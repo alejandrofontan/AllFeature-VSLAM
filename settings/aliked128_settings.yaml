@@ -1,0 +1,15 @@
+%YAML:1.0
+
+# aliked128 parameters
+
+# Feature Extractor 
+FeatureExtractor.nOctaves: 8
+FeatureExtractor.scaleFactor: 2.0
+FeatureExtractor.detectTh: 5.0
+FeatureExtractor.maxNumFeatures: 1000
+
+# Feature Matcher 
+FeatureMatcher.TH_LOW: 1.5
+FeatureMatcher.TH_HIGH: 1.63
+FeatureMatcher.descDistTh_high_reloc: 0.5
+FeatureMatcher.descDistTh_low_reloc: 0.5
