@@ -31,11 +31,11 @@ build_library() {
   fi
 
   if [ "$verbose" = true ]; then
-    echo "[AnyFeature-VSLAM][build.sh] Compile ${library_name} ... "
+    echo "[${library_name}][build.sh] Compile ${library_name} ... "
   	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder
   	cmake --build $build_folder --config Release
   else
-    echo "[AnyFeature-VSLAM][build.sh] Compile ${library_name} (output disabled) ... "
+    echo "[${library_name}][build.sh] Compile ${library_name} (output disabled) ... "
   	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder > /dev/null 2>&1
   	cmake --build $build_folder --config Release > /dev/null 2>&1
   fi
@@ -63,16 +63,16 @@ LIBRARY_PATH=$(realpath "$0")
 LIBRARY_DIR=$(dirname "LIBRARY_PATH")
 
 # Build DBoW2
-# library_name="DBoW2"
-# source_folder="${LIBRARY_DIR}/Thirdparty/${library_name}"
-# build_library ${library_name} ${source_folder} ${verbose} ${force_build}
+library_name="DBoW2"
+source_folder="${LIBRARY_DIR}/Thirdparty/${library_name}"
+build_library ${library_name} ${source_folder} ${verbose} ${force_build}
 
-# # Build Light_Glue_CPP
-# library_name="Light_Glue_CPP"
-# source_folder="${LIBRARY_DIR}/Thirdparty/${library_name}"
-# build_library ${library_name} ${source_folder} ${verbose} ${force_build}
+# Build Light_Glue_CPP
+library_name="Light_Glue_CPP"
+source_folder="${LIBRARY_DIR}/Thirdparty/${library_name}"
+build_library ${library_name} ${source_folder} ${verbose} ${force_build}
 
-## Build AnyFeature-VSLAM
-library_name="AnyFeature-VSLAM"
+## Build AllFeature-VSLAM
+library_name="AllFeature-VSLAM"
 source_folder="${LIBRARY_DIR}"
 build_library ${library_name} ${source_folder} ${verbose} ${force_build}

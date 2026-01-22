@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(AnyFeature-VSLAM)
+project(AllFeature-VSLAM)
 
 # Compiler settings
 set(CMAKE_CXX_STANDARD 17)
@@ -15,7 +15,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 # Compiler flags
 add_compile_options(-Wall -Wextra -Wpedantic -O3 -march=native)
 
-set(SRCS_ANYFEATURE
+set(SRCS_ALLFEATURE
         src/System.cc
         src/Tracking.cc
         src/LocalMapping.cc
@@ -63,13 +63,12 @@ find_package(Python REQUIRED COMPONENTS Interpreter)
 find_package(brisk REQUIRED)
 find_package(akaze REQUIRED)
 find_package(SiftGPU CONFIG REQUIRED)
-# list(PREPEND CMAKE_PREFIX_PATH "${PROJECT_SOURCE_DIR}/Thirdparty/Light_Glue_CPP/cmake")
 find_package(LightGlue REQUIRED HINTS "${PROJECT_SOURCE_DIR}/Thirdparty/Light_Glue_CPP/build")
 
 set(DBoW2_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/include")
 set(DBoW2_LIBRARIES "${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so")
 
-add_library(${PROJECT_NAME} SHARED ${SRCS_ANYFEATURE})
+add_library(${PROJECT_NAME} SHARED ${SRCS_ALLFEATURE})
 
 # Include directories
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -96,17 +95,8 @@ target_link_libraries(${PROJECT_NAME}
 add_executable(vslamlab_allfeature_mono src/vslamlab_allfeature_mono.cpp)
 target_link_libraries(vslamlab_allfeature_mono ${PROJECT_NAME})
 
-# add_executable(feature_calibration src/feature_calibration.cpp)
-# target_link_libraries(feature_calibration ${PROJECT_NAME})
-
-# add_executable(feature_match_cal src/feature_match_cal.cpp)
-# target_link_libraries(feature_match_cal ${PROJECT_NAME})
-
-# add_executable(createVocabulary src/createVocabulary.cpp)
-# target_link_libraries(createVocabulary ${PROJECT_NAME})
-
 # Install targets and headers
-install(TARGETS ${PROJECT_NAME} vslamlab_anyfeature_mono
+install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib)
