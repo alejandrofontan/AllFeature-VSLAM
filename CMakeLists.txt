@@ -93,8 +93,8 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 # Example executables
-add_executable(vslamlab_anyfeature_mono src/vslamlab_anyfeature_mono.cpp)
-target_link_libraries(vslamlab_anyfeature_mono ${PROJECT_NAME})
+add_executable(vslamlab_allfeature_mono src/vslamlab_allfeature_mono.cpp)
+target_link_libraries(vslamlab_allfeature_mono ${PROJECT_NAME})
 
 # add_executable(feature_calibration src/feature_calibration.cpp)
 # target_link_libraries(feature_calibration ${PROJECT_NAME})
