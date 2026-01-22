@@ -1,0 +1,11 @@
+build/
+*~
+lib/
+.idea/
+cmake-build-debug/
+*.pyc
+Vocabulary/
+cmake-build-release/
+bin/
+share/
+allfeature_vocabulary/
