@@ -51,9 +51,7 @@ void LocalMapping::Run()
 
         // Check if there are keyframes in the queue
         if(CheckNewKeyFrames())
-        {
-            std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
-
+        {   
             // BoW conversion and insertion in Map
             ProcessNewKeyFrame();
 
@@ -61,8 +59,12 @@ void LocalMapping::Run()
             MapPointCulling();
 
             // Triangulate new MapPoints
+            std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
             CreateNewMapPoints();
-
+            std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
+            double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+            localMappingTime.push_back(t_duration);
+            medianLocalMappingTime();
             if(!CheckNewKeyFrames())
             {
                 // Find more matches in neighbor keyframes and fuse point duplications
@@ -76,16 +78,15 @@ void LocalMapping::Run()
             if(!CheckNewKeyFrames())
             {
                 // Local BA
-                if(mpMap->KeyFramesInMap()>2)
-                    Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);
-
+                if(mpMap->KeyFramesInMap()>2){
+                    Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);                 
+                }
                 // Check redundant local Keyframes
                 KeyFrameCulling();
             }
             loopCloser->InsertKeyFrame(mpCurrentKeyFrame);
-            std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
-            double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-            localMappingTime.push_back(t_duration);
+            
+            
         }
         else if(Stop())
         {
@@ -197,8 +198,38 @@ void LocalMapping::MapPointCulling()
     }
 }
 
+mat3f LocalMapping::SkewSymmetricMatrix(const vec3f &v)
+{
+    mat3f M;
+    M <<     0.0f   , -v(2),  v(1),
+          v(2),    0.0f    , -v(0),
+         -v(1), v(0) ,     0.0f;
+
+    return M;
+}
+
+mat3f LocalMapping::ComputeF12(Keyframe &pKF1, Keyframe &pKF2)
+{
+    mat3f R1w = pKF1->GetRotation();
+    vec3f t1w = pKF1->GetTranslation();
+    mat3f R2w = pKF2->GetRotation();
+    vec3f t2w = pKF2->GetTranslation();
+
+    mat3f R12 = R1w * R2w.transpose();
+    vec3f t12 = -R1w * R2w.transpose() * t2w + t1w;
+
+    mat3f t12x = SkewSymmetricMatrix(t12);
+
+    const cv::Mat &K1 = pKF1->mK;
+    const cv::Mat &K2 = pKF2->mK;
+
+
+    return Converter::toMatrix3f(K1.t().inv()) * t12x * R12 * Converter::toMatrix3f(K2.inv());
+}
+
 void LocalMapping::CreateNewMapPoints()
 {
+    
     // Retrieve neighbor keyframes in covisibility graph
     const vector<Keyframe > vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES);
 
@@ -213,11 +244,10 @@ void LocalMapping::CreateNewMapPoints()
 
     // Search matches with epipolar restriction and triangulate
     std::map<FeatureType, int> newMapPoints;
+    int j{0};
+    std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
     for(size_t i{0}; i < vpNeighKFs.size(); i++)
     {
-        if(i > 0 && CheckNewKeyFrames())
-            return;
-
         // Init Second Keyframe
         Keyframe  pKF2 = vpNeighKFs[i];
         mat4f Twc2, Tcw2;
@@ -240,8 +270,24 @@ void LocalMapping::CreateNewMapPoints()
 
         // Search matches that fullfil epipolar constraint
         std::map<FeatureType, vector<pair<size_t,size_t>>> vMatchedIndices;
+        std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
+        double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
 
+        #ifdef ALLFEATURE_REAL_TIME
+        if ((j <= 1) || (t_duration < 0.01))
+            matcher->SearchForTriangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
+        else{
+            for (const auto& ft: mpCurrentKeyFrame->featureTypes)
+                vMatchedIndices[ft] = std::vector<std::pair<size_t, size_t>>{};
+            mat3f F12 = ComputeF12(mpCurrentKeyFrame,pKF2);    
+            FeatureType ft = mpCurrentKeyFrame->featureTypes[0];
+            const DescriptorType descriptorType = GetDescriptorType(ft);    
+            matcher->SearchForTriangulation_bybow(mpCurrentKeyFrame, pKF2, F12, vMatchedIndices.at(ft), descriptorType, ft);
+        }
+        ++j;
+        #else
         matcher->SearchForTriangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
+        #endif
 
         for(auto& [featureType, N_]: pKF2->N){                    
             // Triangulate each match
@@ -535,7 +581,6 @@ void LocalMapping::KeyFrameCulling()
                         nMPs++;
                         if(pMP->NumberOfObservations() > thObs)
                         {
-                            //const float keyPtSize = pKF->GetKeyPtSize(KeypointIndex(i), featType);
                             const map<KeyframeId , Obs> observations = pMP->GetObservations();
                             int nObs=0;
                             for(auto& obs: observations)
@@ -543,18 +588,12 @@ void LocalMapping::KeyFrameCulling()
                                 Keyframe keyframe_i = obs.second->projKeyframe;
                                 if(keyframe_i->keyId == pKF->keyId)
                                     continue;
-    // #ifndef VANILLA_ORB_SLAM2
                                 if(keyframe_i->isBad())
                                     continue;
-    // #endif
-                                //const float keyPtSize_i = keyframe_i->GetKeyPtSize(obs.second->projIndex, featType);
 
-                                //if(keyPtSize_i <= keyPtSize * keyframe_i->sizeTolerance)
-                                //{
-                                    nObs++;
-                                    if(nObs>=thObs)
-                                        break;
-                                //}
+                                nObs++;
+                                if(nObs>=thObs)
+                                    break;
                             }
                             if(nObs>=thObs)
                             {
@@ -565,10 +604,14 @@ void LocalMapping::KeyFrameCulling()
                 }
             }
             if(nRedundantObservations > KEYFRAME_CULLING_COVISIBILITY_THRESHOLD * nMPs){  
-                if ((int(pKF->mnFrameId) % 10) != 0 && (int(pKF->keyId) % 5) != 0){
+                #ifdef ALLFEATURE_EVALUATION
+                    if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) != 0){
+                        pKF->SetBadFlag();
+                    }  
+                #else
                     pKF->SetBadFlag();
-                    break;
-                }  
+                #endif
+                
             }
     }
     }

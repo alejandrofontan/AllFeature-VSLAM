@@ -141,6 +141,8 @@ public:
     int imageWidth{};
     int imageHeight{};
 
+    void GBA();
+    
 private:
 
     // Input sensor

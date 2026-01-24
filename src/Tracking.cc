@@ -737,8 +737,6 @@ bool Tracking::TrackLocalMap()
 
         // Local Mapping accept keyframes?
         bool localMappingIdle = localMapper->AcceptKeyFrames();
-        // if(localMappingIdle)
-        //      return true;
 
         // Check how many "close" points are being tracked and how many could be potentially created.
         int nNonTrackedClose = 0;
@@ -747,52 +745,26 @@ bool Tracking::TrackLocalMap()
         bool bNeedToInsertClose = (nTrackedClose < minTrackedClose) && (nNonTrackedClose > minNonTrackedClose);
 
         // Thresholds
-        float thRefRatio = refRatio_medium_needNewKey;
-        if(numKeyframesInMap < size_t(minNKFs))
-            thRefRatio = refRatio_low_needNewKey;
+        const bool c1 = ((mnMatchesInliers < nRefMatches * refRatio_high_needNewKey || bNeedToInsertClose) && mnMatchesInliers > minMatchesInliers);
+        
+        bool c2{false};
+        #ifdef ALLFEATURE_EVALUATION
+        c2 = ((int( currentFrame.mnId) % ALLFEATURE_EVALUATION) == 0);
+        #endif
 
-        if(mSensor == System::MONOCULAR)
-            thRefRatio = refRatio_high_needNewKey;
-
-        // Condition 1a: More than "MaxFrames" have passed from last keyframe insertion
-        const bool c1a = currentFrame.mnId >= lastKeyFrameId + maxFrames;
-        // Condition 1b: More than "MinFrames" have passed and Local Mapping is idle
-        const bool c1b = (currentFrame.mnId >= lastKeyFrameId + minFrames && localMappingIdle);
-        // Condition 1c: tracking is weak
-        // int numInliers = 0;
-        // int numTotal = 0;
-        // for (const auto& [ft, N] : currentFrame.N) {
-        //     numTotal += N;
-        //     for (const auto& pt: currentFrame.pts.at(ft)) {
-        //         if (pt && (!pt->isBad()))
-        //             numInliers++;
-        //     }
-        // }
-        // std::cout << "Inlier ratio: " << float(numInliers)/float(numTotal) << std::endl;
-        // std::cout << "numInliers: " << numInliers << ", numTotal: " << numTotal << std::endl;
-
-        const bool c1c =  mSensor!=System::MONOCULAR && (mnMatchesInliers < nRefMatches * nRefMatchesDrop || bNeedToInsertClose) ;
-        // Condition 2: Few tracked points compared to reference keyframe. Lots of visual odometry compared to map matches.
-        const bool c2 = ((mnMatchesInliers < nRefMatches * thRefRatio || bNeedToInsertClose) && mnMatchesInliers > minMatchesInliers);
-        // if(c2)
-        //     std::cout << "mnMatchesInliers: " << mnMatchesInliers << ", nRefMatches: " << nRefMatches << ", thRefRatio: " 
-        //         << mnMatchesInliers / float(nRefMatches) << std::endl;
-        if(bNeedToInsertClose)
-            std::terminate();
-        if(c1c)
-            std::terminate();
-
-        if(c2)
-        //if((c1a||c1b||c1c)&&c2)
+        if(c1 || c2)
         {
-            // If the mapping accepts keyframes, insert keyframe.
-            // Otherwise, send a signal to interrupt BA
             if(localMappingIdle)
             {
                 return true;
             }
             else
             {   
+                if(c2){
+                    std::cout << "\nEmergency keyframe triggered by evaluation condition at frame " << currentFrame.mnId << std::endl;
+                    emergencyKeyframe = true;
+                    return true;   
+                }
                 if(mnMatchesInliers < nRefMatches * 0.5f)
                     emergencyKeyframe = true;
                 return false;   

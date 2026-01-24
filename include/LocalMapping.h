@@ -50,8 +50,17 @@ public:
     }
 
     vector<double> localMappingTime{};
-
-
+    void medianLocalMappingTime(){
+        if(!localMappingTime.empty()){
+            std::vector<double> tmp = localMappingTime;
+            std::sort(tmp.begin(), tmp.end());
+            double median;
+            size_t n = tmp.size();
+            if(n % 2 == 1) median = tmp[n/2];
+            else median = 0.5*(tmp[n/2 - 1] + tmp[n/2]);
+            std::cout << "LocalMapping median / max time: " << median << " / " << tmp.back() << " s"  << std::endl;
+        }
+    }
 protected:
 
     vector<FeatureType> featureTypes{};
@@ -80,6 +89,8 @@ protected:
     bool CheckNewKeyFrames();
     void ProcessNewKeyFrame();
     void CreateNewMapPoints();
+    mat3f ComputeF12(Keyframe &pKF1, Keyframe &pKF2);
+    mat3f SkewSymmetricMatrix(const vec3f &v);
     void MapPointCulling();
     void SearchInNeighbors(const FeatureType& featureType);
     void KeyFrameCulling();

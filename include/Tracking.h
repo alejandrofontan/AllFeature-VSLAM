@@ -295,8 +295,6 @@ protected:
 
     // NeedNewKeyFrame()
     const float refRatio_high_needNewKey{0.9f};
-    const float refRatio_medium_needNewKey{0.75f};
-    const float refRatio_low_needNewKey{0.4f};
     const int nMinObs_high{3};
     const int nMinObs_low{2};
     const int minNKFs{2};

@@ -61,8 +61,9 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>p
     SetPose(F.Tcw);
 
     for(auto& [ft, N_] : N)
-        if (N_ > 0)
+        if (N_ > 0){
             mDescriptors[ft] = F.mDescriptors.at(ft).clone();
+        }
 }
 
 void KeyFrame::ComputeBoW(const FeatureType &featType)

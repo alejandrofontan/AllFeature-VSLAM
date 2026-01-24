@@ -31,7 +31,6 @@
 #include "Feature_sift128.h"
 #include "matcher/lightglue/matcher.hpp"
 
-
 namespace ANYFEATURE_VSLAM
 {
 
@@ -48,11 +47,12 @@ public:
 
     std::vector<cv::DMatch> featureMatching(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft, 
        bool lightglue = true , bool robustMatching = true, int outlierMehod = cv::FM_RANSAC);
-
+    
     std::vector<cv::DMatch> lightglueMatching(
             const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
             const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
             float min_score = 0.0f);
+
     std::vector<cv::DMatch> robustFeatureMatching(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, int outlierMehod = cv::FM_RANSAC);        
 
     // AllFeature-VSLAM SearchBruteForce         
@@ -67,6 +67,13 @@ public:
     void SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
                                 std::map<FeatureType, vector<pair<size_t,size_t>>>& matchedPairs,
                                 const std::vector<FeatureType>& featureTypes);
+
+    void SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2, const mat3f& F12,
+                                std::vector<pair<size_t,size_t>>& matchedPairs,
+                                const DescriptorType& descriptorType, const FeatureType& featureType);    
+    void SearchForTriangulation_bybow(const Keyframe& keyframe1, const Keyframe& keyframe2, const mat3f& F12,
+                                std::vector<pair<size_t,size_t>>& matchedPairs,
+                                const DescriptorType& descriptorType, const FeatureType& featureType);    
 
     int SearchForInitialization(const Frame &F1, const Frame &F2, std::vector<cv::Point2f> &pointsPrevMatched, std::vector<int> &matches12, const FeatureType& featureType);
 

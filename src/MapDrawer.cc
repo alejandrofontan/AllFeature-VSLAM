@@ -80,7 +80,8 @@ void MapDrawer::DrawMapPoints()
         if((*sit)->isBad())
             continue;
         vec3f pos = (*sit)->GetWorldPos();
-        cv::Scalar color = getFeatureColor((*sit)->featureType,0);
+        cv::Scalar color = getFeatureColor((*sit)->featureType,0, true);
+        //glColor3f(float(color[0])/255.0f, float(color[1])/255.0f, float(color[2])/255.0f);
         glColor3f(GLfloat(color[0]),GLfloat(color[1]),GLfloat(color[2]));
         glVertex3f(pos(0),pos(1),pos(2));
 
@@ -110,7 +111,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
             glMultMatrixf(Twc.ptr<GLfloat>(0));
 
             glLineWidth(mKeyFrameLineWidth);
-            glColor3f(0.0f,0.0f,1.0f);
+            glColor3f(GLfloat(0.f),GLfloat(0.f),GLfloat(0.f));
             glBegin(GL_LINES);
             glVertex3f(0,0,0);
             glVertex3f(w,h,z);
@@ -141,7 +142,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
     if(bDrawGraph)
     {
         glLineWidth(mGraphLineWidth);
-        glColor4f(0.0f,1.0f,0.0f,0.6f);
+        glColor4f(0.6471f,0.6157f,0.8745f,0.6f);
         glBegin(GL_LINES);
 
         for(size_t i=0; i<vpKFs.size(); i++)

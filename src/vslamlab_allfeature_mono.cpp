@@ -265,7 +265,7 @@ int main(int argc, char **argv)
             T = tframe - timestamps[ni-1];
 
         if(ttrack < T)
-            usleep((T-ttrack)  * 1e6);
+            usleep(1.0 * (T-ttrack)  * 1e6);
         //usleep((1.0 * 1e6));
 
         // Advance to next image only after processing this one
@@ -276,6 +276,12 @@ int main(int argc, char **argv)
         quit.store(true, std::memory_order_relaxed);
         if (keyThread.joinable()) keyThread.join();
     }
+
+    string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
+    SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory_beforeGBA.csv");
+
+    // Perform Global Bundle Adjustment
+    SLAM.GBA();
 
     // Stop all threads
     SLAM.Shutdown();
@@ -292,7 +298,7 @@ int main(int argc, char **argv)
     cout << "mean tracking time: " << totaltime/nImages << endl;
 
     // Save camera trajectory
-        string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
+    //string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
     SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
 
     return 0;

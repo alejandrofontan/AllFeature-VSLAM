@@ -32,6 +32,9 @@
 #include "Converter.h"
 
 #include<mutex>
+#include <algorithm>
+#include <random>
+#include <vector>
 
 namespace ANYFEATURE_VSLAM
 {
@@ -459,13 +462,23 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
     lLocalKeyFrames.push_back(pKF);
     pKF->mnBALocalForKF = pKF->keyId;
 
-    const vector<Keyframe> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
+    vector<Keyframe> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
+    #ifdef ALLFEATURE_REAL_TIME
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::shuffle(vNeighKFs.begin(), vNeighKFs.end(), gen);
+    #endif
+
     for(int i=0, iend=vNeighKFs.size(); i<iend; i++)
     {
         Keyframe pKFi = vNeighKFs[i];
         pKFi->mnBALocalForKF = pKF->keyId;
         if(!pKFi->isBad())
             lLocalKeyFrames.push_back(pKFi);
+        #ifdef ALLFEATURE_REAL_TIME    
+        if (lLocalKeyFrames.size()>=30)
+            break;
+        #endif
     }
 
     // Local MapPoints seen in Local KeyFrames

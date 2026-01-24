@@ -50,6 +50,12 @@ void ANYFEATURE_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image&
     at::Tensor kpts_cpu = kpts.cpu().contiguous().to(at::kFloat);
     TORCH_CHECK(kpts_cpu.dim() == 2 && kpts_cpu.size(1) >= 2, "Expected keypoints [N,2] (or more)");
 
+    const auto& scores_t = feats0.at("scores"); 
+    at::Tensor scores_cpu = scores_t.squeeze().cpu().contiguous().to(at::kFloat);
+    TORCH_CHECK(scores_cpu.dim() == 1, "Expected scores [N] after squeeze()");
+    TORCH_CHECK(scores_cpu.size(0) == kpts_cpu.size(0), "scores N != keypoints N");
+    auto sacc = scores_cpu.accessor<float, 1>();
+
     int N = (int)kpts_cpu.size(0);
     auto acc = kpts_cpu.accessor<float, 2>();
     int iKey{0};
@@ -63,13 +69,33 @@ void ANYFEATURE_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image&
         keyPt.size = 1;
         keyPt.angle = 0;
         keyPt.octave = 0;
-        keyPt.response = 1.0;
+        keyPt.response = sacc[i];
         keypoints.push_back(keyPt);
         ++iKey;
     }
 
     const auto& desc_t = feats0.at("descriptors");
     descriptors = tensorDescToMatCopy(desc_t);
+
+    // float min_resp = 0.2f;  // choose your threshold
+    // std::vector<cv::KeyPoint> kps_f;
+    // kps_f.reserve(keypoints.size());
+
+    // // We assume descriptors is CV_32F and has N rows.
+    // // If it's binary / CV_8U, this still works (row copy is type-agnostic).
+    // cv::Mat desc_f;
+    // desc_f.create(0, descriptors.cols, descriptors.type());
+
+    // for (int i = 0; i < (int)keypoints.size(); ++i) {
+    //     if (keypoints[i].response >= min_resp) {
+    //         kps_f.push_back(keypoints[i]);
+    //         desc_f.push_back(descriptors.row(i));  // keep matching row
+    //     }
+    // }
+
+    // // Replace originals
+    // keypoints.swap(kps_f);
+    // descriptors = desc_f;
 }
 
 int ANYFEATURE_VSLAM::FeatureExtractor_aliked128::GetKeypointOctave(const cv::KeyPoint& keypoint) const{

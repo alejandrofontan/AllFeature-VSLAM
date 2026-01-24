@@ -51,10 +51,12 @@ Frame::Frame(const Frame &frame)
             for(int j=0; j<FRAME_GRID_ROWS; j++)
                 mGrid[ft][i][j] = frame.mGrid.at(ft)[i][j];
 
-    for (auto const& [featType, descriptors] : frame.mDescriptors)
+    for (auto const& [featType, descriptors] : frame.mDescriptors){
             descriptors.copyTo(mDescriptors[featType]);
-    for (auto const& [featType, descriptors] : frame.mDescriptorsRight) 
+    }
+    for (auto const& [featType, descriptors] : frame.mDescriptorsRight){
             descriptors.copyTo(mDescriptorsRight[featType]);
+    }
 
     if(frame.Tcw(3,3) == 1.0f)
         SetPose(frame.Tcw);

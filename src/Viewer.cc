@@ -88,7 +88,15 @@ void Viewer::Run()
     const float wS{0.4f};
     const float wS_inv{1.0f - wS};
 
-    pangolin::CreateWindowAndBind("AnyFeature-VSLAM (" + featureName(featureTypes[0]) + ") : Map Viewer",w,h);
+    string title = "AllFeature-VSLAM : Map Viewer (";
+    for(size_t i=0; i<featureTypes.size(); i++){
+        title += " " + featureName(featureTypes[i]);
+        if (i != featureTypes.size() - 1){
+            title += ",";
+        }
+    }
+    title += " )";
+    pangolin::CreateWindowAndBind(title, w, h);
 
     // 3D Mouse handler requires depth testing to be enabled
     glEnable(GL_DEPTH_TEST);

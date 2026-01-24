@@ -93,7 +93,7 @@ std::string ANYFEATURE_VSLAM::featureName(const FeatureType& featureType){
     switch (featureType) {
         // feature name
         case FEAT_ALIKED128:{
-            return "aliked128";
+            return "Aliked128";
         }
         case FEAT_ANYFEATNONBIN:{
             return "anyFeatNonBin";
@@ -114,13 +114,13 @@ std::string ANYFEATURE_VSLAM::featureName(const FeatureType& featureType){
             return "Surf64";
         }
         case FEAT_BRISK:{
-            return "Brisk";
+            return "Brisk48";
         }
         case FEAT_AKAZE61:{
             return "Akaze61";
         }
         case FEAT_ORB:{
-            return "Orb";
+            return "Orb32";
         }
     }
 }
@@ -144,12 +144,12 @@ std::string ANYFEATURE_VSLAM::matType(const int& matTypeIndex){
     }
 }
 
-cv::Scalar ANYFEATURE_VSLAM::getFeatureColor(const FeatureType& featureType, const int& format){
-    Eigen::Matrix<int,3,1> color{0,0,0};
+cv::Scalar ANYFEATURE_VSLAM::getFeatureColor(const FeatureType& featureType, const int& format, const bool& normalize){
+    Eigen::Matrix<float,3,1> color{0,0,0};
     switch(featureType) {
         // descriptor color
         case FEAT_ALIKED128:{
-            color << 255 , 255, 122;
+            color << 181, 243, 249;
             break;
         }
         case FEAT_ANYFEATNONBIN:{
@@ -185,20 +185,23 @@ cv::Scalar ANYFEATURE_VSLAM::getFeatureColor(const FeatureType& featureType, con
             break;
         }
         case FEAT_ORB: {
-            color << 0, 255, 0;
+            color << 129, 149, 251;
             break;
         }
         default:
             return {0,0,0};
     }
 
+    if (normalize){
+        color /= 255.0f;
+    }
     switch(format) {
         case 0:
-            return {float(color(0)),float(color(1)),float(color(2))};
+            return {color(0),color(1),color(2)};
         default:
-            return {float(color(2)),float(color(1)),float(color(0))};
+            return {color(2),color(1),color(0)};
     }
-
+    
 }
 
 void ANYFEATURE_VSLAM::linearRegression(float& m, float& b, float& R2, const std::vector<float>& x_, const std::vector<float>& y_){

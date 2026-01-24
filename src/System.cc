@@ -24,6 +24,7 @@
 #include "Converter.h"
 #include "MathFunctions.h"
 #include "FeatureMatcher.h"
+#include "Optimizer.h"
 
 #include "DBoW2/Random.h"
 
@@ -438,7 +439,14 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 
     for(size_t i=0; i<vpKFs.size(); i++)
     {
+        
         Keyframe pKF = vpKFs[i];
+        
+        #ifdef ALLFEATURE_EVALUATION
+        if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) != 0){
+            continue;
+        }
+        #endif
 
        // pKF->SetPose(pKF->GetPose()*Two);
 
@@ -615,6 +623,12 @@ void System::SaveStatistics(const std::string &filename){
 void System::setImageSize(const int width, const int height){
     imageWidth = width;
     imageHeight = height;
+}
+
+void System::GBA(){
+    std::cout << "Starting Global Bundle Adjustment..." <<std::endl;
+    Optimizer::GlobalBundleAdjustemnt(mpMap, 100);
+    std::cout << "Global Bundle Adjustment finished." <<std::endl;
 }
 
 }
