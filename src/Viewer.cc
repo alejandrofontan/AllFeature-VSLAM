@@ -82,11 +82,14 @@ void Viewer::Run()
     mbFinished = false;
     mbStopped = false;
 
-    const float scaleFactor{1.3f};
+    const float scaleFactor{1.25};
     const float w = scaleFactor * 1280.0f;
     const float h = scaleFactor * 720.0f;
-    const float wS{0.4f};
+    const float wS{0.35f};
     const float wS_inv{1.0f - wS};
+    const float w_pixel = wS * w;
+    const float h_pixel = (imageHeight / float(imageWidth)) * w_pixel;
+    const float hS = h_pixel / h;
 
     string title = "AllFeature-VSLAM : Map Viewer (";
     for(size_t i=0; i<featureTypes.size(); i++){
@@ -108,27 +111,28 @@ void Viewer::Run()
 
     // Define Camera Render Object (for view / scene browsing)
     pangolin::OpenGlRenderState s_cam(
-                pangolin::ProjectionMatrix(wS_inv * w, h ,mViewpointF,mViewpointF, wS_inv * w/2.0f, h/2.0f,0.1,1000),
-                pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0)
-                );
-
-    pangolin::OpenGlRenderState s_cam_aerial(
-            pangolin::ProjectionMatrix(wS * w, h /2.0f ,mViewpointF,mViewpointF, wS * w / 2.0f, h /4.0f ,0.1,1000),
-            pangolin::ModelViewLookAt(0,-1.2,-0.001, 0,0,0,0.0,-1.0, 0.0)
+        pangolin::ProjectionMatrix(wS_inv * w, h ,mViewpointF,mViewpointF, wS_inv * w/2.0f, h/2.0f,0.1,1000),
+        pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0)
     );
 
+    const float left_l = 0.01f;
+    const float left_r = wS;
+    const float left_t = 0.99f;
+    const float left_b = 0.01f;
+    pangolin::View& d_menu = pangolin::CreatePanel("menu").SetBounds(left_b, left_t - hS - 0.01f, left_l, left_r);
+    pangolin::Var<bool> menuFollowCamera("menu.Follow Camera",true,true);
+    pangolin::Var<bool> menuShowPoints("menu.Show Points",true,true);
+    pangolin::Var<bool> menuShowKeyFrames("menu.Show KeyFrames",true,true);
+    pangolin::Var<bool> menuShowGraph("menu.Show Graph",true,true);
+    pangolin::Var<bool> menuLocalizationMode("menu.Localization Mode",false,true);
+    pangolin::Var<bool> menuReset("menu.Reset",false,false);
+    
     pangolin::View& d_img = pangolin::Display("img")
-            .SetBounds(0.5,  0.99, 0.01, wS);
-
-    pangolin::View& d_cam_aerial = pangolin::CreateDisplay()
-            .SetBounds(0.0,  0.5, 0.01 , wS)
-            .SetHandler(new pangolin::Handler3D(s_cam_aerial)
-            );
+            .SetBounds(left_t - hS,  left_t, left_l, left_r);
 
     pangolin::View& d_cam = pangolin::CreateDisplay()
-            .SetBounds(0.0, 1.0, wS ,1.0)
-            .SetHandler(new pangolin::Handler3D(s_cam)
-            );
+        .SetBounds(0.0, 1.0, left_r ,1.0)
+        .SetHandler(new pangolin::Handler3D(s_cam));
 
     pangolin::OpenGlMatrix Twc;
     Twc.SetIdentity();
@@ -136,29 +140,18 @@ void Viewer::Run()
     pangolin::OpenGlMatrix Twc_aerial;
     Twc_aerial.SetIdentity();
 
-    //cv::namedWindow("ORB-SLAM2: Current Frame");
     vec3f trajectoryCenter0{vec3f::Zero()};
     float cameraHeight0{1.0f};
 
     cv::Mat im = frameDrawer->DrawFrame();
-    const int width =  640;
-    int height =  (int) (float(imageHeight) * (float(width) / float(imageWidth)));
-    pangolin::GlTexture imageTexture  = pangolin::GlTexture(width,height,GL_RGB,false,0,GL_RGB,GL_UNSIGNED_BYTE);
-    float ratio = float(height) * 0.5f / 480.0;
-    d_img.SetBounds(1.0f - ratio ,  0.99, 0.01, wS);
-    //float margin = (0.5f - ratio) * 0.5f;
-    //d_cam_aerial.SetBounds(margin,  0.5f + margin, 0.01 , wS);
-
+    std::cout << "[Viewer.cc] Initial size of frame drawn: " << w_pixel << " x " << h_pixel << std::endl;
+    pangolin::GlTexture imageTexture  = pangolin::GlTexture(int(w_pixel) ,int(h_pixel), GL_RGB,false,0,GL_RGB,GL_UNSIGNED_BYTE);
 
     int numIt{-1};
     while(1)
     {
         numIt++;
-        // if (numIt < 500) {
-        //     usleep(3000);
-        //     continue;
-        // }
-
+        
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(1.0f,1.0f,1.0f,1.0f);
 
@@ -172,14 +165,8 @@ void Viewer::Run()
 
         im = frameDrawer->DrawFrame();
         cv::Mat imResized;
-        cv::resize(im,imResized,cv::Size(width,height));
-        ///////////////////////////////////////////////////////// ------------
-        /*static int img_idx = 0;
-        std::stringstream filename;
-        filename << std::setw(5) << std::setfill('0') << img_idx;
-        cv::imwrite("/home/fontan/imgs/" + filename.str() + "_rgb.png", imResized);
-        img_idx++;*/
-
+        cv::resize(im,imResized,cv::Size(int(w_pixel), int(h_pixel)));
+        
         /////////////////////////////////////////////////////////
         cv::flip(imResized.clone(),imResized,0);
 
@@ -188,28 +175,7 @@ void Viewer::Run()
         imageTexture.Upload(imResized.data,GL_RGB,GL_UNSIGNED_BYTE);
         imageTexture.RenderToViewport();
 
-        ///////////////////////////////////////////////////////// ------------
-        //d_cam.SaveOnRender("/home/fontan/imgs/" + filename.str() + "_map.png");
-        //pangolin::SaveWindowOnRender("/home/fontan/imgs/a",d_cam.v);
         pangolin::FinishFrame();
-
-        /*pangolin::Image<unsigned char> buffer;
-        pangolin::VideoPixelFormat fmt = pangolin::VideoFormatFromString("RGBA32");
-        buffer.Alloc(d_cam.v.w, d_cam.v.h, d_cam.v.w * fmt.bpp/8 );
-        glReadBuffer(GL_BACK);
-        glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        glReadPixels(d_cam.v.l, d_cam.v.b, d_cam.v.w, d_cam.v.h, GL_RGBA, GL_UNSIGNED_BYTE, buffer.ptr );
-        cv::Mat img, imgBuffer = cv::Mat(d_cam.v.h, d_cam.v.w, CV_8UC4, buffer.ptr);
-        cv::cvtColor(imgBuffer, img,  cv::COLOR_RGBA2BGR);
-        cv::flip(imgBuffer.clone(), imgBuffer, 0);
-        cv::imwrite("/home/fontan/imgs/" + filename.str() + "_map.png", imgBuffer);*/
-
-        //cv::flip(imagen, img, 0);
-        //cv::imshow("some window", img);
-
-        //////////////////////////////////////////////////////
-
-
 
         if(Stop())
         {

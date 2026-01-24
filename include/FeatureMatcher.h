@@ -152,22 +152,19 @@ protected:
     // Tracking::TrackReferenceKeyframe & Tracking::Relocalization
     static const bool sBF_kf_lightglue = true;
     
-        
     // SearchBruteForce Frame-Frame
     // Tracking::TrackWithMotionModel
     static const bool sBF_ff_lightglue = true;
+    
+    // SearchForTriangulation Keyframe-Keyframe
+    // LocalMapping::CreateNewMapPoints
+    static const bool sFT_kk_lightglue = true;
 
     // SearchForInitialization Frame-Frame
     // Tracking::MonocularInitialization
     static const bool sFI_ff_lightglue = true;
     static const bool sFI_ff_robustMatching = true;
     static const int  sFI_ff_outlierMethod = cv::FM_LMEDS;  
-    
-    // SearchForTriangulation Keyframe-Keyframe
-    // LocalMapping::CreateNewMapPoints
-    static const bool sFT_kk_lightglue = true;
-    static const bool sFT_kk_robustMatching = true;
-    static const int  sFT_kk_outlierMethod = cv::FM_LMEDS;   
 
 };
 

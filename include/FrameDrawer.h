@@ -55,7 +55,6 @@ protected:
     std::map<FeatureType, int> N;
     std::map<FeatureType, vector<cv::KeyPoint>> mvCurrentKeys;
     std::map<FeatureType, vector<bool>> mvbMap, mvbVO;
-    bool mbOnlyTracking;
     int mnTracked, mnTrackedVO;
     std::map<FeatureType, vector<cv::KeyPoint>> mvIniKeys;
     std::vector<int> mvIniMatches;

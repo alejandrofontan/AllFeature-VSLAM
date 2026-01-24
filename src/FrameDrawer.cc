@@ -93,11 +93,11 @@ cv::Mat FrameDrawer::DrawFrame()
         }        
     }
     else if(state==Tracking::OK) //TRACKING
-    {
+    {   
+        mnTracked=0;
+        mnTrackedVO=0;
+        const float r = 5;
         for (auto const& [featType, N_] : N) {   
-            mnTracked=0;
-            mnTrackedVO=0;
-            const float r = 5;
             const int n = vCurrentKeys[featType].size();
             cv::Scalar color = getFeatureColor(featType, 0);
             for(int i=0;i<n;i++)
@@ -128,10 +128,10 @@ cv::Mat FrameDrawer::DrawFrame()
         }
     }
 
-    //cv::Mat imWithInfo;
-    //DrawTextInfo(im,state, imWithInfo);
+    cv::Mat imWithInfo;
+    DrawTextInfo(im,state, imWithInfo);
 
-    return im;
+    return imWithInfo;
 }
 
 
@@ -144,10 +144,8 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
         s << " TRYING TO INITIALIZE ";
     else if(nState==Tracking::OK)
     {
-        if(!mbOnlyTracking)
-            s << "SLAM MODE |  ";
-        else
-            s << "LOCALIZATION | ";
+        s << "SLAM MODE |  ";
+        
         int nKFs = mpMap->KeyFramesInMap();
         int nMPs = mpMap->MapPointsInMap();
         s << "KFs: " << nKFs << ", MPs: " << nMPs << ", Matches: " << mnTracked;
@@ -164,12 +162,13 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
     }
 
     int baseline=0;
-    cv::Size textSize = cv::getTextSize(s.str(),cv::FONT_HERSHEY_PLAIN,1,1,&baseline);
-
+    double fontScale = 1.5;   
+    int thickness = 2.0;    
+    cv::Size textSize = cv::getTextSize(s.str(),cv::FONT_HERSHEY_PLAIN,fontScale,thickness,&baseline);
     imText = cv::Mat(im.rows+textSize.height+10,im.cols,im.type());
     im.copyTo(imText.rowRange(0,im.rows).colRange(0,im.cols));
     imText.rowRange(im.rows,imText.rows) = cv::Mat::zeros(textSize.height+10,im.cols,im.type());
-    cv::putText(imText,s.str(),cv::Point(5,imText.rows-5),cv::FONT_HERSHEY_PLAIN,1,cv::Scalar(255,255,255),1,8);
+    cv::putText(imText,s.str(),cv::Point(5,imText.rows-5),cv::FONT_HERSHEY_PLAIN,fontScale,cv::Scalar(255, 255, 255),thickness,8);
 
 }
 
@@ -183,8 +182,6 @@ void FrameDrawer::Update(Tracking *pTracker)
         mvbVO[featType] = vector<bool>(N[featType],false);
         mvbMap[featType] = vector<bool>(N[featType],false);
     }
-
-    mbOnlyTracking = pTracker->onlyTracking;
 
 
     if(pTracker->mLastProcessedState==Tracking::NOT_INITIALIZED)

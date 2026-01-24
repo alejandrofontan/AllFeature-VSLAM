@@ -43,8 +43,7 @@ System::System(const string &vocabularyFolder,
                const bool activateVisualization,
                const vector<FeatureType>& featureTypes,
                const bool& fixImageSize):
-               mSensor(sensor), viewer(static_cast<shared_ptr<Viewer>>(nullptr)), mbReset(false),mbActivateLocalizationMode(false),
-        mbDeactivateLocalizationMode(false), featureTypes(featureTypes)
+               mSensor(sensor), viewer(static_cast<shared_ptr<Viewer>>(nullptr)), mbReset(false), featureTypes(featureTypes)
 {
     // Output welcome message
     cout << "Any-Feature V-SLAM 2024, Alejandro Fontan Villacampa, Queensland University of Technology\n"
@@ -258,30 +257,6 @@ mat4f System::TrackMonocular(Image &im, const double &timestamp)
         exit(-1);
     }
 
-    // Check mode change
-    {
-        unique_lock<mutex> lock(mMutexMode);
-        if(mbActivateLocalizationMode)
-        {
-            localMapper->RequestStop();
-
-            // Wait until Local Mapping has effectively stopped
-            while(!localMapper->isStopped())
-            {
-                usleep(1000);
-            }
-
-            tracker->InformOnlyTracking(true);
-            mbActivateLocalizationMode = false;
-        }
-        if(mbDeactivateLocalizationMode)
-        {
-            tracker->InformOnlyTracking(false);
-            localMapper->Release();
-            mbDeactivateLocalizationMode = false;
-        }
-    }
-
     // Check reset
     {
     unique_lock<mutex> lock(mMutexReset);
@@ -304,18 +279,6 @@ mat4f System::TrackMonocular(Image &im, const double &timestamp)
     trackingTime.push_back(t_duration);
 
     return Tcw;
-}
-
-void System::ActivateLocalizationMode()
-{
-    unique_lock<mutex> lock(mMutexMode);
-    mbActivateLocalizationMode = true;
-}
-
-void System::DeactivateLocalizationMode()
-{
-    unique_lock<mutex> lock(mMutexMode);
-    mbDeactivateLocalizationMode = true;
 }
 
 bool System::MapChanged()

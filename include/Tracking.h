@@ -76,10 +76,6 @@ public:
     // TODO: Modify MapPoint::PredictScale to take into account focal lenght
     void ChangeCalibration(const string &strSettingPath);
 
-    // Use this function if you have deactivated local mapping and you only want to localize the camera.
-    void InformOnlyTracking(const bool &flag);
-
-
 public:
     VerbosityLevel verbosity{LOW};
 
@@ -115,9 +111,6 @@ public:
     list<Keyframe> mlpReferences;
     list<double> mlFrameTimes;
     list<bool> mlbLost;
-
-    // True if local mapping is deactivated and we are performing only localization
-    bool onlyTracking;
 
     void Reset();
 
@@ -279,15 +272,12 @@ protected:
     const int keyframeTrackedMapPoints{100};
 
     // TrackReferenceKeyFrame()
-    const int minMatches_trackRefKey_high{15};
-    const int minMatches_trackRefKey_low{10};
-
-    // UpdateLastFrame()
-    const int minNumPoints{100};
+    const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH{15};
+    const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW{10};
 
     // TrackWithMotionModel()
-    const int minMatches_trackMotModel_high{20};
-    const int minMatches_trackMotModel_low{10};
+    const int TRACK_WITH_MOTION_MODEL_MIN_MATCHES_HIGH{20};
+    const int TRACK_WITH_MOTION_MODEL_MIN_MATCHES_LOW{10};
 
     // TrackLocalMap()
     const int minMatches_trackLocalMap_high{50};
