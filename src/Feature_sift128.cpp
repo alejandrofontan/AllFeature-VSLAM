@@ -71,6 +71,7 @@ ANYFEATURE_VSLAM::FeatureExtractor_sift128::FeatureExtractor_sift128(std::shared
 }
 
 void ANYFEATURE_VSLAM::FeatureExtractor_sift128::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
+ 
     detectKeypoints(keypoints, img, settings->detectTh, settings->nOctaves);
     computeDescriptors(descriptors, img);
 }

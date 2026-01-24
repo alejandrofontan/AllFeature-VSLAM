@@ -9,16 +9,26 @@ ANYFEATURE_VSLAM::FeatureExtractor_brisk48::FeatureExtractor_brisk48(std::shared
 }
 
 void ANYFEATURE_VSLAM::FeatureExtractor_brisk48::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
-    brisk_detector->detect(img.grayImg, keypoints);
-    brisk_extractor->compute(img.grayImg, keypoints, descriptors);
-    if ((keypoints.size() > 1.05 * settings->maxNumFeatures) && (detectTh < 70)){
-        detectTh += 1;
-        brisk_detector = new brisk::BriskFeatureDetector(int(detectTh), settings->nOctaves / 2, true);
+
+    // BRISK feature detection and description
+    std::vector<cv::KeyPoint> keypoints_;
+    cv::Mat descriptors_; 
+
+    brisk_detector->detect(img.grayImg, keypoints_);
+    brisk_extractor->compute(img.grayImg, keypoints_, descriptors_);
+
+    // Retain only if not too many keypoints
+    if (keypoints_.size() < settings->OVERSIZE_KEYPOINT_FACTOR * settings->maxNumFeatures){
+        keypoints = keypoints_;
+        descriptors = descriptors_;
+        return;
     }
-    if ((keypoints.size() < 0.95 * settings->maxNumFeatures) && (detectTh > 5)){
-        detectTh -= 1;
-        brisk_detector = new brisk::BriskFeatureDetector(int(detectTh), settings->nOctaves / 2, true);
-    }
+
+    // Retain best keypoints using octree distribution
+    keypoints =  DistributeOctTree(keypoints_, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1, settings->maxNumFeatures, 0);
+    descriptors.create((int)keypoints.size(), descriptors_.cols, descriptors_.type());
+    for (int i = 0; i < (int)keypoints.size(); ++i)
+        descriptors_.row(keypoints[i].class_id).copyTo(descriptors.row(i));
 }
 
 int ANYFEATURE_VSLAM::FeatureExtractor_brisk48::GetKeypointOctave(const cv::KeyPoint& keypoint) const{

@@ -17,6 +17,19 @@ namespace ANYFEATURE_VSLAM {
         NONE = 0,
     };
 
+    class ExtractorNode
+    {
+    public:
+        ExtractorNode():bNoMore(false){}
+
+        void DivideNode(ExtractorNode &n1, ExtractorNode &n2, ExtractorNode &n3, ExtractorNode &n4);
+
+        std::vector<cv::KeyPoint> vKeys;
+        cv::Point2i UL, UR, BL, BR;
+        std::list<ExtractorNode>::iterator lit;
+        bool bNoMore;
+    };
+
     class FeatureExtractorSettings
     {
     public:
@@ -45,6 +58,8 @@ namespace ANYFEATURE_VSLAM {
         float maxKeyPtSigma0{};
         const float scaleFactorOrb{1.2f};
         const int nOctavesOrb{8};
+
+        const float OVERSIZE_KEYPOINT_FACTOR{1.05f};
 
     };
 
@@ -82,6 +97,8 @@ namespace ANYFEATURE_VSLAM {
         [[nodiscard]] virtual float GetKeypointSize(const cv::KeyPoint& keypoint) const{};
 
         virtual void detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){};
+        std::vector<cv::KeyPoint> DistributeOctTree(std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
+            const int &maxX, const int &minY, const int &maxY, const int &N, const int &level);
     };
 }
 #endif //ANYFEATURE_VSLAM_FEATUREEXTRACTOR_H

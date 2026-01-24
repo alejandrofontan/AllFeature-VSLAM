@@ -33,6 +33,11 @@ static cv::Mat tensorDescToMatCopy(const at::Tensor& desc_in) {
 }
 
 void ANYFEATURE_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
+
+    // ALIKED feature detection and description
+    std::vector<cv::KeyPoint> keypoints_;
+    cv::Mat descriptors_; 
+
     cv::Mat img_;
     if (img.img.channels() == 3) {
         img_ = img.img.clone();
@@ -70,32 +75,26 @@ void ANYFEATURE_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image&
         keyPt.angle = 0;
         keyPt.octave = 0;
         keyPt.response = sacc[i];
-        keypoints.push_back(keyPt);
+        keypoints_.push_back(keyPt);
         ++iKey;
     }
 
     const auto& desc_t = feats0.at("descriptors");
-    descriptors = tensorDescToMatCopy(desc_t);
+    descriptors_ = tensorDescToMatCopy(desc_t);
 
-    // float min_resp = 0.2f;  // choose your threshold
-    // std::vector<cv::KeyPoint> kps_f;
-    // kps_f.reserve(keypoints.size());
+    // Retain only if not too many keypoints
+    if (keypoints_.size() < settings->OVERSIZE_KEYPOINT_FACTOR * settings->maxNumFeatures){
+        keypoints = keypoints_;
+        descriptors = descriptors_;
+        return;
+    }
 
-    // // We assume descriptors is CV_32F and has N rows.
-    // // If it's binary / CV_8U, this still works (row copy is type-agnostic).
-    // cv::Mat desc_f;
-    // desc_f.create(0, descriptors.cols, descriptors.type());
+    // Retain best keypoints using octree distribution
+    keypoints =  DistributeOctTree(keypoints_, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1, settings->maxNumFeatures, 0);
+    descriptors.create((int)keypoints.size(), descriptors_.cols, descriptors_.type());
+    for (int i = 0; i < (int)keypoints.size(); ++i)
+        descriptors_.row(keypoints[i].class_id).copyTo(descriptors.row(i));
 
-    // for (int i = 0; i < (int)keypoints.size(); ++i) {
-    //     if (keypoints[i].response >= min_resp) {
-    //         kps_f.push_back(keypoints[i]);
-    //         desc_f.push_back(descriptors.row(i));  // keep matching row
-    //     }
-    // }
-
-    // // Replace originals
-    // keypoints.swap(kps_f);
-    // descriptors = desc_f;
 }
 
 int ANYFEATURE_VSLAM::FeatureExtractor_aliked128::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
