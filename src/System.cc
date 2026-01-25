@@ -436,6 +436,74 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
     cout << endl << "trajectory saved!" << endl;
 }
 
+struct PointRGB {
+    float x, y, z;
+    uint8_t r, g, b;
+};
+
+bool write_ply_binary(const std::string& path, const std::vector<PointRGB>& pts) {
+    std::ofstream out(path, std::ios::binary);
+    if (!out) return false;
+
+    out << "ply\n";
+    out << "format binary_little_endian 1.0\n";
+    out << "element vertex " << pts.size() << "\n";
+    out << "property float x\n";
+    out << "property float y\n";
+    out << "property float z\n";
+    out << "property uchar red\n";
+    out << "property uchar green\n";
+    out << "property uchar blue\n";
+    out << "end_header\n";
+
+    for (const auto& p : pts) {
+        out.write(reinterpret_cast<const char*>(&p.x), sizeof(float));
+        out.write(reinterpret_cast<const char*>(&p.y), sizeof(float));
+        out.write(reinterpret_cast<const char*>(&p.z), sizeof(float));
+        out.write(reinterpret_cast<const char*>(&p.r), sizeof(uint8_t));
+        out.write(reinterpret_cast<const char*>(&p.g), sizeof(uint8_t));
+        out.write(reinterpret_cast<const char*>(&p.b), sizeof(uint8_t));
+    }
+
+    return static_cast<bool>(out);
+}
+
+auto to_u8 = [](double v) {
+    v = std::clamp(v, 0.0, 1.0);
+    return static_cast<uint8_t>(std::lround(v * 255.0));
+};
+
+void System::SavePointCloudVSLAMLAB(const string &filename)
+{
+    cout << endl << "Saving point cloud to " << filename << " ..." << endl;
+
+    std::vector<PointRGB> pts;
+    auto mapPoints = mpMap->GetAllMapPoints();
+    for (auto& mp: mapPoints) {
+        if (mp->isBad()) continue;
+    
+        PointRGB p;
+        vec3f pos = mp->GetWorldPos();
+        p.x = pos(0);
+        p.y = pos(1);
+        p.z = pos(2);
+
+        FeatureType ft = mp->featureType;
+        cv::Scalar color = ANYFEATURE_VSLAM::getFeatureColor(ft, 0, true);
+        // p.r = 255;
+        // p.g = 255;
+        // p.b = 255;
+        p.r = to_u8(color[0]); // R
+        p.g = to_u8(color[1]); // G
+        p.b = to_u8(color[2]); // B
+
+        pts.push_back(p);
+    }
+    write_ply_binary(filename, pts);
+}
+
+
+
 void System::SaveTrajectoryKITTI(const string &filename)
 {
     cout << endl << "Saving camera trajectory to " << filename << " ..." << endl;
