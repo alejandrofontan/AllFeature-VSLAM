@@ -21,9 +21,11 @@
 #include "FrameDrawer.h"
 #include "Tracking.h"
 #include "Utils.h"
+#include <filesystem>
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include <opencv2/opencv.hpp>
 
 #include<mutex>
 
@@ -131,6 +133,19 @@ cv::Mat FrameDrawer::DrawFrame()
     cv::Mat imWithInfo;
     DrawTextInfo(im,state, imWithInfo);
 
+    // int compression = 9; // PNG compression 0..9
+    // std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, compression};
+    // static string lastSavedImage = "";
+    // if ((imName!="") && (imName != lastSavedImage)) {
+    //     std::cout << "Saving frame: " << imName << std::endl;
+    //     std::filesystem::path full = std::filesystem::path(ANYFEATURE_VSLAM::FrameDrawer::exp_folder) / imName; 
+    //     std::string path = full.string();
+    //     cv::Mat out = im;          
+    //     cv::cvtColor(out, out, cv::COLOR_RGB2BGR);
+    //     bool ok = cv::imwrite(path, out, params);
+    //     lastSavedImage = imName;
+    // }
+
     return imWithInfo;
 }
 
@@ -176,6 +191,7 @@ void FrameDrawer::Update(Tracking *pTracker)
 {
     unique_lock<mutex> lock(mMutex);
     pTracker->mImGray.copyTo(mIm);
+    imName = pTracker->imName;
     mvCurrentKeys = pTracker->currentFrame.mvKeys;
     for (auto const& [featType, mvKeys] : mvCurrentKeys) {
         N[featType] = mvKeys.size();

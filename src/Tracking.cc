@@ -58,12 +58,13 @@ Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
 
     // Load feature parameters from settings yaml file
     for (auto& ft: featureTypes){
-        featureExtractorLeft[ft] = Tracking::getFeatureExtractor(1, std::string(feature_settings_yaml_file.at(ft)), ft);
+        featureExtractorLeft[ft] = Tracking::getFeatureExtractor(1, feature_settings_yaml_file.at(ft), ft);
+        initFeatureExtractor[ft] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , feature_settings_yaml_file.at(ft), ft); 
     }
 
-    if(sensor==System::MONOCULAR)
-        initFeatureExtractor[featureTypes[featureInitialization]] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , 
-            feature_settings_yaml_file.at(featureTypes[featureInitialization]), featureTypes[featureInitialization]); 
+    // if(sensor==System::MONOCULAR)
+    //     initFeatureExtractor[featureTypes[featureInitialization]] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , 
+    //         feature_settings_yaml_file.at(featureTypes[featureInitialization]), featureTypes[featureInitialization]); 
     
     matcher = std::make_shared<FeatureMatcher>(w, h);        
 }
@@ -105,7 +106,8 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
         // im.FixImageSize(w,h);
 
     mImGray = im.grayImg;
-
+    imName = im.imageName;
+    
     if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)
         currentFrame = Frame(im,timestamp,initFeatureExtractor,vocabulary,mK,mDistCoef,mbf,mThDepth);
     else

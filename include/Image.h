@@ -17,6 +17,7 @@ namespace ANYFEATURE_VSLAM {
         cv::Mat mask{};
 
         std::string imageFile{};
+        std::string imageName{};
         std::string keypointBinFile{};
         std::string scoresBinFile{};
         std::string descriptorsBinFile{};

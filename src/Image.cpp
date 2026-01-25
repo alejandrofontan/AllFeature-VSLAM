@@ -9,12 +9,13 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <iostream>
-
+#include <filesystem>
 
 ANYFEATURE_VSLAM::Image::Image(const std::string &imagePath): imageFile{imagePath} {
 
     img = cv::imread(imageFile,cv::IMREAD_UNCHANGED);
-
+    std::filesystem::path p(imagePath);
+    imageName = p.filename().string();
     keypointBinFile = replaceAllOccurrences(imageFile, "/rgb/", "/r2d2/keypoints/");
     keypointBinFile = replaceAllOccurrences(keypointBinFile, "png", "bin");
     scoresBinFile = replaceAllOccurrences(imageFile, "/rgb/", "/r2d2/scores/");

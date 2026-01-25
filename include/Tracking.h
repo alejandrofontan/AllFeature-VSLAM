@@ -97,6 +97,7 @@ public:
     // Current Frame
     Frame currentFrame;
     cv::Mat mImGray;
+    std::string imName;
 
     // Initialization Variables (mono)
     std::vector<int> mvIniLastMatches;

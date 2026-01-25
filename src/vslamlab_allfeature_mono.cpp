@@ -8,6 +8,7 @@
 #include<System.h>
 #include<Types.h>
 #include <yaml-cpp/yaml.h>
+#include<FrameDrawer.h>
 
 using namespace std;
 namespace ANYFEATURE_VSLAM{
@@ -20,6 +21,8 @@ namespace ANYFEATURE_VSLAM{
 #include <unistd.h>
 #include <sys/select.h>
 #include <cstdio>
+
+string ANYFEATURE_VSLAM::FrameDrawer::exp_folder{};
 
 // RAII: put terminal in raw-ish mode so we can read single key presses
 struct TerminalRawMode {
@@ -178,7 +181,9 @@ int main(int argc, char **argv)
     const vector<std::string> features = settings["features"].as<vector<std::string>>();
     bool debug = (bool)settings["debug"].as<bool>();
     std::cout << "[vslamlab_anyfeature_mono.cpp] Debug mode = " << debug << std::endl;
-  
+
+    ANYFEATURE_VSLAM::FrameDrawer::exp_folder = exp_folder;
+    
     vector<FeatureType> featureTypes{};
     for(const auto& feat : features) {
         int feature_id = get_feature_id(feat);
@@ -300,6 +305,7 @@ int main(int argc, char **argv)
     // Save camera trajectory
     //string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
     SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
+    SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply");
 
     return 0;
 }
