@@ -70,8 +70,8 @@ protected:
     const float CHI2_2DOF{5.991f};
 
     // KeyFrameCulling()
-    const float KEYFRAME_CULLING_COVISIBILITY_THRESHOLD{0.9f};
-    const int KEYFRAME_CULLING_MIN_NUM_OBSERVATIONS{3};
+    const float KEYFRAME_CULLING_COVISIBILITY_THRESHOLD{0.9f}; // 0.9f
+    const int KEYFRAME_CULLING_MIN_NUM_OBSERVATIONS{3}; // 3
 
     // CreateNewMapPoints()
     const int CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES{20};

@@ -31,28 +31,28 @@ ANYFEATURE_VSLAM::FeatureExtractor_sift128::FeatureExtractor_sift128(std::shared
     sift_gpu_args.push_back(std::to_string(settings->maxNumFeatures));
 
     // First Octave to start detection (default: 0).
-    sift_gpu_args.push_back("-fo");
-    sift_gpu_args.push_back(std::to_string(-1));
+    // sift_gpu_args.push_back("-fo");
+    // sift_gpu_args.push_back(std::to_string(-1));
 
     // Maximum number of octaves (default: not limit).
-    sift_gpu_args.push_back("-no");
-    sift_gpu_args.push_back(std::to_string(settings->nOctaves));
+    // sift_gpu_args.push_back("-no");
+    // sift_gpu_args.push_back(std::to_string(settings->nOctaves));
 
-    // DOG levels in an octave (default: 3)
-    sift_gpu_args.push_back("-d");
-    sift_gpu_args.push_back(std::to_string(3));
+    // // DOG levels in an octave (default: 3)
+    // sift_gpu_args.push_back("-d");
+    // sift_gpu_args.push_back(std::to_string(3));
 
-    // DOG threshold (default: 0.02/3)
-    sift_gpu_args.push_back("-t");
-    sift_gpu_args.push_back(std::to_string(settings->detectTh));
+    // // DOG threshold (default: 0.02/3)
+    // sift_gpu_args.push_back("-t");
+    // sift_gpu_args.push_back(std::to_string(settings->detectTh));
 
-    // Edge Threshold (default : 10.0)
-    sift_gpu_args.push_back("-e");
-    sift_gpu_args.push_back(std::to_string(10.0));
+    // // Edge Threshold (default : 10.0)
+    // sift_gpu_args.push_back("-e");
+    // sift_gpu_args.push_back(std::to_string(10.0));
 
-     // Maximum number of orientations.
-    sift_gpu_args.push_back("-mo");
-    sift_gpu_args.push_back(std::to_string(2));
+    //  // Maximum number of orientations.
+    // sift_gpu_args.push_back("-mo");
+    // sift_gpu_args.push_back(std::to_string(2));
     // Let (0, 0) be center of top-left pixel instead of corner with this
     // parameter. The corner is (0, 0) by default, but Lowe‟s SIFT and
     // sift++ are using the pixel center.
@@ -74,6 +74,12 @@ void ANYFEATURE_VSLAM::FeatureExtractor_sift128::detectAndCompute(const Image& i
  
     detectKeypoints(keypoints, img, settings->detectTh, settings->nOctaves);
     computeDescriptors(descriptors, img);
+
+    // Normalize octave and size
+    for (int i = 0; i < (int)keypoints.size(); ++i){
+        keypoints[i].size = 1.0;
+        keypoints[i].octave = 0;
+    }
 }
 
 void ANYFEATURE_VSLAM::FeatureExtractor_sift128::detectKeypoints(

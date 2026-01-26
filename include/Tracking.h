@@ -237,7 +237,7 @@ protected:
 
     //////////////////////////////////////////////// Heuristics
     // Tracking()
-    const int scaleNumFeaturesMonocular{2};
+    const int scaleNumFeaturesMonocular{4};
 
     // UpdateLocalKeyFrames()
     const int _maxNumKey_{80};
@@ -318,7 +318,7 @@ protected:
     // RANSAC
     const float ransac_probability{0.99};
     const int ransac_minInliers{10};
-    const int ransac_maxIterations{300};
+    const int ransac_maxIterations{3000};
     const int ransac_minSet{4};
     const float ransac_epsilon{0.5};
     const float ransac_th2{5.991};

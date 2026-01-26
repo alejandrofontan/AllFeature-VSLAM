@@ -66,28 +66,33 @@ void MapDrawer::DrawMapPoints()
 
     for(size_t i=0, iend=vpMPs.size(); i<iend;i++)
     {
-        if(vpMPs[i]->isBad() || spRefMPs.count(vpMPs[i]))
-            continue;
+        // if((vpMPs[i]->isBad()) || spRefMPs.count(vpMPs[i]))
+        //     continue;
+        if(vpMPs[i]->isBad())
+             continue;
         vec3f pos = vpMPs[i]->GetWorldPos();
-        glVertex3f(pos(0),pos(1),pos(2));
-    }
-    glEnd();
-
-    glPointSize(mPointSize);
-    glBegin(GL_POINTS);
-    for(set<Pt>::iterator sit=spRefMPs.begin(), send=spRefMPs.end(); sit!=send; sit++)
-    {
-        if((*sit)->isBad())
-            continue;
-        vec3f pos = (*sit)->GetWorldPos();
-        cv::Scalar color = getFeatureColor((*sit)->featureType,0, true);
-        //glColor3f(float(color[0])/255.0f, float(color[1])/255.0f, float(color[2])/255.0f);
+        cv::Scalar color = getFeatureColor(vpMPs[i]->featureType,0, true);
         glColor3f(GLfloat(color[0]),GLfloat(color[1]),GLfloat(color[2]));
         glVertex3f(pos(0),pos(1),pos(2));
-
     }
-
     glEnd();
+
+    // glPointSize(mPointSize);
+    // glBegin(GL_POINTS);
+    // for(set<Pt>::iterator sit=spRefMPs.begin(), send=spRefMPs.end(); sit!=send; sit++)
+    // {
+    //     if((*sit)->isBad())
+    //         continue;
+    //     vec3f pos = (*sit)->GetWorldPos();
+    //     cv::Scalar color = getFeatureColor((*sit)->featureType,0, true);
+
+    //     //glColor3f(float(color[0])/255.0f, float(color[1])/255.0f, float(color[2])/255.0f);
+    //     glColor3f(GLfloat(color[0]),GLfloat(color[1]),GLfloat(color[2]));
+    //     glVertex3f(pos(0),pos(1),pos(2));
+
+    // }
+
+    // glEnd();
 }
 
 void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)

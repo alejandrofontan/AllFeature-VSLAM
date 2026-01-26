@@ -144,7 +144,6 @@ void Viewer::Run()
     float cameraHeight0{1.0f};
 
     cv::Mat im = frameDrawer->DrawFrame();
-    std::cout << "[Viewer.cc] Initial size of frame drawn: " << w_pixel << " x " << h_pixel << std::endl;
     pangolin::GlTexture imageTexture  = pangolin::GlTexture(int(w_pixel) ,int(h_pixel), GL_RGB,false,0,GL_RGB,GL_UNSIGNED_BYTE);
 
     int numIt{-1};

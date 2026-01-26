@@ -189,18 +189,17 @@ Frame::Frame(const Image & img, const double &timeStamp,
 
     // Feature extraction
     ExtractFeatures(0,img);
-    
     if(Ntotal == 0)
         return;
 
     UndistortKeyPoints();
 
     // Set no stereo information
-    for(auto& [ft,extractor] : featureExtractorLeft){
-        mvuRight[ft] = vector<float>(N.at(ft),-1);
-        mvDepth[ft] = vector<float>(N.at(ft),-1);
-        pts[ft] = vector<Pt>(N.at(ft), static_cast<Pt>(nullptr));
-        mvbOutlier[ft] = vector<bool>(N.at(ft), false);
+    for(auto& [ft, N_] : N){
+        mvuRight[ft] = vector<float>(N_,-1);
+        mvDepth[ft] = vector<float>(N_,-1);
+        pts[ft] = vector<Pt>(N_, static_cast<Pt>(nullptr));
+        mvbOutlier[ft] = vector<bool>(N_, false);
     }
 
     // This is done only for the first Frame (or after a change in the calibration)
@@ -222,7 +221,7 @@ Frame::Frame(const Image & img, const double &timeStamp,
     }
 
     mb = mbf/fx;
-    for(auto& [ft, extractor] : featureExtractorLeft)
+    for(auto& ft : featureTypes)
         AssignFeaturesToGrid(ft);
 }
 
@@ -248,6 +247,9 @@ void Frame::ExtractFeatures(int flag, const Image & img)
     if(flag==0){
         Ntotal = 0;
         for(auto& [ft, extractor] : featureExtractorLeft){
+            // if((ft != FEAT_ORB) && (mnId % 2) != 0){
+            //     continue;
+            // }
             (*extractor)(img, mvKeys[ft], mDescriptors[ft], keyPtsSigma2[ft], keyPtsInf[ft], keyPtsSize[ft]);
             N[ft] = mvKeys[ft].size();
             Ntotal += N[ft];

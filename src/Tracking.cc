@@ -107,7 +107,7 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
 
     mImGray = im.grayImg;
     imName = im.imageName;
-    
+
     if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)
         currentFrame = Frame(im,timestamp,initFeatureExtractor,vocabulary,mK,mDistCoef,mbf,mThDepth);
     else
@@ -646,7 +646,12 @@ bool Tracking::TrackLocalMap()
         c2 = ((int( currentFrame.mnId) % ALLFEATURE_EVALUATION) == 0);
         #endif
 
-        if(c1 || c2)
+        bool c3{false};
+        #ifdef ALLFEATURE_MAX_KEYFRAMES
+        c3 = ((currentFrame.mnId % ALLFEATURE_MAX_KEYFRAMES) == 0);
+        #endif
+
+        if(c1 || c2 || c3)
         {
             if(localMappingIdle)
             {
@@ -654,13 +659,15 @@ bool Tracking::TrackLocalMap()
             }
             else
             {   
-                if(c2){
+                if(c2 || c3){
                     std::cout << "\nEmergency keyframe triggered by evaluation condition at frame " << currentFrame.mnId << std::endl;
                     emergencyKeyframe = true;
                     return true;   
                 }
-                if(mnMatchesInliers < nRefMatches * 0.5f)
+                if(mnMatchesInliers < nRefMatches * 0.5f){
                     emergencyKeyframe = true;
+                    return true;
+                }
                 return false;   
             }
         }

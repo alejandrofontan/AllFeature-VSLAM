@@ -4,9 +4,9 @@ ANYFEATURE_VSLAM::FeatureExtractor_kaze64::FeatureExtractor_kaze64(std::shared_p
         FeatureExtractor(settings_){
 
         kaze = cv::KAZE::create();
-        kaze->setNOctaves(settings->nOctaves/4);
-        kaze->setNOctaveLayers(settings->nOctaves/2);
-        kaze->setThreshold(settings->detectTh);
+        // kaze->setNOctaves(settings->nOctaves/4);
+        // kaze->setNOctaveLayers(settings->nOctaves/2);
+        // kaze->setThreshold(settings->detectTh);
 }
 
 void ANYFEATURE_VSLAM::FeatureExtractor_kaze64::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
@@ -15,6 +15,12 @@ void ANYFEATURE_VSLAM::FeatureExtractor_kaze64::detectAndCompute(const Image& im
     std::vector<cv::KeyPoint> keypoints_;
     cv::Mat descriptors_; 
     kaze->detectAndCompute(img.grayImg, cv::Mat(), keypoints_, descriptors_);
+
+    // Normalize octave and size
+    for (int i = 0; i < (int)keypoints_.size(); ++i){
+        keypoints_[i].size = 1.0;
+        keypoints_[i].octave = 0;
+    }
 
     // Retain only if not too many keypoints
     if (keypoints_.size() < settings->OVERSIZE_KEYPOINT_FACTOR * settings->maxNumFeatures){

@@ -249,6 +249,51 @@ int FeatureMatcher::SearchForInitialization(const Frame &F1, const Frame &F2,
     return numMatches;
 }
 
+static std::array<float, 9> computeDistancePercentiles_10_to_90(
+    const std::vector<cv::DMatch>& robustMatches)
+{
+    // Static storage for distances (cleared each call)
+    static std::vector<float> distances;
+    //distances.clear();
+    //distances.reserve(robustMatches.size());
+
+    for (const auto& m : robustMatches) {
+        distances.push_back(m.distance);
+    }
+
+    std::array<float, 9> out{};
+    if (distances.empty()) {
+        out.fill(std::numeric_limits<float>::quiet_NaN());
+        return out;
+    }
+
+    std::sort(distances.begin(), distances.end());
+
+    auto percentileLinear = [&](float p) -> float {
+        // p in [0, 1], linear interpolation between nearest ranks
+        const size_t n = distances.size();
+        if (n == 1) return distances[0];
+
+        const float pos = p * float(n - 1);           // 0..n-1
+        const size_t lo = (size_t)std::floor(pos);
+        const size_t hi = (size_t)std::ceil(pos);
+        const float frac = pos - float(lo);
+
+        const float a = distances[lo];
+        const float b = distances[hi];
+        return a + (b - a) * frac;
+    };
+
+    // Fill p10..p90 (10,20,...,90)
+    for (int i = 1; i <= 9; ++i) {
+        const float p = float(i) / 10.0f; // 0.1 .. 0.9
+        out[i - 1] = percentileLinear(p);
+    }
+
+    return out;
+}
+
+
 // SearchForTriangulation Keyframe-Keyframe
 // LocalMapping::CreateNewMapPoints
 void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
@@ -305,12 +350,9 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
         return;
 
     std::vector<cv::DMatch> robustMatches = robustFeatureMatching(allMatches, kps1, kps2, cv::FM_LMEDS);
-    //std::vector<cv::DMatch> robustMatches = allMatches;
 
     int numMatchesTotal = 0;
     for(const auto& m : robustMatches) {
-
-        
 
         const int queryIdx = kps1_indexes[m.queryIdx];
         const int trainIdx = kps2_indexes[m.trainIdx];
@@ -324,6 +366,22 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
         }
     }
 
+    // CODE FOR CALIBRATION THE THRESHOLDS BASED ON DISTANCE PERCENTILES
+    // std::map<FeatureType, std::vector<cv::DMatch>> matches_by_featuretype;
+    // for(const auto& m : robustMatches) {
+    //     const FeatureType featType = usedFeatureTypes[m.queryIdx];
+    //     matches_by_featuretype[featType].push_back(m);
+    // }
+    // for (const auto& [ft, matches_] : matches_by_featuretype){         
+    //     if(ft != FEAT_ALIKED128)
+    //         continue;
+    //     auto p = computeDistancePercentiles_10_to_90(matches_);
+    //     std::cout << "FeatureType " << ft << " - ";
+    //     for (int i = 0; i < 9; ++i) 
+    //         //std::cout << (i + 1) * 10 << "th percentile distance: " << p[i] << "\n";
+    //         std::cout <<  p[i] << ", ";
+    // }
+    // std::cout << " " << std::endl;
     // std::cout << "\nLocalMapping::CreateNewMapPoints::FeatureMatcher::SearchForTriangulation" << std::endl;                         
     // std::cout << " - SearchForTriangulation: " << allMatches.size() << " matches found." << std::endl;
     // std::cout << " - robustMatches.size(): " << robustMatches.size() << std::endl;

@@ -164,7 +164,7 @@ protected:
     // Tracking::MonocularInitialization
     static const bool sFI_ff_lightglue = true;
     static const bool sFI_ff_robustMatching = true;
-    static const int  sFI_ff_outlierMethod = cv::FM_LMEDS;  
+    static const int  sFI_ff_outlierMethod = cv::FM_RANSAC;  
 
 };
 

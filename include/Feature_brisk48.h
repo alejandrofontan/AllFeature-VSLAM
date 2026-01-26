@@ -11,7 +11,6 @@ namespace ANYFEATURE_VSLAM {
 
         cv::Ptr<cv::FeatureDetector> brisk_detector;
         cv::Ptr<cv::DescriptorExtractor> brisk_extractor;
-        float detectTh;
 
         FeatureExtractor_brisk48(std::shared_ptr<FeatureExtractorSettings> &settings_);
 

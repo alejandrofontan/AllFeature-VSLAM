@@ -3,8 +3,8 @@
 ANYFEATURE_VSLAM::FeatureExtractor_brisk48::FeatureExtractor_brisk48(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
     
-    detectTh = settings->detectTh;
-    brisk_detector = new brisk::BriskFeatureDetector(int(settings->detectTh), settings->nOctaves / 2, true);
+    //brisk_detector = new brisk::BriskFeatureDetector(int(settings->detectTh), settings->nOctaves / 2, true);
+    brisk_detector = new brisk::BriskFeatureDetector(34, 4, true);
     brisk_extractor = new brisk::BriskDescriptorExtractor(true, true, brisk::BriskDescriptorExtractor::Version::briskV2);
 }
 
@@ -16,6 +16,12 @@ void ANYFEATURE_VSLAM::FeatureExtractor_brisk48::detectAndCompute(const Image& i
 
     brisk_detector->detect(img.grayImg, keypoints_);
     brisk_extractor->compute(img.grayImg, keypoints_, descriptors_);
+
+    // Normalize octave and size
+    for (int i = 0; i < (int)keypoints_.size(); ++i){
+        keypoints_[i].size = 1.0;
+        keypoints_[i].octave = 0;
+    }
 
     // Retain only if not too many keypoints
     if (keypoints_.size() < settings->OVERSIZE_KEYPOINT_FACTOR * settings->maxNumFeatures){

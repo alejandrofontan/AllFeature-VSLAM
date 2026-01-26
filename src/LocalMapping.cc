@@ -69,7 +69,6 @@ void LocalMapping::Run()
                     SearchInNeighbors(feat);
                 }
             }
-
             mbAbortBA = false;
             //if(!CheckNewKeyFrames() && !stopRequested())
             if(!CheckNewKeyFrames())
@@ -87,6 +86,7 @@ void LocalMapping::Run()
             double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
             localMappingTime.push_back(t_duration);
             medianLocalMappingTime();  
+
         }
         else if(Stop())
         {
@@ -229,7 +229,6 @@ mat3f LocalMapping::ComputeF12(Keyframe &pKF1, Keyframe &pKF2)
 
 void LocalMapping::CreateNewMapPoints()
 {
-    
     // Retrieve neighbor keyframes in covisibility graph
     const vector<Keyframe > vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES);
 
@@ -274,15 +273,20 @@ void LocalMapping::CreateNewMapPoints()
         double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
 
         #ifdef ALLFEATURE_REAL_TIME
-        if ((j <= 1) || (t_duration < 0.01))
+        if ((j <= 1) || (t_duration < 0.1))
             matcher->SearchForTriangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
         else{
-            for (const auto& ft: mpCurrentKeyFrame->featureTypes)
-                vMatchedIndices[ft] = std::vector<std::pair<size_t, size_t>>{};
-            mat3f F12 = ComputeF12(mpCurrentKeyFrame,pKF2);    
-            FeatureType ft = mpCurrentKeyFrame->featureTypes[0];
-            const DescriptorType descriptorType = GetDescriptorType(ft);    
-            matcher->SearchForTriangulation_bybow(mpCurrentKeyFrame, pKF2, F12, vMatchedIndices.at(ft), descriptorType, ft);
+            if (t_duration > 0.15)
+                break;
+            mat3f F12 = ComputeF12(mpCurrentKeyFrame,pKF2);  
+            for(auto& feat: mpCurrentKeyFrame->featureTypes){
+                vMatchedIndices[feat] = std::vector<std::pair<size_t, size_t>>{};
+                const DescriptorType descriptorType = GetDescriptorType(feat); 
+                if (feat == mpCurrentKeyFrame->featureTypes[0])
+                    matcher->SearchForTriangulation_bybow(mpCurrentKeyFrame, pKF2, F12, vMatchedIndices.at(feat), descriptorType, feat);
+                // else
+                //    matcher->SearchForTriangulation(mpCurrentKeyFrame, pKF2, F12, vMatchedIndices.at(feat), descriptorType, feat);
+            }
         }
         ++j;
         #else
@@ -290,7 +294,10 @@ void LocalMapping::CreateNewMapPoints()
         #endif
 
         for(auto& [featureType, N_]: pKF2->N){                    
-            // Triangulate each match
+            // Triangulate each 
+            auto it = vMatchedIndices.find(featureType);
+            if(it == vMatchedIndices.end())
+                continue;
             const int nmatches = vMatchedIndices.at(featureType).size();
             for(int ikp{0}; ikp < nmatches; ikp++)
             {
@@ -426,7 +433,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
     for(vector<Keyframe >::iterator vit=vpTargetKFs.begin(), vend=vpTargetKFs.end(); vit!=vend; vit++)
     {
         Keyframe  pKFi = *vit;
-        if (featureType == FEAT_ORB)
+        //if (featureType == FEAT_ORB)
             matcher->Fuse(pKFi,vpMapPointMatches, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
     }
 
@@ -452,7 +459,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
         }
     }
 
-    if (featureType == FEAT_ORB)
+    //if (featureType == FEAT_ORB)
         matcher->Fuse(mpCurrentKeyFrame,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
 
     // Update points
@@ -606,7 +613,8 @@ void LocalMapping::KeyFrameCulling()
             if(nRedundantObservations > KEYFRAME_CULLING_COVISIBILITY_THRESHOLD * nMPs){  
                 #ifdef ALLFEATURE_EVALUATION
                     if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) != 0){
-                        pKF->SetBadFlag();
+                        //if ((int(pKF->mnFrameId) % ALLFEATURE_MAX_KEYFRAMES) != 0)
+                            pKF->SetBadFlag();
                     }  
                 #else
                     pKF->SetBadFlag();

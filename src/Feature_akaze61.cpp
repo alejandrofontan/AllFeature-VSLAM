@@ -4,9 +4,9 @@ ANYFEATURE_VSLAM::FeatureExtractor_akaze61::FeatureExtractor_akaze61(std::shared
         FeatureExtractor(settings_){
 
     akazeOptions = AKAZEOptions();
-    akazeOptions.omax = settings->GetDetectorNumOctaves() / 4;
-    akazeOptions.nsublevels = settings->GetDetectorNumOctaves() / 2;
-    akazeOptions.dthreshold = float(settings->detectTh);
+    //akazeOptions.omax = settings->GetDetectorNumOctaves() / 4;
+    //akazeOptions.nsublevels = settings->GetDetectorNumOctaves() / 2;
+    //akazeOptions.dthreshold = float(settings->detectTh);
 }
 
 void ANYFEATURE_VSLAM::FeatureExtractor_akaze61::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
@@ -17,6 +17,12 @@ void ANYFEATURE_VSLAM::FeatureExtractor_akaze61::detectAndCompute(const Image& i
     evolution->Feature_Detection(keypoints_);
     evolution->Compute_Descriptors(keypoints_, descriptors_);
     
+    // Normalize octave and size
+    for (int i = 0; i < (int)keypoints_.size(); ++i){
+        keypoints_[i].size = 1.0;
+        keypoints_[i].octave = 0;
+    }
+
     // Retain only if not too many keypoints
     if (keypoints_.size() < settings->OVERSIZE_KEYPOINT_FACTOR * settings->maxNumFeatures){
         keypoints = keypoints_;
@@ -26,6 +32,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor_akaze61::detectAndCompute(const Image& i
 
     // Retain best keypoints using octree distribution
     keypoints =  DistributeOctTree(keypoints_, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1, settings->maxNumFeatures, 0);
+    
     descriptors.create((int)keypoints.size(), descriptors_.cols, descriptors_.type());
     for (int i = 0; i < (int)keypoints.size(); ++i)
         descriptors_.row(keypoints[i].class_id).copyTo(descriptors.row(i));
