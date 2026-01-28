@@ -75,6 +75,9 @@ std::map<FeatureType, int> FeatureMatcher::SearchBruteForce(const Keyframe& keyf
         // Ensure both frames contain the requested feature type
         auto it1 = keyframe->mDescriptors.find(ft);
         auto it2 = frame.mDescriptors.find(ft);
+
+        if (it2 != frame.mDescriptors.end()) 
+            mapPointMatches[ft] = vector<Pt>(frame.N.at(ft), static_cast<Pt>(NULL));
         if (it1 == keyframe->mDescriptors.end() || it2 == frame.mDescriptors.end()) 
             continue; 
         
@@ -354,17 +357,19 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
 
     int numMatchesTotal = 0;
     for(const auto& m : robustMatches) {
-
+        //std::cout << "Evaluating match for triangulation..." << std::endl;
         const int queryIdx = kps1_indexes[m.queryIdx];
         const int trainIdx = kps2_indexes[m.trainIdx];
         const FeatureType featType = usedFeatureTypes[m.queryIdx];
 
         // Only triangulate points that don't already have a 3D MapPoint
+        //std::cout << "Checking match: queryIdx=" << queryIdx << ", trainIdx=" << trainIdx << ", featType=" << featType << std::endl;
         if(!keyframe1->GetMapPoint(queryIdx, featType) && !keyframe2->GetMapPoint(trainIdx, featType)){
                 matchedPairs[featType].emplace_back(static_cast<size_t>(queryIdx), static_cast<size_t>(trainIdx));   
                 numMatchesTotal++;
                 matchesCount[featType]++;
         }
+        //std::cout << " - Match accepted for triangulation." << std::endl;
     }
 
     // CODE FOR CALIBRATION THE THRESHOLDS BASED ON DISTANCE PERCENTILES

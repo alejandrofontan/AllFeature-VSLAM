@@ -62,10 +62,6 @@ Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
         initFeatureExtractor[ft] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , feature_settings_yaml_file.at(ft), ft); 
     }
 
-    // if(sensor==System::MONOCULAR)
-    //     initFeatureExtractor[featureTypes[featureInitialization]] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , 
-    //         feature_settings_yaml_file.at(featureTypes[featureInitialization]), featureTypes[featureInitialization]); 
-    
     matcher = std::make_shared<FeatureMatcher>(w, h);        
 }
 
@@ -83,21 +79,6 @@ void Tracking::SetViewer(shared_ptr<Viewer> viewer_)
 {
     viewer = viewer_;
 }
-
-
-mat4f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat &imRectRight, const double &timestamp)
-{
-    std::cout << "This function (Tracking::GrabImageStereo) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
-    std::terminate();
-}
-
-
-mat4f Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const double &timestamp)
-{
-    std::cout << "This function (Tracking::GrabImageStereo) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
-    std::terminate();
-}
-
 
 mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
 {   
@@ -119,6 +100,8 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
 
 void Tracking::Track()
 {       
+    std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
+
     if(mState==NO_IMAGES_YET)
     {
         mState = NOT_INITIALIZED;
@@ -131,18 +114,15 @@ void Tracking::Track()
 
     if(mState==NOT_INITIALIZED)
     {
-        if(mSensor==System::STEREO || mSensor==System::RGBD)
-            StereoInitialization();
-        else
-            MonocularInitialization(featureTypes[featureInitialization]);
-
+        
+        MonocularInitialization(featureTypes[featureInitialization]);
         frameDrawer->Update(this);
 
         if(mState!=OK)
             return;
     }
     else
-    {   
+    {     
         // System is initialized. Track Frame.
         bool bOK;
         if(mState==OK)
@@ -214,7 +194,6 @@ void Tracking::Track()
             mlpTemporalPoints.clear();
 
             // Check if we need to insert a new keyframe
-
             if(NeedNewKeyFrame())
                 CreateNewKeyFrame();
             // We allow points with high innovation (considererd outliers by the Huber Function)
@@ -229,6 +208,7 @@ void Tracking::Track()
                 }
             }
         }
+
         // Reset if the camera get lost soon after initialization
         if(mState==LOST)
         {
@@ -264,6 +244,11 @@ void Tracking::Track()
         mlbLost.push_back(mState==LOST);
     }
 
+    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
+    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+    trackingTime.push_back(t_duration);
+    medianTrackingTime();  
+
     if (emergencyKeyframe){
         std::cout << "Tracking::Track: emergency keyframe triggered, waiting for local mapping to be idle..." << std::endl;    
         lock.unlock();
@@ -277,13 +262,6 @@ void Tracking::Track()
         emergencyKeyframe = false;
         std::cout << "Tracking::Track: local mapping is idle, inserting emergency keyframe..." << std::endl;
     }
-}
-
-
-void Tracking::StereoInitialization()
-{
-    std::cout << "This function (Tracking::StereoInitialization) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
-    std::terminate();
 }
 
 void Tracking::MonocularInitialization(const FeatureType& featureType)
@@ -462,22 +440,16 @@ void Tracking::CheckReplacedInLastFrame()
 
 bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
 {   
+
     // Feature Matching
     std::map<FeatureType, std::vector<Pt>> mapPointMatches;
-    std::map<FeatureType, int> nmatches_ft = matcher->SearchBruteForce(refKeyframe, currentFrame, mapPointMatches, refKeyframe->featureTypes);
+    std::map<FeatureType, int> nmatches_ft = matcher->SearchBruteForce(refKeyframe, currentFrame, mapPointMatches, currentFrame.featureTypes);
     int nmatches = 0;
     for (auto& [ft, N] : currentFrame.N) 
     {
         currentFrame.pts[ft] = mapPointMatches[ft];   
-        currentFrame.N[ft] = static_cast<int>(mapPointMatches[ft].size());
         currentFrame.mvbOutlier[ft] = vector<bool>(mapPointMatches[ft].size(), false);
-        if (nmatches_ft[ft] == 0)
-            continue;
-
         nmatches += nmatches_ft[ft];
-        // currentFrame.pts[ft] = mapPointMatches[ft];   
-        // currentFrame.N[ft] = static_cast<int>(mapPointMatches[ft].size());
-        // currentFrame.mvbOutlier[ft] = vector<bool>(mapPointMatches[ft].size(), false);
     }
 
     if (!optimizePose)
@@ -526,7 +498,6 @@ void Tracking::UpdateLastFrame()
 
 bool Tracking::TrackWithMotionModel()
 {
-
     UpdateLastFrame();
 
     currentFrame.SetPose(mVelocity * lastFrame.Tcw);
@@ -601,6 +572,7 @@ bool Tracking::TrackLocalMap()
             }
         }
     }
+
     // Decide if the tracking was succesful
     // More restrictive if there was a relocalization recently
     if(currentFrame.mnId < lastRelocFrameId + maxFrames && mnMatchesInliers < minMatches_trackLocalMap_high)

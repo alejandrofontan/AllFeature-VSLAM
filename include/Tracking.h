@@ -63,8 +63,6 @@ public:
              const bool& fixImageSize = false);
 
     // Preprocess the input and call Track(). Extract features and performs stereo matching.
-    mat4f GrabImageStereo(const cv::Mat &imRectLeft,const cv::Mat &imRectRight, const double &timestamp);
-    mat4f GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const double &timestamp);
     mat4f GrabImageMonocular(Image &im, const double &timestamp);
 
     void SetLocalMapper(std::shared_ptr<LocalMapping> localMapper_);
@@ -75,6 +73,19 @@ public:
     // The focal lenght should be similar or scale prediction will fail when projecting points
     // TODO: Modify MapPoint::PredictScale to take into account focal lenght
     void ChangeCalibration(const string &strSettingPath);
+
+    vector<double> trackingTime{};
+    void medianTrackingTime(){
+        if(!trackingTime.empty()){
+            std::vector<double> tmp = trackingTime;
+            std::sort(tmp.begin(), tmp.end());
+            double median;
+            size_t n = tmp.size();
+            if(n % 2 == 1) median = tmp[n/2];
+            else median = 0.5*(tmp[n/2 - 1] + tmp[n/2]);
+            std::cout << "Tracking median / max time: " << median << " / " << tmp.back() << " s"  << std::endl;
+        }
+    }
 
 public:
     VerbosityLevel verbosity{LOW};
@@ -127,9 +138,6 @@ protected:
 
     // Main tracking function. It is independent of the input sensor.
     void Track();
-
-    // Map initialization for stereo and RGB-D
-    void StereoInitialization();
 
     // Map initialization for monocular
     void MonocularInitialization(const FeatureType& featureType);
@@ -332,9 +340,6 @@ protected:
 
     // Track()
     const int minKeyframesInMap{5};
-
-    // StereoInitialization()
-    const int minKeypointsStereo{500};
 
     std::shared_ptr<FeatureMatcher> matcher;
     
