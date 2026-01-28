@@ -118,6 +118,8 @@ public:
     [[nodiscard]] mat2f GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat3f GetKeyPt3DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
 
+    float GetOverlap();
+
 public:
 
     std::vector<FeatureType> featureTypes;
@@ -142,6 +144,8 @@ public:
     static float invfx;
     static float invfy;
     cv::Mat mDistCoef;
+    int w;
+    int h; 
 
     // Stereo baseline multiplied by fx.
     float mbf;
@@ -213,6 +217,7 @@ public:
 
     static bool mbInitialComputations;
 
+    int numMatchedInliers{0};
 
 private:
 
@@ -225,7 +230,7 @@ private:
     void ComputeImageBounds(const cv::Mat &imLeft);
 
     // Assign keypoints to the grid for speed up feature matching (called in the constructor).
-    void AssignFeaturesToGrid(const FeatureType& featType);
+    void AssignFeaturesToGrid();
 
     // Rotation, translation and camera center
     mat3f Rcw;

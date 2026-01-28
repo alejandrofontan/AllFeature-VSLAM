@@ -81,12 +81,11 @@ void LocalMapping::Run()
                 KeyFrameCulling();
             }
             loopCloser->InsertKeyFrame(mpCurrentKeyFrame);
-
+            
             std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
             double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
             localMappingTime.push_back(t_duration);
             medianLocalMappingTime();  
-
         }
         else if(Stop())
         {

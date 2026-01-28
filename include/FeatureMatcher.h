@@ -60,7 +60,7 @@ public:
     int SearchBruteForce(Frame &CurrentFrame, const Frame &LastFrame, 
         const std::vector<FeatureType>& featureTypes);
     
-    std::map<FeatureType, int> SearchBruteForce(const Keyframe& keyframe, const Frame &frame, 
+    std::map<FeatureType, int> SearchBruteForce(const Keyframe& keyframe, Frame &frame, 
         std::map<FeatureType, std::vector<Pt>>& mapPointMatches, 
         const std::vector<FeatureType>& featureTypes);
 

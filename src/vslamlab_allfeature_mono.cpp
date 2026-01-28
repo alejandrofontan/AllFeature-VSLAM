@@ -109,7 +109,7 @@ int main(int argc, char **argv)
 
     string feature{"orb32"};
     string path_to_vocabulary_folder("anyfeature_vocabulary");
-    bool fixImageSize = false;
+    bool fixImageSize = true;
 
     cout << endl;
     for (int i = 0; i < argc; ++i) {

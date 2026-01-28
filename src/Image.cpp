@@ -58,4 +58,5 @@ void ANYFEATURE_VSLAM::Image::FixImageSize(const int& new_width, const int& new_
     cv::Mat resized_gray;
     cv::resize(grayImg, grayImg, new_size);
     cv::resize(img, img, new_size);
+    //std::cout << "Image resized to " << img.cols << " x " << img.rows << std::endl;
 }

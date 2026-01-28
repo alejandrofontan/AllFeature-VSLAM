@@ -58,6 +58,7 @@ public:
     long unsigned int GetMaxKFid();
 
     void clear();
+    float NormalizeMap();
 
     vector<Keyframe> mvpKeyFrameOrigins;
 

@@ -124,4 +124,43 @@ void Map::clear()
     mvpKeyFrameOrigins.clear();
 }
 
-} //namespace ORB_SLAM
+float Map::NormalizeMap()
+{
+    //unique_lock<mutex> lock(mMutexMap);
+    std::vector<float> depths;
+    depths.reserve(mspKeyFrames.size());
+    for(const auto& keyframe: mspKeyFrames)
+    {
+        float medianDepth = keyframe->ComputeSceneMedianDepth(2);
+        depths.push_back(medianDepth);
+    }
+    float medianDepth = 0.0f;
+    if(!depths.empty())
+    {
+        std::sort(depths.begin(), depths.end());
+        medianDepth = depths[0.5f * (depths.size() - 1)];
+    }       
+
+    for(const auto& keyframe: mspKeyFrames)
+    {
+        mat4f Tc2w = keyframe->GetPose();
+        Tc2w.block<3,1>(0,3) /= medianDepth;
+        keyframe->SetPose(Tc2w);
+
+    }
+
+    std::vector<Pt> mspMapPoints_ = GetAllMapPoints();
+    for(size_t iMP=0; iMP<mspMapPoints_.size(); iMP++)
+    {   
+        Pt pMP = mspMapPoints_[iMP];
+        if(pMP)
+        {
+            pMP->SetWorldPos(pMP->GetWorldPos()/medianDepth);
+        }
+    }
+
+    std::cout << "Normalizing map with median depth = " << medianDepth << std::endl;
+    return medianDepth;
+} 
+}
+//namespace ORB_SLAM

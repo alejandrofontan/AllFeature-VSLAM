@@ -61,7 +61,7 @@ FeatureMatcher::FeatureMatcher(const int& imageWidth, const int& imageHeight, fl
 
 // SearchBruteForce Keyframe-Frame
 // Tracking::TrackReferenceKeyframe & Tracking::Relocalization
-std::map<FeatureType, int> FeatureMatcher::SearchBruteForce(const Keyframe& keyframe, const Frame &frame,
+std::map<FeatureType, int> FeatureMatcher::SearchBruteForce(const Keyframe& keyframe, Frame &frame,
     std::map<FeatureType, std::vector<Pt>>& mapPointMatches, const std::vector<FeatureType>& featureTypes)
 {
     
@@ -127,6 +127,7 @@ std::map<FeatureType, int> FeatureMatcher::SearchBruteForce(const Keyframe& keyf
         validMatchesTotal++; 
     }
 
+    frame.numMatchedInliers = robustMatches.size();
     // std::cout << "\nTracking::TrackReferenceKeyFrame::FeatureMatcher::SearchBruteForce" << std::endl;
     // std::cout << " - SearchBruteForce: " << allMatches.size() << " robust matches found." << std::endl;
     // std::cout << " - robustMatches.size(): " << robustMatches.size() << std::endl;

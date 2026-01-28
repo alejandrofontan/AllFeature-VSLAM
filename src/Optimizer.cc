@@ -36,6 +36,10 @@
 #include <random>
 #include <vector>
 
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+
 namespace ANYFEATURE_VSLAM
 {
 
@@ -96,6 +100,8 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
     }
 
     // Set MapPoint vertices
+    vector<g2o::EdgeSE3ProjectXYZ*> vpEdgesMono;
+    vector<Pt> vpMapPointEdgeMono;
     for(size_t i=0; i<vpMP.size(); i++)
     {
         Pt pMP = vpMP[i];
@@ -152,6 +158,8 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
                 e->cy = pKF->cy;
 
                 optimizer.addEdge(e);
+                vpEdgesMono.push_back(e);
+                vpMapPointEdgeMono.push_back(pMP);
             }
             else
             {
@@ -198,6 +206,40 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
     // Optimize!
     optimizer.initializeOptimization();
     optimizer.optimize(nIterations);
+    
+    // const std::string orb_path = "/home/alejandro/rss26_tests/covariances/orb_errors.txt";
+    // const std::string aliked_path = "/home/alejandro/rss26_tests/covariances/aliked_errors.txt";
+    // std::ofstream orb_ofs(orb_path, std::ios::out | std::ios::trunc);
+    // std::ofstream aliked_ofs(aliked_path, std::ios::out | std::ios::trunc);
+
+    // if (orb_ofs.is_open()) orb_ofs << std::setprecision(10);
+    // if (aliked_ofs.is_open()) aliked_ofs << std::setprecision(10);
+
+    // for(size_t i=0, iend=vpEdgesMono.size(); i<iend;i++)
+    // {
+    //     g2o::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
+
+    //     Pt pMP = vpMapPointEdgeMono[i];
+
+    //     if(pMP->isBad())
+    //         continue;
+
+    //     e->computeError();
+    //     if(e->chi2() > chi2_2dof || !e->isDepthPositive())
+    //     {
+    //         continue;
+    //     }
+
+    //     float err = static_cast<float>(e->chi2());
+    //     if (pMP->featureType == FEAT_ORB) {
+    //         if (orb_ofs.is_open()) orb_ofs << err << "\n";
+    //     }
+    //     if (pMP->featureType == FEAT_ALIKED128) {
+    //         if (aliked_ofs.is_open()) aliked_ofs << err << "\n";
+    //     }
+    // }
+    // if (orb_ofs.is_open()) orb_ofs.close();
+    // if (aliked_ofs.is_open()) aliked_ofs.close();
 
     // Recover optimized data
     //Keyframes

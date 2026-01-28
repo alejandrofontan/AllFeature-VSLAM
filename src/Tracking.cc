@@ -102,8 +102,8 @@ mat4f Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const dou
 mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
 {   
     im.GetGrayImage(mbRGB);
-    //if(fixImageSize)
-        // im.FixImageSize(w,h);
+    if(fixImageSize)
+        im.FixImageSize(w,h);
 
     mImGray = im.grayImg;
     imName = im.imageName;
@@ -277,8 +277,6 @@ void Tracking::Track()
         emergencyKeyframe = false;
         std::cout << "Tracking::Track: local mapping is idle, inserting emergency keyframe..." << std::endl;
     }
-
-
 }
 
 
@@ -470,15 +468,18 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     int nmatches = 0;
     for (auto& [ft, N] : currentFrame.N) 
     {
+        currentFrame.pts[ft] = mapPointMatches[ft];   
+        currentFrame.N[ft] = static_cast<int>(mapPointMatches[ft].size());
+        currentFrame.mvbOutlier[ft] = vector<bool>(mapPointMatches[ft].size(), false);
         if (nmatches_ft[ft] == 0)
             continue;
 
         nmatches += nmatches_ft[ft];
-        currentFrame.pts[ft] = mapPointMatches[ft];   
-        currentFrame.N[ft] = static_cast<int>(mapPointMatches[ft].size());
-        currentFrame.mvbOutlier[ft] = vector<bool>(mapPointMatches[ft].size(), false);
+        // currentFrame.pts[ft] = mapPointMatches[ft];   
+        // currentFrame.N[ft] = static_cast<int>(mapPointMatches[ft].size());
+        // currentFrame.mvbOutlier[ft] = vector<bool>(mapPointMatches[ft].size(), false);
     }
-    
+
     if (!optimizePose)
         return true;
 
@@ -651,7 +652,11 @@ bool Tracking::TrackLocalMap()
         c3 = ((currentFrame.mnId % ALLFEATURE_MAX_KEYFRAMES) == 0);
         #endif
 
-        if(c1 || c2 || c3)
+        float overlap = currentFrame.GetOverlap();
+        bool c4 = (overlap < 0.7f);
+
+        //if(c4)
+        if(c1 || c2 || c3 || c4)
         {
             if(localMappingIdle)
             {
@@ -659,7 +664,7 @@ bool Tracking::TrackLocalMap()
             }
             else
             {   
-                if(c2 || c3){
+                if(c2 || c3 || c4){
                     std::cout << "\nEmergency keyframe triggered by evaluation condition at frame " << currentFrame.mnId << std::endl;
                     emergencyKeyframe = true;
                     return true;   
@@ -1120,21 +1125,21 @@ void Tracking::loadCameraParameters(const string &strCalibrationPath, const stri
     w = cam["image_dimension"][0].as<int>();
     h = cam["image_dimension"][1].as<int>();
 
-    // if(fixImageSize){
-        // float ratio = float(w) / float(h);
-        // int new_h = (int) sqrt(307200.f / ratio);
-        // int new_w = (int) (float(new_h) * ratio);
-        // float conv_ratio_h = float(new_h)/float(h);
-        // float conv_ratio_w = float(new_w)/float(w);
+    if(fixImageSize){
+        float ratio = float(w) / float(h);
+        int new_h = (int) sqrt(307200.f / ratio);
+        int new_w = (int) (float(new_h) * ratio);
+        float conv_ratio_h = float(new_h)/float(h);
+        float conv_ratio_w = float(new_w)/float(w);
 
-        // w = new_w;     
-        // h = new_h;
+        w = new_w;     
+        h = new_h;
 
-        // mK.at<float>(0,0) *= conv_ratio_w;
-        // mK.at<float>(1,1) *= conv_ratio_h;
-        // mK.at<float>(0,2) *= conv_ratio_w;
-        // mK.at<float>(1,2) *= conv_ratio_h;
-    // }
+        mK.at<float>(0,0) *= conv_ratio_w;
+        mK.at<float>(1,1) *= conv_ratio_h;
+        mK.at<float>(0,2) *= conv_ratio_w;
+        mK.at<float>(1,2) *= conv_ratio_h;
+    }
 
     // Distortion coefficients
     mDistCoef = cv::Mat::zeros(4,1,CV_32F);

@@ -501,6 +501,10 @@ void KeyFrame::SetBadFlag()
 {   
     {
         unique_lock<mutex> lock(mMutexConnections);
+        #ifdef ALLFEATURE_EVALUATION
+        if ((int(mnFrameId) % ALLFEATURE_EVALUATION) == 0)
+            return;
+        #endif
         if(keyId==0)
             return;
         else if(mbNotErase)
