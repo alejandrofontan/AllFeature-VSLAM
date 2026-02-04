@@ -43,11 +43,11 @@ void ANYFEATURE_VSLAM::FeatureExtractor_surf64::detectAndCompute(const Image& im
 // }
 
 int ANYFEATURE_VSLAM::FeatureExtractor_surf64::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
-    return keypoint.octave;
+    return 0;
 }
 
 float ANYFEATURE_VSLAM::FeatureExtractor_surf64::GetKeypointSize(const cv::KeyPoint& keypoint) const{
-    return powf(settings->GetDetectorScaleFactor(), float(GetKeypointOctave(keypoint)));
+    return 1.0f;
     //return (keypoint.size / 9.0f);
 }
 

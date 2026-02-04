@@ -137,11 +137,11 @@ void ANYFEATURE_VSLAM::FeatureExtractor_sift128::computeDescriptors(
 }
 
 int ANYFEATURE_VSLAM::FeatureExtractor_sift128::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
-    return keypoint.octave;
+    return 0;
 }
 
 float ANYFEATURE_VSLAM::FeatureExtractor_sift128::GetKeypointSize(const cv::KeyPoint& keypoint) const{
-    return powf(settings->GetDetectorScaleFactor(), float(GetKeypointOctave(keypoint)));
+    return 1.0f;
 }
 
 float ANYFEATURE_VSLAM::DescriptorDistance_sift128(const cv::Mat &a, const cv::Mat &b){

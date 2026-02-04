@@ -37,11 +37,11 @@ void ANYFEATURE_VSLAM::FeatureExtractor_kaze64::detectAndCompute(const Image& im
 }
 
 int ANYFEATURE_VSLAM::FeatureExtractor_kaze64::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
-    return keypoint.class_id;
+    return 0;
 }
 
 float ANYFEATURE_VSLAM::FeatureExtractor_kaze64::GetKeypointSize(const cv::KeyPoint& keypoint) const{
-    return powf(settings->GetDetectorScaleFactor(), float(GetKeypointOctave(keypoint)));
+    return 1.0f;
 }
 
 float ANYFEATURE_VSLAM::DescriptorDistance_kaze64(const cv::Mat &a, const cv::Mat &b){
