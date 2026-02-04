@@ -37,10 +37,16 @@ void ANYFEATURE_VSLAM::FeatureExtractor::operator()(const Image& img,
                                              std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors,
                                              std::vector<mat2f>& keyPtsSigma2, std::vector<mat2f>& keyPtsInf, std::vector<float>& keyPtsSize)
 {
+    std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
+
     setupImage(img);
     detectAndCompute(img, keypoints, descriptors);
     computeSize(keyPtsSize,keypoints);
     computeSigma(keyPtsSigma2, keyPtsInf,keyPtsSize,keypoints,img,CovarianceMethod::SIZE);
+
+    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
+    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+    //medianTrackingTime(t_duration, extractorTime, "        - Extractor Time   ", TRACKING_PROFILING); 
 }
 
 void ANYFEATURE_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints){
@@ -51,6 +57,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsS
         float keyPtSize_norm{settings->maxKeyPtSize};
         if(settings->maxKeyPtSize > settings->minKeyPtSize)
             keyPtSize_norm =  1.0f +  (keyPtSize - settings->minKeyPtSize) * (settings->maxKeyPtSize0 - 1.0f)/(settings->maxKeyPtSize - settings->minKeyPtSize);
+         
         keyPtsSize.push_back(keyPtSize_norm);
     }
 }

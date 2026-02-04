@@ -68,6 +68,7 @@ void Optimizer::GlobalBundleAdjustemnt(shared_ptr<Map> pMap, int nIterations, bo
 void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt> &vpMP,
                                  int nIterations, bool* pbStopFlag, const unsigned long nLoopKF, const bool bRobust)
 {
+    std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
     vector<bool> vbNotIncludedMP;
     vbNotIncludedMP.resize(vpMP.size());
 
@@ -207,13 +208,30 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
     optimizer.initializeOptimization();
     optimizer.optimize(nIterations);
     
+    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
+    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+    std::cout << std::fixed << std::setprecision(2) << "Optimization time: " << t_duration * 1000 << " s" << std::endl;
+
     // const std::string orb_path = "/home/alejandro/rss26_tests/covariances/orb_errors.txt";
+    // const std::string akaze_path = "/home/alejandro/rss26_tests/covariances/akaze_errors.txt";
+    // const std::string brisk_path = "/home/alejandro/rss26_tests/covariances/brisk_errors.txt";
+    // const std::string sift_path = "/home/alejandro/rss26_tests/covariances/sift_errors.txt";
     // const std::string aliked_path = "/home/alejandro/rss26_tests/covariances/aliked_errors.txt";
+    // const std::string kaze_path = "/home/alejandro/rss26_tests/covariances/kaze_errors.txt";
+
     // std::ofstream orb_ofs(orb_path, std::ios::out | std::ios::trunc);
+    // std::ofstream akaze_ofs(akaze_path, std::ios::out | std::ios::trunc);
+    // std::ofstream brisk_ofs(brisk_path, std::ios::out | std::ios::trunc);
+    // std::ofstream sift_ofs(sift_path, std::ios::out | std::ios::trunc);
     // std::ofstream aliked_ofs(aliked_path, std::ios::out | std::ios::trunc);
+    // std::ofstream kaze_ofs(kaze_path, std::ios::out | std::ios::trunc);
 
     // if (orb_ofs.is_open()) orb_ofs << std::setprecision(10);
+    // if (akaze_ofs.is_open()) akaze_ofs << std::setprecision(10);
+    // if (brisk_ofs.is_open()) brisk_ofs << std::setprecision(10);
+    // if (sift_ofs.is_open()) sift_ofs << std::setprecision(10);
     // if (aliked_ofs.is_open()) aliked_ofs << std::setprecision(10);
+    // if (kaze_ofs.is_open()) kaze_ofs << std::setprecision(10);
 
     // for(size_t i=0, iend=vpEdgesMono.size(); i<iend;i++)
     // {
@@ -229,17 +247,49 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
     //     {
     //         continue;
     //     }
-
-    //     float err = static_cast<float>(e->chi2());
+    //     if(!e->isDepthPositive())
+    //     {
+    //         continue;
+    //     }
+        
+    //     double error_u, error_v;
+    //     e->get_error(error_u, error_v);
     //     if (pMP->featureType == FEAT_ORB) {
-    //         if (orb_ofs.is_open()) orb_ofs << err << "\n";
+    //         double information;
+    //         e-> getInformation(information);
+    //         if (information < 1.0) {
+    //             continue;
+    //         }
+    //         if (orb_ofs.is_open()) orb_ofs << error_u << "\n";
+    //         if (orb_ofs.is_open()) orb_ofs << error_v << "\n";
+    //     }
+    //     if (pMP->featureType == FEAT_AKAZE61) {
+    //         if (akaze_ofs.is_open()) akaze_ofs << error_u << "\n";
+    //         if (akaze_ofs.is_open()) akaze_ofs << error_v << "\n";
+    //     }
+    //     if (pMP->featureType == FEAT_BRISK) {
+    //         if (brisk_ofs.is_open()) brisk_ofs << error_u << "\n";
+    //         if (brisk_ofs.is_open()) brisk_ofs << error_v << "\n";
+    //     }
+    //     if (pMP->featureType == FEAT_SIFT128) {
+    //         if (sift_ofs.is_open()) sift_ofs << error_u << "\n";
+    //         if (sift_ofs.is_open()) sift_ofs << error_v << "\n";
     //     }
     //     if (pMP->featureType == FEAT_ALIKED128) {
-    //         if (aliked_ofs.is_open()) aliked_ofs << err << "\n";
+    //         if (aliked_ofs.is_open()) aliked_ofs << error_u << "\n";
+    //         if (aliked_ofs.is_open()) aliked_ofs << error_v << "\n";
+    //     }
+    //     if (pMP->featureType == FEAT_KAZE64) {
+    //         if (kaze_ofs.is_open()) kaze_ofs << error_u << "\n";
+    //         if (kaze_ofs.is_open()) kaze_ofs << error_v << "\n";
     //     }
     // }
     // if (orb_ofs.is_open()) orb_ofs.close();
+    // if (akaze_ofs.is_open()) akaze_ofs.close();
+    // if (brisk_ofs.is_open()) brisk_ofs.close();
+    // if (sift_ofs.is_open()) sift_ofs.close();
     // if (aliked_ofs.is_open()) aliked_ofs.close();
+    // if (kaze_ofs.is_open()) kaze_ofs.close();
 
     // Recover optimized data
     //Keyframes
@@ -505,7 +555,8 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
     pKF->mnBALocalForKF = pKF->keyId;
 
     #ifdef ALLFEATURE_REAL_TIME
-    vector<Keyframe> vNeighKFs = pKF->GetBestCovisibilityKeyFrames(20);
+    vector<Keyframe> vNeighKFs = pKF->GetBestCovisibilityKeyFrames(10);
+    //vector<Keyframe> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
     #else
     vector<Keyframe> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
     #endif

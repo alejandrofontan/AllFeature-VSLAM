@@ -70,6 +70,7 @@ void MapDrawer::DrawMapPoints()
         //     continue;
         if(vpMPs[i]->isBad())
              continue;
+
         vec3f pos = vpMPs[i]->GetWorldPos();
         cv::Scalar color = getFeatureColor(vpMPs[i]->featureType,0, true);
         glColor3f(GLfloat(color[0]),GLfloat(color[1]),GLfloat(color[2]));

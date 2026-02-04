@@ -127,6 +127,9 @@ void Viewer::Run()
     pangolin::Var<bool> menuLocalizationMode("menu.Localization Mode",false,true);
     pangolin::Var<bool> menuReset("menu.Reset",false,false);
     
+    pangolin::Var<float> menuTrackingTime("menu.Tracking (ms)", 0.0f, 0.0f, 100.0f, false); 
+    pangolin::Var<float> menuLocalMappingTime("menu.Local Mapping (ms)", 0.0f, 0.0f, 400.0f, false); 
+
     pangolin::View& d_img = pangolin::Display("img")
             .SetBounds(left_t - hS,  left_t, left_l, left_r);
 
@@ -154,6 +157,11 @@ void Viewer::Run()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(1.0f,1.0f,1.0f,1.0f);
 
+        ////////////////////////////////////////////////////////////////////////////////////
+        menuTrackingTime = static_cast<float>(1000.0 * grabImageMonocular_time_median);
+        menuLocalMappingTime = static_cast<float>(1000.0 * runLocalMapping_time_median);
+
+        ////////////////////////////////////////////////////////////////////////////////////
         mapDrawer->GetCurrentOpenGLCameraMatrix(Twc);
 
         d_cam.Activate(s_cam);

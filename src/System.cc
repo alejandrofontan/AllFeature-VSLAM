@@ -126,6 +126,7 @@ System::System(const string &vocabularyFolder,
                                     featureTypes);
         mptViewer = make_shared<thread>(&Viewer::Run, viewer);
         tracker->SetViewer(viewer);
+        localMapper->SetViewer(viewer);
     }
 
     //Set pointers between threads
@@ -134,7 +135,7 @@ System::System(const string &vocabularyFolder,
 
     localMapper->SetTracker(tracker);
     localMapper->SetLoopCloser(loopCloser);
-
+    
     loopCloser->SetTracker(tracker);
     loopCloser->SetLocalMapper(localMapper);
     loopCloser->SetMapDrawer(mapDrawer);
@@ -471,15 +472,18 @@ auto to_u8 = [](double v) {
     return static_cast<uint8_t>(std::lround(v * 255.0));
 };
 
-void System::SavePointCloudVSLAMLAB(const string &filename)
+void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>& imageFilenames)
 {
     cout << endl << "Saving point cloud to " << filename << " ..." << endl;
 
     std::vector<PointRGB> pts;
     auto mapPoints = mpMap->GetAllMapPoints();
+    int numPoints = 0;
+    std::map<int, cv::Mat> imageCache;
+    float alpha = 0.0f;
     for (auto& mp: mapPoints) {
         if (mp->isBad()) continue;
-    
+        numPoints++;
         PointRGB p;
         vec3f pos = mp->GetWorldPos();
         p.x = pos(0);
@@ -491,12 +495,50 @@ void System::SavePointCloudVSLAMLAB(const string &filename)
         // p.r = 255;
         // p.g = 255;
         // p.b = 255;
-        p.r = to_u8(color[0]); // R
-        p.g = to_u8(color[1]); // G
-        p.b = to_u8(color[2]); // B
+
+        auto keyfram = mp->GetCurrentRefKeyframe();
+        int idx = mp->GetIndexInKeyFrame(keyfram);
+        int imgIdx = keyfram->mnFrameId;
+
+        if (imageCache.find(imgIdx) == imageCache.end()) {
+            cv::Mat cvimg = cv::imread(imageFilenames[imgIdx],cv::IMREAD_UNCHANGED);
+            imageCache[imgIdx] = cvimg;
+        }
+        cv::Mat cvimg = imageCache[imgIdx];
+        int u = static_cast<int>(keyfram->mvKeys.at(mp->featureType)[idx].pt.x);
+        int v = static_cast<int>(keyfram->mvKeys.at(mp->featureType)[idx].pt.y);
+        if (cvimg.channels() == 1) {
+            uint8_t intensity = cvimg.at<uint8_t>(v, u);
+            p.r = intensity;
+            p.g = intensity;
+            p.b = intensity;
+        } else if (cvimg.channels() == 3) {
+            cv::Vec3b bgr = cvimg.at<cv::Vec3b>(v, u);
+            // std::cout << " - Color from image. ";
+            // std::cout << " - bgr[0]: " << static_cast<int>(bgr[0]) <<  std::endl;
+            // std::cout << " - bgr[1]: " << static_cast<int>(bgr[1]) <<  std::endl;
+            // std::cout << " - bgr[2]: " << static_cast<int>(bgr[2]) <<  std::endl;
+            // std::cout << " - color[0]: " << color[0] <<  std::endl;
+            // std::cout << " - color[1]: " << color[1] <<  std::endl;
+            // std::cout << " - color[2]: " << color[2] <<  std::endl;
+            // p.b = uint8_t(alpha * float(bgr[2]) + (1.0f - alpha) * float(color[0]));
+            // p.g = uint8_t(alpha * float(bgr[1]) + (1.0f - alpha) * float(color[1]));
+            // p.r = uint8_t(alpha * float(bgr[0]) + (1.0f - alpha) * float(color[2]));
+            p.r = to_u8(alpha * (float(bgr[2]) / 255.0f) + (1.0f - alpha) * (float(color[0])));
+            p.g = to_u8(alpha * (float(bgr[1]) / 255.0f) + (1.0f - alpha) * (float(color[1])));
+            p.b = to_u8(alpha * (float(bgr[0]) / 255.0f) + (1.0f - alpha) * (float(color[2])));
+            // std::cout << " - p.r: " << static_cast<int>(p.r) <<  std::endl;
+            // std::cout << " - p.g: " << static_cast<int>(p.g) <<  std::endl;
+            // std::cout << " - p.b: " << static_cast<int>(p.b) <<  std::endl;
+        }
+
+        // p.r = to_u8(color[0]); // R
+        // p.g = to_u8(color[1]); // G
+        // p.b = to_u8(color[2]); // B
 
         pts.push_back(p);
     }
+    cout << endl << "point cloud saved! Number of points: " << numPoints << endl;
     write_ply_binary(filename, pts);
 }
 
@@ -577,74 +619,74 @@ std::map<FeatureType, std::vector<cv::KeyPoint>> System::GetTrackedKeyPointsUn()
 }
 
 void System::SaveStatistics(const std::string &filename){
-    auto keyframes = mpMap->GetAllKeyFrames();
-    auto pts = mpMap->GetAllMapPoints();
+    // auto keyframes = mpMap->GetAllKeyFrames();
+    // auto pts = mpMap->GetAllMapPoints();
 
-    size_t numKeyframes{0};
-    for (auto& keyframe: keyframes) {
-        if(keyframe->isBad())
-            continue;
-        numKeyframes++;
-    }
+    // size_t numKeyframes{0};
+    // for (auto& keyframe: keyframes) {
+    //     if(keyframe->isBad())
+    //         continue;
+    //     numKeyframes++;
+    // }
 
-    size_t numPts{0};
-    size_t numObservations{0};
-    for (auto& pt: pts) {
-        if(pt->isBad())
-            continue;
-        numPts++;
-        numObservations += pt->NumberOfObservations();
-    }
-    float numObservationsPerPt = float(numObservations)/float(numPts);
+    // size_t numPts{0};
+    // size_t numObservations{0};
+    // for (auto& pt: pts) {
+    //     if(pt->isBad())
+    //         continue;
+    //     numPts++;
+    //     numObservations += pt->NumberOfObservations();
+    // }
+    // float numObservationsPerPt = float(numObservations)/float(numPts);
 
-    double medianTrackingTime{};
-    ANYFEATURE_VSLAM::vectorMedian(medianTrackingTime,trackingTime);
+    // double medianTrackingTime{};
+    // ANYFEATURE_VSLAM::vectorMedian(medianTrackingTime,trackingTime);
 
-    double medianLocalMapppingTime{};
-    ANYFEATURE_VSLAM::vectorMedian(medianLocalMapppingTime,localMapper->localMappingTime);
+    // double medianLocalMapppingTime{};
+    // ANYFEATURE_VSLAM::vectorMedian(medianLocalMapppingTime,localMapper->localMappingTime);
 
-    double medianLoopClosingTime{};
-    ANYFEATURE_VSLAM::vectorMedian(medianLoopClosingTime,loopCloser->loopClosingTime);
+    // double medianLoopClosingTime{};
+    // ANYFEATURE_VSLAM::vectorMedian(medianLoopClosingTime,loopCloser->loopClosingTime);
 
-    long long finalVirtualMemUsed{virtualMemUsed.back()};
-    long long firstVirtualMemUsed{virtualMemUsed.front()};
-    long long maxVirtualMemUsed{0};
-    ANYFEATURE_VSLAM::vectorMax(maxVirtualMemUsed,virtualMemUsed);
+    // long long finalVirtualMemUsed{virtualMemUsed.back()};
+    // long long firstVirtualMemUsed{virtualMemUsed.front()};
+    // long long maxVirtualMemUsed{0};
+    // ANYFEATURE_VSLAM::vectorMax(maxVirtualMemUsed,virtualMemUsed);
 
-    ofstream f;
-    string statisticsFile = filename + ".txt";
-    f.open(statisticsFile.c_str());
-    f << fixed;
-    f << setprecision(0) << numKeyframes << " " << numPts << " " << numObservations << " " << setprecision(3) << numObservationsPerPt  <<
-    " " << setprecision(9) << medianTrackingTime << " " << medianLocalMapppingTime << " " << medianLoopClosingTime <<
-    " " << tracker->numTrackedFrames <<" " << loopCloser->numOfLoopClosures << setprecision(0) <<
-    " " << firstVirtualMemUsed <<" " << maxVirtualMemUsed << " " << finalVirtualMemUsed <<
-    endl;
+    // ofstream f;
+    // string statisticsFile = filename + ".txt";
+    // f.open(statisticsFile.c_str());
+    // f << fixed;
+    // f << setprecision(0) << numKeyframes << " " << numPts << " " << numObservations << " " << setprecision(3) << numObservationsPerPt  <<
+    // " " << setprecision(9) << medianTrackingTime << " " << medianLocalMapppingTime << " " << medianLoopClosingTime <<
+    // " " << tracker->numTrackedFrames <<" " << loopCloser->numOfLoopClosures << setprecision(0) <<
+    // " " << firstVirtualMemUsed <<" " << maxVirtualMemUsed << " " << finalVirtualMemUsed <<
+    // endl;
 
-    // Create statistics yaml file
+    // // Create statistics yaml file
     string statisticsFile_yaml = filename + ".yaml";
-    YAML::Node node;
+    // YAML::Node node;
 
-    node["graph"]["numKeyframes"] = numKeyframes;
-    node["graph"]["numPts"] = numPts;
-    node["graph"]["numObservations"] = numObservations;
-    node["graph"]["numObservationsPerPt"] = numObservationsPerPt;
+    // node["graph"]["numKeyframes"] = numKeyframes;
+    // node["graph"]["numPts"] = numPts;
+    // node["graph"]["numObservations"] = numObservations;
+    // node["graph"]["numObservationsPerPt"] = numObservationsPerPt;
 
-    node["profiling"]["medianTrackingTime"] = medianTrackingTime;
-    node["profiling"]["medianLocalMapppingTime"] = medianLocalMapppingTime;
-    node["profiling"]["medianLoopClosingTime"] = medianLoopClosingTime;
+    // node["profiling"]["medianTrackingTime"] = medianTrackingTime;
+    // node["profiling"]["medianLocalMapppingTime"] = medianLocalMapppingTime;
+    // node["profiling"]["medianLoopClosingTime"] = medianLoopClosingTime;
 
-    node["recall"]["numTrackedFrames"] = tracker->numTrackedFrames;
-    node["recall"]["loopCloser->numOfLoopClosures"] = loopCloser->numOfLoopClosures;
+    // node["recall"]["numTrackedFrames"] = tracker->numTrackedFrames;
+    // node["recall"]["loopCloser->numOfLoopClosures"] = loopCloser->numOfLoopClosures;
 
-    node["memory"]["firstVirtualMemUsed"] = firstVirtualMemUsed;
-    node["memory"]["maxVirtualMemUsed"] = maxVirtualMemUsed;
-    node["memory"]["finalVirtualMemUsed"] = finalVirtualMemUsed;
+    // node["memory"]["firstVirtualMemUsed"] = firstVirtualMemUsed;
+    // node["memory"]["maxVirtualMemUsed"] = maxVirtualMemUsed;
+    // node["memory"]["finalVirtualMemUsed"] = finalVirtualMemUsed;
 
-    std::ofstream fout(statisticsFile_yaml);
+    // std::ofstream fout(statisticsFile_yaml);
 
-    fout << node;
-    fout.close();
+    // fout << node;
+    // fout.close();
     std::cout << statisticsFile_yaml + " file written successfully!" << std::endl;
 
 }

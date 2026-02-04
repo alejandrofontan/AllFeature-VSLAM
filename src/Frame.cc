@@ -22,6 +22,19 @@
 #include "Converter.h"
 #include <thread>
 
+#include <vector>
+#include <utility>
+#include <type_traits>
+#include <opencv2/features2d.hpp> // for cv::KeyPoint
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#include <vector>
+#include <utility>
+#include <type_traits>
+#include <opencv2/features2d.hpp>
+
 namespace ANYFEATURE_VSLAM
 {
 
@@ -113,8 +126,6 @@ Frame::Frame(const Image & img, const double &timeStamp,
 
     mb = mbf/fx;
     AssignFeaturesToGrid();
-
-
 }
 
 void Frame::AssignFeaturesToGrid()
@@ -140,31 +151,79 @@ void Frame::AssignFeaturesToGrid()
     }
 }
 
-void Frame::ExtractFeatures(int flag, const Image & img)
+void Frame::ExtractFeatures(int flag, const Image& img)
 {
     featureTypes.clear();
-    if(flag==0){
-        Ntotal = 0;
-        for(auto& [ft, extractor] : featureExtractorLeft){
-            // if((ft != FEAT_ORB) && (mnId % 2) != 0){
-            //     continue;
-            // }
-            (*extractor)(img, mvKeys[ft], mDescriptors[ft], keyPtsSigma2[ft], keyPtsInf[ft], keyPtsSize[ft]);
-            N[ft] = mvKeys[ft].size();
-            Ntotal += N[ft];
-            featureTypes.push_back(ft);
-            //std::cout << "Extracted " << N[ft] << " keypoints of type " << ft << std::endl;
-        }
-        maxKeyPtSize = featureExtractorLeft.begin()->second->GetMaxKeyPtSize();
-        maxKeyPtSigma = featureExtractorLeft.begin()->second->GetMaxKeyPtSigma();
-    }
-    else{
-        std::cout << "This part of the code (Frame::ExtractORB) is not prepared to run with independent sigmas and sizes."<< std::endl;
-        std::terminate();
-        //(*mpORBextractorRight)(im,cv::Mat(),mvKeysRight,mDescriptorsRight);
+    Ntotal = 0;
+
+    // 1) Stable job list
+    std::vector<std::pair<FeatureType, shared_ptr<FeatureExtractor>>> jobs;
+    jobs.reserve(featureExtractorLeft.size());
+    for (auto& [ft, extractor] : featureExtractorLeft) {
+        jobs.emplace_back(ft, extractor);
     }
 
+    // 2) Per-job outputs (no shared writes here)
+    struct Out {
+        std::vector<cv::KeyPoint>   keys;
+        cv::Mat   desc;
+        vector<mat2f> sigma2;
+        vector<mat2f>    inf;
+        vector<float>   size;
+        int n = 0;
+    };
+
+    std::vector<Out> outs(jobs.size());
+
+    // 3) Parallel extraction (OpenMP if enabled; otherwise runs serially)
+    #pragma omp parallel for
+    for (int i = 0; i < (int)jobs.size(); ++i) {
+        auto& extractor = jobs[i].second;
+        auto& o = outs[i];
+
+        (*extractor)(img, o.keys, o.desc, o.sigma2, o.inf, o.size);
+        o.n = (int)o.keys.size();
+    }
+
+    // 4) Serial merge into your maps/vectors (safe)
+    featureTypes.reserve(jobs.size());
+    for (size_t i = 0; i < jobs.size(); ++i) {
+        const auto ft = jobs[i].first;
+        auto& o = outs[i];
+
+        mvKeys[ft]        = std::move(o.keys);
+        mDescriptors[ft]  = std::move(o.desc);
+        keyPtsSigma2[ft]  = std::move(o.sigma2);
+        keyPtsInf[ft]     = std::move(o.inf);
+        keyPtsSize[ft]    = std::move(o.size);
+
+        N[ft] = o.n;
+        Ntotal += o.n;
+        featureTypes.push_back(ft);
+    }
+
+    maxKeyPtSize  = featureExtractorLeft.begin()->second->GetMaxKeyPtSize();
+    maxKeyPtSigma = featureExtractorLeft.begin()->second->GetMaxKeyPtSigma();
 }
+
+
+// void Frame::ExtractFeatures(int flag, const Image & img)
+// {
+//     featureTypes.clear();
+//     Ntotal = 0;
+//     for(auto& [ft, extractor] : featureExtractorLeft){
+//         // if((ft != FEAT_ORB) && (mnId % 15) != 0){
+//         //     continue;
+//         // }
+//         (*extractor)(img, mvKeys[ft], mDescriptors[ft], keyPtsSigma2[ft], keyPtsInf[ft], keyPtsSize[ft]);
+//         N[ft] = mvKeys[ft].size();
+//         Ntotal += N[ft];
+//         featureTypes.push_back(ft);
+//         //std::cout << "Extracted " << N[ft] << " keypoints of type " << ft << std::endl;
+//     }
+//     maxKeyPtSize = featureExtractorLeft.begin()->second->GetMaxKeyPtSize();
+//     maxKeyPtSigma = featureExtractorLeft.begin()->second->GetMaxKeyPtSigma();
+// }
 
 void Frame::SetPose(const mat4f& Tcw_)
 {

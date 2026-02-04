@@ -3,34 +3,34 @@
 
 #include "Tracking.h"
 
-#include<opencv2/core/core.hpp>
+#include <opencv2/core/core.hpp>
 //#include<opencv2/features2d/features2d.hpp>
 
-#include"FrameDrawer.h"
-#include"Converter.h"
-#include"Map.h"
-#include"Initializer.h"
+#include "FrameDrawer.h"
+#include "Converter.h"
+#include "Map.h"
+#include "Initializer.h"
 
-#include"Optimizer.h"
-#include"PnPsolver.h"
-#include"Utils.h"
+#include "Optimizer.h"
+#include "PnPsolver.h"
+#include "Utils.h"
 
-#include<iostream>
+#include <iostream>
 
-#include<mutex>
+#include <mutex>
 
 #include <yaml-cpp/yaml.h>
 
-#include"Feature_orb32.h"
-#include"Feature_brisk48.h"
-#include"Feature_akaze61.h"
-#include"Feature_surf64.h"
-#include"Feature_kaze64.h"
-#include"Feature_sift128.h"
-#include"Feature_r2d2_128.h"
-#include"Feature_anyFeatBin.h"
-#include"Feature_anyFeatNonBin.h"
-#include"Feature_aliked128.h"
+#include "Feature_orb32.h"
+#include "Feature_brisk48.h"
+#include "Feature_akaze61.h"
+#include "Feature_surf64.h"
+#include "Feature_kaze64.h"
+#include "Feature_sift128.h"
+#include "Feature_r2d2_128.h"
+#include "Feature_anyFeatBin.h"
+#include "Feature_anyFeatNonBin.h"
+#include "Feature_aliked128.h"
 
 using namespace std;
 
@@ -82,6 +82,10 @@ void Tracking::SetViewer(shared_ptr<Viewer> viewer_)
 
 mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
 {   
+    std::chrono::steady_clock::time_point t_start_0 = std::chrono::steady_clock::now();
+    ///////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////
+    // Convert image to grayscale and resize
     im.GetGrayImage(mbRGB);
     if(fixImageSize)
         im.FixImageSize(w,h);
@@ -89,18 +93,69 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     mImGray = im.grayImg;
     imName = im.imageName;
 
+#ifdef PROFILING_EXHAUSTIVE
+    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
+    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
+    resize_times.push_back(t_duration);
+#endif
+
+    ///////////////////////////////////////////////////////////////////////////////
+    // Create Frame (extract features)
+#ifdef PROFILING_EXHAUSTIVE
+    std::chrono::steady_clock::time_point t_start_1 = std::chrono::steady_clock::now();
+#endif
+
     if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)
         currentFrame = Frame(im,timestamp,initFeatureExtractor,vocabulary,mK,mDistCoef,mbf,mThDepth);
     else
         currentFrame = Frame(im,timestamp,featureExtractorLeft,vocabulary,mK,mDistCoef,mbf,mThDepth);
-    
+
+#ifdef PROFILING_EXHAUSTIVE
+    t_end = std::chrono::steady_clock::now();
+    t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_1).count();
+    frame_times.push_back(t_duration);
+#endif
+    ///////////////////////////////////////////////////////////////////////////////
+    // Track Frame
+#ifdef PROFILING_EXHAUSTIVE
+    std::chrono::steady_clock::time_point t_start_2 = std::chrono::steady_clock::now();
+#endif
+
     Track();
+
+#ifdef PROFILING_EXHAUSTIVE
+    t_end = std::chrono::steady_clock::now();
+    t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_2).count();
+    if(mState == OK)
+        tracking_times.push_back(t_duration);
+#endif
+    
+    viewer->set_grabImageMonocular_time_median(vector_median(grabImageMonocular_times));
+
+#ifdef PROFILING_EXHAUSTIVE
+    std::cout << "\n Tracking Profiling " << std::endl;
+    medianTrackingTime(resize_times            , "    - Resize Image   ", TRACKING_PROFILING); 
+    medianTrackingTime(frame_times             , "    - Frame Creation ", TRACKING_PROFILING); 
+    medianTrackingTime(tracking_times          , "    - Tracking       ", TRACKING_PROFILING); 
+    medianTrackingTime(track_ref_times         , "        - Track Ref   ", TRACKING_PROFILING); 
+    medianTrackingTime(pose_opt_times          , "        - Pose Optimization   ", TRACKING_PROFILING); 
+    medianTrackingTime(local_map_times         , "        - Track Local Map   ", TRACKING_PROFILING);
+    medianTrackingTime(grabImageMonocular_times, "\033[1;32mGrab Image Monocular   \033[0m", TRACKING_PROFILING);
+#endif
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////
+    t_end = std::chrono::steady_clock::now();
+    t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
+    if(mState == OK)
+        grabImageMonocular_times.push_back(t_duration);
+
     return currentFrame.Tcw;
 }
 
 void Tracking::Track()
 {       
-    std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
+    
 
     if(mState==NO_IMAGES_YET)
     {
@@ -129,16 +184,7 @@ void Tracking::Track()
         {
             // Local Mapping might have changed some MapPoints tracked in last frame
             CheckReplacedInLastFrame();
-            bool trackReferenceKeyframe = (mVelocity(3,3) != 1.0f) || (currentFrame.mnId < lastRelocFrameId+2) 
-                || (lastFrame.mnId == refKeyframe->mnFrameId);
-            if(trackReferenceKeyframe)
-                bOK = TrackReferenceKeyFrame();
-            else
-            {
-                bOK = TrackWithMotionModel();
-                bool optimizePose = !bOK;
-                bOK = TrackReferenceKeyFrame(optimizePose);
-            }
+            bOK = TrackReferenceKeyFrame();
         }
         else
         {   
@@ -149,14 +195,24 @@ void Tracking::Track()
         currentFrame.refKeyframe = refKeyframe;
 
         // If we have an initial estimation of the camera pose and matching. Track the local map.
+#ifdef PROFILING_EXHAUSTIVE
+        std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
+#endif
+
         if(bOK)
             bOK = TrackLocalMap();
-        
+
+#ifdef PROFILING_EXHAUSTIVE
+        std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
+        double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+        local_map_times.push_back(t_duration);
+#endif
+
         if(bOK)
             mState = OK;
         else
             mState=LOST;
-
+ 
         // Update drawer
         frameDrawer->Update(this);
 
@@ -192,10 +248,12 @@ void Tracking::Track()
                 }
             }
             mlpTemporalPoints.clear();
-
+            
             // Check if we need to insert a new keyframe
             if(NeedNewKeyFrame())
                 CreateNewKeyFrame();
+
+
             // We allow points with high innovation (considererd outliers by the Huber Function)
             // pass to the new keyframe, so that bundle adjustment will finally decide
             // if they are outliers or not. We don't want next frame to estimate its position
@@ -244,11 +302,6 @@ void Tracking::Track()
         mlbLost.push_back(mState==LOST);
     }
 
-    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
-    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    trackingTime.push_back(t_duration);
-    medianTrackingTime();  
-
     if (emergencyKeyframe){
         std::cout << "Tracking::Track: emergency keyframe triggered, waiting for local mapping to be idle..." << std::endl;    
         lock.unlock();
@@ -293,10 +346,9 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
             return;
         }
         // Find correspondences
-
         int nmatches = matcher->SearchForInitialization(mInitialFrame, currentFrame, mvbPrevMatched, mvIniMatches, featureType);
 
-             // Check if there are enough correspondences
+        // Check if there are enough correspondences
         if(nmatches < minMatches_monoInit)
         {
             mpInitializer = nullptr;
@@ -440,6 +492,9 @@ void Tracking::CheckReplacedInLastFrame()
 
 bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
 {   
+    #ifdef PROFILING_EXHAUSTIVE
+            std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
+    #endif
 
     // Feature Matching
     std::map<FeatureType, std::vector<Pt>> mapPointMatches;
@@ -458,6 +513,13 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     if(nmatches < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
         return false;
          
+#ifdef PROFILING_EXHAUSTIVE
+    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
+    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+    track_ref_times.push_back(t_duration);
+    t_start = std::chrono::steady_clock::now();
+#endif
+
     // Optimize Pose
     currentFrame.SetPose(lastFrame.Tcw);
     Optimizer::PoseOptimization(&currentFrame);
@@ -483,6 +545,12 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
             }
         }
     }
+
+#ifdef PROFILING_EXHAUSTIVE
+    t_end = std::chrono::steady_clock::now();
+    t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+    pose_opt_times.push_back(t_duration);
+#endif
 
     return nmatchesMap >= TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW;
 }
@@ -636,15 +704,15 @@ bool Tracking::TrackLocalMap()
             }
             else
             {   
-                if(c2 || c3 || c4){
-                    std::cout << "\nEmergency keyframe triggered by evaluation condition at frame " << currentFrame.mnId << std::endl;
-                    emergencyKeyframe = true;
-                    return true;   
-                }
-                if(mnMatchesInliers < nRefMatches * 0.5f){
-                    emergencyKeyframe = true;
-                    return true;
-                }
+                // if(c2 || c3 || c4){
+                //     std::cout << "\nEmergency keyframe triggered by evaluation condition at frame " << currentFrame.mnId << std::endl;
+                //     emergencyKeyframe = true;
+                //     return true;   
+                // }
+                // if(mnMatchesInliers < nRefMatches * 0.5f){
+                //     emergencyKeyframe = true;
+                //     return true;
+                // }
                 return false;   
             }
         }
@@ -1037,6 +1105,14 @@ void Tracking::Reset()
     mlFrameTimes.clear();
     mlbLost.clear();
 
+    resize_times.clear();
+    frame_times.clear();
+    tracking_times.clear();
+    track_ref_times.clear();
+    pose_opt_times.clear();
+    local_map_times.clear();
+    grabImageMonocular_times.clear();
+    
     if(viewer)
         viewer->Release();
 }

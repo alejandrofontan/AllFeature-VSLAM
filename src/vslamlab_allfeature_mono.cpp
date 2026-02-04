@@ -305,7 +305,7 @@ int main(int argc, char **argv)
     // Save camera trajectory
     //string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
     SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
-    SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply");
+    SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply", imageFilenames);
 
     return 0;
 }

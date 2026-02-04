@@ -71,6 +71,7 @@ namespace ANYFEATURE_VSLAM {
         ~FeatureExtractor() = default;
 
         std::shared_ptr<FeatureExtractorSettings> settings{};
+        std::vector<double> extractorTime{};
 
         void operator()( const Image & img,
                          std::vector<cv::KeyPoint>& keypoints,

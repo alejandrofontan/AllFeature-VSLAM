@@ -255,3 +255,38 @@ int ANYFEATURE_VSLAM::RandomIntegerGenerator::GetRandomInteger(const int& minNum
     std::uniform_int_distribution<> distrib(minNumber, maxNumber);
     return distrib(randomIntGenerator);
 }
+
+void ANYFEATURE_VSLAM::medianTrackingTime(std::vector<double> &timeVector, const std::string& stage, const bool& activate){
+    if(!activate)
+        return;
+    if(timeVector.empty()){
+        return;
+    }
+    std::vector<double> tmp = timeVector;
+    std::sort(tmp.begin(), tmp.end());
+    double median;
+    size_t n = tmp.size();
+    if(n % 2 == 1) median = tmp[n/2];
+    else median = 0.5*(tmp[n/2 - 1] + tmp[n/2]);
+    const double sum = std::accumulate(timeVector.begin(), timeVector.end(), 0.0);
+    double stddev = 0.0;
+    if (n >= 2) {
+        double sq_sum = 0.0;
+        for (double x : timeVector) {
+            const double d = x - median;
+            sq_sum += d * d;
+        }
+        stddev = std::sqrt(sq_sum / static_cast<double>(n - 1));
+    }
+    std::cout << stage + "median / std  / max time: " << " / " << 1000*median << " / " << 1000*stddev << " / " << 1000*tmp.back() << " ms" << std::endl;
+}
+
+double ANYFEATURE_VSLAM::vector_median(std::vector<double>& vector_){
+    std::vector<double> tmp = vector_;
+    std::sort(tmp.begin(), tmp.end());
+    size_t n = tmp.size();
+    if(n == 0)
+        return 0.0;
+    if(n % 2 == 1) return tmp[n/2];
+    else return 0.5*(tmp[n/2 - 1] + tmp[n/2]);
+}

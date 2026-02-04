@@ -46,7 +46,7 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>p
     maxKeyPtSize(F.maxKeyPtSize),maxKeyPtSigma(F.maxKeyPtSigma),
     mnMaxY(F.mnMaxY), mK(F.mK), mvpMapPoints(F.pts), mpKeyFrameDB(pKFDB),
     vocabulary(F.vocabulary), mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
-    mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap), featureTypes(F.featureTypes)
+    mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap), featureTypes(F.featureTypes), cache_matchedPairs(F.cache_matchedPairs)
 {
     keyId = nNextId++;
     for(auto& [ft, N_] : N){

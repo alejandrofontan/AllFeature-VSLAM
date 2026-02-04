@@ -24,6 +24,19 @@ ANYFEATURE_VSLAM::Image::Image(const std::string &imagePath): imageFile{imagePat
     descriptorsBinFile = replaceAllOccurrences(descriptorsBinFile, "png", "bin");
 }
 
+ANYFEATURE_VSLAM::Image::Image(const cv::Mat& image){
+
+    img = image.clone();
+    //std::filesystem::path p(imagePath);
+    //imageName = p.filename().string();
+    // keypointBinFile = replaceAllOccurrences(imageFile, "/rgb/", "/r2d2/keypoints/");
+    // keypointBinFile = replaceAllOccurrences(keypointBinFile, "png", "bin");
+    // scoresBinFile = replaceAllOccurrences(imageFile, "/rgb/", "/r2d2/scores/");
+    // scoresBinFile = replaceAllOccurrences(scoresBinFile, "png", "bin");
+    // descriptorsBinFile = replaceAllOccurrences(imageFile, "/rgb/", "/r2d2/descriptors/");
+    // descriptorsBinFile = replaceAllOccurrences(descriptorsBinFile, "png", "bin");
+}
+
 void ANYFEATURE_VSLAM::Image::LoadMask(const std::string &maskPath) {
     mask = cv::imread( maskPath.substr(0, 43) + "mask" + maskPath.substr(46, 50),cv::IMREAD_UNCHANGED);
 }
