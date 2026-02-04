@@ -7,6 +7,8 @@
 #include "Tracking.h"
 #include "KeyFrameDatabase.h"
 #include "FeatureMatcher.h"
+#include "Viewer.h"
+
 
 #include <mutex>
 
@@ -17,6 +19,7 @@ namespace ANYFEATURE_VSLAM
 class Tracking;
 class LoopClosing;
 class Map;
+class Viewer;
 
 class LocalMapping
 {
@@ -25,6 +28,7 @@ public:
 
     void SetLoopCloser(std::shared_ptr<LoopClosing>  loopCloser_){loopCloser = loopCloser_;};
     void SetTracker(std::shared_ptr<Tracking> tracker_){tracker = tracker_;};
+    void SetViewer(std::shared_ptr<Viewer> viewer_){viewer = viewer_;};
 
     // Main function
     void Run();
@@ -49,18 +53,33 @@ public:
         return mlNewKeyFrames.size();
     }
 
-    vector<double> localMappingTime{};
-    void medianLocalMappingTime(){
-        if(!localMappingTime.empty()){
-            std::vector<double> tmp = localMappingTime;
-            std::sort(tmp.begin(), tmp.end());
-            double median;
-            size_t n = tmp.size();
-            if(n % 2 == 1) median = tmp[n/2];
-            else median = 0.5*(tmp[n/2 - 1] + tmp[n/2]);
-            std::cout << "LocalMapping median / max time: " << median << " / " << tmp.back() << " s"  << std::endl;
-        }
-    }
+    vector<double> localMapping_times{};
+    vector<double> createNewMapPoints_times{};
+    vector<double> localbundleadjustment_times{};
+    vector<double> searchInNeighbors_times{};
+
+    // void medianLocalMappingTime(){
+    //     if(!localMappingTime.empty()){
+    //         std::vector<double> tmp = localMappingTime;
+    //         std::sort(tmp.begin(), tmp.end());
+    //         double median;
+    //         size_t n = tmp.size();
+    //         if(n % 2 == 1) median = tmp[n/2];
+    //         else median = 0.5*(tmp[n/2 - 1] + tmp[n/2]);
+
+    //         const double sum = std::accumulate(localMappingTime.begin(), localMappingTime.end(), 0.0);
+    //         double stddev = 0.0;
+    //         if (n >= 2) {
+    //             double sq_sum = 0.0;
+    //             for (double x : localMappingTime) {
+    //                 const double d = x - median;
+    //                 sq_sum += d * d;
+    //             }
+    //             stddev = std::sqrt(sq_sum / static_cast<double>(n - 1));
+    //         }
+    //         std::cout << std::fixed << std::setprecision(2) << "Local  median / std: " << " / " << median*1000 << " / " << stddev*1000 << " / " << " ms" << std::endl;
+    //     }
+    // }
 protected:
 
     vector<FeatureType> featureTypes{};
@@ -74,7 +93,7 @@ protected:
     const int KEYFRAME_CULLING_MIN_NUM_OBSERVATIONS{3}; // 3
 
     // CreateNewMapPoints()
-    const int CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES{20};
+    const int CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES{5};
     const float CREATE_NEW_MAP_POINTS_RATIO_BASELINE_DEPTH{0.01f};
     const float CREATE_NEW_MAP_POINTS_MIN_COS{0.9998f};
 
@@ -108,6 +127,7 @@ protected:
     std::shared_ptr<LoopClosing> loopCloser;
     std::shared_ptr<Tracking> tracker;
     std::shared_ptr<FeatureMatcher> matcher;
+    std::shared_ptr<Viewer> viewer;
 
     std::list<Keyframe> mlNewKeyFrames;
     Keyframe mpCurrentKeyFrame;

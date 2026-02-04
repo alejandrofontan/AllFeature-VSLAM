@@ -43,17 +43,33 @@ public:
     // Computes the Hamming distance between two ORB descriptors
     static Descriptor_Distance_Type DescriptorDistance(const cv::Mat &a, const cv::Mat &b, const DescriptorType& descriptorType_);
     cv::NormTypes getNormType(const FeatureType& featureType_);
-    std::vector<cv::DMatch> featureMatching(const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& ft);
 
-    std::vector<cv::DMatch> featureMatching(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft, 
-       bool lightglue = true , bool robustMatching = true, int outlierMehod = cv::FM_RANSAC);
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    std::vector<cv::DMatch> featureMatching_0(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft);
+    std::vector<cv::DMatch> featureMatching_1(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& ft);
+    std::vector<cv::DMatch> featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft, 
+       bool lightglue, bool robustMatching, int outlierMehod = cv::FM_RANSAC);
     
     std::vector<cv::DMatch> lightglueMatching(
             const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
             const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
             float min_score = 0.0f);
 
-    std::vector<cv::DMatch> robustFeatureMatching(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, int outlierMehod = cv::FM_RANSAC);        
+    std::vector<cv::DMatch> robustFeatureMatching(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
+         int outlierMehod = cv::FM_RANSAC, const int maxForRansac = 2000);        
+    
+    std::map<FeatureType, std::vector<cv::DMatch>> parallelFeatureMatching(const std::vector<FeatureType>& featureTypes, 
+        const std::map<FeatureType, cv::Mat> &desc1, const std::map<FeatureType, cv::Mat> &desc2,
+        const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps1, const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps2);
+
+    std::vector<cv::DMatch> serialFeatureMatching(
+        const cv::Mat& desc1, const cv::Mat& desc2,
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
+        const FeatureType& ft);
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     // AllFeature-VSLAM SearchBruteForce         
 

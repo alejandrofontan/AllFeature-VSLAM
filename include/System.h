@@ -107,7 +107,7 @@ public:
     // Call first Shutdown()
     // See format details at: http://vision.in.tum.de/data/datasets/rgbd-dataset
     void SaveKeyFrameTrajectoryVSLAMLAB(const string &filename);
-    void SavePointCloudVSLAMLAB(const string &filename);
+    void SavePointCloudVSLAMLAB(const string &filename, const vector<string>& imageFilenames);
 
     // Save camera trajectory in the KITTI dataset format.
     // Only for stereo and RGB-D. This method does not work for monocular.

@@ -147,6 +147,7 @@ public:
 public:
 
     std::vector<FeatureType> featureTypes{};
+    std::map<FrameId, std::vector<cv::DMatch>> cache_matchedPairs{}; 
 
     static long unsigned int nNextId;
     KeyframeId keyId;

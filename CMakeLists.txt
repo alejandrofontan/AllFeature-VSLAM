@@ -53,6 +53,30 @@ set(SRCS_ALLFEATURE
         src/FeatureMatcher_lightglue.cpp
 ) 
 
+# ---- CUDA (help Torch/Caffe2 legacy FindCUDA) ----
+# Prefer the pixi/conda CUDA layout when present
+if(DEFINED ENV{CONDA_PREFIX})
+  set(_CUDA_PREFIX "$ENV{CONDA_PREFIX}/targets/x86_64-linux")
+  if(EXISTS "${_CUDA_PREFIX}/include/cuda.h")
+    set(CUDA_TOOLKIT_ROOT_DIR "${_CUDA_PREFIX}" CACHE PATH "CUDA root" FORCE)
+    set(CUDAToolkit_ROOT      "${_CUDA_PREFIX}" CACHE PATH "CUDA root" FORCE)
+    set(CUDA_INCLUDE_DIRS     "${_CUDA_PREFIX}/include" CACHE PATH "CUDA include" FORCE)
+    # Common lib locations in conda/pixi CUDA packages:
+    if(EXISTS "${_CUDA_PREFIX}/lib")
+      list(APPEND CMAKE_LIBRARY_PATH "${_CUDA_PREFIX}/lib")
+    endif()
+    if(EXISTS "${_CUDA_PREFIX}/lib64")
+      list(APPEND CMAKE_LIBRARY_PATH "${_CUDA_PREFIX}/lib64")
+    endif()
+  endif()
+endif()
+
+# Optional but often helps some configs that look at CMAKE_PREFIX_PATH
+if(DEFINED CUDA_TOOLKIT_ROOT_DIR)
+  list(APPEND CMAKE_PREFIX_PATH "${CUDA_TOOLKIT_ROOT_DIR}")
+endif()
+
+
 # Dependencies
 find_package(OpenCV REQUIRED )
 find_package(Eigen3  REQUIRED NO_MODULE)
@@ -64,6 +88,13 @@ find_package(brisk REQUIRED)
 find_package(akaze REQUIRED)
 find_package(SiftGPU CONFIG REQUIRED)
 find_package(LightGlue REQUIRED HINTS "${PROJECT_SOURCE_DIR}/Thirdparty/Light_Glue_CPP/build")
+
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+  message(STATUS "OpenMP found: ${OpenMP_CXX_VERSION}")
+else()
+  message(WARNING "OpenMP NOT found")
+endif()
 
 set(DBoW2_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/include")
 set(DBoW2_LIBRARIES "${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so")
@@ -89,14 +120,19 @@ target_link_libraries(${PROJECT_NAME}
         ${Pangolin_LIBRARIES}
         SiftGPU::sift_gpu
         LightGlue::lib
+        OpenMP::OpenMP_CXX
 )
+
 
 # Example executables
 add_executable(vslamlab_allfeature_mono src/vslamlab_allfeature_mono.cpp)
 target_link_libraries(vslamlab_allfeature_mono ${PROJECT_NAME})
 
+add_executable(vslamlab_allfeature_mono_stream src/vslamlab_allfeature_mono_stream.cpp)
+target_link_libraries(vslamlab_allfeature_mono_stream ${PROJECT_NAME})
+
 # Install targets and headers
-install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono
+install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mono_stream
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib)

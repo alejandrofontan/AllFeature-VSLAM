@@ -28,6 +28,9 @@ namespace ANYFEATURE_VSLAM{
     std::vector<std::vector<float>> loadBinFile(const std::string& filename, const int& numFloats);
     std::string replaceAllOccurrences(std::string str, const std::string& from, const std::string& to);
 
+    void medianTrackingTime(std::vector<double> &timeVector, const std::string& stage, const bool& activate);
+    double vector_median(std::vector<double>& vector_);
+
     class RandomIntegerGenerator
     {
     private:

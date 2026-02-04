@@ -12,6 +12,7 @@ namespace ANYFEATURE_VSLAM {
     class Image {
     public:
         explicit Image(const std::string& imagePath);
+        explicit Image(const cv::Mat& image);
         cv::Mat img{};
         cv::Mat grayImg{};
         cv::Mat mask{};

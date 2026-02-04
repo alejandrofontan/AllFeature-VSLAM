@@ -59,6 +59,26 @@ public:
 
     void Release();
 
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Profiling
+    std::mutex mutexProfileStats;
+    void set_grabImageMonocular_time_median(double time){ 
+        std::unique_lock<std::mutex> lock(mutexProfileStats);
+        grabImageMonocular_time_median = time; 
+    };
+
+    void set_runLocalMapping_time_median(double time){ 
+        std::unique_lock<std::mutex> lock(mutexProfileStats);
+        runLocalMapping_time_median = time; 
+    };
+
+    double grabImageMonocular_time_median{0.0};
+    double runLocalMapping_time_median{0.0};
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 private:
 
     bool Stop();
@@ -85,7 +105,7 @@ private:
     std::mutex mMutexStop;
 
     vector<FeatureType> featureTypes;
-
+    
 };
 
 }

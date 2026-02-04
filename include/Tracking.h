@@ -38,7 +38,7 @@
 #include "MapDrawer.h"
 #include "System.h"
 #include"FeatureMatcher.h"
-
+#include "Utils.h"
 
 namespace ANYFEATURE_VSLAM
 {
@@ -73,19 +73,6 @@ public:
     // The focal lenght should be similar or scale prediction will fail when projecting points
     // TODO: Modify MapPoint::PredictScale to take into account focal lenght
     void ChangeCalibration(const string &strSettingPath);
-
-    vector<double> trackingTime{};
-    void medianTrackingTime(){
-        if(!trackingTime.empty()){
-            std::vector<double> tmp = trackingTime;
-            std::sort(tmp.begin(), tmp.end());
-            double median;
-            size_t n = tmp.size();
-            if(n % 2 == 1) median = tmp[n/2];
-            else median = 0.5*(tmp[n/2 - 1] + tmp[n/2]);
-            std::cout << "Tracking median / max time: " << median << " / " << tmp.back() << " s"  << std::endl;
-        }
-    }
 
 public:
     VerbosityLevel verbosity{LOW};
@@ -134,6 +121,21 @@ public:
 
     int get_image_width() const {return w;};
     int get_image_height() const {return h;};
+
+    ////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////
+    // Profiling
+    vector<double> resize_times{};
+    vector<double> frame_times{};
+    vector<double> tracking_times{};
+    vector<double> track_ref_times{};
+    vector<double> pose_opt_times{};
+    vector<double> local_map_times{};
+    vector<double> grabImageMonocular_times{};
+
+    ////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////
+
 protected:
 
     // Main tracking function. It is independent of the input sensor.
