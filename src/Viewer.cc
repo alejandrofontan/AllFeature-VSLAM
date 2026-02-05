@@ -121,11 +121,7 @@ void Viewer::Run()
     const float left_b = 0.01f;
     pangolin::View& d_menu = pangolin::CreatePanel("menu").SetBounds(left_b, left_t - hS - 0.01f, left_l, left_r);
     pangolin::Var<bool> menuFollowCamera("menu.Follow Camera",true,true);
-    pangolin::Var<bool> menuShowPoints("menu.Show Points",true,true);
-    pangolin::Var<bool> menuShowKeyFrames("menu.Show KeyFrames",true,true);
-    pangolin::Var<bool> menuShowGraph("menu.Show Graph",true,true);
-    pangolin::Var<bool> menuLocalizationMode("menu.Localization Mode",false,true);
-    pangolin::Var<bool> menuReset("menu.Reset",false,false);
+    pangolin::Var<bool> menuAerialCamera("menu.Aerial Camera",false,true);
     
     pangolin::Var<float> menuTrackingTime("menu.Tracking (ms)", 0.0f, 0.0f, 100.0f, false); 
     pangolin::Var<float> menuLocalMappingTime("menu.Local Mapping (ms)", 0.0f, 0.0f, 400.0f, false); 
@@ -150,6 +146,8 @@ void Viewer::Run()
     pangolin::GlTexture imageTexture  = pangolin::GlTexture(int(w_pixel) ,int(h_pixel), GL_RGB,false,0,GL_RGB,GL_UNSIGNED_BYTE);
 
     int numIt{-1};
+    bool bFollow = true;
+    bool bAerial = false;
     while(1)
     {
         numIt++;
@@ -168,7 +166,50 @@ void Viewer::Run()
         mapDrawer->DrawCurrentCamera(Twc);
         mapDrawer->DrawKeyFrames(true,true);
         mapDrawer->DrawMapPoints();
-        s_cam.Follow(Twc);
+
+        if(menuFollowCamera && bFollow)
+        {   
+            if(menuAerialCamera && !bAerial){
+                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt( 0, mViewpointY, 0, 0, 0, 0, 0, 0, 1 ));
+            }else if(!menuAerialCamera && bAerial){
+                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0));
+            }
+            s_cam.Follow(Twc);
+        }else if(menuFollowCamera && !bFollow)
+        {
+            if(menuAerialCamera && !bAerial){
+                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt( 0, mViewpointY, 0, 0, 0, 0, 0, 0, 1 ));
+            }else if(!menuAerialCamera && bAerial){
+                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0));
+            }
+            s_cam.Follow(Twc);
+        }
+        else if(!menuFollowCamera && bFollow)
+        {
+            if(menuAerialCamera && !bAerial){
+                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt( 0, mViewpointY, 0, 0, 0, 0, 0, 0, 1 ));
+                s_cam.Follow(Twc);
+            }else if(!menuAerialCamera && bAerial){
+                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0));
+                s_cam.Follow(Twc);
+            }
+        }else if(!menuFollowCamera && !bFollow)
+        {
+            if(menuAerialCamera && !bAerial){
+                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt( 0, mViewpointY, 0, 0, 0, 0, 0, 0, 1 ));
+                s_cam.Follow(Twc);
+            }else if(!menuAerialCamera && bAerial){
+                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0));
+                s_cam.Follow(Twc);
+            }
+        }
+
+        if(menuFollowCamera && !bFollow)      bFollow = true;
+        else if(!menuFollowCamera && bFollow) bFollow = false;
+
+        if(menuAerialCamera && !bAerial)      bAerial = true;
+        else if(!menuAerialCamera && bAerial) bAerial = false;
+
 
         im = frameDrawer->DrawFrame();
         cv::Mat imResized;

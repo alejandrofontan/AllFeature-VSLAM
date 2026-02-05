@@ -96,7 +96,8 @@ std::map<FeatureType, int> FeatureMatcher::SearchBruteForce(const Keyframe& keyf
         
         mapPointsKF[ft] = keyframe->GetMapPointMatches(ft);    
 
-        // std::vector<cv::DMatch> matches = matchesByType[ft];
+        //std::vector<cv::DMatch> matches = allMatches_.clear();
+        //std::vector<cv::DMatch> matches = matchesByType[ft];
         std::vector<cv::DMatch> matches = featureMatching_0(
             keyframe->mDescriptors.at(ft), frame.mDescriptors.at(ft), 
             keyframe->mvKeysUn.at(ft), frame.mvKeysUn.at(ft), 
@@ -1989,7 +1990,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
 
     std::vector<cv::DMatch> FeatureMatcher::robustFeatureMatching(std::vector<cv::DMatch>& matches,
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, 
-        int outlierMehod, const int maxForRansac){
+        int outlierMethod, const int maxForRansac){
 
         std::sort(matches.begin(), matches.end(),
             [](const cv::DMatch& a, const cv::DMatch& b) { return a.distance < b.distance; });
@@ -2016,7 +2017,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         std::vector<uchar> inlierMask;
         cv::Mat F = cv::findFundamentalMat(
             pts1, pts2,
-            outlierMehod,
+            outlierMethod,
             reprojThreshold,
             confidence,
             inlierMask
@@ -2057,6 +2058,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         const std::map<FeatureType, cv::Mat> &desc1_, const std::map<FeatureType, cv::Mat> &desc2_,
         const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps1_, const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps2_
     ){        
+    
         struct MatchOut {
             FeatureType ft{};
             bool valid = false;
