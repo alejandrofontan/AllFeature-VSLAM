@@ -635,92 +635,93 @@ void LocalMapping::InterruptBA()
 void LocalMapping::KeyFrameCulling()
 {
 
-    vector<Keyframe > vpLocalKeyFrames = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
-    for(vector<Keyframe >::iterator vit=vpLocalKeyFrames.begin(), vend=vpLocalKeyFrames.end(); vit!=vend; vit++)
-    {
-        Keyframe  pKF = *vit;
-        if(pKF->keyId == 0)
-            continue;
-        if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) == 0)
-            continue;
-        if ((int(pKF->mnFrameId) % ALLFEATURE_KEYFRAMES) == 0)
-            continue;
-        if(mpCurrentKeyFrame->keyId - pKF->keyId < 3)
-            continue;
-        pKF->SetBadFlag();    
-    }
+    // vector<Keyframe > vpLocalKeyFrames = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
+    // for(vector<Keyframe >::iterator vit=vpLocalKeyFrames.begin(), vend=vpLocalKeyFrames.end(); vit!=vend; vit++)
+    // {
+    //     Keyframe  pKF = *vit;
+    //     if(pKF->keyId == 0)
+    //         continue;
+    //     if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) == 0)
+    //         continue;
+    //     if ((int(pKF->mnFrameId) % ALLFEATURE_KEYFRAMES) == 0)
+    //         continue;
+    //     if(mpCurrentKeyFrame->keyId - pKF->keyId < 3)
+    //         continue;
+    //     pKF->SetBadFlag();    
+    // }
 
 
     // Check redundant keyframes (only local keyframes)
     // A keyframe is considered redundant if the 90% of the MapPoints it sees, are seen
     // in at least other 3 keyframes (in the same or finer scale)
     // We only consider close stereo points
-    // vector<Keyframe > vpLocalKeyFrames = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
+    
+    vector<Keyframe > vpLocalKeyFrames = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
 
-    // for(vector<Keyframe >::iterator vit=vpLocalKeyFrames.begin(), vend=vpLocalKeyFrames.end(); vit!=vend; vit++)
-    // {
-    //     Keyframe  pKF = *vit;
-    //     for(const auto feat: pKF->featureTypes){
-    //         if(pKF->keyId == 0)
-    //             continue;
-    //         const vector<Pt> vpMapPoints = pKF->GetMapPointMatches(feat);
+    for(vector<Keyframe >::iterator vit=vpLocalKeyFrames.begin(), vend=vpLocalKeyFrames.end(); vit!=vend; vit++)
+    {
+        Keyframe  pKF = *vit;
+        for(const auto feat: pKF->featureTypes){
+            if(pKF->keyId == 0)
+                continue;
+            const vector<Pt> vpMapPoints = pKF->GetMapPointMatches(feat);
 
-    //         int nObs = KEYFRAME_CULLING_MIN_NUM_OBSERVATIONS;
-    //         const int thObs=nObs;
-    //         int nRedundantObservations=0;
-    //         int nMPs=0;
-    //         for(size_t i=0, iend=vpMapPoints.size(); i<iend; i++)
-    //         {
-    //             Pt pMP = vpMapPoints[i];
+            int nObs = KEYFRAME_CULLING_MIN_NUM_OBSERVATIONS;
+            const int thObs=nObs;
+            int nRedundantObservations=0;
+            int nMPs=0;
+            for(size_t i=0, iend=vpMapPoints.size(); i<iend; i++)
+            {
+                Pt pMP = vpMapPoints[i];
 
-    //             if(pMP)
-    //             {
-    //                 if(!pMP->isBad())
-    //                 {
-    //                     FeatureType featType = pMP->featureType;
-    //                     nMPs++;
-    //                     if(pMP->NumberOfObservations() > thObs)
-    //                     {
-    //                         const map<KeyframeId , Obs> observations = pMP->GetObservations();
-    //                         int nObs=0;
-    //                         for(auto& obs: observations)
-    //                         {
-    //                             Keyframe keyframe_i = obs.second->projKeyframe;
-    //                             if(keyframe_i->keyId == pKF->keyId)
-    //                                 continue;
-    //                             if(keyframe_i->isBad())
-    //                                 continue;
+                if(pMP)
+                {
+                    if(!pMP->isBad())
+                    {
+                        FeatureType featType = pMP->featureType;
+                        nMPs++;
+                        if(pMP->NumberOfObservations() > thObs)
+                        {
+                            const map<KeyframeId , Obs> observations = pMP->GetObservations();
+                            int nObs=0;
+                            for(auto& obs: observations)
+                            {
+                                Keyframe keyframe_i = obs.second->projKeyframe;
+                                if(keyframe_i->keyId == pKF->keyId)
+                                    continue;
+                                if(keyframe_i->isBad())
+                                    continue;
 
-    //                             nObs++;
-    //                             if(nObs>=thObs)
-    //                                 break;
-    //                         }
-    //                         if(nObs>=thObs)
-    //                         {
-    //                             nRedundantObservations++;
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //         if (pKF->featureTypes.size() < 2){
-    //             pKF->SetBadFlag();
-    //             continue;
-    //         }
-    //         if(nRedundantObservations > KEYFRAME_CULLING_COVISIBILITY_THRESHOLD * nMPs){  
-    //             #ifdef ALLFEATURE_EVALUATION
+                                nObs++;
+                                if(nObs>=thObs)
+                                    break;
+                            }
+                            if(nObs>=thObs)
+                            {
+                                nRedundantObservations++;
+                            }
+                        }
+                    }
+                }
+            }
+            if (pKF->featureTypes.size() < 2){
+                pKF->SetBadFlag();
+                continue;
+            }
+            if(nRedundantObservations > KEYFRAME_CULLING_COVISIBILITY_THRESHOLD * nMPs){  
+                #ifdef ALLFEATURE_EVALUATION
                     
-    //                 if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) != 0){
-    //                     //if ((int(pKF->mnFrameId) % ALLFEATURE_MAX_KEYFRAMES) != 0)
-    //                         pKF->SetBadFlag();
-    //                 }  
-    //             #else
-    //                 pKF->SetBadFlag();
-    //             #endif
+                    if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) != 0){
+                        if ((int(pKF->mnFrameId) % ALLFEATURE_MAX_KEYFRAMES) != 0)
+                            pKF->SetBadFlag();
+                    }  
+                #else
+                    pKF->SetBadFlag();
+                #endif
                 
-    //         }
-    // }
-    // }
+            }
+    }
+    }
 }
 
 void LocalMapping::RequestReset()

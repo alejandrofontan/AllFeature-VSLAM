@@ -74,7 +74,9 @@ void LoopClosing::Run()
         if(CheckNewKeyFrames())
         {
             // Detect loop candidates and check covisibility consistency
+
             if(DetectLoop())
+            //if(DetectLoop() && false)
             {
                // Compute similarity transformation [sR|t]
                // In the stereo/RGBD case s=1

@@ -130,7 +130,7 @@ std::map<FeatureType, int> FeatureMatcher::SearchBruteForce(const Keyframe& keyf
         mapPointMatches[ft] = std::vector<Pt>(frame.N.at(ft), static_cast<Pt>(NULL)); 
     }
 
-    std::vector<cv::DMatch> robustMatches = robustFeatureMatching(allMatches, kps1, kps2, cv::FM_LMEDS);
+    std::vector<cv::DMatch> robustMatches = robustFeatureMatching(allMatches, kps1, kps2, cv::USAC_MAGSAC);
 
     int validMatchesTotal = 0;
     std::map<FeatureType, int> matchesCount;

@@ -709,10 +709,10 @@ bool Tracking::TrackLocalMap()
                 //     emergencyKeyframe = true;
                 //     return true;   
                 // }
-                // if(mnMatchesInliers < nRefMatches * 0.5f){
-                //     emergencyKeyframe = true;
-                //     return true;
-                // }
+                if(mnMatchesInliers < nRefMatches * 0.5f){
+                    emergencyKeyframe = true;
+                    return true;
+                }
                 return false;   
             }
         }
