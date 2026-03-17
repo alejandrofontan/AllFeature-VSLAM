@@ -4,3 +4,6 @@
 [submodule "Thirdparty/Light_Glue_CPP"]
 	path = Thirdparty/Light_Glue_CPP
 	url = https://github.com/VSLAM-LAB/Light_Glue_CPP.git
+[submodule "Thirdparty/SuperPoint-SuperGlue-TensorRT"]
+	path = Thirdparty/SuperPoint-SuperGlue-TensorRT
+	url = https://github.com/VSLAM-LAB/SuperPoint-SuperGlue-TensorRT
