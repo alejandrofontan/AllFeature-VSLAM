@@ -72,7 +72,12 @@ library_name="Light_Glue_CPP"
 source_folder="${LIBRARY_DIR}/Thirdparty/${library_name}"
 build_library ${library_name} ${source_folder} ${verbose} ${force_build}
 
-## Build AllFeature-VSLAM
+# Build SuperPoint-SuperGlue-TensorRT
+library_name="SuperPoint-SuperGlue-TensorRT"
+source_folder="${LIBRARY_DIR}/Thirdparty/${library_name}"
+build_library ${library_name} ${source_folder} ${verbose} ${force_build}
+
+# Build AllFeature-VSLAM
 library_name="AllFeature-VSLAM"
 source_folder="${LIBRARY_DIR}"
 build_library ${library_name} ${source_folder} ${verbose} ${force_build}

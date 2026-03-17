@@ -31,6 +31,7 @@
 #include "Feature_anyFeatBin.h"
 #include "Feature_anyFeatNonBin.h"
 #include "Feature_aliked128.h"
+#include "Feature_superpoint256.h"
 
 using namespace std;
 
@@ -59,10 +60,10 @@ Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
     // Load feature parameters from settings yaml file
     for (auto& ft: featureTypes){
         featureExtractorLeft[ft] = Tracking::getFeatureExtractor(1, feature_settings_yaml_file.at(ft), ft);
-        initFeatureExtractor[ft] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , feature_settings_yaml_file.at(ft), ft); 
+        initFeatureExtractor[ft] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , feature_settings_yaml_file.at(ft), ft);
     }
 
-    matcher = std::make_shared<FeatureMatcher>(w, h);        
+    matcher = std::make_shared<FeatureMatcher>(w, h);
 }
 
 void Tracking::SetLocalMapper(std::shared_ptr<LocalMapping> localMapper_)
@@ -81,7 +82,7 @@ void Tracking::SetViewer(shared_ptr<Viewer> viewer_)
 }
 
 mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
-{   
+{
     std::chrono::steady_clock::time_point t_start_0 = std::chrono::steady_clock::now();
     ///////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -129,16 +130,16 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     if(mState == OK)
         tracking_times.push_back(t_duration);
 #endif
-    
+
     viewer->set_grabImageMonocular_time_median(vector_median(grabImageMonocular_times));
 
 #ifdef PROFILING_EXHAUSTIVE
     std::cout << "\n Tracking Profiling " << std::endl;
-    medianTrackingTime(resize_times            , "    - Resize Image   ", TRACKING_PROFILING); 
-    medianTrackingTime(frame_times             , "    - Frame Creation ", TRACKING_PROFILING); 
-    medianTrackingTime(tracking_times          , "    - Tracking       ", TRACKING_PROFILING); 
-    medianTrackingTime(track_ref_times         , "        - Track Ref   ", TRACKING_PROFILING); 
-    medianTrackingTime(pose_opt_times          , "        - Pose Optimization   ", TRACKING_PROFILING); 
+    medianTrackingTime(resize_times            , "    - Resize Image   ", TRACKING_PROFILING);
+    medianTrackingTime(frame_times             , "    - Frame Creation ", TRACKING_PROFILING);
+    medianTrackingTime(tracking_times          , "    - Tracking       ", TRACKING_PROFILING);
+    medianTrackingTime(track_ref_times         , "        - Track Ref   ", TRACKING_PROFILING);
+    medianTrackingTime(pose_opt_times          , "        - Pose Optimization   ", TRACKING_PROFILING);
     medianTrackingTime(local_map_times         , "        - Track Local Map   ", TRACKING_PROFILING);
     medianTrackingTime(grabImageMonocular_times, "\033[1;32mGrab Image Monocular   \033[0m", TRACKING_PROFILING);
 #endif
@@ -154,8 +155,8 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
 }
 
 void Tracking::Track()
-{       
-    
+{
+
 
     if(mState==NO_IMAGES_YET)
     {
@@ -169,7 +170,7 @@ void Tracking::Track()
 
     if(mState==NOT_INITIALIZED)
     {
-        
+
         MonocularInitialization(featureTypes[featureInitialization]);
         frameDrawer->Update(this);
 
@@ -177,7 +178,7 @@ void Tracking::Track()
             return;
     }
     else
-    {     
+    {
         // System is initialized. Track Frame.
         bool bOK;
         if(mState==OK)
@@ -187,11 +188,11 @@ void Tracking::Track()
             bOK = TrackReferenceKeyFrame();
         }
         else
-        {   
+        {
             bOK = Relocalization(featureTypes[featureRelocalization]);
         }
-        
-        
+
+
         currentFrame.refKeyframe = refKeyframe;
 
         // If we have an initial estimation of the camera pose and matching. Track the local map.
@@ -212,7 +213,7 @@ void Tracking::Track()
             mState = OK;
         else
             mState=LOST;
- 
+
         // Update drawer
         frameDrawer->Update(this);
 
@@ -248,7 +249,7 @@ void Tracking::Track()
                 }
             }
             mlpTemporalPoints.clear();
-            
+
             // Check if we need to insert a new keyframe
             if(NeedNewKeyFrame())
                 CreateNewKeyFrame();
@@ -303,7 +304,7 @@ void Tracking::Track()
     }
 
     if (emergencyKeyframe){
-        std::cout << "Tracking::Track: emergency keyframe triggered, waiting for local mapping to be idle..." << std::endl;    
+        std::cout << "Tracking::Track: emergency keyframe triggered, waiting for local mapping to be idle..." << std::endl;
         lock.unlock();
         bool localMappingIdle = localMapper->AcceptKeyFrames();
         while(!localMappingIdle)
@@ -318,10 +319,10 @@ void Tracking::Track()
 }
 
 void Tracking::MonocularInitialization(const FeatureType& featureType)
-{   
+{
     const DescriptorType descriptorType = GetDescriptorType(featureType);
     if(!mpInitializer)
-    {   
+    {
         // Set Reference Frame
         if(currentFrame.mvKeys[featureType].size() > minKeypointsMonocular)
         {
@@ -380,7 +381,7 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
 }
 
 void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
-{   
+{
     // Create KeyFrames
     Keyframe pKFini = make_shared<KeyFrame>(mInitialFrame, map, keyFrameDB);
     Keyframe pKFcur = make_shared<KeyFrame>(currentFrame, map, keyFrameDB);
@@ -471,7 +472,7 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
 }
 
 void Tracking::CheckReplacedInLastFrame()
-{   
+{
     for (auto& [ft, pts] : lastFrame.pts) {
         for(int i = 0; i<lastFrame.N.at(ft); i++)
         {
@@ -491,7 +492,7 @@ void Tracking::CheckReplacedInLastFrame()
 
 
 bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
-{   
+{
     #ifdef PROFILING_EXHAUSTIVE
             std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
     #endif
@@ -500,9 +501,9 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     std::map<FeatureType, std::vector<Pt>> mapPointMatches;
     std::map<FeatureType, int> nmatches_ft = matcher->SearchBruteForce(refKeyframe, currentFrame, mapPointMatches, currentFrame.featureTypes);
     int nmatches = 0;
-    for (auto& [ft, N] : currentFrame.N) 
+    for (auto& [ft, N] : currentFrame.N)
     {
-        currentFrame.pts[ft] = mapPointMatches[ft];   
+        currentFrame.pts[ft] = mapPointMatches[ft];
         currentFrame.mvbOutlier[ft] = vector<bool>(mapPointMatches[ft].size(), false);
         nmatches += nmatches_ft[ft];
     }
@@ -512,7 +513,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
 
     if(nmatches < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
         return false;
-         
+
 #ifdef PROFILING_EXHAUSTIVE
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
@@ -526,7 +527,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
 
     // Discard outliers
     int nmatchesMap = 0;
-    for (auto& [ft, N] : currentFrame.N) 
+    for (auto& [ft, N] : currentFrame.N)
     {
         for(int i = 0; i < N; i++)
         {
@@ -576,7 +577,7 @@ bool Tracking::TrackWithMotionModel()
 
     // Feature Matching
     int nmatches= matcher->SearchBruteForce(currentFrame, lastFrame, currentFrame.featureTypes);
-    
+
     if(nmatches < TRACK_WITH_MOTION_MODEL_MIN_MATCHES_HIGH)
         return false;
 
@@ -585,7 +586,7 @@ bool Tracking::TrackWithMotionModel()
 
     // Discard outliers
     int nmatchesMap = 0;
-    for (auto& [ft, N_] : currentFrame.N) 
+    for (auto& [ft, N_] : currentFrame.N)
     {
         for(int i{0}; i < N_; i++)
         {
@@ -602,9 +603,9 @@ bool Tracking::TrackWithMotionModel()
                 else if(currentFrame.pts.at(ft)[i]->NumberOfObservations() > 0)
                     nmatchesMap++;
             }
-        }    
+        }
     }
-    
+
     return nmatchesMap >= TRACK_WITH_MOTION_MODEL_MIN_MATCHES_LOW;
 }
 
@@ -623,16 +624,16 @@ bool Tracking::TrackLocalMap()
     // Update MapPoints Statistics
     for (auto& [ft, pts] : currentFrame.pts) {
         for(int i = 0; i < pts.size(); i++)
-        {   
+        {
             if(currentFrame.pts.at(ft)[i])
             {
                 if(!currentFrame.mvbOutlier.at(ft)[i])
                 {
                     currentFrame.pts.at(ft)[i]->IncreaseFound();
-                    
+
                     if(currentFrame.pts.at(ft)[i]->NumberOfObservations() > 0)
                         mnMatchesInliers++;
-                    
+
                 }
                 else if(mSensor==System::STEREO)
                     currentFrame.pts.at(ft)[i] = static_cast<Pt>(nullptr);
@@ -681,7 +682,7 @@ bool Tracking::TrackLocalMap()
 
         // Thresholds
         const bool c1 = ((mnMatchesInliers < nRefMatches * refRatio_high_needNewKey || bNeedToInsertClose) && mnMatchesInliers > minMatchesInliers);
-        
+
         bool c2{false};
         #ifdef ALLFEATURE_EVALUATION
         c2 = ((int( currentFrame.mnId) % ALLFEATURE_EVALUATION) == 0);
@@ -703,17 +704,17 @@ bool Tracking::TrackLocalMap()
                 return true;
             }
             else
-            {   
+            {
                 // if(c2 || c3 || c4){
                 //     std::cout << "\nEmergency keyframe triggered by evaluation condition at frame " << currentFrame.mnId << std::endl;
                 //     emergencyKeyframe = true;
-                //     return true;   
+                //     return true;
                 // }
                 if(mnMatchesInliers < nRefMatches * 0.5f){
                     emergencyKeyframe = true;
                     return true;
                 }
-                return false;   
+                return false;
             }
         }
         else
@@ -736,7 +737,7 @@ bool Tracking::TrackLocalMap()
     }
 
     void Tracking::SearchLocalPoints()
-    {   
+    {
         // Do not search map points already matched
         for (const auto& [ft, N] : currentFrame.N) {
             for(auto& pt: currentFrame.pts.at(ft)){
@@ -1112,7 +1113,7 @@ void Tracking::Reset()
     pose_opt_times.clear();
     local_map_times.clear();
     grabImageMonocular_times.clear();
-    
+
     if(viewer)
         viewer->Release();
 }
@@ -1165,11 +1166,11 @@ void Tracking::loadCameraParameters(const string &strCalibrationPath, const stri
             break;
         }
     }
-    
+
     mK = (cv::Mat_<float>(3, 3) << cam["focal_length"][0].as<float>(), 0.0f, cam["principal_point"][0].as<float>(),
             0.0f, cam["focal_length"][1].as<float>(), cam["principal_point"][1].as<float>(),
             0.0f, 0.0f, 1.0f);
-                
+
     w = cam["image_dimension"][0].as<int>();
     h = cam["image_dimension"][1].as<int>();
 
@@ -1180,7 +1181,7 @@ void Tracking::loadCameraParameters(const string &strCalibrationPath, const stri
         float conv_ratio_h = float(new_h)/float(h);
         float conv_ratio_w = float(new_w)/float(w);
 
-        w = new_w;     
+        w = new_w;
         h = new_h;
 
         mK.at<float>(0,0) *= conv_ratio_w;
@@ -1193,7 +1194,7 @@ void Tracking::loadCameraParameters(const string &strCalibrationPath, const stri
     mDistCoef = cv::Mat::zeros(4,1,CV_32F);
     if (cam["distortion_type"] && cam["distortion_coefficients"]) {
         std::vector<float> dist_coeffs_vec = cam["distortion_coefficients"].as<std::vector<float>>();
-        mDistCoef = cv::Mat(dist_coeffs_vec.size(), 1, CV_32F, dist_coeffs_vec.data()).clone(); 
+        mDistCoef = cv::Mat(dist_coeffs_vec.size(), 1, CV_32F, dist_coeffs_vec.data()).clone();
     }
 
     // Camera frequence (hz)
@@ -1271,6 +1272,9 @@ shared_ptr<FeatureExtractor> Tracking::getFeatureExtractor(const int& scaleNumFe
     extractorSettings->maxNumFeatures *= scaleNumFeaturesMonocular_;
 
     switch (keypointType) {
+        case KEYP_superpoint256:{
+            return std::make_shared<FeatureExtractor_superpoint256>(extractorSettings);
+        }
         case KEYP_ALIKED128:{
             return std::make_shared<FeatureExtractor_aliked128>(extractorSettings);
         }

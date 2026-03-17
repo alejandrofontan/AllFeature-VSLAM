@@ -175,7 +175,7 @@ int main(int argc, char **argv)
         //     continue;
         // }
     }
-    
+
     // AnyFeature-VSLAM inputs
     YAML::Node settings = YAML::LoadFile(settings_yaml);
     const vector<std::string> features = settings["features"].as<vector<std::string>>();
@@ -183,7 +183,7 @@ int main(int argc, char **argv)
     std::cout << "[vslamlab_anyfeature_mono.cpp] Debug mode = " << debug << std::endl;
 
     ANYFEATURE_VSLAM::FrameDrawer::exp_folder = exp_folder;
-    
+
     vector<FeatureType> featureTypes{};
     for(const auto& feat : features) {
         int feature_id = get_feature_id(feat);
@@ -200,6 +200,7 @@ int main(int argc, char **argv)
     feature_settings_yaml_file[FEAT_KAZE64] = "settings/kaze64_settings.yaml";
     feature_settings_yaml_file[FEAT_SIFT128] = "settings/sift128_settings.yaml";
     feature_settings_yaml_file[FEAT_ALIKED128] = "settings/aliked128_settings.yaml";
+    feature_settings_yaml_file[FEAT_SUPERPOINT256] = "settings/superpoint256_settings.yaml";
 
     // Retrieve paths to images
     vector<string> imageFilenames{};
@@ -210,12 +211,12 @@ int main(int argc, char **argv)
     size_t nImages = imageFilenames.size();
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
-    
-    ANYFEATURE_VSLAM::System SLAM(path_to_vocabulary_folder, 
+
+    ANYFEATURE_VSLAM::System SLAM(path_to_vocabulary_folder,
                                   calibration_yaml, settings_yaml, feature_settings_yaml_file,
                                   ANYFEATURE_VSLAM::System::MONOCULAR,
                                   verbose,
-                                  featureTypes, 
+                                  featureTypes,
                                   fixImageSize);
 
     // Vector for tracking time statistics
@@ -237,7 +238,7 @@ int main(int argc, char **argv)
     // for(size_t ni = 0; ni < nImages; ni++){
     for (size_t ni = 0; ni < nImages; /* ni++ happens when a frame passes */) {
         //std::cout << "Processing image " << ni << " / " << nImages << "\r";
-        //printf("frame %zu\n", ni); 
+        //printf("frame %zu\n", ni);
         // Wait until we have at least 1 "allowed" frame, or quit
         if (debug){
             while (!quit.load(std::memory_order_relaxed) && allowance.load(std::memory_order_relaxed) == 0){
@@ -330,12 +331,12 @@ void LoadImages(const string &pathToSequence, const string &rgb_csv,
 
     imageFilenames.clear();
     timestamps.clear();
-    
+
     std::ifstream in(rgb_csv);
     std::string line;
 
     // Read and map the header row to find indices
-    if (!std::getline(in, line)) return; 
+    if (!std::getline(in, line)) return;
     if (!line.empty() && line.back() == '\r') line.pop_back();
 
     std::vector<std::string> headers = split(line, ',');
@@ -354,7 +355,7 @@ void LoadImages(const string &pathToSequence, const string &rgb_csv,
     };
 
     int ts_idx = get_index(header_ts);
-    int rgb0_idx = get_index(header_rgb0);   
+    int rgb0_idx = get_index(header_rgb0);
 
     // Read and process data lines using fixed indices
     while (std::getline(in, line)) {
@@ -362,7 +363,7 @@ void LoadImages(const string &pathToSequence, const string &rgb_csv,
         if (!line.empty() && line.back() == '\r') line.pop_back();
 
         std::vector<std::string> tokens = split(line, ',');
-        
+
         // Assign variables using indices, regardless of column order
         std::string t_str = tokens[ts_idx];
         std::string rel_rgb0_path = tokens[rgb0_idx];

@@ -50,8 +50,10 @@ set(SRCS_ALLFEATURE
         src/Feature_anyFeatBin.cpp
         src/Feature_anyFeatNonBin.cpp
         src/Feature_aliked128.cpp
+        src/Feature_superpoint256.cpp
         src/FeatureMatcher_lightglue.cpp
-) 
+        src/FeatureMatcher_superglue.cpp
+)
 
 # ---- CUDA (help Torch/Caffe2 legacy FindCUDA) ----
 # Prefer the pixi/conda CUDA layout when present
@@ -76,6 +78,11 @@ if(DEFINED CUDA_TOOLKIT_ROOT_DIR)
   list(APPEND CMAKE_PREFIX_PATH "${CUDA_TOOLKIT_ROOT_DIR}")
 endif()
 
+# ---- SuperPoint-SuperGlue ----
+set(SUPERPOINTGLUE_DIR "${PROJECT_SOURCE_DIR}/Thirdparty/SuperPoint-SuperGlue-TensorRT"
+    CACHE PATH "Path to SuperPointGlue source")
+set(SUPERPOINTGLUE_BUILD_EXECUTABLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(${SUPERPOINTGLUE_DIR} ${CMAKE_BINARY_DIR}/superpointglue)
 
 # Dependencies
 find_package(OpenCV REQUIRED )
@@ -121,6 +128,7 @@ target_link_libraries(${PROJECT_NAME}
         SiftGPU::sift_gpu
         LightGlue::lib
         OpenMP::OpenMP_CXX
+        superpointglue_lib
 )
 
 

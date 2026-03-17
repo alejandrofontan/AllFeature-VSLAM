@@ -115,22 +115,23 @@ int main() {
     feature_settings_yaml_file[FEAT_KAZE64] = "settings/kaze64_settings.yaml";
     feature_settings_yaml_file[FEAT_SIFT128] = "settings/sift128_settings.yaml";
     feature_settings_yaml_file[FEAT_ALIKED128] = "settings/aliked128_settings.yaml";
+    feature_settings_yaml_file[FEAT_SUPERPOINT256] = "settings/superpoint256_settings.yaml";
 
     // Setting AllFeature-VSLAM
-    ANYFEATURE_VSLAM::System SLAM(path_to_vocabulary_folder, 
+    ANYFEATURE_VSLAM::System SLAM(path_to_vocabulary_folder,
                                   calibration_yaml, settings_yaml, feature_settings_yaml_file,
                                   ANYFEATURE_VSLAM::System::MONOCULAR,
                                   verbose,
-                                  featureTypes, 
+                                  featureTypes,
                                   fixImageSize);
 
     // If OpenCV was built with FFmpeg, this usually works:
     //std::string url = "udp://127.0.0.1:5000";
-    const std::string url = "rtmp://10.68.61.71:1935/live/stream";   
+    const std::string url = "rtmp://10.68.61.71:1935/live/stream";
 
     // Some builds prefer explicitly selecting FFmpeg backend:
     cv::VideoCapture cap(url, cv::CAP_FFMPEG);
-    
+
     if (!cap.isOpened()) {
         std::cerr << "Failed to open stream: " << url << std::endl;
         return 1;
@@ -176,7 +177,7 @@ int main() {
     //     //lastGood = frame.clone();
 
     //     cv::imshow("UDP Stream", frame);
-        
+
     //     // ANYFEATURE_VSLAM::Image im(frame);
     //     // ANYFEATURE_VSLAM::Seconds tframe = idx * (1.0/30.0); // or use a real timestamp
     //     // SLAM.TrackMonocular(im, tframe);
@@ -197,7 +198,7 @@ int main() {
 
         ANYFEATURE_VSLAM::Image im(frame);
         ANYFEATURE_VSLAM::Seconds tframe = idx * (1.f/30.f);
-        
+
         SLAM.TrackMonocular(im,tframe);
         idx++;
 

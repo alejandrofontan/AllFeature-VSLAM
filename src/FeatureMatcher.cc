@@ -18,6 +18,7 @@
 #include "Feature_anyFeatBin.h"
 #include "Feature_anyFeatNonBin.h"
 #include "Feature_aliked128.h"
+#include "Feature_superpoint256.h"
 
 
 #include<opencv2/core/core.hpp>
@@ -29,7 +30,7 @@ using namespace std;
 
 namespace ANYFEATURE_VSLAM
 {
-    
+
 std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::TH_HIGH = {};
 std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::TH_LOW = {};
 std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::descDistTh_high_reloc = {};
@@ -40,7 +41,7 @@ VerbosityLevel FeatureMatcher::verbosity{MEDIUM};
 const int FeatureMatcher::HISTO_LENGTH = 30;
 float FeatureMatcher::radiusScale{1.15f};
 
-FeatureMatcher::FeatureMatcher(const int& imageWidth, const int& imageHeight, float nnratio, bool checkOri): 
+FeatureMatcher::FeatureMatcher(const int& imageWidth, const int& imageHeight, float nnratio, bool checkOri):
     mfNNratio(nnratio), mbCheckOrientation(checkOri), imageWidth(imageWidth), imageHeight(imageHeight)
 {
     std::cout << "Initializing SiftMatchGPU..." << std::endl;
@@ -53,9 +54,33 @@ FeatureMatcher::FeatureMatcher(const int& imageWidth, const int& imageHeight, fl
     sift_match_gpu_ .Allocate(max_supported, 1);
     std::cout << "Finished initializing SiftMatchGPU." << std::endl;
 
+    std::cout << "Initializing LightGlue..." << std::endl;
     torch_device = std::make_shared<torch::Device>(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
     matcher_lightglue = std::make_shared<matcher::LightGlue>();
     matcher_lightglue->to(*torch_device);
+    std::cout << "Finished initializing LightGlue." << std::endl;
+
+    std::cout << "Initializing SuperGlue..." << std::endl;
+    std::string config_path = "/home/alejandro/VSLAM-LAB/Baselines/AllFeature-VSLAM-DEV/Thirdparty/SuperPoint-SuperGlue-TensorRT/config/config.yaml";
+    std::string model_dir = "/home/alejandro/VSLAM-LAB/Baselines/AllFeature-VSLAM-DEV/Thirdparty/SuperPoint-SuperGlue-TensorRT/weights/";
+    Configs configs(config_path, model_dir);
+    matcher_superglue = std::make_shared<SuperGlue>(configs.superglue_config);
+    // Dump the parsed superglue config to verify keys
+    std::cout << "[SuperGlue config dump]\n";
+    std::cout << "  onnx_file:   " << configs.superglue_config.onnx_file << "\n";
+    std::cout << "  engine_file: " << configs.superglue_config.engine_file << "\n";
+    std::cout << "  input_tensor_names size: " << configs.superglue_config.input_tensor_names.size() << "\n";
+    std::cout << "  output_tensor_names size: " << configs.superglue_config.output_tensor_names.size() << "\n";
+    // Add whatever fields SuperGlueConfig has
+    if (!matcher_superglue->build()) {
+        throw std::runtime_error(
+                "SuperGlue: failed to build/load TensorRT engine.\n"
+                "  config: " + config_path + "\n"
+                "  weights: " + model_dir);
+        }
+        std::cout << "SuperGlue engine loaded from: " << model_dir << "\n";
+        std::cout << "Engines ready.\n\n";
+    std::cout << "Finished initializing SuperGlue." << std::endl;
 
 }
 
@@ -73,11 +98,11 @@ std::map<FeatureType, int> FeatureMatcher::SearchBruteForce(const Keyframe& keyf
     std::map<FeatureType, std::vector<Pt>>& mapPointMatches, const std::vector<FeatureType>& featureTypes)
 {
 
-    // std::map<FeatureType, std::vector<cv::DMatch>> matchesByType = parallelFeatureMatching(featureTypes, 
+    // std::map<FeatureType, std::vector<cv::DMatch>> matchesByType = parallelFeatureMatching(featureTypes,
     //     keyframe->mDescriptors, frame.mDescriptors, keyframe->mvKeysUn, frame.mvKeysUn);
 
     // for (const auto& [ft, matches] : matchesByType){
-    //     mapPointMatches[ft] = std::vector<Pt>(frame.N.at(ft), static_cast<Pt>(NULL)); 
+    //     mapPointMatches[ft] = std::vector<Pt>(frame.N.at(ft), static_cast<Pt>(NULL));
     // }
 
     std::vector<cv::KeyPoint> kps1, kps2;
@@ -91,16 +116,16 @@ std::map<FeatureType, int> FeatureMatcher::SearchBruteForce(const Keyframe& keyf
         auto it1 = keyframe->mDescriptors.find(ft);
         auto it2 = frame.mDescriptors.find(ft);
 
-        if (it1 == keyframe->mDescriptors.end() || it2 == frame.mDescriptors.end()) 
-            continue; 
-        
-        mapPointsKF[ft] = keyframe->GetMapPointMatches(ft);    
+        if (it1 == keyframe->mDescriptors.end() || it2 == frame.mDescriptors.end())
+            continue;
+
+        mapPointsKF[ft] = keyframe->GetMapPointMatches(ft);
 
         //std::vector<cv::DMatch> matches = allMatches_.clear();
         //std::vector<cv::DMatch> matches = matchesByType[ft];
         std::vector<cv::DMatch> matches = featureMatching_0(
-            keyframe->mDescriptors.at(ft), frame.mDescriptors.at(ft), 
-            keyframe->mvKeysUn.at(ft), frame.mvKeysUn.at(ft), 
+            keyframe->mDescriptors.at(ft), frame.mDescriptors.at(ft),
+            keyframe->mvKeysUn.at(ft), frame.mvKeysUn.at(ft),
             ft);
 
         int size_kpts1 = kps1.size();
@@ -127,7 +152,7 @@ std::map<FeatureType, int> FeatureMatcher::SearchBruteForce(const Keyframe& keyf
 
         usedFeatureTypes.insert(usedFeatureTypes.end(), v1.size(), ft);
 
-        mapPointMatches[ft] = std::vector<Pt>(frame.N.at(ft), static_cast<Pt>(NULL)); 
+        mapPointMatches[ft] = std::vector<Pt>(frame.N.at(ft), static_cast<Pt>(NULL));
     }
 
     std::vector<cv::DMatch> robustMatches = robustFeatureMatching(allMatches, kps1, kps2, cv::USAC_MAGSAC);
@@ -141,9 +166,9 @@ std::map<FeatureType, int> FeatureMatcher::SearchBruteForce(const Keyframe& keyf
         Pt pt = mapPointsKF[featType][queryIdx];
         if(!pt || (pt->isBad()))
             continue;
-        mapPointMatches[featType][trainIdx] = pt;  
+        mapPointMatches[featType][trainIdx] = pt;
         matchesCount[featType]++;
-        validMatchesTotal++; 
+        validMatchesTotal++;
     }
 
     auto swapped = SwapMatchDirection(robustMatches);
@@ -166,12 +191,12 @@ int FeatureMatcher::SearchBruteForce(Frame &CurrentFrame, const Frame &LastFrame
         // Ensure both frames contain the requested feature type
         auto it1 = CurrentFrame.mDescriptors.find(featType);
         auto it2 = LastFrame.mDescriptors.find(featType);
-        if (it1 == CurrentFrame.mDescriptors.end() || it2 == LastFrame.mDescriptors.end()) 
-            continue; 
-                
+        if (it1 == CurrentFrame.mDescriptors.end() || it2 == LastFrame.mDescriptors.end())
+            continue;
+
         std::vector<cv::DMatch> matches = featureMatching_0(
-            CurrentFrame.mDescriptors.at(featType), LastFrame.mDescriptors.at(featType), 
-            CurrentFrame.mvKeysUn.at(featType), LastFrame.mvKeysUn.at(featType), 
+            CurrentFrame.mDescriptors.at(featType), LastFrame.mDescriptors.at(featType),
+            CurrentFrame.mvKeysUn.at(featType), LastFrame.mvKeysUn.at(featType),
             featType);
 
         int size_kpts1 = kps1.size();
@@ -183,7 +208,7 @@ int FeatureMatcher::SearchBruteForce(Frame &CurrentFrame, const Frame &LastFrame
         allMatches.insert(allMatches.end(), matches.begin(), matches.end());
         kps1.insert(kps1.end(), CurrentFrame.mvKeysUn.at(featType).begin(), CurrentFrame.mvKeysUn.at(featType).end());
         kps2.insert(kps2.end(), LastFrame.mvKeysUn.at(featType).begin(), LastFrame.mvKeysUn.at(featType).end());
-        
+
         // Track original indices inside v1 / v2
         auto const& v1 = CurrentFrame.mvKeysUn.at(featType);
         auto const& v2 = LastFrame.mvKeysUn.at(featType);
@@ -218,7 +243,7 @@ int FeatureMatcher::SearchBruteForce(Frame &CurrentFrame, const Frame &LastFrame
             continue;
 
         CurrentFrame.pts.at(featType)[queryIdx] = pt;
-        
+
         numMatchesTotal++;
     }
 
@@ -235,7 +260,7 @@ int FeatureMatcher::SearchBruteForce(Frame &CurrentFrame, const Frame &LastFrame
 
 // SearchForInitialization Frame-Frame
 // Tracking::MonocularInitialization
-int FeatureMatcher::SearchForInitialization(const Frame &F1, const Frame &F2, 
+int FeatureMatcher::SearchForInitialization(const Frame &F1, const Frame &F2,
     vector<cv::Point2f> &pointsPrevMatched, vector<int> &matches12, const FeatureType& featType)
 {
     matches12.clear();
@@ -243,10 +268,10 @@ int FeatureMatcher::SearchForInitialization(const Frame &F1, const Frame &F2,
     // Ensure both frames contain the requested feature type
     auto it1 = F1.mDescriptors.find(featType);
     auto it2 = F2.mDescriptors.find(featType);
-    if (it1 == F1.mDescriptors.end() || it2 == F2.mDescriptors.end()) 
-        return 0; 
-    
-    std::vector<cv::DMatch> matches = featureMatching_2(F1.mDescriptors.at(featType), F2.mDescriptors.at(featType), 
+    if (it1 == F1.mDescriptors.end() || it2 == F2.mDescriptors.end())
+        return 0;
+
+    std::vector<cv::DMatch> matches = featureMatching_2(F1.mDescriptors.at(featType), F2.mDescriptors.at(featType),
          F1.mvKeysUn.at(featType), F2.mvKeysUn.at(featType), featType, sFI_ff_lightglue, sFI_ff_robustMatching, sFI_ff_outlierMethod);
 
     int numMatches = 0;
@@ -315,22 +340,22 @@ static std::array<float, 9> computeDistancePercentiles_10_to_90(
 // LocalMapping::CreateNewMapPoints
 void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
                                 std::map<FeatureType, vector<pair<size_t,size_t>>>& matchedPairs,
-                                const std::vector<FeatureType>& featureTypes){   
+                                const std::vector<FeatureType>& featureTypes){
 
 
-    bool cached_1 = (keyframe1->cache_matchedPairs.find(keyframe2->mnFrameId) != keyframe1->cache_matchedPairs.end() && 
+    bool cached_1 = (keyframe1->cache_matchedPairs.find(keyframe2->mnFrameId) != keyframe1->cache_matchedPairs.end() &&
         !keyframe1->cache_matchedPairs.at(keyframe2->mnFrameId).empty());
-    bool cached_2 = true;//(keyframe2->cache_matchedPairs.find(keyframe1->mnFrameId) != keyframe2->cache_matchedPairs.end() && 
+    bool cached_2 = true;//(keyframe2->cache_matchedPairs.find(keyframe1->mnFrameId) != keyframe2->cache_matchedPairs.end() &&
         //!keyframe2->cache_matchedPairs.at(keyframe1->mnFrameId).empty());
-   
+
 
     // if(cached_1){
     //     std::cout << " - Using cached matches for triangulation between Keyframe " << keyframe1->mnFrameId << " and Keyframe " << keyframe2->mnFrameId << std::endl;
     // }
 
-    std::map<FeatureType, std::vector<cv::DMatch>> matchesByType;   
-    if ((!cached_1) || (!cached_2)){ 
-        matchesByType = parallelFeatureMatching(featureTypes, 
+    std::map<FeatureType, std::vector<cv::DMatch>> matchesByType;
+    if ((!cached_1) || (!cached_2)){
+        matchesByType = parallelFeatureMatching(featureTypes,
             keyframe1->mDescriptors, keyframe2->mDescriptors, keyframe1->mvKeysUn, keyframe2->mvKeysUn);
     }
 
@@ -338,16 +363,16 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
     std::vector<int> kps1_indexes, kps2_indexes;
     std::vector<cv::DMatch> allMatches;
     std::vector<FeatureType> usedFeatureTypes;
-    std::map<FeatureType, int> matchesCount;                                
-    for (const auto& ft : featureTypes){                                
+    std::map<FeatureType, int> matchesCount;
+    for (const auto& ft : featureTypes){
         matchedPairs[ft].clear();
-        
+
         // Ensure both frames contain the requested feature type
         auto it1 = keyframe1->mDescriptors.find(ft);
         auto it2 = keyframe2->mDescriptors.find(ft);
-        if (it1 == keyframe1->mDescriptors.end() || it2 == keyframe2->mDescriptors.end()) 
-            continue; 
-        
+        if (it1 == keyframe1->mDescriptors.end() || it2 == keyframe2->mDescriptors.end())
+            continue;
+
         if ((!cached_1) || (!cached_2)){
 
             std::vector<cv::DMatch> matches = matchesByType[ft];
@@ -359,10 +384,10 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
             }
             allMatches.insert(allMatches.end(), matches.begin(), matches.end());
         }
-       
+
         kps1.insert(kps1.end(), keyframe1->mvKeysUn.at(ft).begin(), keyframe1->mvKeysUn.at(ft).end());
         kps2.insert(kps2.end(), keyframe2->mvKeysUn.at(ft).begin(), keyframe2->mvKeysUn.at(ft).end());
-        
+
         // Track original indices inside v1 / v2
         auto const& v1 = keyframe1->mvKeysUn.at(ft);
         auto const& v2 = keyframe2->mvKeysUn.at(ft);
@@ -377,7 +402,7 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
         // matchedPairs[ft].reserve(matches.size());
     }
 
-    std::vector<cv::DMatch> robustMatches{};    
+    std::vector<cv::DMatch> robustMatches{};
     if ((!cached_1) || (!cached_2)){
         if (allMatches.size() < 10)
             return;
@@ -388,7 +413,7 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
         //std::cout << " - Using cached matches for triangulation between Keyframe " << keyframe1->mnFrameId << " and Keyframe " << keyframe2->mnFrameId << std::endl;
         robustMatches = keyframe1->cache_matchedPairs.at(keyframe2->mnFrameId);
     }
-    
+
     int numMatchesTotal = 0;
     for(const auto& m : robustMatches) {
         //std::cout << "Evaluating match for triangulation..." << std::endl;
@@ -399,7 +424,7 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
         // Only triangulate points that don't already have a 3D MapPoint
         //std::cout << "Checking match: queryIdx=" << queryIdx << ", trainIdx=" << trainIdx << ", featType=" << featType << std::endl;
         if(!keyframe1->GetMapPoint(queryIdx, featType) && !keyframe2->GetMapPoint(trainIdx, featType)){
-                matchedPairs[featType].emplace_back(static_cast<size_t>(queryIdx), static_cast<size_t>(trainIdx));   
+                matchedPairs[featType].emplace_back(static_cast<size_t>(queryIdx), static_cast<size_t>(trainIdx));
                 numMatchesTotal++;
                 matchesCount[featType]++;
         }
@@ -412,17 +437,17 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
     //     const FeatureType featType = usedFeatureTypes[m.queryIdx];
     //     matches_by_featuretype[featType].push_back(m);
     // }
-    // for (const auto& [ft, matches_] : matches_by_featuretype){         
+    // for (const auto& [ft, matches_] : matches_by_featuretype){
     //     if(ft != FEAT_ALIKED128)
     //         continue;
     //     auto p = computeDistancePercentiles_10_to_90(matches_);
     //     std::cout << "FeatureType " << ft << " - ";
-    //     for (int i = 0; i < 9; ++i) 
+    //     for (int i = 0; i < 9; ++i)
     //         //std::cout << (i + 1) * 10 << "th percentile distance: " << p[i] << "\n";
     //         std::cout <<  p[i] << ", ";
     // }
     // std::cout << " " << std::endl;
-    // std::cout << "\nLocalMapping::CreateNewMapPoints::FeatureMatcher::SearchForTriangulation" << std::endl;                         
+    // std::cout << "\nLocalMapping::CreateNewMapPoints::FeatureMatcher::SearchForTriangulation" << std::endl;
     // std::cout << " - SearchForTriangulation: " << allMatches.size() << " matches found." << std::endl;
     // std::cout << " - robustMatches.size(): " << robustMatches.size() << std::endl;
     // for (const auto& [ft, count] : matchesCount){
@@ -432,9 +457,9 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
 }
 
 void FeatureMatcher::SearchForTriangulation_bybow(const Keyframe& pKF1, const Keyframe& pKF2, const mat3f& F12,
-                                            vector<pair<size_t, size_t> > &vMatchedPairs, 
+                                            vector<pair<size_t, size_t> > &vMatchedPairs,
                                             const DescriptorType& descriptorType, const FeatureType& ft)
-{    
+{
     const DBoW2::FeatureVector &vFeatVec1 = pKF1->mFeatVec;
     const DBoW2::FeatureVector &vFeatVec2 = pKF2->mFeatVec;
 
@@ -468,25 +493,25 @@ void FeatureMatcher::SearchForTriangulation_bybow(const Keyframe& pKF1, const Ke
             for(size_t i1=0, iend1=f1it->second.size(); i1<iend1; i1++)
             {
                 const size_t idx1 = f1it->second[i1];
-                
+
                 Pt pMP1 = pKF1->GetMapPoint(idx1, ft);
-                
+
                 // If there is already a MapPoint skip
                 if(pMP1)
                     continue;
-                
+
                 const cv::KeyPoint &kp1 = pKF1->mvKeysUn.at(ft)[idx1];
-                
+
                 const cv::Mat &refDescriptor = pKF1->mDescriptors.at(ft).row(idx1);
                 Descriptor_Distance_Type bestDist{TH_LOW[ft]};
                 int bestIdx2{-1};
-                
+
                 for(size_t i2=0, iend2=f2it->second.size(); i2<iend2; i2++)
                 {
                     size_t idx2 = f2it->second[i2];
-                    
+
                     Pt pMP2 = pKF2->GetMapPoint(idx2, ft);
-                    
+
                     // If we have already matched or there is a MapPoint skip
                     if(vbMatched2[idx2] || pMP2)
                         continue;
@@ -506,7 +531,7 @@ void FeatureMatcher::SearchForTriangulation_bybow(const Keyframe& pKF1, const Ke
                         bestDist = descDist;
                     }
                 }
-                
+
                 if(bestIdx2>=0)
                 {
                     const cv::KeyPoint &kp2 = pKF2->mvKeysUn.at(ft)[bestIdx2];
@@ -550,8 +575,8 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& pKF1,
 {
     auto it1 = pKF1->mDescriptors.find(ft);
     auto it2 = pKF2->mDescriptors.find(ft);
-    if (it1 == pKF1->mDescriptors.end() || it2 == pKF2->mDescriptors.end()) 
-        return; 
+    if (it1 == pKF1->mDescriptors.end() || it2 == pKF2->mDescriptors.end())
+        return;
 
     // Compute epipole in second image (kept from original; not used below but harmless)
     vec3f Cw  = pKF1->GetCameraCenter();
@@ -637,7 +662,7 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& pKF1,
 int FeatureMatcher::SearchByProjection(Frame &frame, const vector<Pt> &mapPoints){
     std::map<FeatureType, std::vector<int>> idx_points, idx_frame;
     std::map<FeatureType, cv::Mat> desc_points, desc_frame;
- 
+
     int idx = -1;
     for(const auto& pt: mapPoints){
         idx++;
@@ -655,14 +680,14 @@ int FeatureMatcher::SearchByProjection(Frame &frame, const vector<Pt> &mapPoints
             if(frame.pts.at(ft)[i]){
                 if(frame.pts.at(ft)[i]->NumberOfObservations() > 0){
                     continue;
-                }             
+                }
             }
             idx_frame[ft].push_back(i);
             desc_frame[ft].push_back(frame.mDescriptors.at(ft).row(i));
         }
         auto it1 = desc_frame.find(ft);
         auto it2 = desc_points.find(ft);
-        if (it1 == desc_frame.end() || it2 == desc_points.end()) 
+        if (it1 == desc_frame.end() || it2 == desc_points.end())
             continue;
 
         std::vector<cv::DMatch> matches = featureMatching_1(desc_frame.at(ft), desc_points.at(ft),  ft);
@@ -704,7 +729,7 @@ int FeatureMatcher::SearchByProjection(Frame &frame, const vector<Pt> &mapPoints
     //     diffRemainingPoints[ft] = 100.0f * numRemainingPoints[ft] / float(frame.N.at(ft));
     // }
 
-    // for (const auto& pt : mapPoints) 
+    // for (const auto& pt : mapPoints)
     //     mapPointsByType[pt->GetCurrentRefKeyframe()][pt->featureType].push_back(pt);
 
     // for(auto& [keyframe, mapPointsByType_]: mapPointsByType){
@@ -719,45 +744,45 @@ int FeatureMatcher::SearchByProjection(Frame &frame, const vector<Pt> &mapPoints
 
     // std::sort(ordered.begin(), ordered.end(),
     //       [](const auto& a, const auto& b) {
-    //           if (a.second != b.second) return a.second > b.second;   
-    //           return a.first->keyId < b.first->keyId;                 
+    //           if (a.second != b.second) return a.second > b.second;
+    //           return a.first->keyId < b.first->keyId;
     //       });
 
     // int numMatches = 0;
     // int numKeyframes = 0;
     // float totalPercentage = 0.0f;
-    
+
     // for(auto& [keyframe, n]: ordered){
     //     auto mapPointsByType_ = mapPointsByType[keyframe];
     //     for(auto& [ft, pts]: mapPointsByType_){
     //         cv::Mat descriptors;
     //         std::vector<cv::KeyPoint> keypoints;
-    //         for(auto pt: pts){   
-    //             int ipt = pt->GetIndexInKeyFrame(keyframe);    
-    //             cv::Mat desc; 
+    //         for(auto pt: pts){
+    //             int ipt = pt->GetIndexInKeyFrame(keyframe);
+    //             cv::Mat desc;
     //             if (ipt > 0){
-    //                 desc = keyframe->mDescriptors.at(ft).row(ipt);     
+    //                 desc = keyframe->mDescriptors.at(ft).row(ipt);
     //                 keypoints.push_back(keyframe->mvKeysUn.at(ft)[ipt]);
     //             }
     //             else{
-    //                 desc = pt->GetDescriptor();       
+    //                 desc = pt->GetDescriptor();
     //                 keypoints.push_back(keyframe->mvKeysUn.at(ft)[0]);
     //             }
     //             descriptors.push_back(desc);
     //         }
-            
+
     //         // std::vector<cv::DMatch> matches = featureMatching(frameDescriptors.at(ft), descriptors, ft);
     //         bool lightglue = true;
     //         bool robustMatching = false;
     //         int outlierMehod = cv::FM_RANSAC;
-    //         std::vector<cv::DMatch> matches = featureMatching(frame.mDescriptors.at(ft), descriptors, 
+    //         std::vector<cv::DMatch> matches = featureMatching(frame.mDescriptors.at(ft), descriptors,
     //             frame.mvKeysUn.at(ft), keypoints, ft, lightglue, robustMatching, outlierMehod);
 
     //         for(const auto& m : matches) {
     //             Pt pMP = pts[m.trainIdx];
     //             if(!pMP || (pMP->isBad()))
     //                 continue;
-                
+
     //             if(frame.pts.at(ft)[m.queryIdx])
     //                 if(frame.pts.at(ft)[m.queryIdx]->NumberOfObservations() > 0)
     //                     continue;
@@ -919,7 +944,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const vector<Pt> &vpMapPoints, const floa
             if(pMPinKF)
             {
                 if(!pMPinKF->isBad())
-                {   
+                {
                     if(pMPinKF->NumberOfObservations() > pMP->NumberOfObservations())
                         pMP->Replace(pMPinKF);
                     else
@@ -1052,7 +1077,7 @@ bool FeatureMatcher::CheckDistEpipolarLine(const cv::KeyPoint &kp1, const cv::Ke
 
 // SearchByProjection 2
 // Compute Sim3
-int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoints, vector<Pt> &vpMatched, 
+int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoints, vector<Pt> &vpMatched,
     const float& radiusTh, const FeatureType& featType)
 {
 
@@ -1723,6 +1748,8 @@ Descriptor_Distance_Type FeatureMatcher::DescriptorDistance(const cv::Mat &a, co
 {
     switch(descriptorType_) {
         // DescriptorDistance
+        case DESC_superpoint256:
+            return DescriptorDistance_superpoint256(a,b);
         case DESC_ALIKED128:
              return DescriptorDistance_aliked128(a,b);
         case DESC_ANYFEATNONBIN:
@@ -1748,6 +1775,8 @@ Descriptor_Distance_Type FeatureMatcher::DescriptorDistance(const cv::Mat &a, co
 
 cv::NormTypes FeatureMatcher::getNormType(const FeatureType& featureType_){
     switch(featureType_) {
+        case FEAT_SUPERPOINT256:
+            return cv::NORM_L2;
         case FEAT_ALIKED128:
             return cv::NORM_L2;
         case FEAT_ANYFEATNONBIN:
@@ -1878,9 +1907,10 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
 
     std::vector<cv::DMatch> FeatureMatcher::featureMatching_1(
         const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& ft){
-        
+
         std::vector<cv::DMatch> matches;
         switch(ft) {
+            case FEAT_SUPERPOINT256:
             case FEAT_ALIKED128:
             case FEAT_ANYFEATNONBIN:
             case FEAT_KAZE64:
@@ -1902,8 +1932,8 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
                     matches.reserve(num_matches);
                     for (int i = 0; i < num_matches; ++i) {
                         matches.emplace_back(
-                            static_cast<int>(match_buffer[i][0]), 
-                            static_cast<int>(match_buffer[i][1]), 
+                            static_cast<int>(match_buffer[i][0]),
+                            static_cast<int>(match_buffer[i][1]),
                             0.0f);
                     }
                     delete[] match_buffer;
@@ -1920,16 +1950,21 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
     }
 
     std::vector<cv::DMatch> FeatureMatcher::featureMatching_0(
-        const cv::Mat& desc1, const cv::Mat& desc2, 
+        const cv::Mat& desc1, const cv::Mat& desc2,
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
         const FeatureType& ft){
-        
+
         std::vector<cv::DMatch> matches;
         switch(ft) {
             case FEAT_SIFT128:
             case FEAT_ALIKED128:
                 {
                     matches = lightglueMatching(kps1, desc1, kps2, desc2, 0.0f);
+                    break;
+                }
+            case FEAT_SUPERPOINT256:
+                {
+                    matches = superglueMatching(kps1, desc1, kps2, desc2, 0.0f);
                     break;
                 }
             case FEAT_ANYFEATNONBIN:
@@ -1953,8 +1988,8 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         return matches;
     }
 
-    std::vector<cv::DMatch> FeatureMatcher::featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2, 
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft, 
+    std::vector<cv::DMatch> FeatureMatcher::featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2,
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft,
         bool lightglue, bool robustMatching, int outlierMehod){
 
         std::vector<cv::DMatch> matches;
@@ -1965,6 +2000,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
                     matches = lightglueMatching(kps1, desc1, kps2, desc2, 0.0f);
                     break;
                 }
+            case FEAT_SUPERPOINT256:
             case FEAT_ANYFEATNONBIN:
             case FEAT_R2D2:
             case FEAT_KAZE64:
@@ -1989,12 +2025,12 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
     }
 
     std::vector<cv::DMatch> FeatureMatcher::robustFeatureMatching(std::vector<cv::DMatch>& matches,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, 
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
         int outlierMethod, const int maxForRansac){
 
         std::sort(matches.begin(), matches.end(),
             [](const cv::DMatch& a, const cv::DMatch& b) { return a.distance < b.distance; });
-        
+
         if (matches.size() > maxForRansac) matches.resize(maxForRansac);
 
         // Build point correspondences ---
@@ -2054,11 +2090,11 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
     }
 
     std::map<FeatureType, std::vector<cv::DMatch>> FeatureMatcher::parallelFeatureMatching(
-        const std::vector<FeatureType>& featureTypes, 
+        const std::vector<FeatureType>& featureTypes,
         const std::map<FeatureType, cv::Mat> &desc1_, const std::map<FeatureType, cv::Mat> &desc2_,
         const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps1_, const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps2_
-    ){        
-    
+    ){
+
         struct MatchOut {
             FeatureType ft{};
             bool valid = false;
@@ -2097,7 +2133,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         std::map<FeatureType, std::vector<cv::DMatch>> matchesByType;
         for (auto& o : outs) {
             if (!o.valid) continue;
-            matchesByType[o.ft] = std::move(o.matches); 
+            matchesByType[o.ft] = std::move(o.matches);
         }
         return matchesByType;
     }
@@ -2106,8 +2142,8 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         const cv::Mat& desc1_, const cv::Mat& desc2_,
         const std::vector<cv::KeyPoint>& kps1_, const std::vector<cv::KeyPoint>& kps2_,
         const FeatureType& ft
-    ){        
-        
+    ){
+
         std::vector<cv::DMatch> matches = featureMatching_0(desc1_, desc2_, kps1_, kps2_, ft);
         return matches;
     }

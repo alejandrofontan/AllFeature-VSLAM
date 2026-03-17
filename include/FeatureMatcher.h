@@ -30,12 +30,19 @@
 #include "Frame.h"
 #include "Feature_sift128.h"
 #include "matcher/lightglue/matcher.hpp"
+#include <mutex>
+
+#ifdef CHECK
+#undef CHECK
+#endif
+
+#include "super_glue.h"
 
 namespace ANYFEATURE_VSLAM
 {
 
 class FeatureMatcher
-{    
+{
 public:
 
     FeatureMatcher(const int& imageWidth, const int& imageHeight, float nnratio=0.6, bool checkOri=true);
@@ -48,18 +55,23 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     std::vector<cv::DMatch> featureMatching_0(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft);
     std::vector<cv::DMatch> featureMatching_1(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& ft);
-    std::vector<cv::DMatch> featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft, 
+    std::vector<cv::DMatch> featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft,
        bool lightglue, bool robustMatching, int outlierMehod = cv::FM_RANSAC);
-    
+
     std::vector<cv::DMatch> lightglueMatching(
             const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
             const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
             float min_score = 0.0f);
 
+    std::vector<cv::DMatch> superglueMatching(
+            const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
+            const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
+            float min_score = 0.0f);
+
     std::vector<cv::DMatch> robustFeatureMatching(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-         int outlierMehod = cv::FM_RANSAC, const int maxForRansac = 2000);        
-    
-    std::map<FeatureType, std::vector<cv::DMatch>> parallelFeatureMatching(const std::vector<FeatureType>& featureTypes, 
+         int outlierMehod = cv::FM_RANSAC, const int maxForRansac = 2000);
+
+    std::map<FeatureType, std::vector<cv::DMatch>> parallelFeatureMatching(const std::vector<FeatureType>& featureTypes,
         const std::map<FeatureType, cv::Mat> &desc1, const std::map<FeatureType, cv::Mat> &desc2,
         const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps1, const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps2);
 
@@ -71,13 +83,13 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    // AllFeature-VSLAM SearchBruteForce         
+    // AllFeature-VSLAM SearchBruteForce
 
-    int SearchBruteForce(Frame &CurrentFrame, const Frame &LastFrame, 
+    int SearchBruteForce(Frame &CurrentFrame, const Frame &LastFrame,
         const std::vector<FeatureType>& featureTypes);
-    
-    std::map<FeatureType, int> SearchBruteForce(const Keyframe& keyframe, Frame &frame, 
-        std::map<FeatureType, std::vector<Pt>>& mapPointMatches, 
+
+    std::map<FeatureType, int> SearchBruteForce(const Keyframe& keyframe, Frame &frame,
+        std::map<FeatureType, std::vector<Pt>>& mapPointMatches,
         const std::vector<FeatureType>& featureTypes);
 
     void SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
@@ -86,10 +98,10 @@ public:
 
     void SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2, const mat3f& F12,
                                 std::vector<pair<size_t,size_t>>& matchedPairs,
-                                const DescriptorType& descriptorType, const FeatureType& featureType);    
+                                const DescriptorType& descriptorType, const FeatureType& featureType);
     void SearchForTriangulation_bybow(const Keyframe& keyframe1, const Keyframe& keyframe2, const mat3f& F12,
                                 std::vector<pair<size_t,size_t>>& matchedPairs,
-                                const DescriptorType& descriptorType, const FeatureType& featureType);    
+                                const DescriptorType& descriptorType, const FeatureType& featureType);
 
     int SearchForInitialization(const Frame &F1, const Frame &F2, std::vector<cv::Point2f> &pointsPrevMatched, std::vector<int> &matches12, const FeatureType& featureType);
 
@@ -105,7 +117,7 @@ public:
     // Project MapPoints using a Similarity Transformation and search matches.
     // Used in loop detection (Loop Closing)
      int SearchByProjection(Keyframe pKF, const mat4f& Scw, const std::vector<Pt> &vpPoints, std::vector<Pt> &vpMatched, const float& radiusTh, const FeatureType& featureType);
-     
+
     // Search matches between MapPoints in a KeyFrame and ORB in a Frame.
     // Brute force constrained to ORB that belong to the same vocabulary node (at a certain level)
     // Used in Relocalisation and Loop Detection
@@ -159,19 +171,21 @@ protected:
     cv::BFMatcher bf_matcher_L2{cv::NORM_L2, true};
     std::shared_ptr<matcher::LightGlue> matcher_lightglue;
     std::shared_ptr<torch::Device> torch_device;
+    std::shared_ptr<SuperGlue> matcher_superglue;
     int imageWidth;
     int imageHeight;
+
 
     // Matching options
 
     // SearchBruteForce Keyframe-Frame
     // Tracking::TrackReferenceKeyframe & Tracking::Relocalization
     static const bool sBF_kf_lightglue = true;
-    
+
     // SearchBruteForce Frame-Frame
     // Tracking::TrackWithMotionModel
     static const bool sBF_ff_lightglue = true;
-    
+
     // SearchForTriangulation Keyframe-Keyframe
     // LocalMapping::CreateNewMapPoints
     static const bool sFT_kk_lightglue = true;
@@ -180,8 +194,10 @@ protected:
     // Tracking::MonocularInitialization
     static const bool sFI_ff_lightglue = true;
     static const bool sFI_ff_robustMatching = true;
-    static const int  sFI_ff_outlierMethod = cv::FM_RANSAC;  
+    static const int  sFI_ff_outlierMethod = cv::FM_RANSAC;
 
+
+    std::mutex superglue_mutex_;
 };
 
 }// namespace ORB_SLAM
