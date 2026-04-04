@@ -36,7 +36,7 @@
 #undef CHECK
 #endif
 
-#include "super_glue.h"
+#include "light_glue.h"
 
 namespace ANYFEATURE_VSLAM
 {
@@ -63,7 +63,7 @@ public:
             const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
             float min_score = 0.0f);
 
-    std::vector<cv::DMatch> superglueMatching(
+    std::vector<cv::DMatch> matcherLightglueSuperpoint(
             const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
             const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
             float min_score = 0.0f);
@@ -171,7 +171,7 @@ protected:
     cv::BFMatcher bf_matcher_L2{cv::NORM_L2, true};
     std::shared_ptr<matcher::LightGlue> matcher_lightglue;
     std::shared_ptr<torch::Device> torch_device;
-    std::shared_ptr<SuperGlue> matcher_superglue;
+    std::shared_ptr<SuperPointLightGlue> matcher_lightglue_superpoint;
     int imageWidth;
     int imageHeight;
 
@@ -197,7 +197,7 @@ protected:
     static const int  sFI_ff_outlierMethod = cv::FM_RANSAC;
 
 
-    std::mutex superglue_mutex_;
+    std::mutex lightglue_superpoint_mutex_;
 };
 
 }// namespace ORB_SLAM

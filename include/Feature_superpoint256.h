@@ -7,7 +7,7 @@
 #undef CHECK
 #endif
 
-#include "super_point.h"
+#include "Thirdparty/SuperPoint-LightGlue-TensorRT/include/super_point.h"
 
 namespace ANYFEATURE_VSLAM {
 

@@ -14,6 +14,7 @@
 ANYFEATURE_VSLAM::Image::Image(const std::string &imagePath): imageFile{imagePath} {
 
     img = cv::imread(imageFile,cv::IMREAD_UNCHANGED);
+
     std::filesystem::path p(imagePath);
     imageName = p.filename().string();
     keypointBinFile = replaceAllOccurrences(imageFile, "/rgb/", "/r2d2/keypoints/");
@@ -27,7 +28,9 @@ ANYFEATURE_VSLAM::Image::Image(const std::string &imagePath): imageFile{imagePat
 ANYFEATURE_VSLAM::Image::Image(const cv::Mat& image){
 
     img = image.clone();
-    //std::filesystem::path p(imagePath);
+    std::cout << "Image loaded with size: " << img.cols << " x " << img.rows << std::endl;
+
+    //std::filesystem::pathp(imagePath);
     //imageName = p.filename().string();
     // keypointBinFile = replaceAllOccurrences(imageFile, "/rgb/", "/r2d2/keypoints/");
     // keypointBinFile = replaceAllOccurrences(keypointBinFile, "png", "bin");
@@ -71,5 +74,11 @@ void ANYFEATURE_VSLAM::Image::FixImageSize(const int& new_width, const int& new_
     cv::Mat resized_gray;
     cv::resize(grayImg, grayImg, new_size);
     cv::resize(img, img, new_size);
-    //std::cout << "Image resized to " << img.cols << " x " << img.rows << std::endl;
+
+    int cropWidth = (img.cols / 32) * 32;    // floor to nearest multiple of 32
+    int cropHeight = (img.rows / 32) * 32;   // floor to nearest multiple of 32
+
+    cv::Rect cropRect(0, 0, cropWidth, cropHeight);
+    img = img(cropRect);
+    grayImg = grayImg(cropRect);
 }

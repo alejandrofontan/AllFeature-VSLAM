@@ -2,48 +2,41 @@
 #include <Eigen/Dense>
 
 #include "include/FeatureMatcher.h"
-#include "Thirdparty/SuperPoint-SuperGlue-TensorRT/include/super_glue.h"
 
-std::vector<cv::DMatch> ANYFEATURE_VSLAM::FeatureMatcher::superglueMatching(
+#ifdef CHECK
+#undef CHECK
+#endif
+
+#include "Thirdparty/SuperPoint-LightGlue-TensorRT/include/light_glue.h"
+#include "Thirdparty/SuperPoint-LightGlue-TensorRT/include/super_point.h"
+
+std::vector<cv::DMatch> ANYFEATURE_VSLAM::FeatureMatcher::matcherLightglueSuperpoint(
     const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
     const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
     float min_score)
 {
-    if (kps1.empty() || kps2.empty())
-        return {};
 
+    // Build 258-row feature matrices: rows 0-1 = x/y, rows 2-257 = descriptor
     auto make_fp = [](const std::vector<cv::KeyPoint>& kps, const cv::Mat& desc)
-        -> Eigen::Matrix<double, 259, Eigen::Dynamic>
+        -> Eigen::Matrix<double, 258, Eigen::Dynamic>
     {
         const int N = (int)kps.size();
-        Eigen::Matrix<double, 259, Eigen::Dynamic> fp(259, N);
+        Eigen::Matrix<double, 258, Eigen::Dynamic> fp(258, N);
         for (int i = 0; i < N; ++i) {
-            fp(0, i) = kps[i].response;
-            fp(1, i) = kps[i].pt.x;
-            fp(2, i) = kps[i].pt.y;
+            fp(0, i) = kps[i].pt.x;
+            fp(1, i) = kps[i].pt.y;
             for (int d = 0; d < 256; ++d)
-                fp(3 + d, i) = desc.at<float>(i, d);
+                fp(2 + d, i) = desc.at<float>(i, d);
         }
         return fp;
     };
 
-    Eigen::Matrix<double, 259, Eigen::Dynamic> fp0 = make_fp(kps1, desc1);
-    Eigen::Matrix<double, 259, Eigen::Dynamic> fp1 = make_fp(kps2, desc2);
-
-    // Serialize all SuperGlue calls — IExecutionContext is not thread-safe
-    std::lock_guard<std::mutex> lock(superglue_mutex_);
-
+    Eigen::Matrix<double, 258, Eigen::Dynamic> fp0_ = make_fp(kps1, desc1);
+    Eigen::Matrix<double, 258, Eigen::Dynamic> fp1_ = make_fp(kps2, desc2);
     std::vector<cv::DMatch> matches;
-    matcher_superglue->matching_points(fp0, fp1, matches, false, imageWidth, imageHeight);
 
-    if (min_score > 0.0f) {
-        matches.erase(
-            std::remove_if(matches.begin(), matches.end(),
-                [min_score](const cv::DMatch& m) {
-                    return (1.0f - m.distance) < min_score;
-                }),
-            matches.end());
-    }
+    std::lock_guard<std::mutex> lock(lightglue_superpoint_mutex_);
+    matcher_lightglue_superpoint->matching_points(fp0_, fp1_, matches);
 
     return matches;
 }

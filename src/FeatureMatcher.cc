@@ -60,27 +60,24 @@ FeatureMatcher::FeatureMatcher(const int& imageWidth, const int& imageHeight, fl
     matcher_lightglue->to(*torch_device);
     std::cout << "Finished initializing LightGlue." << std::endl;
 
-    std::cout << "Initializing SuperGlue..." << std::endl;
-    std::string config_path = "/home/alejandro/VSLAM-LAB/Baselines/AllFeature-VSLAM-DEV/Thirdparty/SuperPoint-SuperGlue-TensorRT/config/config.yaml";
-    std::string model_dir = "/home/alejandro/VSLAM-LAB/Baselines/AllFeature-VSLAM-DEV/Thirdparty/SuperPoint-SuperGlue-TensorRT/weights/";
+    std::cout << "Initializing SuperPoint-LightGlue..." << std::endl;
+    std::string config_path = "Thirdparty/SuperPoint-LightGlue-TensorRT/config/config.yaml";
+    std::string model_dir = "Thirdparty/SuperPoint-LightGlue-TensorRT/weights/";
     Configs configs(config_path, model_dir);
-    matcher_superglue = std::make_shared<SuperGlue>(configs.superglue_config);
-    // Dump the parsed superglue config to verify keys
-    std::cout << "[SuperGlue config dump]\n";
-    std::cout << "  onnx_file:   " << configs.superglue_config.onnx_file << "\n";
-    std::cout << "  engine_file: " << configs.superglue_config.engine_file << "\n";
-    std::cout << "  input_tensor_names size: " << configs.superglue_config.input_tensor_names.size() << "\n";
-    std::cout << "  output_tensor_names size: " << configs.superglue_config.output_tensor_names.size() << "\n";
-    // Add whatever fields SuperGlueConfig has
-    if (!matcher_superglue->build()) {
+    matcher_lightglue_superpoint = std::make_shared<SuperPointLightGlue>(configs.superpoint_lightglue_config);
+    std::cout << "[SuperPoint-LightGlue config dump]\n";
+    std::cout << "  onnx_file:   " << configs.superpoint_lightglue_config.onnx_file << "\n";
+    std::cout << "  engine_file: " << configs.superpoint_lightglue_config.engine_file << "\n";
+    std::cout << "  input_tensor_names size: " << configs.superpoint_lightglue_config.input_tensor_names.size() << "\n";
+    std::cout << "  output_tensor_names size: " << configs.superpoint_lightglue_config.output_tensor_names.size() << "\n";
+    if (!matcher_lightglue_superpoint->build()) {
         throw std::runtime_error(
-                "SuperGlue: failed to build/load TensorRT engine.\n"
+                "SuperPoint-LightGlue: failed to build/load TensorRT engine.\n"
                 "  config: " + config_path + "\n"
                 "  weights: " + model_dir);
-        }
-        std::cout << "SuperGlue engine loaded from: " << model_dir << "\n";
-        std::cout << "Engines ready.\n\n";
-    std::cout << "Finished initializing SuperGlue." << std::endl;
+    }
+    std::cout << "SuperPoint-LightGlue engine loaded from: " << model_dir << "\n";
+    std::cout << "Finished initializing SuperPoint-LightGlue." << std::endl;
 
 }
 
@@ -1964,7 +1961,10 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
                 }
             case FEAT_SUPERPOINT256:
                 {
-                    matches = superglueMatching(kps1, desc1, kps2, desc2, 0.0f);
+                    matches = matcherLightglueSuperpoint(kps1, desc1, kps2, desc2, 0.0f);
+                    //std::cout << "kps1 size: " << kps1.size() << ", kps2 size: " << kps2.size() << std::endl;
+                    //std::cout << "FeatureMatcher::featureMatching_0: " << matches.size() << " matches found with LightGlue SuperPoint." << std::endl;
+                    //std::terminate();
                     break;
                 }
             case FEAT_ANYFEATNONBIN:
