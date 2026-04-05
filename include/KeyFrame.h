@@ -28,7 +28,7 @@
 #include "FeatureExtractor.h"
 #include "Frame.h"
 #include "KeyFrameDatabase.h"
-#include "Types.h"
+#include "FeatureFactory.h"
 
 #include <mutex>
 
@@ -147,7 +147,7 @@ public:
 public:
 
     std::vector<FeatureType> featureTypes{};
-    std::map<FrameId, std::vector<cv::DMatch>> cache_matchedPairs{}; 
+    std::map<FrameId, std::vector<cv::DMatch>> cache_matchedPairs{};
 
     static long unsigned int nNextId;
     KeyframeId keyId;
@@ -252,7 +252,7 @@ protected:
     // Bad flags
     bool mbNotErase;
     bool mbToBeErased;
-    bool mbBad;    
+    bool mbBad;
 
     float mHalfBaseline; // Only for visualization
 

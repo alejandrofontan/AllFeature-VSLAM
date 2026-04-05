@@ -5,6 +5,7 @@
 #include <fstream>
 #include "Utils.h"
 #include <utility>
+#include "Feature_superpoint256.h"
 
 std::random_device rd;
 //std::mt19937 ANYFEATURE_VSLAM::RandomIntegerGenerator::randomIntGenerator{std::mt19937(rd())};
@@ -21,120 +22,25 @@ void ANYFEATURE_VSLAM::printError(const std::string& function, const std::string
     std::cout << "\x1b[91m" << "[" << function << "] : " <<  message << "\x1b[0m"<< std::endl;
 }
 
-std::string ANYFEATURE_VSLAM::keypointName(const KeypointType & keypointType){
-    switch (keypointType) {
-        // keypoint name
-        case KEYP_superpoint256:{
-            return "superpoint256";
-        }
-        case KEYP_ALIKED128:{
-            return "Aliked128";
-        }
-        case KEYP_ANYFEATNONBIN:{
-            return "AnyFeatNonBin";
-        }
-        case KEYP_ANYFEATBIN:{
-            return "AnyFeatBin";
-        }
-        case KEYP_R2D2:{
-            return "R2d2";
-        }
-        case KEYP_SIFT:{
-            return "Sift";
-        }
-        case KEYP_KAZE:{
-            return "Kaze";
-        }
-        case KEYP_SURF:{
-            return "Surf";
-        }
-        case KEYP_BRISK:{
-            return "Brisk";
-        }
-        case KEYP_AKAZE:{
-            return "Akaze";
-        }
-        case KEYP_ORB:{
-            return "Orb";
-        }
-    }
-}
-std::string ANYFEATURE_VSLAM::descriptorName(const DescriptorType& descriptorType){
-    switch (descriptorType) {
-
-        // descriptor name
-        case DESC_superpoint256:{
-            return "superpoint256";
-        }
-        case DESC_ALIKED128:{
-            return "Aliked128";
-        }
-        case DESC_ANYFEATNONBIN:{
-            return "AnyFeatNonBin";
-        }
-        case DESC_ANYFEATBIN:{
-            return "AnyFeatBin";
-        }
-        case DESC_R2D2:{
-            return "R2d2";
-        }
-        case DESC_SIFT128:{
-            return "Sift128";
-        }
-        case DESC_KAZE64:{
-            return "Kaze64";
-        }
-        case DESC_SURF64:{
-            return "Surf64";
-        }
-        case DESC_BRISK:{
-            return "Brisk";
-        }
-        case DESC_AKAZE61:{
-            return "Akaze61";
-        }
-        case DESC_ORB:{
-            return "Orb";
-        }
-    }
-}
-
 std::string ANYFEATURE_VSLAM::featureName(const FeatureType& featureType){
-    switch (featureType) {
-        // feature name
-        case FEAT_SUPERPOINT256:{
-            return "SuperPoint256";
-        }
-        case FEAT_ALIKED128:{
-            return "Aliked128";
-        }
-        case FEAT_ANYFEATNONBIN:{
-            return "anyFeatNonBin";
-        }
-        case FEAT_ANYFEATBIN:{
-            return "anyFeatBin";
-        }
-        case FEAT_R2D2:{
-            return "r2d2";
-        }
-        case FEAT_SIFT128:{
-            return "sift128";
-        }
-        case FEAT_KAZE64:{
-            return "Kaze64";
-        }
-        case FEAT_SURF64:{
-            return "Surf64";
-        }
-        case FEAT_BRISK:{
-            return "Brisk48";
-        }
-        case FEAT_AKAZE61:{
-            return "Akaze61";
-        }
-        case FEAT_ORB:{
-            return "Orb32";
-        }
+    std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featureType);
+    return ft->getFeatureName();
+}
+
+cv::Scalar ANYFEATURE_VSLAM::getFeatureColor(const FeatureType& featureType, const int& format, const bool& normalize){
+
+    Eigen::Matrix<float,3,1> color{0,0,0};
+    std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featureType);
+    color = ft->getColor();
+
+    if (normalize){
+        color /= 255.0f;
+    }
+    switch(format) {
+        case 0:
+            return {color(0),color(1),color(2)};
+        default:
+            return {color(2),color(1),color(0)};
     }
 }
 
@@ -155,92 +61,6 @@ std::string ANYFEATURE_VSLAM::matType(const int& matTypeIndex){
         case 6:
             return "CV_64F ";
     }
-}
-
-cv::Scalar ANYFEATURE_VSLAM::getFeatureColor(const FeatureType& featureType, const int& format, const bool& normalize){
-    Eigen::Matrix<float,3,1> color{0,0,0};
-    switch(featureType) {
-        // descriptor color
-        case FEAT_SUPERPOINT256:{
-            color << 122, 0, 255;
-            break;
-        }
-        case FEAT_ALIKED128:{
-            color << 181, 243, 249;
-            break;
-        }
-        case FEAT_ANYFEATNONBIN:{
-            color << 122 , 255, 122;
-            break;
-        }
-        case FEAT_ANYFEATBIN:{
-            color << 255 , 122, 255;
-            break;
-        }
-        case FEAT_R2D2:{
-            color << 255 , 0, 255;
-            break;
-        }
-        case FEAT_SIFT128:{
-            color << 255 , 0, 0;
-            break;
-        }
-        case FEAT_KAZE64:{
-            color << 0, 255, 255;
-            break;
-        }
-        case FEAT_SURF64:{
-            color << 0, 0, 255;
-            break;
-        }
-        case FEAT_BRISK:{
-            color << 0, 122, 122;
-            break;
-        }
-        case FEAT_AKAZE61:{
-            color <<  255 , 255, 0;
-            break;
-        }
-        case FEAT_ORB: {
-            color << 129, 149, 251;
-            break;
-        }
-        default:
-            return {0,0,0};
-    }
-
-    if (normalize){
-        color /= 255.0f;
-    }
-    switch(format) {
-        case 0:
-            return {color(0),color(1),color(2)};
-        default:
-            return {color(2),color(1),color(0)};
-    }
-
-}
-
-void ANYFEATURE_VSLAM::linearRegression(float& m, float& b, float& R2, const std::vector<float>& x_, const std::vector<float>& y_){
-    Eigen::VectorXf x(x_.size());
-    for (int i = 0; i < x_.size(); ++i)
-        x(i) = x_[i];
-    Eigen::VectorXf y(y_.size());
-    for (int i = 0; i < y_.size(); ++i)
-        y(i) = y_[i];
-
-    Eigen::MatrixXf A(x.size(), 2);
-    A.col(0) = x;
-    A.col(1) = Eigen::VectorXf::Ones(x.size());
-
-    Eigen::VectorXf theta = (A.transpose() * A).inverse() * A.transpose() * y;
-    Eigen::VectorXf y_pred = A * theta;
-    float ss_res = (y - y_pred).squaredNorm();
-    float ss_tot = (y - y.mean() * Eigen::VectorXf::Ones(y.size())).squaredNorm();
-
-    m = theta(0);
-    b = theta(1);
-    R2 = float (1.0 - ss_res / ss_tot);
 }
 
 std::vector<std::vector<float>> ANYFEATURE_VSLAM::loadBinFile(const std::string& filename, const int& numFloats ){

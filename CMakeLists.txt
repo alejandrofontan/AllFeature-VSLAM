@@ -40,6 +40,7 @@ set(SRCS_ALLFEATURE
         src/Utils.cpp
         src/Vocabulary.cpp
         src/Image.cpp
+        src/Feature.cpp
         src/Feature_orb32.cpp
         src/Feature_brisk48.cpp
         src/Feature_akaze61.cpp

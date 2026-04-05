@@ -1,6 +1,7 @@
 #ifndef ANYFEATURE_VSLAM_FEATURE_ANYFEATNONBIN_H
 #define ANYFEATURE_VSLAM_FEATURE_ANYFEATNONBIN_H
 
+#include "Feature.h"
 #include "FeatureExtractor.h"
 #include <opencv2/xfeatures2d.hpp>
 #include <opencv2/core/core.hpp>
@@ -8,6 +9,16 @@
 
 
 namespace ANYFEATURE_VSLAM {
+
+    class AnyFeatNonBin : public Feature {
+    public:
+        const std::string& getFeatureName()    const override { return s_featureName; }
+        const FeatureType  getType()           const override { return FEAT_ANYFEATNONBIN; }
+        const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
+    private:
+        inline static const std::string s_featureName    = "anyfeatnonbin";
+        inline static const Eigen::Matrix<float,3,1> s_color = {50, 100, 200};
+    };
 
     class FeatureExtractor_anyFeatNonBin : public FeatureExtractor {
     public:

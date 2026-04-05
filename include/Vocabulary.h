@@ -5,7 +5,7 @@
 #ifndef ANYFEATURE_VSLAM_VOCABULARY_H
 #define ANYFEATURE_VSLAM_VOCABULARY_H
 
-#include "Types.h"
+#include "FeatureFactory.h"
 #include "Definitions.h"
 #include "DBoW2/TemplatedVocabulary.h"
 #include "DBoW2/DBoW2.h"
@@ -13,9 +13,9 @@
 namespace ANYFEATURE_VSLAM {
     class Vocabulary {
     public:
-        Vocabulary(const string vocabularyFolder, const  DescriptorType descriptorType);
+        Vocabulary(const string vocabularyFolder, const  FeatureType featureType);
 
-        DescriptorType descriptorType;
+        FeatureType featureType;
         const string vocabularyFolder;
 
         // Vocabulary variables

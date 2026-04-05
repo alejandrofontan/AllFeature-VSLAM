@@ -1,17 +1,28 @@
 #ifndef ANYFEATURE_VSLAM_FEATURE_AKAZE61_H
 #define ANYFEATURE_VSLAM_FEATURE_AKAZE61_H
 
+#include "Feature.h"
 #include "FeatureExtractor.h"
 #include "akaze/AKAZE.h"
 
 namespace ANYFEATURE_VSLAM {
+
+    class Akaze61 : public Feature {
+    public:
+        const std::string& getFeatureName()    const override { return s_featureName; }
+        const FeatureType  getType()           const override { return FEAT_AKAZE61; }
+        const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
+    private:
+        inline static const std::string s_featureName    = "akaze61";
+        inline static const Eigen::Matrix<float,3,1> s_color = {255, 255, 0};
+    };
 
     class FeatureExtractor_akaze61 : public FeatureExtractor {
     public:
 
         std::shared_ptr<libAKAZE::AKAZE> evolution{};
         AKAZEOptions akazeOptions{};
-        
+
         FeatureExtractor_akaze61(std::shared_ptr<FeatureExtractorSettings> &settings_);
 
         void detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override;

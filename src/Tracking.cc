@@ -320,7 +320,6 @@ void Tracking::Track()
 
 void Tracking::MonocularInitialization(const FeatureType& featureType)
 {
-    const DescriptorType descriptorType = GetDescriptorType(featureType);
     if(!mpInitializer)
     {
         // Set Reference Frame
@@ -1265,44 +1264,41 @@ shared_ptr<FeatureExtractor> Tracking::getFeatureExtractor(const int& scaleNumFe
                                                            const string &featureSettingsYamlFile,
                                                             const FeatureType& featureType){
 
-    const KeypointType keypointType = GetKeypointType(featureType);
-    const DescriptorType descriptorType = GetDescriptorType(featureType);
-
-    shared_ptr<FeatureExtractorSettings> extractorSettings = make_shared<FeatureExtractorSettings>(keypointType, descriptorType, featureSettingsYamlFile);
+    shared_ptr<FeatureExtractorSettings> extractorSettings = make_shared<FeatureExtractorSettings>(featureType, featureSettingsYamlFile);
     extractorSettings->maxNumFeatures *= scaleNumFeaturesMonocular_;
 
-    switch (keypointType) {
-        case KEYP_superpoint256:{
+    switch (featureType) {
+        case FEAT_SUPERPOINT256:{
             return std::make_shared<FeatureExtractor_superpoint256>(extractorSettings);
         }
-        case KEYP_ALIKED128:{
+        case FEAT_ALIKED128:{
             return std::make_shared<FeatureExtractor_aliked128>(extractorSettings);
         }
-        case KEYP_ANYFEATNONBIN:{
+        case FEAT_ANYFEATNONBIN:{
             return std::make_shared<FeatureExtractor_anyFeatNonBin>(extractorSettings);
         }
-        case KEYP_ANYFEATBIN:{
+        case FEAT_ANYFEATBIN:{
             return std::make_shared<FeatureExtractor_anyFeatBin>(extractorSettings);
         }
-        case KEYP_R2D2:{
+        case FEAT_R2D2:{
             return std::make_shared<FeatureExtractor_r2d2_128>(extractorSettings);
         }
-        case KEYP_SIFT:{
+        case FEAT_SIFT128:{
             return std::make_shared<FeatureExtractor_sift128>(extractorSettings);
         }
-        case KEYP_KAZE:{
+        case FEAT_KAZE64:{
             return std::make_shared<FeatureExtractor_kaze64>(extractorSettings);
         }
-        case KEYP_SURF:{
+        case FEAT_SURF64:{
             return std::make_shared<FeatureExtractor_surf64>(extractorSettings);
         }
-        case KEYP_AKAZE:{
+        case FEAT_AKAZE61:{
             return std::make_shared<FeatureExtractor_akaze61>(extractorSettings);
         }
-        case KEYP_BRISK:{
+        case FEAT_BRISK:{
             return std::make_shared<FeatureExtractor_brisk48>(extractorSettings);
         }
-        case KEYP_ORB: {
+        case FEAT_ORB: {
             return std::make_shared<FeatureExtractor_orb32>(extractorSettings);
         }
     }

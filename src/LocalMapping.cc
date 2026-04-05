@@ -32,19 +32,19 @@ void LocalMapping::Run()
 
         // Check if there are keyframes in the queue
         if(CheckNewKeyFrames())
-        {   
-            
+        {
+
             std::chrono::steady_clock::time_point t_start_0 = std::chrono::steady_clock::now();
             //////////////////////////////////////////////////////////////////////////////////////////////////////
             //////////////////////////////////////////////////////////////////////////////////////////////////////
 
             // BoW conversion and insertion in Map
             ProcessNewKeyFrame();
-            
+
             // Check recent MapPoints
-            
+
             MapPointCulling();
-            
+
             //////////////////////////////////////////////////////////////////////////////////////////////////////
             // Triangulate new MapPoints
             std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
@@ -72,13 +72,13 @@ void LocalMapping::Run()
                 // Local BA
                 if(mpMap->KeyFramesInMap()>2){
                     t_start = std::chrono::steady_clock::now();
-                    Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);      
+                    Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);
                     t_end = std::chrono::steady_clock::now();
                     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-                    //medianTrackingTime(t_duration, localbundleadjustment_times, "    - Local BA ", LOCALMAPPING_PROFILING);             
+                    //medianTrackingTime(t_duration, localbundleadjustment_times, "    - Local BA ", LOCALMAPPING_PROFILING);
                 }
                 // Check redundant local Keyframes
-                KeyFrameCulling();     
+                KeyFrameCulling();
             }
             loopCloser->InsertKeyFrame(mpCurrentKeyFrame);
 
@@ -88,7 +88,7 @@ void LocalMapping::Run()
             //////////////////////////////////////////////////////////////////////////////////////////////////////
             t_end = std::chrono::steady_clock::now();
             t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
-            localMapping_times.push_back(t_duration);            
+            localMapping_times.push_back(t_duration);
         }
         else if(Stop())
         {
@@ -160,7 +160,7 @@ void LocalMapping::ProcessNewKeyFrame()
                     }
                 }
             }
-        }    
+        }
     }
     // Update links in the Covisibility Graph
     mpCurrentKeyFrame->UpdateConnections();
@@ -352,26 +352,13 @@ void LocalMapping::CreateNewMapPoints()
         #ifdef ALLFEATURE_REAL_TIME
         if ((j <= 1) || (t_duration < 10.05))
             matcher->SearchForTriangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
-        // else{
-        //     // if (t_duration > 0.15)
-        //     //     break;
-        //     mat3f F12 = ComputeF12(mpCurrentKeyFrame,pKF2);  
-        //     for(auto& feat: mpCurrentKeyFrame->featureTypes){
-        //         vMatchedIndices[feat] = std::vector<std::pair<size_t, size_t>>{};
-        //         const DescriptorType descriptorType = GetDescriptorType(feat); 
-        //         if (feat == mpCurrentKeyFrame->featureTypes[0])
-        //             matcher->SearchForTriangulation_bybow(mpCurrentKeyFrame, pKF2, F12, vMatchedIndices.at(feat), descriptorType, feat);
-        //         else
-        //            matcher->SearchForTriangulation(mpCurrentKeyFrame, pKF2, F12, vMatchedIndices.at(feat), descriptorType, feat);
-        //     }
-        // }
         ++j;
         #else
         matcher->SearchForTriangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
         #endif
 
-        for(auto& [featureType, N_]: pKF2->N){                    
-            // Triangulate each 
+        for(auto& [featureType, N_]: pKF2->N){
+            // Triangulate each
             auto it = vMatchedIndices.find(featureType);
             if(it == vMatchedIndices.end())
                 continue;
@@ -409,16 +396,16 @@ void LocalMapping::CreateNewMapPoints()
 
                     Eigen::JacobiSVD<Eigen::Matrix<float,4,4>> svd(
                         A, Eigen::ComputeFullV
-                    );  
+                    );
 
                     const Eigen::Matrix<float,4,4>& V = svd.matrixV();
-                    Eigen::Vector4f x_h = V.col(3); 
+                    Eigen::Vector4f x_h = V.col(3);
 
                     const float w = x_h(3);
                     if (std::abs(w) < 1e-12f)
                         continue;
 
-                    x3D = x_h.head<3>() / w; 
+                    x3D = x_h.head<3>() / w;
                 }
                 else
                     continue; //No stereo and very low parallax
@@ -445,7 +432,7 @@ void LocalMapping::CreateNewMapPoints()
                 float errY1 = v1 - kp1.pt.y;
                 if((errX1*errX1+errY1*errY1) > CHI2_2DOF * sigmaSquare1)
                     continue;
-                
+
                 // Check reprojection error in second keyframe
                 const float sigmaSquare2 = pKF2->GetKeyPt1DSigma2(idx2, featureType);
                 const float x2 = Rcw2.row(0).dot(x3D) + tcw2(0);
@@ -458,7 +445,7 @@ void LocalMapping::CreateNewMapPoints()
                 float errY2 = v2 - kp2.pt.y;
                 if((errX2*errX2+errY2*errY2) > CHI2_2DOF * sigmaSquare2)
                     continue;
-                
+
                 // Check scale consistency
                 vec3f normal1 = x3D - twc1;
                 float dist1 = normal1.norm();
@@ -470,10 +457,10 @@ void LocalMapping::CreateNewMapPoints()
                     continue;
 
                 // Triangulation is succesfull
-                newMapPoints[featureType]++;   
+                newMapPoints[featureType]++;
                 Pt pMP = mpCurrentKeyFrame->CreateMonocularMapPoint(x3D, KeypointIndex(idx1),
                                                                     pKF2,  KeypointIndex(idx2),
-                                                                    featureType);                                        
+                                                                    featureType);
                 mlpRecentAddedMapPoints.push_back(pMP);
             }
         }
@@ -647,7 +634,7 @@ void LocalMapping::KeyFrameCulling()
     //         continue;
     //     if(mpCurrentKeyFrame->keyId - pKF->keyId < 3)
     //         continue;
-    //     pKF->SetBadFlag();    
+    //     pKF->SetBadFlag();
     // }
 
 
@@ -655,7 +642,7 @@ void LocalMapping::KeyFrameCulling()
     // A keyframe is considered redundant if the 90% of the MapPoints it sees, are seen
     // in at least other 3 keyframes (in the same or finer scale)
     // We only consider close stereo points
-    
+
     vector<Keyframe > vpLocalKeyFrames = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
 
     for(vector<Keyframe >::iterator vit=vpLocalKeyFrames.begin(), vend=vpLocalKeyFrames.end(); vit!=vend; vit++)
@@ -708,17 +695,17 @@ void LocalMapping::KeyFrameCulling()
                 pKF->SetBadFlag();
                 continue;
             }
-            if(nRedundantObservations > KEYFRAME_CULLING_COVISIBILITY_THRESHOLD * nMPs){  
+            if(nRedundantObservations > KEYFRAME_CULLING_COVISIBILITY_THRESHOLD * nMPs){
                 #ifdef ALLFEATURE_EVALUATION
-                    
+
                     if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) != 0){
                         if ((int(pKF->mnFrameId) % ALLFEATURE_MAX_KEYFRAMES) != 0)
                             pKF->SetBadFlag();
-                    }  
+                    }
                 #else
                     pKF->SetBadFlag();
                 #endif
-                
+
             }
     }
     }
@@ -773,7 +760,7 @@ bool LocalMapping::CheckFinish()
 void LocalMapping::SetFinish()
 {
     unique_lock<mutex> lock(mMutexFinish);
-    mbFinished = true;    
+    mbFinished = true;
     unique_lock<mutex> lock2(mMutexStop);
     mbStopped = true;
 }

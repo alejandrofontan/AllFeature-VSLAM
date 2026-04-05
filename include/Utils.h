@@ -5,7 +5,7 @@
 #ifndef ANYFEATURE_VSLAM_UTILS_H
 #define ANYFEATURE_VSLAM_UTILS_H
 
-#include "Types.h"
+#include "FeatureFactory.h"
 
 #include<opencv2/core/core.hpp>
 
@@ -18,13 +18,10 @@ namespace ANYFEATURE_VSLAM{
                    std::string color = "\x1b[0m");
     void printError(const std::string& function, const std::string& message);
 
-    std::string keypointName(const KeypointType & keypointType);
-    std::string descriptorName(const DescriptorType& descriptorType);
     std::string featureName(const FeatureType& featureType);
 
     std::string matType(const int& matTypeIndex);
     cv::Scalar getFeatureColor(const FeatureType& featureType, const int& format, const bool& normalize = false);
-    void linearRegression(float& a, float& b, float& R2, const std::vector<float>& x, const std::vector<float>& y);
     std::vector<std::vector<float>> loadBinFile(const std::string& filename, const int& numFloats);
     std::string replaceAllOccurrences(std::string str, const std::string& from, const std::string& to);
 

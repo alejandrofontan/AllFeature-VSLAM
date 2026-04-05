@@ -37,7 +37,7 @@ namespace ANYFEATURE_VSLAM
 {
 
 System::System(const string &vocabularyFolder,
-               const string &strCalibrationFile, const string &strSettingsFile,  
+               const string &strCalibrationFile, const string &strSettingsFile,
                const std::map<FeatureType, string>& feature_settings_yaml_file,
                const eSensor sensor,
                const bool activateVisualization,
@@ -79,7 +79,7 @@ System::System(const string &vocabularyFolder,
     DUtils::Random::SeedRandOnce(0);
 
     //Load ORB Vocabulary
-    vocabulary = make_shared<Vocabulary>(vocabularyFolder, GetDescriptorType(featureTypes[0]));
+    vocabulary = make_shared<Vocabulary>(vocabularyFolder, featureTypes[0]);
     vocabulary->createVocabulary();
     bool vocabularyLoaded = vocabulary->loadFromTextFile();
     if(!vocabularyLoaded){
@@ -100,12 +100,12 @@ System::System(const string &vocabularyFolder,
     // Initialize matching thresholds
     for (const auto& featureType : featureTypes)
          FeatureMatcher::setDescriptorDistanceThresholds(feature_settings_yaml_file.at(featureType), featureType);
-    
+
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
     tracker = make_shared<Tracking>(this, vocabulary, frameDrawer, mapDrawer,
                              mpMap, mpKeyFrameDatabase,
-                             strCalibrationFile, strSettingsFile, 
+                             strCalibrationFile, strSettingsFile,
                              feature_settings_yaml_file,
                              mSensor, featureTypes, fixImageSize);
 
@@ -114,7 +114,7 @@ System::System(const string &vocabularyFolder,
     mptLocalMapping = make_shared<thread>(&ANYFEATURE_VSLAM::LocalMapping::Run, localMapper);
 
     //Initialize the Loop Closing thread and launch
-    loopCloser =  make_shared<LoopClosing>(mpMap, mpKeyFrameDatabase, vocabulary, mSensor!=MONOCULAR, featureTypes[featureLoopClosure], 
+    loopCloser =  make_shared<LoopClosing>(mpMap, mpKeyFrameDatabase, vocabulary, mSensor!=MONOCULAR, featureTypes[featureLoopClosure],
         tracker->get_image_width(), tracker->get_image_height());
     mptLoopClosing = make_shared<thread>(&ANYFEATURE_VSLAM::LoopClosing::Run, loopCloser);
 
@@ -135,7 +135,7 @@ System::System(const string &vocabularyFolder,
 
     localMapper->SetTracker(tracker);
     localMapper->SetLoopCloser(loopCloser);
-    
+
     loopCloser->SetTracker(tracker);
     loopCloser->SetLocalMapper(localMapper);
     loopCloser->SetMapDrawer(mapDrawer);
@@ -150,7 +150,7 @@ mat4f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const d
     // {
     //     cerr << "ERROR: you called TrackStereo but input sensor was not set to STEREO." << endl;
     //     exit(-1);
-    // }   
+    // }
 
     // // Check mode change
     // {
@@ -196,14 +196,14 @@ mat4f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const d
 }
 
 mat4f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double &timestamp)
-{   
+{
     std::cout << "This function (System::TrackRGBD) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
     std::terminate();
     // if(mSensor!=RGBD)
     // {
     //     cerr << "ERROR: you called TrackRGBD but input sensor was not set to RGBD." << endl;
     //     exit(-1);
-    // }    
+    // }
 
     // // Check mode change
     // {
@@ -403,7 +403,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 
     for(size_t i=0; i<vpKFs.size(); i++)
     {
-        
+
         Keyframe pKF = vpKFs[i];
         #ifdef ALLFEATURE_EVALUATION
         if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) != 0){

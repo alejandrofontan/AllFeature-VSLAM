@@ -1,10 +1,21 @@
 #ifndef ANYFEATURE_VSLAM_FEATURE_SIFT128_H
 #define ANYFEATURE_VSLAM_FEATURE_SIFT128_H
 
+#include "Feature.h"
 #include "FeatureExtractor.h"
 #include "SiftGPU.h"
 
 namespace ANYFEATURE_VSLAM {
+
+    class Sift128 : public Feature {
+    public:
+        const std::string& getFeatureName()    const override { return s_featureName; }
+        const FeatureType  getType()           const override { return FEAT_SIFT128; }
+        const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
+    private:
+        inline static const std::string s_featureName    = "sift128";
+        inline static const Eigen::Matrix<float,3,1> s_color = {255, 0, 0};
+    };
 
     class FeatureExtractor_sift128 : public FeatureExtractor {
     public:

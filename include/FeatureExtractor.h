@@ -39,8 +39,7 @@ namespace ANYFEATURE_VSLAM {
         float detectTh;
         int maxNumFeatures;
 
-        FeatureExtractorSettings(const KeypointType& keypointType_,
-                                 const DescriptorType& descriptorType_,
+        FeatureExtractorSettings(const FeatureType& featureType__,
                                  const std::string &settingsYamlFile);
 
         float GetDetectorScaleFactor() const {return scaleFactor;};
@@ -49,8 +48,8 @@ namespace ANYFEATURE_VSLAM {
 
         VerbosityLevel verbosity{LOW};
 
-        KeypointType keypointType;
-        DescriptorType descriptorType;
+        FeatureType featureType;
+        
         float maxKeyPtSize{0.0};
         float minKeyPtSize{std::numeric_limits<float>::max()};
 

@@ -1,9 +1,20 @@
 #ifndef ANYFEATURE_VSLAM_FEATURE_R2D2_128_H
 #define ANYFEATURE_VSLAM_FEATURE_R2D2_128_H
 
+#include "Feature.h"
 #include "FeatureExtractor.h"
 
 namespace ANYFEATURE_VSLAM {
+
+    class R2d2_128 : public Feature {
+    public:
+        const std::string& getFeatureName()    const override { return s_featureName; }
+        const FeatureType  getType()           const override { return FEAT_R2D2; }
+        const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
+    private:
+        inline static const std::string s_featureName    = "r2d2_128";
+        inline static const Eigen::Matrix<float,3,1> s_color = {255 , 0, 255};
+    };
 
     class FeatureExtractor_r2d2_128 : public FeatureExtractor {
     public:

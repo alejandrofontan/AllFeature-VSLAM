@@ -1,9 +1,20 @@
 #ifndef ANYFEATURE_VSLAM_FEATURE_ORB32_H
 #define ANYFEATURE_VSLAM_FEATURE_ORB32_H
 
+#include "Feature.h"
 #include "FeatureExtractor.h"
 
 namespace ANYFEATURE_VSLAM {
+
+    class Orb32 : public Feature {
+    public:
+        const std::string& getFeatureName()    const override { return s_featureName; }
+        const FeatureType  getType()           const override { return FEAT_ORB; }
+        const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
+    private:
+        inline static const std::string s_featureName    = "orb32";
+        inline static const Eigen::Matrix<float,3,1> s_color = {129, 149, 251};
+    };
 
     class FeatureExtractor_orb32 : public FeatureExtractor {
     public:
@@ -12,7 +23,7 @@ namespace ANYFEATURE_VSLAM {
         const int HALF_PATCH_SIZE = 15;
         const int EDGE_THRESHOLD = 19;
         std::vector<float> mvScaleFactor;
-        std::vector<float> mvInvScaleFactor;    
+        std::vector<float> mvInvScaleFactor;
         std::vector<float> mvLevelSigma2;
         std::vector<float> mvInvLevelSigma2;
         std::vector<cv::Mat> mvImagePyramid;
@@ -30,7 +41,7 @@ namespace ANYFEATURE_VSLAM {
         [[nodiscard]] float GetKeypointSize(const cv::KeyPoint &keypoint) const override;
 
         void ComputePyramid(cv::Mat image);
-        void ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints);    
+        void ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints);
     };
 
     float DescriptorDistance_orb32(const cv::Mat &a, const cv::Mat &b);

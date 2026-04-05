@@ -35,8 +35,6 @@ MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, con
     mnCorrectedReference(0), mnBAGlobalForKF(0), mpRefKF(pRefKF), mnVisible(1), mnFound(1), mbBad(false),
     mpReplaced(static_cast<Pt>(NULL)), minDistance(0), maxDistance(0), mpMap(pMap), featureType(featureType)
 {
-    keypointType = GetKeypointType(featureType);
-    descriptorType = GetDescriptorType(featureType);
 
     XYZ = XYZ_;
     normalVector = vec3f::Zero();
@@ -56,8 +54,6 @@ MapPoint::MapPoint(const vec3f &XYZ_, shared_ptr<Map> pMap, Frame* pFrame, const
     mnCorrectedReference(0), mnBAGlobalForKF(0), mpRefKF(static_cast<Keyframe>(NULL)), mnVisible(1),
     mnFound(1), mbBad(false), mpReplaced(NULL), mpMap(pMap), featureType(featureType)
 {
-    keypointType = GetKeypointType(featureType);
-    descriptorType = GetDescriptorType(featureType);
 
     XYZ = XYZ_;
     vec3f twc = pFrame->GetCameraCenter();
@@ -327,7 +323,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
         Distances[i][i] = Descriptor_Distance_Type(0.0);
         for(size_t j = i + 1;j < N; j++)
         {
-            Descriptor_Distance_Type distij = FeatureMatcher::DescriptorDistance(descriptors[i], descriptors[j],descriptorType);
+            Descriptor_Distance_Type distij = FeatureMatcher::DescriptorDistance(descriptors[i], descriptors[j], featureType);
             Distances[i][j] = distij;
             Distances[j][i] = distij;
         }
@@ -351,7 +347,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
 
     //BestIdx = latestIndex; // Prefer the latest one
     {
-        
+
         unique_lock<mutex> lock(mMutexFeatures);
         mDescriptor = descriptors[BestIdx].clone();
         refIndex = projIndexes[BestIdx];

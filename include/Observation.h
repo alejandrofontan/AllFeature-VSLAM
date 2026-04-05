@@ -6,7 +6,7 @@
 #define ANYFEATURE_VSLAM_OBSERVATION_H
 
 #include "KeyFrame.h"
-#include "Types.h"
+#include "FeatureFactory.h"
 
 namespace ANYFEATURE_VSLAM {
 

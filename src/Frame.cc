@@ -129,10 +129,10 @@ Frame::Frame(const Image & img, const double &timeStamp,
 }
 
 void Frame::AssignFeaturesToGrid()
-{   
+{
     for(const auto [ft, N_]: N){
         int nReserve = 0.5f * N_ / (FRAME_GRID_COLS*FRAME_GRID_ROWS);
-        
+
 
         for(unsigned int i=0; i<FRAME_GRID_COLS;i++){
             for (unsigned int j=0; j<FRAME_GRID_ROWS;j++){
@@ -146,7 +146,7 @@ void Frame::AssignFeaturesToGrid()
             int nGridPosX, nGridPosY;
             if(PosInGrid(kp,nGridPosX,nGridPosY)){
                 mGrid[ft][nGridPosX][nGridPosY].push_back(i);
-            }      
+            }
         }
     }
 }
@@ -232,7 +232,7 @@ void Frame::SetPose(const mat4f& Tcw_)
 }
 
 void Frame::UpdatePoseMatrices()
-{ 
+{
     Rcw = Tcw.block<3,3>(0,0);
     tcw = Tcw.block<3,1>(0,3);
     Rwc = Rcw.transpose();
@@ -366,7 +366,7 @@ void Frame::ComputeBoW(const FeatureType& featType)
 }
 
 void Frame::UndistortKeyPoints()
-{   
+{
     for(auto& [ft,extractor] : featureExtractorLeft)
     {
         if(mDistCoef.at<float>(0)==0.0)
@@ -430,7 +430,7 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
     }
 }
 
-    void Frame::ComputeStereoMatches(const DescriptorType& descriptorType)
+    void Frame::ComputeStereoMatches(const FeatureType& featureType_)
     {
         std::cout << "This function (Frame::ComputeStereoMatches) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
         std::terminate();
@@ -496,14 +496,14 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
         const int radius = 30; // pixels
 
         for(const auto& [ft, pts]: pts)
-        {   
+        {
             for(const auto& pt : pts)
             {
                 if((!pt) || pt->isBad())
                     continue;
 
-                const int x = (int) pt->mTrackProjX;  
-                const int y = (int) pt->mTrackProjY;   
+                const int x = (int) pt->mTrackProjX;
+                const int y = (int) pt->mTrackProjY;
 
                 if (0 <= x && x < w && 0 <= y && y < h)
                 {
@@ -514,12 +514,12 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
         }
 
         for(const auto& [ft, kpts]: mvKeysUn)
-        {   
+        {
             for(const auto& kpt : kpts)
             {
-             
-                const int x = (int) kpt.pt.x;  
-                const int y = (int) kpt.pt.y;  
+
+                const int x = (int) kpt.pt.x;
+                const int y = (int) kpt.pt.y;
 
                 if (0 <= x && x < w && 0 <= y && y < h)
                 {

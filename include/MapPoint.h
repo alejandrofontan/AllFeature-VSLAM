@@ -87,7 +87,7 @@ public:
     Pt ComputeDistinctiveDescriptors();
 
     cv::Mat GetDescriptor();
-    
+
     void UpdateNormalAndDepth();
 
     float GetMinDistanceInvariance();
@@ -123,17 +123,15 @@ public:
     // Variables used by loop closing
     long unsigned int mnLoopPointForKF;
     long unsigned int mnCorrectedByKF;
-    long unsigned int mnCorrectedReference;    
+    long unsigned int mnCorrectedReference;
     vec3f PosGBA;
     long unsigned int mnBAGlobalForKF;
 
 
     static std::mutex mGlobalMutex;
     FeatureType featureType;
-    KeypointType keypointType;
-    DescriptorType descriptorType;
 
-protected:    
+protected:
 
      // Position in absolute coordinates
      vec3f XYZ;

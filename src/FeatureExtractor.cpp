@@ -11,21 +11,21 @@ using namespace cv;
 using namespace std;
 
 ANYFEATURE_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
-        const KeypointType& keypointType_, const DescriptorType& descriptorType_,
+        const FeatureType& featureType_,
         const std::string &settingsYamlFile):
-        keypointType(keypointType_), descriptorType(descriptorType_){
+        featureType(featureType_){
 
     YAML::Node settings = YAML::LoadFile(settingsYamlFile);
     nOctaves = settings["FeatureExtractor.nOctaves"].as<int>();
     scaleFactor = settings["FeatureExtractor.scaleFactor"].as<float>();
     detectTh = settings["FeatureExtractor.detectTh"].as<float>();
     maxNumFeatures = settings["FeatureExtractor.maxNumFeatures"].as<int>();
-    
+
     cout << endl  << "Loading Feature Extractor Settings from : " << settingsYamlFile << endl;
     std::cout << "- nOctaves = " << nOctaves << std::endl;
     std::cout << "- scaleFactor = " << scaleFactor << std::endl;
-    std::cout << "- detectTh = " << detectTh << std::endl; 
-    std::cout << "- maxNumFeatures = " << maxNumFeatures << std::endl;       
+    std::cout << "- detectTh = " << detectTh << std::endl;
+    std::cout << "- maxNumFeatures = " << maxNumFeatures << std::endl;
 
     maxKeyPtSize0  = pow(scaleFactorOrb,float(nOctavesOrb - 1.0));
     maxKeyPtSigma0 = pow(scaleFactorOrb,float(nOctavesOrb - 1.0));
@@ -46,7 +46,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor::operator()(const Image& img,
 
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    //medianTrackingTime(t_duration, extractorTime, "        - Extractor Time   ", TRACKING_PROFILING); 
+    //medianTrackingTime(t_duration, extractorTime, "        - Extractor Time   ", TRACKING_PROFILING);
 }
 
 void ANYFEATURE_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints){
@@ -57,7 +57,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsS
         float keyPtSize_norm{settings->maxKeyPtSize};
         if(settings->maxKeyPtSize > settings->minKeyPtSize)
             keyPtSize_norm =  1.0f +  (keyPtSize - settings->minKeyPtSize) * (settings->maxKeyPtSize0 - 1.0f)/(settings->maxKeyPtSize - settings->minKeyPtSize);
-         
+
         keyPtsSize.push_back(keyPtSize_norm);
     }
 }
@@ -95,7 +95,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor::computeSigma(std::vector<mat2f>& keyPts
 std::vector<cv::KeyPoint> ANYFEATURE_VSLAM::FeatureExtractor::DistributeOctTree(std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
                                        const int &maxX, const int &minY, const int &maxY, const int &N, const int &level)
 {
-    // Compute how many initial nodes   
+    // Compute how many initial nodes
     const int nIni = round(static_cast<float>(maxX-minX)/(maxY-minY));
 
     const float hX = static_cast<float>(maxX-minX)/nIni;
@@ -178,7 +178,7 @@ std::vector<cv::KeyPoint> ANYFEATURE_VSLAM::FeatureExtractor::DistributeOctTree(
                 // Add childs if they contain points
                 if(n1.vKeys.size()>0)
                 {
-                    lNodes.push_front(n1);                    
+                    lNodes.push_front(n1);
                     if(n1.vKeys.size()>1)
                     {
                         nToExpand++;
@@ -220,7 +220,7 @@ std::vector<cv::KeyPoint> ANYFEATURE_VSLAM::FeatureExtractor::DistributeOctTree(
                 lit=lNodes.erase(lit);
                 continue;
             }
-        }       
+        }
 
         // Finish if there are more nodes than required features
         // or all nodes contain just one point

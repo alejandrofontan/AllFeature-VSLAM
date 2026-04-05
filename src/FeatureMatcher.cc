@@ -455,7 +455,7 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
 
 void FeatureMatcher::SearchForTriangulation_bybow(const Keyframe& pKF1, const Keyframe& pKF2, const mat3f& F12,
                                             vector<pair<size_t, size_t> > &vMatchedPairs,
-                                            const DescriptorType& descriptorType, const FeatureType& ft)
+                                            const FeatureType& ft)
 {
     const DBoW2::FeatureVector &vFeatVec1 = pKF1->mFeatVec;
     const DBoW2::FeatureVector &vFeatVec2 = pKF2->mFeatVec;
@@ -514,7 +514,7 @@ void FeatureMatcher::SearchForTriangulation_bybow(const Keyframe& pKF1, const Ke
                         continue;
 
                     const cv::Mat &descriptor = pKF2->mDescriptors.at(ft).row(idx2);
-                    const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,descriptorType);
+                    const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,ft);
 
                     if(descDist > TH_LOW[ft] || descDist > bestDist)
                         continue;
@@ -567,7 +567,6 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& pKF1,
                                             const Keyframe& pKF2,
                                             const mat3f& F12,
                                             std::vector<std::pair<size_t, size_t>> &vMatchedPairs,
-                                            const DescriptorType& descriptorType,
                                             const FeatureType& ft)
 {
     auto it1 = pKF1->mDescriptors.find(ft);
@@ -619,7 +618,7 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& pKF1,
 
             const cv::Mat &descriptor = pKF2->mDescriptors.at(ft).row((int)idx2);
             const Descriptor_Distance_Type descDist =
-                DescriptorDistance(refDescriptor, descriptor, descriptorType);
+                DescriptorDistance(refDescriptor, descriptor, ft);
 
             if (descDist > TH_LOW[ft] || descDist > bestDist)
                 continue;
@@ -925,7 +924,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const vector<Pt> &vpMapPoints, const floa
             }
 
             const cv::Mat &descriptor = pKF->mDescriptors.at(featType).row(idx);
-            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->descriptorType);
+            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -1011,7 +1010,7 @@ int FeatureMatcher::SearchByProjection(Frame &F, const vector<Pt> &vpMapPoints, 
             }
 
             const cv::Mat &descriptor = F.mDescriptors.at(featType).row(idx);
-            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor, pMP->descriptorType);
+            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor, pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -1168,7 +1167,7 @@ int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vec
             //    continue;
 
             const cv::Mat &descriptor = pKF->mDescriptors.at(featType).row(idx);
-            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->descriptorType);
+            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -1246,7 +1245,7 @@ int FeatureMatcher::SearchByBoW(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMat
                         continue;
 
                     const cv::Mat &descriptor = Descriptors2.row(idx2);
-                    Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP2->descriptorType);
+                    Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP2->featureType);
 
                     if(descDist < bestDist1)
                     {
@@ -1386,7 +1385,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
             //    continue;
 
             const cv::Mat &descriptor = pKF->mDescriptors.at(featType).row(idx);
-            Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->descriptorType);
+            Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -1525,7 +1524,7 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
             //    continue;
 
             const cv::Mat &descriptor = pKF2->mDescriptors.at(featType).row(idx);
-            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->descriptorType);
+            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -1603,7 +1602,7 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
             //    continue;
 
             const cv::Mat &descriptor = pKF1->mDescriptors.at(featType).row(idx);
-            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->descriptorType);
+            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -1714,7 +1713,7 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
                         continue;
 
                     const cv::Mat &descriptor = CurrentFrame.mDescriptors.at(featType).row(i2);
-                    const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->descriptorType);
+                    const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
 
                     if(descDist < bestDist)
                     {
@@ -1741,31 +1740,31 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
     return nMatches;
 }
 
-Descriptor_Distance_Type FeatureMatcher::DescriptorDistance(const cv::Mat &a, const cv::Mat &b, const DescriptorType& descriptorType_)
+Descriptor_Distance_Type FeatureMatcher::DescriptorDistance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_)
 {
-    switch(descriptorType_) {
+    switch(featureType_) {
         // DescriptorDistance
-        case DESC_superpoint256:
+        case FEAT_SUPERPOINT256:
             return DescriptorDistance_superpoint256(a,b);
-        case DESC_ALIKED128:
+        case FEAT_ALIKED128:
              return DescriptorDistance_aliked128(a,b);
-        case DESC_ANYFEATNONBIN:
+        case FEAT_ANYFEATNONBIN:
             return DescriptorDistance_anyFeatureNonBin(a,b);
-        case DESC_ANYFEATBIN:
+        case FEAT_ANYFEATBIN:
             return DescriptorDistance_anyFeatureBin(a,b);
-        case DESC_R2D2:
+        case FEAT_R2D2:
             return DescriptorDistance_r2d2_128(a,b);
-        case DESC_SIFT128:
+        case FEAT_SIFT128:
             return DescriptorDistance_sift128(a,b);
-        case DESC_KAZE64:
+        case FEAT_KAZE64:
             return DescriptorDistance_kaze64(a,b);
-        case DESC_SURF64:
+        case FEAT_SURF64:
             return DescriptorDistance_surf64(a,b);
-        case DESC_BRISK:
+        case FEAT_BRISK:
             return DescriptorDistance_brisk48(a,b);
-        case DESC_AKAZE61:
+        case FEAT_AKAZE61:
             return DescriptorDistance_akaze61(a,b);
-        case DESC_ORB:
+        case FEAT_ORB:
             return DescriptorDistance_orb32(a,b);
     }
 }

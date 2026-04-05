@@ -6,7 +6,7 @@
 #include "sys/sysinfo.h"
 
 #include<System.h>
-#include<Types.h>
+#include<FeatureFactory.h>
 #include <yaml-cpp/yaml.h>
 #include<FrameDrawer.h>
 
@@ -186,8 +186,7 @@ int main(int argc, char **argv)
 
     vector<FeatureType> featureTypes{};
     for(const auto& feat : features) {
-        int feature_id = get_feature_id(feat);
-        auto featureType = FeatureType(feature_id);
+        auto featureType = get_feature_type(feat);
         featureTypes.push_back(featureType);
         std::cout << "[vslamlab_anyfeature_mono.cpp] Loaded feature from settings YAML: " << feat << std::endl;
     }

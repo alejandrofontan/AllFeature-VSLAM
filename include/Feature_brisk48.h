@@ -1,10 +1,21 @@
 #ifndef ANYFEATURE_VSLAM_FEATURE_BRISK48_H
 #define ANYFEATURE_VSLAM_FEATURE_BRISK48_H
 
+#include "Feature.h"
 #include "FeatureExtractor.h"
 #include "brisk/brisk.h"
 
 namespace ANYFEATURE_VSLAM {
+
+    class Brisk48 : public Feature {
+    public:
+        const std::string& getFeatureName()    const override { return s_featureName; }
+        const FeatureType  getType()           const override { return FEAT_BRISK; }
+        const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
+    private:
+        inline static const std::string s_featureName    = "brisk48";
+        inline static const Eigen::Matrix<float,3,1> s_color = {0, 122, 122};
+    };
 
     class FeatureExtractor_brisk48 : public FeatureExtractor {
     public:

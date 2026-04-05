@@ -29,6 +29,7 @@
 #include "KeyFrame.h"
 #include "Frame.h"
 #include "Feature_sift128.h"
+
 #include "matcher/lightglue/matcher.hpp"
 #include <mutex>
 
@@ -48,7 +49,7 @@ public:
     FeatureMatcher(const int& imageWidth, const int& imageHeight, float nnratio=0.6, bool checkOri=true);
 
     // Computes the Hamming distance between two ORB descriptors
-    static Descriptor_Distance_Type DescriptorDistance(const cv::Mat &a, const cv::Mat &b, const DescriptorType& descriptorType_);
+    static Descriptor_Distance_Type DescriptorDistance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_);
     cv::NormTypes getNormType(const FeatureType& featureType_);
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -98,10 +99,10 @@ public:
 
     void SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2, const mat3f& F12,
                                 std::vector<pair<size_t,size_t>>& matchedPairs,
-                                const DescriptorType& descriptorType, const FeatureType& featureType);
+                                const FeatureType& featureType);
     void SearchForTriangulation_bybow(const Keyframe& keyframe1, const Keyframe& keyframe2, const mat3f& F12,
                                 std::vector<pair<size_t,size_t>>& matchedPairs,
-                                const DescriptorType& descriptorType, const FeatureType& featureType);
+                                const FeatureType& featureType);
 
     int SearchForInitialization(const Frame &F1, const Frame &F2, std::vector<cv::Point2f> &pointsPrevMatched, std::vector<int> &matches12, const FeatureType& featureType);
 

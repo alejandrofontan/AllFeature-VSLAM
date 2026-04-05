@@ -31,7 +31,7 @@
 #include "FeatureVocabulary.h"
 #include "KeyFrame.h"
 #include "FeatureExtractor.h"
-#include "Types.h"
+#include "FeatureFactory.h"
 #include "Vocabulary.h"
 #include <opencv2/opencv.hpp>
 
@@ -102,7 +102,7 @@ public:
 
     // Search a match for each keypoint in the left image to a keypoint in the right image.
     // If there is a match, depth is computed and the right coordinate associated to the left keypoint is stored.
-    void ComputeStereoMatches(const DescriptorType& descriptorType);
+    void ComputeStereoMatches(const FeatureType& featureType);
 
     // Associate a "right" coordinate to a keypoint if there is valid depth in the depthmap.
     void ComputeStereoFromRGBD(const cv::Mat &imDepth);
@@ -123,7 +123,7 @@ public:
 public:
 
     std::vector<FeatureType> featureTypes;
-    std::map<FrameId, std::vector<cv::DMatch>> cache_matchedPairs{};      
+    std::map<FrameId, std::vector<cv::DMatch>> cache_matchedPairs{};
 
     // Vocabulary used for relocalization.
     shared_ptr<Vocabulary> vocabulary;
@@ -146,7 +146,7 @@ public:
     static float invfy;
     cv::Mat mDistCoef;
     int w;
-    int h; 
+    int h;
 
     // Stereo baseline multiplied by fx.
     float mbf;
