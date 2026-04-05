@@ -207,89 +207,10 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
     // Optimize!
     optimizer.initializeOptimization();
     optimizer.optimize(nIterations);
-    
+
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
     std::cout << std::fixed << std::setprecision(2) << "Optimization time: " << t_duration * 1000 << " s" << std::endl;
-
-    // const std::string orb_path = "/home/alejandro/rss26_tests/covariances/orb_errors.txt";
-    // const std::string akaze_path = "/home/alejandro/rss26_tests/covariances/akaze_errors.txt";
-    // const std::string brisk_path = "/home/alejandro/rss26_tests/covariances/brisk_errors.txt";
-    // const std::string sift_path = "/home/alejandro/rss26_tests/covariances/sift_errors.txt";
-    // const std::string aliked_path = "/home/alejandro/rss26_tests/covariances/aliked_errors.txt";
-    // const std::string kaze_path = "/home/alejandro/rss26_tests/covariances/kaze_errors.txt";
-
-    // std::ofstream orb_ofs(orb_path, std::ios::out | std::ios::trunc);
-    // std::ofstream akaze_ofs(akaze_path, std::ios::out | std::ios::trunc);
-    // std::ofstream brisk_ofs(brisk_path, std::ios::out | std::ios::trunc);
-    // std::ofstream sift_ofs(sift_path, std::ios::out | std::ios::trunc);
-    // std::ofstream aliked_ofs(aliked_path, std::ios::out | std::ios::trunc);
-    // std::ofstream kaze_ofs(kaze_path, std::ios::out | std::ios::trunc);
-
-    // if (orb_ofs.is_open()) orb_ofs << std::setprecision(10);
-    // if (akaze_ofs.is_open()) akaze_ofs << std::setprecision(10);
-    // if (brisk_ofs.is_open()) brisk_ofs << std::setprecision(10);
-    // if (sift_ofs.is_open()) sift_ofs << std::setprecision(10);
-    // if (aliked_ofs.is_open()) aliked_ofs << std::setprecision(10);
-    // if (kaze_ofs.is_open()) kaze_ofs << std::setprecision(10);
-
-    // for(size_t i=0, iend=vpEdgesMono.size(); i<iend;i++)
-    // {
-    //     g2o::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
-
-    //     Pt pMP = vpMapPointEdgeMono[i];
-
-    //     if(pMP->isBad())
-    //         continue;
-
-    //     e->computeError();
-    //     if(e->chi2() > chi2_2dof || !e->isDepthPositive())
-    //     {
-    //         continue;
-    //     }
-    //     if(!e->isDepthPositive())
-    //     {
-    //         continue;
-    //     }
-        
-    //     double error_u, error_v;
-    //     e->get_error(error_u, error_v);
-    //     if (pMP->featureType == FEAT_ORB) {
-    //         double information;
-    //         e-> getInformation(information);
-    //         if (information < 1.0) {
-    //             continue;
-    //         }
-    //         if (orb_ofs.is_open()) orb_ofs << error_u << "\n";
-    //         if (orb_ofs.is_open()) orb_ofs << error_v << "\n";
-    //     }
-    //     if (pMP->featureType == FEAT_AKAZE61) {
-    //         if (akaze_ofs.is_open()) akaze_ofs << error_u << "\n";
-    //         if (akaze_ofs.is_open()) akaze_ofs << error_v << "\n";
-    //     }
-    //     if (pMP->featureType == FEAT_BRISK) {
-    //         if (brisk_ofs.is_open()) brisk_ofs << error_u << "\n";
-    //         if (brisk_ofs.is_open()) brisk_ofs << error_v << "\n";
-    //     }
-    //     if (pMP->featureType == FEAT_SIFT128) {
-    //         if (sift_ofs.is_open()) sift_ofs << error_u << "\n";
-    //         if (sift_ofs.is_open()) sift_ofs << error_v << "\n";
-    //     }
-    //     if (pMP->featureType == FEAT_ALIKED128) {
-    //         if (aliked_ofs.is_open()) aliked_ofs << error_u << "\n";
-    //         if (aliked_ofs.is_open()) aliked_ofs << error_v << "\n";
-    //     }
-    //     if (pMP->featureType == FEAT_KAZE64) {
-    //         if (kaze_ofs.is_open()) kaze_ofs << error_u << "\n";
-    //         if (kaze_ofs.is_open()) kaze_ofs << error_v << "\n";
-    //     }
-    // }
-    // if (orb_ofs.is_open()) orb_ofs.close();
-    // if (akaze_ofs.is_open()) akaze_ofs.close();
-    // if (brisk_ofs.is_open()) brisk_ofs.close();
-    // if (sift_ofs.is_open()) sift_ofs.close();
-    // if (aliked_ofs.is_open()) aliked_ofs.close();
-    // if (kaze_ofs.is_open()) kaze_ofs.close();
 
     // Recover optimized data
     //Keyframes
@@ -372,10 +293,10 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     unique_lock<mutex> lock(MapPoint::mGlobalMutex);
     for (auto& [ft, pts] : pFrame->pts) {
         for(int i = 0; i < pFrame->N.at(ft); i++)
-        {   
+        {
             Pt pMP = pFrame->pts[ft][i];
             if(pMP)
-            {   
+            {
                 // mono observation
                 if(pFrame->mvuRight.at(ft)[i] < 0)
                 {
@@ -487,7 +408,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                 const float chi2 = e->chi2();
 
                 if(chi2 > chi2Mono[it])
-                {                
+                {
                     pFrame->mvbOutlier.at(ft)[idx]=true;
                     e->setLevel(1);
                     nBad++;
@@ -524,7 +445,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                     nBad++;
                 }
                 else
-                {                
+                {
                     e->setLevel(0);
                     pFrame->mvbOutlier.at(ft)[idx]=false;
                 }
@@ -535,7 +456,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
         }
         if(optimizer.edges().size()<10)
             break;
-    }    
+    }
 
     // Recover optimized pose and return number of inliers
     g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
@@ -546,7 +467,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
 }
 
 void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr<Map> pMap)
-{    
+{
 
     // Local KeyFrames: First Breath Search from Current Keyframe
     list<Keyframe> lLocalKeyFrames;
@@ -599,7 +520,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
             Keyframe pKFi = obs.second->projKeyframe;
 
             if(pKFi->mnBALocalForKF!=pKF->keyId && pKFi->mnBAFixedForKF != pKF->keyId)
-            {                
+            {
                 pKFi->mnBAFixedForKF=pKF->keyId;
                 if(!pKFi->isBad())
                     lFixedCameras.push_back(pKFi);
@@ -687,7 +608,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
             Keyframe pKFi = obs.second->projKeyframe;
 
             if(!pKFi->isBad())
-            {                
+            {
                 const cv::KeyPoint &kpUn = pKFi->mvKeysUn.at(featType)[obs.second->projIndex];
 
                 // mono observation
@@ -810,7 +731,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
     vector<pair<Keyframe,Pt> > vToErase;
     vToErase.reserve(vpEdgesMono.size()+vpEdgesStereo.size());
 
-    // Check inlier observations       
+    // Check inlier observations
     for(size_t i=0, iend=vpEdgesMono.size(); i<iend;i++)
     {
         g2o::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
@@ -1160,7 +1081,7 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
     const vec3f t2w = pKF2->GetTranslation();
 
     // Set Sim3 vertex
-    g2o::VertexSim3Expmap * vSim3 = new g2o::VertexSim3Expmap();    
+    g2o::VertexSim3Expmap * vSim3 = new g2o::VertexSim3Expmap();
     vSim3->_fix_scale=bFixScale;
     vSim3->setEstimate(g2oS12);
     vSim3->setId(0);

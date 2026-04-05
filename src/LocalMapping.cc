@@ -497,8 +497,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
     for(vector<Keyframe >::iterator vit=vpTargetKFs.begin(), vend=vpTargetKFs.end(); vit!=vend; vit++)
     {
         Keyframe  pKFi = *vit;
-        //if (featureType == FEAT_ORB)
-            matcher->Fuse(pKFi,vpMapPointMatches, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
+        matcher->Fuse(pKFi,vpMapPointMatches, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
     }
 
     // Search matches by projection from target KFs in current KF
@@ -523,8 +522,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
         }
     }
 
-    //if (featureType == FEAT_ORB)
-        matcher->Fuse(mpCurrentKeyFrame,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
+    matcher->Fuse(mpCurrentKeyFrame,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
 
     // Update points
     vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches(featureType);

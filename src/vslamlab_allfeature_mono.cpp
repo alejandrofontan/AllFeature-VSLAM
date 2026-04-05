@@ -191,16 +191,6 @@ int main(int argc, char **argv)
         std::cout << "[vslamlab_anyfeature_mono.cpp] Loaded feature from settings YAML: " << feat << std::endl;
     }
 
-    std::map<FeatureType, string> feature_settings_yaml_file;
-    feature_settings_yaml_file[FEAT_ORB] = "settings/orb32_settings.yaml";
-    feature_settings_yaml_file[FEAT_AKAZE61] = "settings/akaze61_settings.yaml";
-    feature_settings_yaml_file[FEAT_BRISK] = "settings/brisk48_settings.yaml";
-    feature_settings_yaml_file[FEAT_SURF64] = "settings/surf64_settings.yaml";
-    feature_settings_yaml_file[FEAT_KAZE64] = "settings/kaze64_settings.yaml";
-    feature_settings_yaml_file[FEAT_SIFT128] = "settings/sift128_settings.yaml";
-    feature_settings_yaml_file[FEAT_ALIKED128] = "settings/aliked128_settings.yaml";
-    feature_settings_yaml_file[FEAT_SUPERPOINT256] = "settings/superpoint256_settings.yaml";
-
     // Retrieve paths to images
     vector<string> imageFilenames{};
     vector<ANYFEATURE_VSLAM::Seconds> timestamps{};
@@ -212,7 +202,7 @@ int main(int argc, char **argv)
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
 
     ANYFEATURE_VSLAM::System SLAM(path_to_vocabulary_folder,
-                                  calibration_yaml, settings_yaml, feature_settings_yaml_file,
+                                  calibration_yaml, settings_yaml,
                                   ANYFEATURE_VSLAM::System::MONOCULAR,
                                   verbose,
                                   featureTypes,

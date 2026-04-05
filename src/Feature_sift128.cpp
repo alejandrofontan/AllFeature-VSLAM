@@ -14,7 +14,7 @@ ANYFEATURE_VSLAM::FeatureExtractor_sift128::FeatureExtractor_sift128(std::shared
     std::vector<std::string> sift_gpu_args;
     sift_gpu_args.push_back("./sift_gpu");
 
-    // Use CUDA version       
+    // Use CUDA version
     sift_gpu_args.push_back("-cuda");
     sift_gpu_args.push_back(std::to_string(0));
 
@@ -71,10 +71,9 @@ ANYFEATURE_VSLAM::FeatureExtractor_sift128::FeatureExtractor_sift128(std::shared
 }
 
 void ANYFEATURE_VSLAM::FeatureExtractor_sift128::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
- 
+
     detectKeypoints(keypoints, img, settings->detectTh, settings->nOctaves);
     computeDescriptors(descriptors, img);
-
     // Normalize octave and size
     for (int i = 0; i < (int)keypoints.size(); ++i){
         keypoints[i].size = 1.0;
@@ -101,7 +100,6 @@ void ANYFEATURE_VSLAM::FeatureExtractor_sift128::detectKeypoints(
         keyPt.response = 1.0;
         keypoints.push_back(keyPt);
         ++iKey;
-        //std::cout << keyPt.size << " " << keyPt.octave << " " << keyPt.angle << " " << keyPt.response << " " <<std::endl;
     }
 }
 

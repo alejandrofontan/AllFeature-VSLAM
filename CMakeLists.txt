@@ -126,10 +126,10 @@ target_link_libraries(${PROJECT_NAME}
         ${brisk_LIBRARIES}
         ${akaze_LIBRARIES}
         ${Pangolin_LIBRARIES}
-        SiftGPU::sift_gpu
-        LightGlue::lib
         OpenMP::OpenMP_CXX
+        LightGlue::lib
         superpoint_lightglue_lib
+        SiftGPU::sift_gpu
 )
 
 

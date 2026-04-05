@@ -38,7 +38,6 @@ namespace ANYFEATURE_VSLAM
 
 System::System(const string &vocabularyFolder,
                const string &strCalibrationFile, const string &strSettingsFile,
-               const std::map<FeatureType, string>& feature_settings_yaml_file,
                const eSensor sensor,
                const bool activateVisualization,
                const vector<FeatureType>& featureTypes,
@@ -97,9 +96,17 @@ System::System(const string &vocabularyFolder,
     frameDrawer = make_shared<FrameDrawer>(mpMap,featureTypes);
     mapDrawer = make_shared<MapDrawer>(mpMap, strSettingsFile,featureTypes);
 
+    // Feature settings yaml file
+    std::map<FeatureType, string> feature_settings_yaml_file;
+    for (const auto& featureType : featureTypes){
+        std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featureType);
+        feature_settings_yaml_file[featureType] = ft->getSettingsYamlFile();
+    }
+
     // Initialize matching thresholds
-    for (const auto& featureType : featureTypes)
+    for (const auto& featureType : featureTypes){
          FeatureMatcher::setDescriptorDistanceThresholds(feature_settings_yaml_file.at(featureType), featureType);
+    }
 
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)

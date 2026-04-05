@@ -50,14 +50,13 @@ public:
 
     // Computes the Hamming distance between two ORB descriptors
     static Descriptor_Distance_Type DescriptorDistance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_);
-    cv::NormTypes getNormType(const FeatureType& featureType_);
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     std::vector<cv::DMatch> featureMatching_0(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft);
     std::vector<cv::DMatch> featureMatching_1(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& ft);
     std::vector<cv::DMatch> featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft,
-       bool lightglue, bool robustMatching, int outlierMehod = cv::FM_RANSAC);
+       int outlierMehod = cv::FM_RANSAC);
 
     std::vector<cv::DMatch> lightglueMatching(
             const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
@@ -193,10 +192,7 @@ protected:
 
     // SearchForInitialization Frame-Frame
     // Tracking::MonocularInitialization
-    static const bool sFI_ff_lightglue = true;
-    static const bool sFI_ff_robustMatching = true;
     static const int  sFI_ff_outlierMethod = cv::FM_RANSAC;
-
 
     std::mutex lightglue_superpoint_mutex_;
 };

@@ -1267,42 +1267,8 @@ shared_ptr<FeatureExtractor> Tracking::getFeatureExtractor(const int& scaleNumFe
     shared_ptr<FeatureExtractorSettings> extractorSettings = make_shared<FeatureExtractorSettings>(featureType, featureSettingsYamlFile);
     extractorSettings->maxNumFeatures *= scaleNumFeaturesMonocular_;
 
-    switch (featureType) {
-        case FEAT_SUPERPOINT256:{
-            return std::make_shared<FeatureExtractor_superpoint256>(extractorSettings);
-        }
-        case FEAT_ALIKED128:{
-            return std::make_shared<FeatureExtractor_aliked128>(extractorSettings);
-        }
-        case FEAT_ANYFEATNONBIN:{
-            return std::make_shared<FeatureExtractor_anyFeatNonBin>(extractorSettings);
-        }
-        case FEAT_ANYFEATBIN:{
-            return std::make_shared<FeatureExtractor_anyFeatBin>(extractorSettings);
-        }
-        case FEAT_R2D2:{
-            return std::make_shared<FeatureExtractor_r2d2_128>(extractorSettings);
-        }
-        case FEAT_SIFT128:{
-            return std::make_shared<FeatureExtractor_sift128>(extractorSettings);
-        }
-        case FEAT_KAZE64:{
-            return std::make_shared<FeatureExtractor_kaze64>(extractorSettings);
-        }
-        case FEAT_SURF64:{
-            return std::make_shared<FeatureExtractor_surf64>(extractorSettings);
-        }
-        case FEAT_AKAZE61:{
-            return std::make_shared<FeatureExtractor_akaze61>(extractorSettings);
-        }
-        case FEAT_BRISK:{
-            return std::make_shared<FeatureExtractor_brisk48>(extractorSettings);
-        }
-        case FEAT_ORB: {
-            return std::make_shared<FeatureExtractor_orb32>(extractorSettings);
-        }
-    }
-    return nullptr;
+    std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featureType);
+    return ft->createExtractor(extractorSettings);
 }
 
 void Tracking::getGrayImage(cv::Mat& im , const bool& rgb){

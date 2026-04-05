@@ -7,13 +7,21 @@
 
 namespace ANYFEATURE_VSLAM {
 
+    class FeatureExtractor_aliked128;
+
     class Aliked128 : public Feature {
     public:
         const std::string& getFeatureName()    const override { return s_featureName; }
         const FeatureType  getType()           const override { return FEAT_ALIKED128; }
+        const MatcherType getMatcherType()     const override { return LIGHTGLUE_ALIKED; }
         const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
+        const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
+        float DescriptorDistance(const cv::Mat &a, const cv::Mat &b) const override { return (Descriptor_Distance_Type) cv::norm(a, b, cv::NORM_L2); };
+        std::shared_ptr<FeatureExtractor> createExtractor(
+            std::shared_ptr<FeatureExtractorSettings> settings) const override;
     private:
         inline static const std::string s_featureName    = "aliked128";
+        inline static const std::string s_settingsYamlFile = "settings/aliked128_settings.yaml";
         inline static const Eigen::Matrix<float,3,1> s_color = {181, 243, 249};
     };
 
@@ -30,6 +38,11 @@ namespace ANYFEATURE_VSLAM {
         [[nodiscard]] int GetKeypointOctave(const cv::KeyPoint &keypoint) const override;
         [[nodiscard]] float GetKeypointSize(const cv::KeyPoint &keypoint) const override;
     };
+
+    inline std::shared_ptr<FeatureExtractor> Aliked128::createExtractor(
+        std::shared_ptr<FeatureExtractorSettings> settings) const {
+        return std::make_shared<FeatureExtractor_aliked128>(settings);
+    }
 
     float DescriptorDistance_aliked128(const cv::Mat &a, const cv::Mat &b);
 

@@ -22,6 +22,14 @@ enum FeatureType {
     FEAT_ORB = 0,
 };
 
+enum MatcherType {
+    LIGHTGLUE_SUPERPOINT = 4,
+    LIGHTGLUE_ALIKED = 3,
+    LIGHTGLUE_SIFT = 2,
+    BF_L2 = 1,
+    BF_HAMMING = 0
+};
+
 //typedef int Descriptor_Distance_Type;
 typedef float Descriptor_Distance_Type;
 

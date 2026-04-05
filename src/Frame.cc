@@ -206,25 +206,6 @@ void Frame::ExtractFeatures(int flag, const Image& img)
     maxKeyPtSigma = featureExtractorLeft.begin()->second->GetMaxKeyPtSigma();
 }
 
-
-// void Frame::ExtractFeatures(int flag, const Image & img)
-// {
-//     featureTypes.clear();
-//     Ntotal = 0;
-//     for(auto& [ft, extractor] : featureExtractorLeft){
-//         // if((ft != FEAT_ORB) && (mnId % 15) != 0){
-//         //     continue;
-//         // }
-//         (*extractor)(img, mvKeys[ft], mDescriptors[ft], keyPtsSigma2[ft], keyPtsInf[ft], keyPtsSize[ft]);
-//         N[ft] = mvKeys[ft].size();
-//         Ntotal += N[ft];
-//         featureTypes.push_back(ft);
-//         //std::cout << "Extracted " << N[ft] << " keypoints of type " << ft << std::endl;
-//     }
-//     maxKeyPtSize = featureExtractorLeft.begin()->second->GetMaxKeyPtSize();
-//     maxKeyPtSigma = featureExtractorLeft.begin()->second->GetMaxKeyPtSigma();
-// }
-
 void Frame::SetPose(const mat4f& Tcw_)
 {
     Tcw = Tcw_;

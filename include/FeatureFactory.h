@@ -70,7 +70,7 @@ inline FeatureType get_feature_type(const std::string& str) {
     } else if (str == "superpoint256") {
         return FEAT_SUPERPOINT256;
     } else {
-        return FEAT_ORB;
+        std::terminate();
     }
 }
 

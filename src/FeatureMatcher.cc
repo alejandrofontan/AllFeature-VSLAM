@@ -45,6 +45,7 @@ FeatureMatcher::FeatureMatcher(const int& imageWidth, const int& imageHeight, fl
     mfNNratio(nnratio), mbCheckOrientation(checkOri), imageWidth(imageWidth), imageHeight(imageHeight)
 {
     std::cout << "Initializing SiftMatchGPU..." << std::endl;
+
     sift_match_gpu_ = SiftMatchGPU();
     sift_match_gpu_.SetLanguage(SiftMatchGPU::SIFTMATCH_CUDA);
     if (sift_match_gpu_.VerifyContextGL() == 0) {
@@ -269,7 +270,7 @@ int FeatureMatcher::SearchForInitialization(const Frame &F1, const Frame &F2,
         return 0;
 
     std::vector<cv::DMatch> matches = featureMatching_2(F1.mDescriptors.at(featType), F2.mDescriptors.at(featType),
-         F1.mvKeysUn.at(featType), F2.mvKeysUn.at(featType), featType, sFI_ff_lightglue, sFI_ff_robustMatching, sFI_ff_outlierMethod);
+         F1.mvKeysUn.at(featType), F2.mvKeysUn.at(featType), featType, sFI_ff_outlierMethod);
 
     int numMatches = 0;
     matches12 = vector<int>(F1.mvKeysUn.at(featType).size(),-1);
@@ -1742,58 +1743,8 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
 
 Descriptor_Distance_Type FeatureMatcher::DescriptorDistance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_)
 {
-    switch(featureType_) {
-        // DescriptorDistance
-        case FEAT_SUPERPOINT256:
-            return DescriptorDistance_superpoint256(a,b);
-        case FEAT_ALIKED128:
-             return DescriptorDistance_aliked128(a,b);
-        case FEAT_ANYFEATNONBIN:
-            return DescriptorDistance_anyFeatureNonBin(a,b);
-        case FEAT_ANYFEATBIN:
-            return DescriptorDistance_anyFeatureBin(a,b);
-        case FEAT_R2D2:
-            return DescriptorDistance_r2d2_128(a,b);
-        case FEAT_SIFT128:
-            return DescriptorDistance_sift128(a,b);
-        case FEAT_KAZE64:
-            return DescriptorDistance_kaze64(a,b);
-        case FEAT_SURF64:
-            return DescriptorDistance_surf64(a,b);
-        case FEAT_BRISK:
-            return DescriptorDistance_brisk48(a,b);
-        case FEAT_AKAZE61:
-            return DescriptorDistance_akaze61(a,b);
-        case FEAT_ORB:
-            return DescriptorDistance_orb32(a,b);
-    }
-}
-
-cv::NormTypes FeatureMatcher::getNormType(const FeatureType& featureType_){
-    switch(featureType_) {
-        case FEAT_SUPERPOINT256:
-            return cv::NORM_L2;
-        case FEAT_ALIKED128:
-            return cv::NORM_L2;
-        case FEAT_ANYFEATNONBIN:
-            return cv::NORM_L2;
-        case FEAT_ANYFEATBIN:
-            return cv::NORM_HAMMING;
-        case FEAT_R2D2:
-            return cv::NORM_L2;
-        case FEAT_SIFT128:
-            return cv::NORM_L2;
-        case FEAT_KAZE64:
-            return cv::NORM_L2;
-        case FEAT_SURF64:
-            return cv::NORM_L2;
-        case FEAT_BRISK:
-            return cv::NORM_HAMMING;
-        case FEAT_AKAZE61:
-            return cv::NORM_HAMMING;
-        case FEAT_ORB:
-            return cv::NORM_HAMMING;
-    }
+    std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featureType_);
+    return ft->DescriptorDistance(a,b);
 }
 
 void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType) {
@@ -1902,82 +1853,74 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
     }
 
     std::vector<cv::DMatch> FeatureMatcher::featureMatching_1(
-        const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& ft){
+        const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& featType_){
+
+        std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featType_);
+        MatcherType matcherType = ft->getMatcherType();
 
         std::vector<cv::DMatch> matches;
-        switch(ft) {
-            case FEAT_SUPERPOINT256:
-            case FEAT_ALIKED128:
-            case FEAT_ANYFEATNONBIN:
-            case FEAT_KAZE64:
-            case FEAT_SURF64:
-            case FEAT_R2D2:
+        switch(matcherType) {
+            case LIGHTGLUE_SUPERPOINT:
+            case LIGHTGLUE_ALIKED:
+            case BF_L2:{
                 bf_matcher_L2.match(desc1, desc2, matches);
                 break;
-            case FEAT_SIFT128:
-                {
-                    sift_match_gpu_.SetDescriptors(0, desc1.rows, desc1.ptr<float>());
-                    sift_match_gpu_.SetDescriptors(1, desc2.rows, desc2.ptr<float>());
-
-                    const int max_out = 4000;
-                    uint32_t (*match_buffer)[2] = new uint32_t[max_out][2];
-
-                    int num_matches = sift_match_gpu_.GetSiftMatch(max_out, match_buffer, 0.7f, 0.8f, 1);
-
-                    matches.clear();
-                    matches.reserve(num_matches);
-                    for (int i = 0; i < num_matches; ++i) {
-                        matches.emplace_back(
-                            static_cast<int>(match_buffer[i][0]),
-                            static_cast<int>(match_buffer[i][1]),
-                            0.0f);
-                    }
-                    delete[] match_buffer;
-                    break;
+            }
+            case LIGHTGLUE_SIFT:
+            {
+                sift_match_gpu_.SetDescriptors(0, desc1.rows, desc1.ptr<float>());
+                sift_match_gpu_.SetDescriptors(1, desc2.rows, desc2.ptr<float>());
+                const int max_out = 4000;
+                uint32_t (*match_buffer)[2] = new uint32_t[max_out][2];
+                int num_matches = sift_match_gpu_.GetSiftMatch(max_out, match_buffer, 0.7f, 0.8f, 1);
+                matches.clear();
+                matches.reserve(num_matches);
+                for (int i = 0; i < num_matches; ++i) {
+                    matches.emplace_back(
+                        static_cast<int>(match_buffer[i][0]),
+                        static_cast<int>(match_buffer[i][1]),
+                        0.0f);
                 }
-            case FEAT_ANYFEATBIN:
-            case FEAT_BRISK:
-            case FEAT_AKAZE61:
-            case FEAT_ORB:
+                delete[] match_buffer;
+                break;
+            }
+            case BF_HAMMING:
+            {
                 bf_matcher_hamming.match(desc1, desc2, matches);
                 break;
+            }
         }
+
         return matches;
     }
 
     std::vector<cv::DMatch> FeatureMatcher::featureMatching_0(
         const cv::Mat& desc1, const cv::Mat& desc2,
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-        const FeatureType& ft){
+        const FeatureType& featType_){
+
+        std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featType_);
+        MatcherType matcherType = ft->getMatcherType();
 
         std::vector<cv::DMatch> matches;
-        switch(ft) {
-            case FEAT_SIFT128:
-            case FEAT_ALIKED128:
-                {
-                    matches = lightglueMatching(kps1, desc1, kps2, desc2, 0.0f);
-                    break;
-                }
-            case FEAT_SUPERPOINT256:
-                {
-                    matches = matcherLightglueSuperpoint(kps1, desc1, kps2, desc2, 0.0f);
-                    //std::cout << "kps1 size: " << kps1.size() << ", kps2 size: " << kps2.size() << std::endl;
-                    //std::cout << "FeatureMatcher::featureMatching_0: " << matches.size() << " matches found with LightGlue SuperPoint." << std::endl;
-                    //std::terminate();
-                    break;
-                }
-            case FEAT_ANYFEATNONBIN:
-            case FEAT_R2D2:
-            case FEAT_KAZE64:
-            case FEAT_SURF64:
+        switch(matcherType) {
+            case LIGHTGLUE_SIFT:
+            case LIGHTGLUE_ALIKED:
+            {
+                matches = lightglueMatching(kps1, desc1, kps2, desc2, 0.0f);
+                break;
+            }
+            case LIGHTGLUE_SUPERPOINT:
+            {
+                matches = matcherLightglueSuperpoint(kps1, desc1, kps2, desc2, 0.0f);
+                break;
+            }
+            case BF_L2:
             {
                 bf_matcher_L2.match(desc1, desc2, matches);
                 break;
             }
-            case FEAT_ANYFEATBIN:
-            case FEAT_BRISK:
-            case FEAT_AKAZE61:
-            case FEAT_ORB:
+            case BF_HAMMING:
             {
                 bf_matcher_hamming.match(desc1, desc2, matches);
                 break;
@@ -1988,39 +1931,39 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
     }
 
     std::vector<cv::DMatch> FeatureMatcher::featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft,
-        bool lightglue, bool robustMatching, int outlierMehod){
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& featType_,
+        int outlierMehod){
+
+        std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featType_);
+        MatcherType matcherType = ft->getMatcherType();
 
         std::vector<cv::DMatch> matches;
-        switch(ft) {
-            case FEAT_SIFT128:
-            case FEAT_ALIKED128:
-                if (lightglue){
-                    matches = lightglueMatching(kps1, desc1, kps2, desc2, 0.0f);
-                    break;
-                }
-            case FEAT_SUPERPOINT256:
-            case FEAT_ANYFEATNONBIN:
-            case FEAT_R2D2:
-            case FEAT_KAZE64:
-            case FEAT_SURF64:
+
+        switch(matcherType) {
+            case LIGHTGLUE_SIFT:
+            case LIGHTGLUE_ALIKED:
+            {
+                matches = lightglueMatching(kps1, desc1, kps2, desc2, 0.0f);
+                break;
+            }
+            case LIGHTGLUE_SUPERPOINT:
+            {
+                matches = matcherLightglueSuperpoint(kps1, desc1, kps2, desc2, 0.0f);
+                break;
+            }
+            case BF_L2:
             {
                 bf_matcher_L2.match(desc1, desc2, matches);
                 break;
             }
-            case FEAT_ANYFEATBIN:
-            case FEAT_BRISK:
-            case FEAT_AKAZE61:
-            case FEAT_ORB:
+            case BF_HAMMING:
             {
                 bf_matcher_hamming.match(desc1, desc2, matches);
                 break;
             }
         }
 
-        if (robustMatching)
-            return robustFeatureMatching(matches, kps1, kps2, outlierMehod);
-        return matches;
+        return robustFeatureMatching(matches, kps1, kps2, outlierMehod);
     }
 
     std::vector<cv::DMatch> FeatureMatcher::robustFeatureMatching(std::vector<cv::DMatch>& matches,

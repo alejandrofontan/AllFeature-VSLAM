@@ -8,13 +8,21 @@
 
 namespace ANYFEATURE_VSLAM {
 
+    class FeatureExtractor_surf64;
+
     class Surf64 : public Feature {
     public:
         const std::string& getFeatureName()    const override { return s_featureName; }
         const FeatureType  getType()           const override { return FEAT_SURF64; }
+        const MatcherType getMatcherType()     const override { return BF_L2; }
         const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
+        const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
+        float DescriptorDistance(const cv::Mat &a, const cv::Mat &b) const override { return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2); };
+        std::shared_ptr<FeatureExtractor> createExtractor(
+            std::shared_ptr<FeatureExtractorSettings> settings) const override;
     private:
         inline static const std::string s_featureName    = "surf64";
+        inline static const std::string s_settingsYamlFile = "settings/surf64_settings.yaml";
         inline static const Eigen::Matrix<float,3,1> s_color = {0, 0, 255};
     };
 
@@ -30,6 +38,11 @@ namespace ANYFEATURE_VSLAM {
         [[nodiscard]] int GetKeypointOctave(const cv::KeyPoint &keypoint) const override;
         [[nodiscard]] float GetKeypointSize(const cv::KeyPoint &keypoint) const override;
     };
+
+    inline std::shared_ptr<FeatureExtractor> Surf64::createExtractor(
+        std::shared_ptr<FeatureExtractorSettings> settings) const {
+        return std::make_shared<FeatureExtractor_surf64>(settings);
+    }
 
     float DescriptorDistance_surf64(const cv::Mat &a, const cv::Mat &b);
 }

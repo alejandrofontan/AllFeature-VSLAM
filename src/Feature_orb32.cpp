@@ -1,10 +1,29 @@
 #include "Feature_orb32.h"
 
+float ANYFEATURE_VSLAM::Orb32::DescriptorDistance(const cv::Mat &a, const cv::Mat &b) const {
+    // Bit set count operation from
+    // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
+    const int *pa = a.ptr<int32_t>();
+    const int *pb = b.ptr<int32_t>();
+
+    int dist=0;
+
+    for(int i=0; i<8; i++, pa++, pb++)
+    {
+        unsigned  int v = *pa ^ *pb;
+        v = v - ((v >> 1) & 0x55555555);
+        v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+        dist += (((v + (v >> 4)) & 0xF0F0F0F) * 0x1010101) >> 24;
+    }
+
+    return Descriptor_Distance_Type(dist);
+}
+
 ANYFEATURE_VSLAM::FeatureExtractor_orb32::FeatureExtractor_orb32(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
 
     iniThFAST = settings->detectTh;
-    
+
     mvScaleFactor.resize(settings->nOctaves);
     mvLevelSigma2.resize(settings->nOctaves);
     mvScaleFactor[0]=1.0f;
@@ -69,7 +88,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor_orb32::detectAndCompute(const Image& img
     int nkeypoints = 0;
     for (int level = 0; level < settings->nOctaves; ++level)
         nkeypoints += (int)allKeypoints[level].size();
-   
+
     _descriptors.create(nkeypoints, 32, CV_8U);
     int offset = 0;
     for (int level = 0; level < settings->nOctaves; ++level)
@@ -141,12 +160,12 @@ void ANYFEATURE_VSLAM::FeatureExtractor_orb32::ComputePyramid(cv::Mat image)
             cv::resize(mvImagePyramid[level-1], mvImagePyramid[level], sz, 0, 0, cv::INTER_LINEAR);
 
             cv::copyMakeBorder(mvImagePyramid[level], temp, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD,
-                           cv::BORDER_REFLECT_101+cv::BORDER_ISOLATED);            
+                           cv::BORDER_REFLECT_101+cv::BORDER_ISOLATED);
         }
         else
         {
             cv::copyMakeBorder(image, temp, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD,
-                           cv::BORDER_REFLECT_101);            
+                           cv::BORDER_REFLECT_101);
         }
     }
 

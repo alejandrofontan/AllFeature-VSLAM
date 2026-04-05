@@ -33,11 +33,11 @@ build_library() {
   if [ "$verbose" = true ]; then
     echo "[${library_name}][build.sh] Compile ${library_name} ... "
   	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder
-  	cmake --build $build_folder --config Release
+  	cmake --build $build_folder --config Release --parallel 8
   else
     echo "[${library_name}][build.sh] Compile ${library_name} (output disabled) ... "
   	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder > /dev/null 2>&1
-  	cmake --build $build_folder --config Release > /dev/null 2>&1
+  	cmake --build $build_folder --config Release --parallel 8 > /dev/null 2>&1
   fi
 }
 

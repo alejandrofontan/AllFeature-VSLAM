@@ -6,13 +6,22 @@
 
 namespace ANYFEATURE_VSLAM {
 
+    class FeatureExtractor_orb32;
+
     class Orb32 : public Feature {
     public:
         const std::string& getFeatureName()    const override { return s_featureName; }
         const FeatureType  getType()           const override { return FEAT_ORB; }
+        const MatcherType getMatcherType()     const override { return BF_HAMMING; }
+        const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
+
         const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
+        float DescriptorDistance(const cv::Mat &a, const cv::Mat &b) const override;
+        std::shared_ptr<FeatureExtractor> createExtractor(
+            std::shared_ptr<FeatureExtractorSettings> settings) const override;
     private:
         inline static const std::string s_featureName    = "orb32";
+        inline static const std::string s_settingsYamlFile = "settings/orb32_settings.yaml";
         inline static const Eigen::Matrix<float,3,1> s_color = {129, 149, 251};
     };
 
@@ -43,6 +52,11 @@ namespace ANYFEATURE_VSLAM {
         void ComputePyramid(cv::Mat image);
         void ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints);
     };
+
+    inline std::shared_ptr<FeatureExtractor> Orb32::createExtractor(
+        std::shared_ptr<FeatureExtractorSettings> settings) const {
+        return std::make_shared<FeatureExtractor_orb32>(settings);
+    }
 
     float DescriptorDistance_orb32(const cv::Mat &a, const cv::Mat &b);
 }

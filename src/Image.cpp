@@ -79,6 +79,6 @@ void ANYFEATURE_VSLAM::Image::FixImageSize(const int& new_width, const int& new_
     int cropHeight = (img.rows / 32) * 32;   // floor to nearest multiple of 32
 
     cv::Rect cropRect(0, 0, cropWidth, cropHeight);
-    img = img(cropRect);
-    grayImg = grayImg(cropRect);
+    img = img(cropRect).clone();
+    grayImg = grayImg(cropRect).clone();
 }
