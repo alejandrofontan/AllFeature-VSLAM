@@ -24,13 +24,13 @@
 
 #include<thread>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 Initializer::Initializer(const Frame &ReferenceFrame, float sigma_, int iterations, const FeatureType& featureType_)
 {
     featureType = featureType_;
-    
+
     K = Converter::toMatrix3f(ReferenceFrame.mK.clone());
 
     keypoints1 = ReferenceFrame.mvKeysUn.at(featureType);
@@ -38,7 +38,7 @@ Initializer::Initializer(const Frame &ReferenceFrame, float sigma_, int iteratio
     sigma = sigma_;
     sigma2 = sigma_ * sigma_;
     maxIterations = iterations;
-    
+
 }
 
 bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &matches12_,
@@ -297,7 +297,7 @@ mat3f Initializer::ComputeF21(const vector<vec2f> &P1,const vector<vec2f> &P2)
 }
 
 float Initializer::CheckHomography(const mat3f &H21, const mat3f &H12, vector<bool> &matchesInliers, const float& sigma_)
-{   
+{
     const size_t N = matches12.size();
     matchesInliers.resize(N);
 
@@ -660,7 +660,7 @@ bool Initializer::ReconstructH(const vector<bool> &inliers,
 
 
     int bestGood = 0;
-    int secondBestGood = 0;    
+    int secondBestGood = 0;
     int bestSolutionIdx = -1;
     float bestParallax = -1;
     vector<vec3f> bestP3D;
@@ -911,4 +911,4 @@ void Initializer::DecomposeE(const mat3f &E, mat3f &R1, mat3f &R2, vec3f &t)
         R2 = -R2;
 }
 
-} // namespace ANYFEATURE_VSLAM
+} // namespace AF_VSLAM

@@ -1,11 +1,11 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_ALIKED128_H
-#define ANYFEATURE_VSLAM_FEATURE_ALIKED128_H
+#ifndef AF_VSLAM_FEATURE_ALIKED128_H
+#define AF_VSLAM_FEATURE_ALIKED128_H
 
 #include "Feature.h"
 #include "FeatureExtractor.h"
 #include "feature/ALIKED.hpp"
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor_aliked128;
 
@@ -48,4 +48,4 @@ namespace ANYFEATURE_VSLAM {
 
 }
 
-#endif //ANYFEATURE_VSLAM_FEATURE_ALIKED128_H
+#endif //AF_VSLAM_FEATURE_ALIKED128_H

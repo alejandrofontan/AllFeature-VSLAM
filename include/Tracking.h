@@ -40,7 +40,7 @@
 #include"FeatureMatcher.h"
 #include "Utils.h"
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class Viewer;
@@ -51,7 +51,7 @@ class LoopClosing;
 class System;
 
 class Tracking
-{  
+{
 
 public:
     Tracking(System* pSys, shared_ptr<Vocabulary> vocabulary, std::shared_ptr<FrameDrawer> pFrameDrawer, std::shared_ptr<MapDrawer> pMapDrawer, shared_ptr<Map> pMap,
@@ -164,7 +164,7 @@ protected:
 
     void loadCameraParameters(const string &strCalibrationPath, const string &strSettingPath);
     shared_ptr<FeatureExtractor> getFeatureExtractor(const int& scaleNumFeaturesMonocular_,
-                                                     const string &featureSettingsYamlFile, 
+                                                     const string &featureSettingsYamlFile,
                                                      const FeatureType& featureType);
     static void getGrayImage(cv::Mat& im, const bool& rgb);
 
@@ -193,10 +193,10 @@ protected:
     Keyframe refKeyframe;
     std::vector<Keyframe> localKeyframes;
     std::vector<Pt> localPts;
-    
+
     // System
     System* mpSystem;
-    
+
     //Drawers
     std::shared_ptr<Viewer> viewer;
     std::shared_ptr<FrameDrawer> frameDrawer;
@@ -344,7 +344,7 @@ protected:
     const int minKeyframesInMap{5};
 
     std::shared_ptr<FeatureMatcher> matcher;
-    
+
     bool emergencyKeyframe{false};
 
 };

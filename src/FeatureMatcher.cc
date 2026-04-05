@@ -28,7 +28,7 @@
 
 using namespace std;
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::TH_HIGH = {};
@@ -1743,7 +1743,7 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
 
 Descriptor_Distance_Type FeatureMatcher::DescriptorDistance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_)
 {
-    std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featureType_);
+    std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType_);
     return ft->DescriptorDistance(a,b);
 }
 
@@ -1855,7 +1855,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
     std::vector<cv::DMatch> FeatureMatcher::featureMatching_1(
         const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& featType_){
 
-        std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featType_);
+        std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featType_);
         MatcherType matcherType = ft->getMatcherType();
 
         std::vector<cv::DMatch> matches;
@@ -1899,7 +1899,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
         const FeatureType& featType_){
 
-        std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featType_);
+        std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featType_);
         MatcherType matcherType = ft->getMatcherType();
 
         std::vector<cv::DMatch> matches;
@@ -1934,7 +1934,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& featType_,
         int outlierMehod){
 
-        std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featType_);
+        std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featType_);
         MatcherType matcherType = ft->getMatcherType();
 
         std::vector<cv::DMatch> matches;

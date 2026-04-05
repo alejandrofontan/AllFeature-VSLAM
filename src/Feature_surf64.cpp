@@ -3,11 +3,11 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/xfeatures2d.hpp>
 
-ANYFEATURE_VSLAM::FeatureExtractor_surf64::FeatureExtractor_surf64(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::FeatureExtractor_surf64::FeatureExtractor_surf64(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor_surf64::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
+void AF_VSLAM::FeatureExtractor_surf64::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
     // std::map<int,std::vector<cv::KeyPoint>> keypoints_level;
     // std::map<int,cv::Mat> descriptors_level;
     // detectKeypoints(keypoints_level, img, settings->detectTh, settings->nOctaves);
@@ -16,7 +16,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor_surf64::detectAndCompute(const Image& im
     // mergeKeypointLevels(keypoints,descriptors,descriptors_level,keypoints_level);
 }
 
-// void ANYFEATURE_VSLAM::FeatureExtractor_surf64::detectKeypoints(
+// void AF_VSLAM::FeatureExtractor_surf64::detectKeypoints(
 //         std::map<int,std::vector<cv::KeyPoint>>& keypoints_level,
 //         const Image& img, const float& detectTh, const int& nOctaves) const{
 
@@ -29,7 +29,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor_surf64::detectAndCompute(const Image& im
 
 // }
 
-// void ANYFEATURE_VSLAM::FeatureExtractor_surf64::computeDescriptors(
+// void AF_VSLAM::FeatureExtractor_surf64::computeDescriptors(
 //         std::map<int,cv::Mat>& descriptors_level,
 //         std::map<int,std::vector<cv::KeyPoint>>& keypoints_level,
 //         const Image& img) const {
@@ -42,19 +42,19 @@ void ANYFEATURE_VSLAM::FeatureExtractor_surf64::detectAndCompute(const Image& im
 //         surf->compute(img.grayImg, keypoints, descriptors_level[level]);
 // }
 
-int ANYFEATURE_VSLAM::FeatureExtractor_surf64::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
+int AF_VSLAM::FeatureExtractor_surf64::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
     return 0;
 }
 
-float ANYFEATURE_VSLAM::FeatureExtractor_surf64::GetKeypointSize(const cv::KeyPoint& keypoint) const{
+float AF_VSLAM::FeatureExtractor_surf64::GetKeypointSize(const cv::KeyPoint& keypoint) const{
     return 1.0f;
     //return (keypoint.size / 9.0f);
 }
 
-// void ANYFEATURE_VSLAM::FeatureExtractor_surf64::filterKeypoints(std::map<int,std::vector<cv::KeyPoint>>& keypoints_level, const cv::Mat& image, const cv::Mat& mask) const{
+// void AF_VSLAM::FeatureExtractor_surf64::filterKeypoints(std::map<int,std::vector<cv::KeyPoint>>& keypoints_level, const cv::Mat& image, const cv::Mat& mask) const{
 //     FeatureExtractor::filterKeypoints_notScaled(keypoints_level,image,mask);
 // }
 
-float ANYFEATURE_VSLAM::DescriptorDistance_surf64(const cv::Mat &a, const cv::Mat &b){
+float AF_VSLAM::DescriptorDistance_surf64(const cv::Mat &a, const cv::Mat &b){
     return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2);
 }

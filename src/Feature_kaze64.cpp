@@ -1,6 +1,6 @@
 #include "Feature_kaze64.h"
 
-ANYFEATURE_VSLAM::FeatureExtractor_kaze64::FeatureExtractor_kaze64(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::FeatureExtractor_kaze64::FeatureExtractor_kaze64(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
 
         kaze = cv::KAZE::create();
@@ -9,11 +9,11 @@ ANYFEATURE_VSLAM::FeatureExtractor_kaze64::FeatureExtractor_kaze64(std::shared_p
         // kaze->setThreshold(settings->detectTh);
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor_kaze64::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
+void AF_VSLAM::FeatureExtractor_kaze64::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
 
     // KAZE feature detection and description
     std::vector<cv::KeyPoint> keypoints_;
-    cv::Mat descriptors_; 
+    cv::Mat descriptors_;
     kaze->detectAndCompute(img.grayImg, cv::Mat(), keypoints_, descriptors_);
 
     // Normalize octave and size
@@ -36,14 +36,14 @@ void ANYFEATURE_VSLAM::FeatureExtractor_kaze64::detectAndCompute(const Image& im
         descriptors_.row(keypoints[i].class_id).copyTo(descriptors.row(i));
 }
 
-int ANYFEATURE_VSLAM::FeatureExtractor_kaze64::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
+int AF_VSLAM::FeatureExtractor_kaze64::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
     return 0;
 }
 
-float ANYFEATURE_VSLAM::FeatureExtractor_kaze64::GetKeypointSize(const cv::KeyPoint& keypoint) const{
+float AF_VSLAM::FeatureExtractor_kaze64::GetKeypointSize(const cv::KeyPoint& keypoint) const{
     return 1.0f;
 }
 
-float ANYFEATURE_VSLAM::DescriptorDistance_kaze64(const cv::Mat &a, const cv::Mat &b){
+float AF_VSLAM::DescriptorDistance_kaze64(const cv::Mat &a, const cv::Mat &b){
     return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2);
 }

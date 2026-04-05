@@ -1,10 +1,10 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_KAZE64_H
-#define ANYFEATURE_VSLAM_FEATURE_KAZE64_H
+#ifndef AF_VSLAM_FEATURE_KAZE64_H
+#define AF_VSLAM_FEATURE_KAZE64_H
 
 #include "Feature.h"
 #include "FeatureExtractor.h"
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor_kaze64;
 
@@ -45,4 +45,4 @@ namespace ANYFEATURE_VSLAM {
     float DescriptorDistance_kaze64(const cv::Mat &a, const cv::Mat &b);
 }
 
-#endif //ANYFEATURE_VSLAM_FEATURE_KAZE64_H
+#endif //AF_VSLAM_FEATURE_KAZE64_H

@@ -27,7 +27,7 @@
 #include <pangolin/pangolin.h>
 #include <mutex>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 

@@ -1,6 +1,6 @@
 
-#ifndef ANYFEATURE_VSLAM_FEATURE_FACTORY_H
-#define ANYFEATURE_VSLAM_FEATURE_FACTORY_H
+#ifndef AF_VSLAM_FEATURE_FACTORY_H
+#define AF_VSLAM_FEATURE_FACTORY_H
 
 #include <memory>
 #include "Feature_orb32.h"
@@ -15,30 +15,30 @@
 #include "Feature_aliked128.h"
 #include "Feature_superpoint256.h"
 
-inline std::unique_ptr<ANYFEATURE_VSLAM::Feature> get_feature(const FeatureType& featureType) {
+inline std::unique_ptr<AF_VSLAM::Feature> get_feature(const FeatureType& featureType) {
     switch (featureType) {
         case FEAT_ORB:
-            return std::make_unique<ANYFEATURE_VSLAM::Orb32>();
+            return std::make_unique<AF_VSLAM::Orb32>();
         case FEAT_AKAZE61:
-            return std::make_unique<ANYFEATURE_VSLAM::Akaze61>();
+            return std::make_unique<AF_VSLAM::Akaze61>();
         case FEAT_BRISK:
-            return std::make_unique<ANYFEATURE_VSLAM::Brisk48>();
+            return std::make_unique<AF_VSLAM::Brisk48>();
         case FEAT_SURF64:
-            return std::make_unique<ANYFEATURE_VSLAM::Surf64>();
+            return std::make_unique<AF_VSLAM::Surf64>();
         case FEAT_KAZE64:
-            return std::make_unique<ANYFEATURE_VSLAM::Kaze64>();
+            return std::make_unique<AF_VSLAM::Kaze64>();
         case FEAT_SIFT128:
-            return std::make_unique<ANYFEATURE_VSLAM::Sift128>();
+            return std::make_unique<AF_VSLAM::Sift128>();
         case FEAT_R2D2:
-            return std::make_unique<ANYFEATURE_VSLAM::R2d2_128>();
+            return std::make_unique<AF_VSLAM::R2d2_128>();
         case FEAT_ANYFEATBIN:
-            return std::make_unique<ANYFEATURE_VSLAM::AnyFeatBin>();
+            return std::make_unique<AF_VSLAM::AnyFeatBin>();
         case FEAT_ANYFEATNONBIN:
-            return std::make_unique<ANYFEATURE_VSLAM::AnyFeatNonBin>();
+            return std::make_unique<AF_VSLAM::AnyFeatNonBin>();
         case FEAT_ALIKED128:
-            return std::make_unique<ANYFEATURE_VSLAM::Aliked128>();
+            return std::make_unique<AF_VSLAM::Aliked128>();
         case FEAT_SUPERPOINT256:
-            return std::make_unique<ANYFEATURE_VSLAM::Superpoint256>();
+            return std::make_unique<AF_VSLAM::Superpoint256>();
         default:{
             std::cout <<"get_feature"<< std::endl;
             std::terminate();
@@ -74,4 +74,4 @@ inline FeatureType get_feature_type(const std::string& str) {
     }
 }
 
-#endif //ANYFEATURE_VSLAM_FEATURE_FACTORY_H
+#endif //AF_VSLAM_FEATURE_FACTORY_H

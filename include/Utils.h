@@ -2,8 +2,8 @@
 // Created by fontan on 20/02/24.
 //
 
-#ifndef ANYFEATURE_VSLAM_UTILS_H
-#define ANYFEATURE_VSLAM_UTILS_H
+#ifndef AF_VSLAM_UTILS_H
+#define AF_VSLAM_UTILS_H
 
 #include "FeatureFactory.h"
 
@@ -12,7 +12,7 @@
 #include <vector>
 #include <random>
 
-namespace ANYFEATURE_VSLAM{
+namespace AF_VSLAM{
     void printInfo(const std::string& function, const std::string& message,
                    const VerbosityLevel& verbosityLevel, const VerbosityLevel& verbosityLevelRequired,
                    std::string color = "\x1b[0m");
@@ -41,4 +41,4 @@ namespace ANYFEATURE_VSLAM{
 
 
 
-#endif //ANYFEATURE_VSLAM_UTILS_H
+#endif //AF_VSLAM_UTILS_H

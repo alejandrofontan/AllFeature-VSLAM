@@ -36,7 +36,7 @@
 
 #include "g2o/types/types_seven_dof_expmap.h"
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class Tracking;
@@ -88,7 +88,7 @@ public:
     bool isFinishedGBA(){
         unique_lock<std::mutex> lock(mMutexGBA);
         return mbFinishedGBA;
-    }   
+    }
 
     void RequestFinish();
 

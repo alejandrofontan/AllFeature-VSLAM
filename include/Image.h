@@ -2,12 +2,12 @@
 // Created by fontan on 30/03/24.
 //
 
-#ifndef ANYFEATURE_VSLAM_IMAGE_H
-#define ANYFEATURE_VSLAM_IMAGE_H
+#ifndef AF_VSLAM_IMAGE_H
+#define AF_VSLAM_IMAGE_H
 
 #include<opencv2/core/core.hpp>
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class Image {
     public:
@@ -30,4 +30,4 @@ namespace ANYFEATURE_VSLAM {
 
 }
 
-#endif //ANYFEATURE_VSLAM_IMAGE_H
+#endif //AF_VSLAM_IMAGE_H

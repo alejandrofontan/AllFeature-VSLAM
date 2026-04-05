@@ -29,7 +29,7 @@
 using namespace DBoW2;
 using namespace std;
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 std::vector<std::vector<std::string>> read_txt(const std::string &filePath, const size_t &numCols, char delimiter ,int headerRows);
 void displayProgressBar(int width, double progressPercentage);
 
@@ -41,7 +41,7 @@ void loadNonBinaryFeatures(vector<vector<vector<float>>> &features, const std::v
 void changeStructure(const cv::Mat &plain, vector<vector<float>> &out);
 void testNonBinaryVocCreation(const vector<vector<vector<float>>> &features);
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 int numberOfImages{};
 string savePath{""};
 string vocName{""};
@@ -128,32 +128,32 @@ void loadBinaryFeatures(vector<vector<cv::Mat>> &features, const std::vector<std
     const int progressBarWidth = 50; // Width of the progress bar in characters
     const int totalIterations = numberOfImages; // Total iterations for the process
 
-    shared_ptr<ANYFEATURE_VSLAM::FeatureExtractorSettings> extractorSettings;
-    shared_ptr<ANYFEATURE_VSLAM::FeatureExtractor> extractor;
+    shared_ptr<AF_VSLAM::FeatureExtractorSettings> extractorSettings;
+    shared_ptr<AF_VSLAM::FeatureExtractor> extractor;
 
     switch(descriptorId) { // loadBinaryFeatures
         case DESC_ANYFEATBIN:{
             cout << script_label + "Extracting " + "anyFeatBin" + " features..." << endl;
-            extractorSettings = make_shared<ANYFEATURE_VSLAM::FeatureExtractorSettings>(KEYP_ANYFEATBIN, DESC_ANYFEATBIN, featureSettingsYamlFile);
-            extractor = make_shared<ANYFEATURE_VSLAM::FeatureExtractor_anyFeatBin>(1000,extractorSettings);
+            extractorSettings = make_shared<AF_VSLAM::FeatureExtractorSettings>(KEYP_ANYFEATBIN, DESC_ANYFEATBIN, featureSettingsYamlFile);
+            extractor = make_shared<AF_VSLAM::FeatureExtractor_anyFeatBin>(1000,extractorSettings);
             break;
         }
         case DESC_BRISK:{
             cout << script_label + "Extracting " + "Brisk48" + " features..." << endl;
-            extractorSettings = make_shared<ANYFEATURE_VSLAM::FeatureExtractorSettings>(KEYP_BRISK, DESC_BRISK, featureSettingsYamlFile);
-            extractor = make_shared<ANYFEATURE_VSLAM::FeatureExtractor_brisk48>(1000,extractorSettings);
-            break;          
-        }      
+            extractorSettings = make_shared<AF_VSLAM::FeatureExtractorSettings>(KEYP_BRISK, DESC_BRISK, featureSettingsYamlFile);
+            extractor = make_shared<AF_VSLAM::FeatureExtractor_brisk48>(1000,extractorSettings);
+            break;
+        }
         case DESC_AKAZE61: {
             cout << script_label + "Extracting " + "Akaze61" + " features..." << endl;
-            extractorSettings = make_shared<ANYFEATURE_VSLAM::FeatureExtractorSettings>(KEYP_AKAZE, DESC_AKAZE61, featureSettingsYamlFile);
-            extractor = make_shared<ANYFEATURE_VSLAM::FeatureExtractor_akaze61>(1000,extractorSettings);
+            extractorSettings = make_shared<AF_VSLAM::FeatureExtractorSettings>(KEYP_AKAZE, DESC_AKAZE61, featureSettingsYamlFile);
+            extractor = make_shared<AF_VSLAM::FeatureExtractor_akaze61>(1000,extractorSettings);
             break;
         }
         case DESC_ORB: {
             cout << script_label + "Extracting " + "Orb" + " features..." << endl;
-            extractorSettings = make_shared<ANYFEATURE_VSLAM::FeatureExtractorSettings>(KEYP_ORB, DESC_ORB, featureSettingsYamlFile);
-            extractor = make_shared<ANYFEATURE_VSLAM::FeatureExtractor_orb32>(1000,extractorSettings);
+            extractorSettings = make_shared<AF_VSLAM::FeatureExtractorSettings>(KEYP_ORB, DESC_ORB, featureSettingsYamlFile);
+            extractor = make_shared<AF_VSLAM::FeatureExtractor_orb32>(1000,extractorSettings);
             break;
         }
     }
@@ -162,7 +162,7 @@ void loadBinaryFeatures(vector<vector<cv::Mat>> &features, const std::vector<std
         vector<cv::KeyPoint> keypoints;
         cv::Mat descriptors;
 
-        ANYFEATURE_VSLAM::Image im(imagePaths[i]);
+        AF_VSLAM::Image im(imagePaths[i]);
         im.GetGrayImage(true);
 
         (*extractor)(im,keypoints,descriptors);
@@ -187,26 +187,26 @@ void loadNonBinaryFeatures(vector<vector<vector<float>>> &features, const std::v
     const int progressBarWidth = 50; // Width of the progress bar in characters
     const int totalIterations = numberOfImages; // Total iterations for the process
 
-    shared_ptr<ANYFEATURE_VSLAM::FeatureExtractorSettings> extractorSettings;
-    shared_ptr<ANYFEATURE_VSLAM::FeatureExtractor> extractor;
+    shared_ptr<AF_VSLAM::FeatureExtractorSettings> extractorSettings;
+    shared_ptr<AF_VSLAM::FeatureExtractor> extractor;
 
     switch(descriptorId) { // loadNonBinaryFeatures
         case DESC_ANYFEATNONBIN:{
             cout << script_label + "Extracting " + "AnyFeat" + " features..." << endl;
-            extractorSettings = make_shared<ANYFEATURE_VSLAM::FeatureExtractorSettings>(KEYP_ANYFEATNONBIN, DESC_ANYFEATNONBIN, featureSettingsYamlFile);
-            extractor = make_shared<ANYFEATURE_VSLAM::FeatureExtractor_anyFeatNonBin>(1000,extractorSettings);
+            extractorSettings = make_shared<AF_VSLAM::FeatureExtractorSettings>(KEYP_ANYFEATNONBIN, DESC_ANYFEATNONBIN, featureSettingsYamlFile);
+            extractor = make_shared<AF_VSLAM::FeatureExtractor_anyFeatNonBin>(1000,extractorSettings);
             break;
         }
         case DESC_SIFT128:{
             cout << script_label + "Extracting " + "Sift128" + " features..." << endl;
-            extractorSettings = make_shared<ANYFEATURE_VSLAM::FeatureExtractorSettings>(KEYP_SIFT, DESC_SIFT128, featureSettingsYamlFile);
-            extractor = make_shared<ANYFEATURE_VSLAM::FeatureExtractor_sift128>(1000,extractorSettings);
+            extractorSettings = make_shared<AF_VSLAM::FeatureExtractorSettings>(KEYP_SIFT, DESC_SIFT128, featureSettingsYamlFile);
+            extractor = make_shared<AF_VSLAM::FeatureExtractor_sift128>(1000,extractorSettings);
             break;
         }
         case DESC_SURF64:{
             cout << script_label + "Extracting " + "Surf64" + " features..." << endl;
-            extractorSettings = make_shared<ANYFEATURE_VSLAM::FeatureExtractorSettings>(KEYP_SURF, DESC_SURF64, featureSettingsYamlFile);
-            extractor = make_shared<ANYFEATURE_VSLAM::FeatureExtractor_surf64>(1000,extractorSettings);
+            extractorSettings = make_shared<AF_VSLAM::FeatureExtractorSettings>(KEYP_SURF, DESC_SURF64, featureSettingsYamlFile);
+            extractor = make_shared<AF_VSLAM::FeatureExtractor_surf64>(1000,extractorSettings);
             break;
         }
     }
@@ -215,7 +215,7 @@ void loadNonBinaryFeatures(vector<vector<vector<float>>> &features, const std::v
         vector<cv::KeyPoint> keypoints;
         cv::Mat descriptors;
 
-        ANYFEATURE_VSLAM::Image im(imagePaths[i]);
+        AF_VSLAM::Image im(imagePaths[i]);
         im.GetGrayImage(true);
 
         (*extractor)(im,keypoints,descriptors);

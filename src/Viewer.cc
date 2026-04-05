@@ -25,7 +25,7 @@
 
 #include <mutex>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 Viewer::Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> frameDrawer,
@@ -63,7 +63,7 @@ Viewer::Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> fram
     cout << "- w: " << imageWidth << endl;
     cout << "- h: " << imageHeight << endl;
     cout << "- fps: " << fps << endl;
-    
+
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
     mViewpointX = fSettings["Viewer.ViewpointX"];
     mViewpointY = fSettings["Viewer.ViewpointY"];
@@ -74,7 +74,7 @@ Viewer::Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> fram
     cout << "- mViewpointX: " << mViewpointX << endl;
     cout << "- mViewpointY: " << mViewpointY << endl;
     cout << "- mViewpointZ: " << mViewpointZ << endl;
-    cout << "- mViewpointF: " << mViewpointF << endl; 
+    cout << "- mViewpointF: " << mViewpointF << endl;
 }
 
 void Viewer::Run()
@@ -122,9 +122,9 @@ void Viewer::Run()
     pangolin::View& d_menu = pangolin::CreatePanel("menu").SetBounds(left_b, left_t - hS - 0.01f, left_l, left_r);
     pangolin::Var<bool> menuFollowCamera("menu.Follow Camera",true,true);
     pangolin::Var<bool> menuAerialCamera("menu.Aerial Camera",false,true);
-    
-    pangolin::Var<float> menuTrackingTime("menu.Tracking (ms)", 0.0f, 0.0f, 100.0f, false); 
-    pangolin::Var<float> menuLocalMappingTime("menu.Local Mapping (ms)", 0.0f, 0.0f, 400.0f, false); 
+
+    pangolin::Var<float> menuTrackingTime("menu.Tracking (ms)", 0.0f, 0.0f, 100.0f, false);
+    pangolin::Var<float> menuLocalMappingTime("menu.Local Mapping (ms)", 0.0f, 0.0f, 400.0f, false);
 
     pangolin::View& d_img = pangolin::Display("img")
             .SetBounds(left_t - hS,  left_t, left_l, left_r);
@@ -151,7 +151,7 @@ void Viewer::Run()
     while(1)
     {
         numIt++;
-        
+
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(1.0f,1.0f,1.0f,1.0f);
 
@@ -168,7 +168,7 @@ void Viewer::Run()
         mapDrawer->DrawMapPoints();
 
         if(menuFollowCamera && bFollow)
-        {   
+        {
             if(menuAerialCamera && !bAerial){
                 s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt( 0, mViewpointY, 0, 0, 0, 0, 0, 0, 1 ));
             }else if(!menuAerialCamera && bAerial){
@@ -214,7 +214,7 @@ void Viewer::Run()
         im = frameDrawer->DrawFrame();
         cv::Mat imResized;
         cv::resize(im,imResized,cv::Size(int(w_pixel), int(h_pixel)));
-        
+
         /////////////////////////////////////////////////////////
         cv::flip(imResized.clone(),imResized,0);
 

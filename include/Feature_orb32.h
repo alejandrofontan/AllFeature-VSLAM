@@ -1,10 +1,10 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_ORB32_H
-#define ANYFEATURE_VSLAM_FEATURE_ORB32_H
+#ifndef AF_VSLAM_FEATURE_ORB32_H
+#define AF_VSLAM_FEATURE_ORB32_H
 
 #include "Feature.h"
 #include "FeatureExtractor.h"
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor_orb32;
 
@@ -412,4 +412,4 @@ static int bit_pattern_31_[256*4] =
     -1,-6, 0,-11/*mean (0.127148), correlation (0.547401)*/
 };
 
-#endif //ANYFEATURE_VSLAM_FEATURE_ORB32_H
+#endif //AF_VSLAM_FEATURE_ORB32_H

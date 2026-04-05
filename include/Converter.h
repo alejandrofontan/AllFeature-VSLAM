@@ -31,7 +31,7 @@
 #include "Types.h"
 #include "Definitions.h"
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class Converter

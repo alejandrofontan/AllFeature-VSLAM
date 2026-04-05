@@ -35,7 +35,7 @@
 #include <type_traits>
 #include <opencv2/features2d.hpp>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 long unsigned int Frame::nNextId=0;

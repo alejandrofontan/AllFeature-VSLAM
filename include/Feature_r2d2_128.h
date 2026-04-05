@@ -1,10 +1,10 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_R2D2_128_H
-#define ANYFEATURE_VSLAM_FEATURE_R2D2_128_H
+#ifndef AF_VSLAM_FEATURE_R2D2_128_H
+#define AF_VSLAM_FEATURE_R2D2_128_H
 
 #include "Feature.h"
 #include "FeatureExtractor.h"
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor_r2d2_128;
 
@@ -42,4 +42,4 @@ namespace ANYFEATURE_VSLAM {
     float DescriptorDistance_r2d2_128(const cv::Mat &a, const cv::Mat &b);
 }
 
-#endif //ANYFEATURE_VSLAM_FEATURE_R2D2_128_H
+#endif //AF_VSLAM_FEATURE_R2D2_128_H

@@ -22,7 +22,7 @@
 
 #include<mutex>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 Map::Map():mnMaxKFid(0),mnBigChangeIdx(0)
@@ -139,7 +139,7 @@ float Map::NormalizeMap()
     {
         std::sort(depths.begin(), depths.end());
         medianDepth = depths[0.5f * (depths.size() - 1)];
-    }       
+    }
 
     for(const auto& keyframe: mspKeyFrames)
     {
@@ -151,7 +151,7 @@ float Map::NormalizeMap()
 
     std::vector<Pt> mspMapPoints_ = GetAllMapPoints();
     for(size_t iMP=0; iMP<mspMapPoints_.size(); iMP++)
-    {   
+    {
         Pt pMP = mspMapPoints_[iMP];
         if(pMP)
         {
@@ -161,6 +161,6 @@ float Map::NormalizeMap()
 
     std::cout << "Normalizing map with median depth = " << medianDepth << std::endl;
     return medianDepth;
-} 
+}
 }
 //namespace ORB_SLAM

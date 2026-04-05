@@ -35,7 +35,7 @@
 
 using namespace std;
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
@@ -1267,7 +1267,7 @@ shared_ptr<FeatureExtractor> Tracking::getFeatureExtractor(const int& scaleNumFe
     shared_ptr<FeatureExtractorSettings> extractorSettings = make_shared<FeatureExtractorSettings>(featureType, featureSettingsYamlFile);
     extractorSettings->maxNumFeatures *= scaleNumFeaturesMonocular_;
 
-    std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featureType);
+    std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType);
     return ft->createExtractor(extractorSettings);
 }
 

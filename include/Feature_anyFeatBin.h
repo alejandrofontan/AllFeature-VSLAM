@@ -1,5 +1,5 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_ANYFEATBIN_H
-#define ANYFEATURE_VSLAM_FEATURE_ANYFEATBIN_H
+#ifndef AF_VSLAM_FEATURE_ANYFEATBIN_H
+#define AF_VSLAM_FEATURE_ANYFEATBIN_H
 
 #include "Feature.h"
 #include "FeatureExtractor.h"
@@ -8,7 +8,7 @@
 #include <opencv2/highgui/highgui.hpp>
 
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor_anyFeatBin;
 
@@ -49,4 +49,4 @@ namespace ANYFEATURE_VSLAM {
 
 }
 
-#endif //ANYFEATURE_VSLAM_FEATURE_ANYFEATBIN_H
+#endif //AF_VSLAM_FEATURE_ANYFEATBIN_H

@@ -33,7 +33,7 @@
 #include <iomanip>
 #include <yaml-cpp/yaml.h>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 System::System(const string &vocabularyFolder,
@@ -99,7 +99,7 @@ System::System(const string &vocabularyFolder,
     // Feature settings yaml file
     std::map<FeatureType, string> feature_settings_yaml_file;
     for (const auto& featureType : featureTypes){
-        std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featureType);
+        std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType);
         feature_settings_yaml_file[featureType] = ft->getSettingsYamlFile();
     }
 
@@ -118,12 +118,12 @@ System::System(const string &vocabularyFolder,
 
     //Initialize the Local Mapping thread and launch
     localMapper = make_shared<LocalMapping>(mpMap, mSensor==MONOCULAR, featureTypes, tracker->get_image_width(), tracker->get_image_height());
-    mptLocalMapping = make_shared<thread>(&ANYFEATURE_VSLAM::LocalMapping::Run, localMapper);
+    mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::Run, localMapper);
 
     //Initialize the Loop Closing thread and launch
     loopCloser =  make_shared<LoopClosing>(mpMap, mpKeyFrameDatabase, vocabulary, mSensor!=MONOCULAR, featureTypes[featureLoopClosure],
         tracker->get_image_width(), tracker->get_image_height());
-    mptLoopClosing = make_shared<thread>(&ANYFEATURE_VSLAM::LoopClosing::Run, loopCloser);
+    mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::Run, loopCloser);
 
     //Initialize the Viewer thread and launch
     if(activateVisualization)
@@ -355,7 +355,7 @@ void System::SaveTrajectoryTUM(const string &filename)
 
     // For each frame we have a reference keyframe (lRit), the timestamp (lT) and a flag
     // which is true when tracking failed (lbL).
-    list<ANYFEATURE_VSLAM::Keyframe>::iterator lRit = tracker->mlpReferences.begin();
+    list<AF_VSLAM::Keyframe>::iterator lRit = tracker->mlpReferences.begin();
     list<double>::iterator lT = tracker->mlFrameTimes.begin();
     list<bool>::iterator lbL = tracker->mlbLost.begin();
     for(list<mat4f>::iterator lit=tracker->mlRelativeFramePoses.begin(),
@@ -498,7 +498,7 @@ void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>
         p.z = pos(2);
 
         FeatureType ft = mp->featureType;
-        cv::Scalar color = ANYFEATURE_VSLAM::getFeatureColor(ft, 0, true);
+        cv::Scalar color = AF_VSLAM::getFeatureColor(ft, 0, true);
         // p.r = 255;
         // p.g = 255;
         // p.b = 255;
@@ -577,11 +577,11 @@ void System::SaveTrajectoryKITTI(const string &filename)
 
     // For each frame we have a reference keyframe (lRit), the timestamp (lT) and a flag
     // which is true when tracking failed (lbL).
-    list<ANYFEATURE_VSLAM::Keyframe>::iterator lRit = tracker->mlpReferences.begin();
+    list<AF_VSLAM::Keyframe>::iterator lRit = tracker->mlpReferences.begin();
     list<double>::iterator lT = tracker->mlFrameTimes.begin();
     for(list<mat4f>::iterator lit=tracker->mlRelativeFramePoses.begin(), lend=tracker->mlRelativeFramePoses.end();lit!=lend;lit++, lRit++, lT++)
     {
-        ANYFEATURE_VSLAM::Keyframe pKF = *lRit;
+        AF_VSLAM::Keyframe pKF = *lRit;
 
         mat4f Trw{mat4f::Identity()};
 
@@ -647,18 +647,18 @@ void System::SaveStatistics(const std::string &filename){
     // float numObservationsPerPt = float(numObservations)/float(numPts);
 
     // double medianTrackingTime{};
-    // ANYFEATURE_VSLAM::vectorMedian(medianTrackingTime,trackingTime);
+    // AF_VSLAM::vectorMedian(medianTrackingTime,trackingTime);
 
     // double medianLocalMapppingTime{};
-    // ANYFEATURE_VSLAM::vectorMedian(medianLocalMapppingTime,localMapper->localMappingTime);
+    // AF_VSLAM::vectorMedian(medianLocalMapppingTime,localMapper->localMappingTime);
 
     // double medianLoopClosingTime{};
-    // ANYFEATURE_VSLAM::vectorMedian(medianLoopClosingTime,loopCloser->loopClosingTime);
+    // AF_VSLAM::vectorMedian(medianLoopClosingTime,loopCloser->loopClosingTime);
 
     // long long finalVirtualMemUsed{virtualMemUsed.back()};
     // long long firstVirtualMemUsed{virtualMemUsed.front()};
     // long long maxVirtualMemUsed{0};
-    // ANYFEATURE_VSLAM::vectorMax(maxVirtualMemUsed,virtualMemUsed);
+    // AF_VSLAM::vectorMax(maxVirtualMemUsed,virtualMemUsed);
 
     // ofstream f;
     // string statisticsFile = filename + ".txt";

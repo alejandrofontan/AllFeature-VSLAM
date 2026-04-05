@@ -6,11 +6,11 @@
 #include "Converter.h"
 #include "FeatureFactory.h"
 
-ANYFEATURE_VSLAM::Vocabulary::Vocabulary(const string vocabularyFolder, const FeatureType featureType):
+AF_VSLAM::Vocabulary::Vocabulary(const string vocabularyFolder, const FeatureType featureType):
         vocabularyFolder(vocabularyFolder), featureType(featureType)
 {}
 
-void ANYFEATURE_VSLAM::Vocabulary::createVocabulary(){
+void AF_VSLAM::Vocabulary::createVocabulary(){
     switch(featureType) {
         // Create Vocabulary
         case FEAT_ANYFEATNONBIN: {
@@ -52,7 +52,7 @@ void ANYFEATURE_VSLAM::Vocabulary::createVocabulary(){
     }
 }
 
-bool ANYFEATURE_VSLAM::Vocabulary::loadFromTextFile(){
+bool AF_VSLAM::Vocabulary::loadFromTextFile(){
     switch(featureType) {
         // load from text file
         case FEAT_ANYFEATNONBIN:{
@@ -106,7 +106,7 @@ bool ANYFEATURE_VSLAM::Vocabulary::loadFromTextFile(){
     }
 }
 
-unsigned int ANYFEATURE_VSLAM::Vocabulary::size(){
+unsigned int AF_VSLAM::Vocabulary::size(){
     switch(featureType) {
         // size
         case FEAT_ANYFEATNONBIN:
@@ -130,7 +130,7 @@ unsigned int ANYFEATURE_VSLAM::Vocabulary::size(){
     }
 }
 
-double ANYFEATURE_VSLAM::Vocabulary::score(const DBoW2::BowVector &BowVec_1, const DBoW2::BowVector &BowVec_2){
+double AF_VSLAM::Vocabulary::score(const DBoW2::BowVector &BowVec_1, const DBoW2::BowVector &BowVec_2){
     switch(featureType) {
         // score
         case FEAT_ANYFEATNONBIN:
@@ -154,7 +154,7 @@ double ANYFEATURE_VSLAM::Vocabulary::score(const DBoW2::BowVector &BowVec_1, con
     }
 }
 
-void ANYFEATURE_VSLAM::Vocabulary::transform(
+void AF_VSLAM::Vocabulary::transform(
         const cv::Mat& mDescriptors,  DBoW2::BowVector& mBowVec,DBoW2::FeatureVector& mFeatVec){
     switch(featureType) {
         // transform

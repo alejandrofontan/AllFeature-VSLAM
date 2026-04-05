@@ -10,7 +10,7 @@
 using namespace cv;
 using namespace std;
 
-ANYFEATURE_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
+AF_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
         const FeatureType& featureType_,
         const std::string &settingsYamlFile):
         featureType(featureType_){
@@ -33,7 +33,7 @@ ANYFEATURE_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
     minKeyPtSize = 1.0f;
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor::operator()(const Image& img,
+void AF_VSLAM::FeatureExtractor::operator()(const Image& img,
                                              std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors,
                                              std::vector<mat2f>& keyPtsSigma2, std::vector<mat2f>& keyPtsInf, std::vector<float>& keyPtsSize)
 {
@@ -49,7 +49,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor::operator()(const Image& img,
     //medianTrackingTime(t_duration, extractorTime, "        - Extractor Time   ", TRACKING_PROFILING);
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints){
+void AF_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints){
     keyPtsSize.clear();
     keyPtsSize.reserve(keypoints.size());
     for(auto& keyPt: keypoints){
@@ -62,7 +62,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsS
     }
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor::computeSigma(std::vector<mat2f>& keyPtsSigma2, std::vector<mat2f>& keyPtsInf,
+void AF_VSLAM::FeatureExtractor::computeSigma(std::vector<mat2f>& keyPtsSigma2, std::vector<mat2f>& keyPtsInf,
                                                       const std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints,
                                                       const Image& img, const CovarianceMethod& method){
     keyPtsSigma2.clear();
@@ -92,7 +92,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor::computeSigma(std::vector<mat2f>& keyPts
     }
 }
 
-std::vector<cv::KeyPoint> ANYFEATURE_VSLAM::FeatureExtractor::DistributeOctTree(std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
+std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::DistributeOctTree(std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
                                        const int &maxX, const int &minY, const int &maxY, const int &N, const int &level)
 {
     // Compute how many initial nodes
@@ -320,7 +320,7 @@ std::vector<cv::KeyPoint> ANYFEATURE_VSLAM::FeatureExtractor::DistributeOctTree(
     return vResultKeys;
 }
 
-void ANYFEATURE_VSLAM::ExtractorNode::DivideNode(ExtractorNode &n1, ExtractorNode &n2, ExtractorNode &n3, ExtractorNode &n4)
+void AF_VSLAM::ExtractorNode::DivideNode(ExtractorNode &n1, ExtractorNode &n2, ExtractorNode &n3, ExtractorNode &n4)
 {
     const int halfX = ceil(static_cast<float>(UR.x-UL.x)/2);
     const int halfY = ceil(static_cast<float>(BR.y-UL.y)/2);

@@ -29,7 +29,7 @@
 #include <mutex>
 
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class Tracking;
@@ -47,7 +47,7 @@ public:
     cv::Mat DrawFrame();
 
     static std::string exp_folder;
-    
+
 protected:
 
     void DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText);

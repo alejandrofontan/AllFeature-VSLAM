@@ -1,5 +1,5 @@
-#ifndef ANYFEATURE_VSLAM_FEATUREEXTRACTOR_H
-#define ANYFEATURE_VSLAM_FEATUREEXTRACTOR_H
+#ifndef AF_VSLAM_FEATUREEXTRACTOR_H
+#define AF_VSLAM_FEATUREEXTRACTOR_H
 
 #include "Types.h"
 #include "Definitions.h"
@@ -7,7 +7,7 @@
 
 #include <opencv2/opencv.hpp>
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor;
     class ExtractorNode;
@@ -49,7 +49,7 @@ namespace ANYFEATURE_VSLAM {
         VerbosityLevel verbosity{LOW};
 
         FeatureType featureType;
-        
+
         float maxKeyPtSize{0.0};
         float minKeyPtSize{std::numeric_limits<float>::max()};
 
@@ -101,4 +101,4 @@ namespace ANYFEATURE_VSLAM {
             const int &maxX, const int &minY, const int &maxY, const int &N, const int &level);
     };
 }
-#endif //ANYFEATURE_VSLAM_FEATUREEXTRACTOR_H
+#endif //AF_VSLAM_FEATUREEXTRACTOR_H

@@ -28,7 +28,7 @@
 #include "Frame.h"
 
 #include "g2o/types/types_seven_dof_expmap.h"
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class LoopClosing;

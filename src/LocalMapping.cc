@@ -9,7 +9,7 @@
 #include <Eigen/Core>
 #include <Eigen/SVD>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& imageWidth, const int& imageHeight):

@@ -8,29 +8,29 @@
 #include "Feature_superpoint256.h"
 
 std::random_device rd;
-//std::mt19937 ANYFEATURE_VSLAM::RandomIntegerGenerator::randomIntGenerator{std::mt19937(rd())};
-std::mt19937 ANYFEATURE_VSLAM::RandomIntegerGenerator::randomIntGenerator{123456u};
+//std::mt19937 AF_VSLAM::RandomIntegerGenerator::randomIntGenerator{std::mt19937(rd())};
+std::mt19937 AF_VSLAM::RandomIntegerGenerator::randomIntGenerator{123456u};
 
-void ANYFEATURE_VSLAM::printInfo(const std::string& function, const std::string& message,
+void AF_VSLAM::printInfo(const std::string& function, const std::string& message,
                           const VerbosityLevel& verbosityLevel, const VerbosityLevel& verbosityLevelRequired,
                           std::string color){
     if(verbosityLevel >= verbosityLevelRequired)
         std::cout << color << "[" << function << "] : " <<  message << "\x1b[0m"<< std::endl;
 }
 
-void ANYFEATURE_VSLAM::printError(const std::string& function, const std::string& message){
+void AF_VSLAM::printError(const std::string& function, const std::string& message){
     std::cout << "\x1b[91m" << "[" << function << "] : " <<  message << "\x1b[0m"<< std::endl;
 }
 
-std::string ANYFEATURE_VSLAM::featureName(const FeatureType& featureType){
-    std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featureType);
+std::string AF_VSLAM::featureName(const FeatureType& featureType){
+    std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType);
     return ft->getFeatureName();
 }
 
-cv::Scalar ANYFEATURE_VSLAM::getFeatureColor(const FeatureType& featureType, const int& format, const bool& normalize){
+cv::Scalar AF_VSLAM::getFeatureColor(const FeatureType& featureType, const int& format, const bool& normalize){
 
     Eigen::Matrix<float,3,1> color{0,0,0};
-    std::unique_ptr<ANYFEATURE_VSLAM::Feature> ft = get_feature(featureType);
+    std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType);
     color = ft->getColor();
 
     if (normalize){
@@ -44,7 +44,7 @@ cv::Scalar ANYFEATURE_VSLAM::getFeatureColor(const FeatureType& featureType, con
     }
 }
 
-std::string ANYFEATURE_VSLAM::matType(const int& matTypeIndex){
+std::string AF_VSLAM::matType(const int& matTypeIndex){
     switch(matTypeIndex) {
         case 0:
             return "CV_8U";
@@ -63,7 +63,7 @@ std::string ANYFEATURE_VSLAM::matType(const int& matTypeIndex){
     }
 }
 
-std::vector<std::vector<float>> ANYFEATURE_VSLAM::loadBinFile(const std::string& filename, const int& numFloats ){
+std::vector<std::vector<float>> AF_VSLAM::loadBinFile(const std::string& filename, const int& numFloats ){
 
     std::vector<std::vector<float>> floats{};
     std::vector<double> floatsRow(numFloats);
@@ -79,7 +79,7 @@ std::vector<std::vector<float>> ANYFEATURE_VSLAM::loadBinFile(const std::string&
     return floats;
 }
 
-std::string ANYFEATURE_VSLAM::replaceAllOccurrences(std::string str, const std::string& from, const std::string& to) {
+std::string AF_VSLAM::replaceAllOccurrences(std::string str, const std::string& from, const std::string& to) {
     size_t startPos = 0;
     while ((startPos = str.find(from, startPos)) != std::string::npos) {
         str.replace(startPos, from.length(), to);
@@ -88,12 +88,12 @@ std::string ANYFEATURE_VSLAM::replaceAllOccurrences(std::string str, const std::
     return str;
 }
 
-int ANYFEATURE_VSLAM::RandomIntegerGenerator::GetRandomInteger(const int& minNumber, const int& maxNumber){
+int AF_VSLAM::RandomIntegerGenerator::GetRandomInteger(const int& minNumber, const int& maxNumber){
     std::uniform_int_distribution<> distrib(minNumber, maxNumber);
     return distrib(randomIntGenerator);
 }
 
-void ANYFEATURE_VSLAM::medianTrackingTime(std::vector<double> &timeVector, const std::string& stage, const bool& activate){
+void AF_VSLAM::medianTrackingTime(std::vector<double> &timeVector, const std::string& stage, const bool& activate){
     if(!activate)
         return;
     if(timeVector.empty()){
@@ -118,7 +118,7 @@ void ANYFEATURE_VSLAM::medianTrackingTime(std::vector<double> &timeVector, const
     std::cout << stage + "median / std  / max time: " << " / " << 1000*median << " / " << 1000*stddev << " / " << 1000*tmp.back() << " ms" << std::endl;
 }
 
-double ANYFEATURE_VSLAM::vector_median(std::vector<double>& vector_){
+double AF_VSLAM::vector_median(std::vector<double>& vector_){
     std::vector<double> tmp = vector_;
     std::sort(tmp.begin(), tmp.end());
     size_t n = tmp.size();

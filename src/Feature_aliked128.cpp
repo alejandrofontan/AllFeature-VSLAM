@@ -3,10 +3,10 @@
 #include <opencv2/opencv.hpp>
 #include <torch/torch.h>
 
-ANYFEATURE_VSLAM::FeatureExtractor_aliked128::FeatureExtractor_aliked128(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::FeatureExtractor_aliked128::FeatureExtractor_aliked128(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
-            
-        torch::Device device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;    
+
+        torch::Device device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
         extractor = std::make_shared<ALIKED>("aliked-n16", device.str());
 }
 
@@ -32,17 +32,17 @@ static cv::Mat tensorDescToMatCopy(const at::Tensor& desc_in) {
     return out;
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
+void AF_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
 
     // ALIKED feature detection and description
     std::vector<cv::KeyPoint> keypoints_;
-    cv::Mat descriptors_; 
+    cv::Mat descriptors_;
 
     cv::Mat img_;
     if (img.img.channels() == 3) {
         img_ = img.img.clone();
     } else if (img.img.channels() == 1) {
-        cv::cvtColor(img.img, img_, cv::COLOR_GRAY2RGB); 
+        cv::cvtColor(img.img, img_, cv::COLOR_GRAY2RGB);
     } else if (img.img.channels() == 4) {
         cv::cvtColor(img.img, img_, cv::COLOR_BGRA2RGB);
     } else {
@@ -55,7 +55,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image&
     at::Tensor kpts_cpu = kpts.cpu().contiguous().to(at::kFloat);
     TORCH_CHECK(kpts_cpu.dim() == 2 && kpts_cpu.size(1) >= 2, "Expected keypoints [N,2] (or more)");
 
-    const auto& scores_t = feats0.at("scores"); 
+    const auto& scores_t = feats0.at("scores");
     at::Tensor scores_cpu = scores_t.squeeze().cpu().contiguous().to(at::kFloat);
     TORCH_CHECK(scores_cpu.dim() == 1, "Expected scores [N] after squeeze()");
     TORCH_CHECK(scores_cpu.size(0) == kpts_cpu.size(0), "scores N != keypoints N");
@@ -97,14 +97,14 @@ void ANYFEATURE_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image&
 
 }
 
-int ANYFEATURE_VSLAM::FeatureExtractor_aliked128::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
+int AF_VSLAM::FeatureExtractor_aliked128::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
     return 0;
 }
 
-float ANYFEATURE_VSLAM::FeatureExtractor_aliked128::GetKeypointSize(const cv::KeyPoint& keypoint) const{
+float AF_VSLAM::FeatureExtractor_aliked128::GetKeypointSize(const cv::KeyPoint& keypoint) const{
     return 1.0f;
 }
 
-float ANYFEATURE_VSLAM::DescriptorDistance_aliked128(const cv::Mat &a, const cv::Mat &b){
+float AF_VSLAM::DescriptorDistance_aliked128(const cv::Mat &a, const cv::Mat &b){
     return (Descriptor_Distance_Type) cv::norm(a, b, cv::NORM_L2);
 }

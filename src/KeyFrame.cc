@@ -23,7 +23,7 @@
 #include<mutex>
 #include <memory>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 static bool KeyframeComparison(pair<int , Keyframe> a, pair<int , Keyframe> b){
@@ -498,7 +498,7 @@ void KeyFrame::SetErase()
 }
 
 void KeyFrame::SetBadFlag()
-{   
+{
     {
         unique_lock<mutex> lock(mMutexConnections);
         #ifdef ALLFEATURE_EVALUATION
@@ -627,8 +627,8 @@ void KeyFrame::EraseConnection(Keyframe keyframe)
 vector<size_t> KeyFrame::GetFeaturesInArea(const float &x, const float &y, const float &r, const FeatureType& featType) const
 {
     auto it1 = N.find(featType);
-    if (it1 == N.end() ) 
-        return vector<size_t> (); 
+    if (it1 == N.end() )
+        return vector<size_t> ();
 
     vector<size_t> vIndices;
     vIndices.reserve(N.at(featType));

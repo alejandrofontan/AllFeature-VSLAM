@@ -23,7 +23,7 @@
 
 #include<mutex>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 long unsigned int MapPoint::nNextId=0;

@@ -2,8 +2,8 @@
 // Created by fontan on 15/02/24.
 //
 
-#ifndef ANYFEATURE_VSLAM_TYPES_H
-#define ANYFEATURE_VSLAM_TYPES_H
+#ifndef AF_VSLAM_TYPES_H
+#define AF_VSLAM_TYPES_H
 
 #include <Eigen/Dense>
 #include <iostream>
@@ -63,4 +63,4 @@ enum VerbosityLevel{
     ABLATION = 4
 };
 
-#endif //ANYFEATURE_VSLAM_TYPES_H
+#endif //AF_VSLAM_TYPES_H

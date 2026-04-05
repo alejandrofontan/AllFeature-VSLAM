@@ -2,13 +2,13 @@
 // Created by fontan on 18/02/24.
 //
 
-#ifndef ANYFEATURE_VSLAM_OBSERVATION_H
-#define ANYFEATURE_VSLAM_OBSERVATION_H
+#ifndef AF_VSLAM_OBSERVATION_H
+#define AF_VSLAM_OBSERVATION_H
 
 #include "KeyFrame.h"
 #include "FeatureFactory.h"
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class KeyFrame;
 
@@ -33,4 +33,4 @@ namespace ANYFEATURE_VSLAM {
     typedef shared_ptr<Observation> Obs;
 
 }
-#endif //ANYFEATURE_VSLAM_OBSERVATION_H
+#endif //AF_VSLAM_OBSERVATION_H

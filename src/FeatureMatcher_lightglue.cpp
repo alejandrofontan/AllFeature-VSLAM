@@ -37,32 +37,32 @@ static FeatDict make_feats_like_aliked(
     torch::Device device
 ) {
     FeatDict f;
-    f.insert("keypoints", kps_to_tensor_N2(kps, device));          
-    f.insert("descriptors", desc_to_tensor_ND(desc, device));      
+    f.insert("keypoints", kps_to_tensor_N2(kps, device));
+    f.insert("descriptors", desc_to_tensor_ND(desc, device));
     f.insert("image_size",
             torch::tensor({(float)width, (float)height}, torch::TensorOptions().dtype(torch::kFloat32))
-                .unsqueeze(0).to(device));                       
+                .unsqueeze(0).to(device));
     return f;
 }
 
 static std::vector<cv::DMatch> lightglue_to_dmatches(
-        const at::Tensor& matches0,                 
-        const at::Tensor* matching_scores0 = nullptr, 
+        const at::Tensor& matches0,
+        const at::Tensor* matching_scores0 = nullptr,
         float min_score = 0.0f
     ) {
         // Move to CPU + contiguous
         at::Tensor m = matches0.to(at::kCPU).contiguous();
-        if (m.dim() == 2) m = m.squeeze(0); 
+        if (m.dim() == 2) m = m.squeeze(0);
         TORCH_CHECK(m.dim() == 1, "matches0 must be [N0] or [1,N0]");
-        m = m.to(at::kLong);                
+        m = m.to(at::kLong);
 
         at::Tensor s;
         bool has_scores = (matching_scores0 != nullptr);
         if (has_scores) {
             s = matching_scores0->to(at::kCPU).contiguous();
-            if (s.dim() == 2) s = s.squeeze(0);    
+            if (s.dim() == 2) s = s.squeeze(0);
             TORCH_CHECK(s.dim() == 1, "matching_scores0 must be [N0] or [1,N0]");
-            s = s.to(at::kFloat);                  
+            s = s.to(at::kFloat);
             TORCH_CHECK(s.size(0) == m.size(0), "scores length must match matches0 length");
         }
 
@@ -82,10 +82,10 @@ static std::vector<cv::DMatch> lightglue_to_dmatches(
                 if (score < min_score) continue;
 
                 cv::DMatch dm;
-                dm.queryIdx = (int)i;       
-                dm.trainIdx = (int)j;        
+                dm.queryIdx = (int)i;
+                dm.trainIdx = (int)j;
                 dm.imgIdx   = 0;
-                dm.distance = 1.0f - score;  
+                dm.distance = 1.0f - score;
                 out.push_back(dm);
             }
         } else {
@@ -105,7 +105,7 @@ static std::vector<cv::DMatch> lightglue_to_dmatches(
         return out;
     }
 
-    std::vector<cv::DMatch> ANYFEATURE_VSLAM::FeatureMatcher::lightglueMatching(
+    std::vector<cv::DMatch> AF_VSLAM::FeatureMatcher::lightglueMatching(
         const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
         const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
         float min_score
@@ -117,6 +117,6 @@ static std::vector<cv::DMatch> lightglue_to_dmatches(
         auto matches01 = matcher_lightglue->forward(f0, f1);
         const auto& matches0 = matches01.at("matches0");
         const auto& scores0  = matches01.at("matching_scores0");
-        std::vector<cv::DMatch> matches = lightglue_to_dmatches(matches0, &scores0, min_score);    
+        std::vector<cv::DMatch> matches = lightglue_to_dmatches(matches0, &scores0, min_score);
         return matches;
     }

@@ -21,7 +21,7 @@
 
 #include "Converter.h"
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 mat4f Converter::toMatrix4f(const g2o::Sim3 &Sim3)

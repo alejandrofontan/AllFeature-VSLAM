@@ -29,7 +29,7 @@
 
 #include<mutex>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 FrameDrawer::FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& featureTypes):
@@ -81,8 +81,8 @@ cv::Mat FrameDrawer::DrawFrame()
     //Draw
     if(state==Tracking::NOT_INITIALIZED) //INITIALIZING
     {
-        
-        for (auto const& [featType, N_] : N) {   
+
+        for (auto const& [featType, N_] : N) {
             cv::Scalar color = getFeatureColor(featType, 0);
             for(unsigned int i=0; i<vMatches[featType].size(); i++)
             {
@@ -92,14 +92,14 @@ cv::Mat FrameDrawer::DrawFrame()
                             cv::Scalar(color));
                 }
             }
-        }        
+        }
     }
     else if(state==Tracking::OK) //TRACKING
-    {   
+    {
         mnTracked=0;
         mnTrackedVO=0;
         const float r = 5;
-        for (auto const& [featType, N_] : N) {   
+        for (auto const& [featType, N_] : N) {
             const int n = vCurrentKeys[featType].size();
             cv::Scalar color = getFeatureColor(featType, 0);
             for(int i=0;i<n;i++)
@@ -138,9 +138,9 @@ cv::Mat FrameDrawer::DrawFrame()
     // static string lastSavedImage = "";
     // if ((imName!="") && (imName != lastSavedImage)) {
     //     std::cout << "Saving frame: " << imName << std::endl;
-    //     std::filesystem::path full = std::filesystem::path(ANYFEATURE_VSLAM::FrameDrawer::exp_folder) / imName; 
+    //     std::filesystem::path full = std::filesystem::path(AF_VSLAM::FrameDrawer::exp_folder) / imName;
     //     std::string path = full.string();
-    //     cv::Mat out = im;          
+    //     cv::Mat out = im;
     //     cv::cvtColor(out, out, cv::COLOR_RGB2BGR);
     //     bool ok = cv::imwrite(path, out, params);
     //     lastSavedImage = imName;
@@ -160,7 +160,7 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
     else if(nState==Tracking::OK)
     {
         s << "SLAM MODE |  ";
-        
+
         int nKFs = mpMap->KeyFramesInMap();
         int nMPs = mpMap->MapPointsInMap();
         s << "KFs: " << nKFs << ", MPs: " << nMPs << ", Matches: " << mnTracked;
@@ -177,8 +177,8 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
     }
 
     int baseline=0;
-    double fontScale = 1.5;   
-    int thickness = 2.0;    
+    double fontScale = 1.5;
+    int thickness = 2.0;
     cv::Size textSize = cv::getTextSize(s.str(),cv::FONT_HERSHEY_PLAIN,fontScale,thickness,&baseline);
     imText = cv::Mat(im.rows+textSize.height+10,im.cols,im.type());
     im.copyTo(imText.rowRange(0,im.rows).colRange(0,im.cols));
@@ -207,7 +207,7 @@ void FrameDrawer::Update(Tracking *pTracker)
     }
     else if(pTracker->mLastProcessedState==Tracking::OK)
     {
-        for (auto const& [featType, N_] : N) {   
+        for (auto const& [featType, N_] : N) {
             for(int i = 0; i < N_; i++)
             {
                 Pt pMP = pTracker->currentFrame.pts.at(featType)[i];

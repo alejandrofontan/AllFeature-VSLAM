@@ -1,11 +1,11 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_SIFT128_H
-#define ANYFEATURE_VSLAM_FEATURE_SIFT128_H
+#ifndef AF_VSLAM_FEATURE_SIFT128_H
+#define AF_VSLAM_FEATURE_SIFT128_H
 
 #include "Feature.h"
 #include "FeatureExtractor.h"
 #include "SiftGPU.h"
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor_sift128;
 
@@ -54,4 +54,4 @@ namespace ANYFEATURE_VSLAM {
     float DescriptorDistance_sift128(const cv::Mat &a, const cv::Mat &b);
 }
 
-#endif //ANYFEATURE_VSLAM_FEATURE_SIFT128_H
+#endif //AF_VSLAM_FEATURE_SIFT128_H

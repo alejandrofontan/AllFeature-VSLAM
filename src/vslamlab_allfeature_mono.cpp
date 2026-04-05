@@ -11,7 +11,7 @@
 #include<FrameDrawer.h>
 
 using namespace std;
-namespace ANYFEATURE_VSLAM{
+namespace AF_VSLAM{
     using Seconds = double;
 }
 
@@ -22,7 +22,7 @@ namespace ANYFEATURE_VSLAM{
 #include <sys/select.h>
 #include <cstdio>
 
-string ANYFEATURE_VSLAM::FrameDrawer::exp_folder{};
+string AF_VSLAM::FrameDrawer::exp_folder{};
 
 // RAII: put terminal in raw-ish mode so we can read single key presses
 struct TerminalRawMode {
@@ -84,7 +84,7 @@ inline std::thread startKeyAllowanceThread(std::atomic<int>& allowance,
 
 
 void LoadImages(const string &pathToSequence, const string &rgb_csv,
-                vector<string> &imageFilenames, vector<ANYFEATURE_VSLAM::Seconds> &timestamps,
+                vector<string> &imageFilenames, vector<AF_VSLAM::Seconds> &timestamps,
                 const string cam_name = "rgb_0");
 std::string paddingZeros(const std::string& number, const size_t numberOfZeros = 5);
 
@@ -98,7 +98,7 @@ void removeSubstring(std::string& str, const std::string& substring) {
 
 int main(int argc, char **argv)
 {
-    // ANYFEATURE_VSLAM inputs
+    // AF_VSLAM inputs
     string sequence_path;
     string calibration_yaml;
     string rgb_csv;
@@ -182,7 +182,7 @@ int main(int argc, char **argv)
     bool debug = (bool)settings["debug"].as<bool>();
     std::cout << "[vslamlab_anyfeature_mono.cpp] Debug mode = " << debug << std::endl;
 
-    ANYFEATURE_VSLAM::FrameDrawer::exp_folder = exp_folder;
+    AF_VSLAM::FrameDrawer::exp_folder = exp_folder;
 
     vector<FeatureType> featureTypes{};
     for(const auto& feat : features) {
@@ -193,7 +193,7 @@ int main(int argc, char **argv)
 
     // Retrieve paths to images
     vector<string> imageFilenames{};
-    vector<ANYFEATURE_VSLAM::Seconds> timestamps{};
+    vector<AF_VSLAM::Seconds> timestamps{};
     LoadImages(sequence_path, rgb_csv, imageFilenames, timestamps);
 
     // Retrieve paths to images
@@ -201,15 +201,15 @@ int main(int argc, char **argv)
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
 
-    ANYFEATURE_VSLAM::System SLAM(path_to_vocabulary_folder,
+    AF_VSLAM::System SLAM(path_to_vocabulary_folder,
                                   calibration_yaml, settings_yaml,
-                                  ANYFEATURE_VSLAM::System::MONOCULAR,
+                                  AF_VSLAM::System::MONOCULAR,
                                   verbose,
                                   featureTypes,
                                   fixImageSize);
 
     // Vector for tracking time statistics
-    vector<ANYFEATURE_VSLAM::Seconds> vTimesTrack;
+    vector<AF_VSLAM::Seconds> vTimesTrack;
     vTimesTrack.resize(nImages);
 
     cout << endl << "-------" << endl;
@@ -239,21 +239,21 @@ int main(int argc, char **argv)
         }
 
         // Read image from file
-        ANYFEATURE_VSLAM::Image im(imageFilenames[ni]);
+        AF_VSLAM::Image im(imageFilenames[ni]);
 
         //im.LoadMask(imageFilenames[ni]);
-        ANYFEATURE_VSLAM::Seconds tframe = timestamps[ni];
+        AF_VSLAM::Seconds tframe = timestamps[ni];
 
         // Pass the image to the SLAM system
         std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
         SLAM.TrackMonocular(im,tframe);
         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
 
-        ANYFEATURE_VSLAM::Seconds ttrack = std::chrono::duration_cast<std::chrono::duration<ANYFEATURE_VSLAM::Seconds> >(t2 - t1).count();
+        AF_VSLAM::Seconds ttrack = std::chrono::duration_cast<std::chrono::duration<AF_VSLAM::Seconds> >(t2 - t1).count();
         vTimesTrack[ni] = ttrack;
 
         // Wait to load the next frame
-        ANYFEATURE_VSLAM::Seconds T = 0.0;
+        AF_VSLAM::Seconds T = 0.0;
         if(ni < nImages-1)
             T = timestamps[ni+1] - tframe;
         else if(ni > 0)
@@ -283,7 +283,7 @@ int main(int argc, char **argv)
 
     // Tracking time statistics
     sort(vTimesTrack.begin(),vTimesTrack.end());
-    ANYFEATURE_VSLAM::Seconds totaltime = 0.0;
+    AF_VSLAM::Seconds totaltime = 0.0;
     for(int ni = 0; ni < nImages; ni++)
     {
         totaltime+=vTimesTrack[ni];
@@ -314,7 +314,7 @@ std::vector<std::string> split(const std::string& s, char delimiter) {
 }
 
 void LoadImages(const string &pathToSequence, const string &rgb_csv,
-                vector<string> &imageFilenames, vector<ANYFEATURE_VSLAM::Seconds> &timestamps,
+                vector<string> &imageFilenames, vector<AF_VSLAM::Seconds> &timestamps,
                 const string cam_name)
 {
 
@@ -357,7 +357,7 @@ void LoadImages(const string &pathToSequence, const string &rgb_csv,
         std::string t_str = tokens[ts_idx];
         std::string rel_rgb0_path = tokens[rgb0_idx];
 
-        ANYFEATURE_VSLAM::Seconds t = static_cast<double>(std::stoll(t_str)) * 1e-9;
+        AF_VSLAM::Seconds t = static_cast<double>(std::stoll(t_str)) * 1e-9;
 
         timestamps.push_back(t);
         imageFilenames.push_back(pathToSequence + "/" + rel_rgb0_path);

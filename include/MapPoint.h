@@ -29,7 +29,7 @@
 #include<opencv2/core/core.hpp>
 #include<mutex>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class KeyFrame;
@@ -38,7 +38,7 @@ class Frame;
 class Observation;
 
 class MapPoint;
-typedef shared_ptr<ANYFEATURE_VSLAM::MapPoint> Pt;
+typedef shared_ptr<AF_VSLAM::MapPoint> Pt;
 
 
 class MapPoint: public std::enable_shared_from_this<MapPoint>

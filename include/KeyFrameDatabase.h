@@ -33,12 +33,12 @@
 #include<mutex>
 
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class Frame;
 class KeyFrame;
-typedef shared_ptr<ANYFEATURE_VSLAM::KeyFrame> Keyframe;
+typedef shared_ptr<AF_VSLAM::KeyFrame> Keyframe;
 
 class KeyFrameDatabase
 {

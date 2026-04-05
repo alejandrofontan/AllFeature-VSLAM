@@ -1,12 +1,12 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_SURF64_H
-#define ANYFEATURE_VSLAM_FEATURE_SURF64_H
+#ifndef AF_VSLAM_FEATURE_SURF64_H
+#define AF_VSLAM_FEATURE_SURF64_H
 
 #include "Feature.h"
 #include "FeatureExtractor.h"
 //#include "opencv2/xfeatures2d/cudafeatures2d.hpp"
 #include <opencv2/xfeatures2d/cuda.hpp>
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor_surf64;
 
@@ -48,4 +48,4 @@ namespace ANYFEATURE_VSLAM {
 }
 
 
-#endif //ANYFEATURE_VSLAM_FEATURE_SURF64_H
+#endif //AF_VSLAM_FEATURE_SURF64_H

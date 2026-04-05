@@ -1,6 +1,6 @@
 #include "Feature_orb32.h"
 
-float ANYFEATURE_VSLAM::Orb32::DescriptorDistance(const cv::Mat &a, const cv::Mat &b) const {
+float AF_VSLAM::Orb32::DescriptorDistance(const cv::Mat &a, const cv::Mat &b) const {
     // Bit set count operation from
     // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
     const int *pa = a.ptr<int32_t>();
@@ -19,7 +19,7 @@ float ANYFEATURE_VSLAM::Orb32::DescriptorDistance(const cv::Mat &a, const cv::Ma
     return Descriptor_Distance_Type(dist);
 }
 
-ANYFEATURE_VSLAM::FeatureExtractor_orb32::FeatureExtractor_orb32(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::FeatureExtractor_orb32::FeatureExtractor_orb32(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
 
     iniThFAST = settings->detectTh;
@@ -81,7 +81,7 @@ ANYFEATURE_VSLAM::FeatureExtractor_orb32::FeatureExtractor_orb32(std::shared_ptr
     }
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor_orb32::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& _keypoints, cv::Mat& _descriptors){
+void AF_VSLAM::FeatureExtractor_orb32::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& _keypoints, cv::Mat& _descriptors){
     ComputePyramid(img.grayImg);
     std::vector < std::vector<cv::KeyPoint> > allKeypoints;
     ComputeKeyPointsOctTree(allKeypoints);
@@ -115,15 +115,15 @@ void ANYFEATURE_VSLAM::FeatureExtractor_orb32::detectAndCompute(const Image& img
     }
 }
 
-int ANYFEATURE_VSLAM::FeatureExtractor_orb32::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
+int AF_VSLAM::FeatureExtractor_orb32::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
     return keypoint.octave;
 }
 
-float ANYFEATURE_VSLAM::FeatureExtractor_orb32::GetKeypointSize(const cv::KeyPoint& keypoint) const{
+float AF_VSLAM::FeatureExtractor_orb32::GetKeypointSize(const cv::KeyPoint& keypoint) const{
     return powf(settings->GetDetectorScaleFactor(), float(GetKeypointOctave(keypoint)));
 }
 
-float ANYFEATURE_VSLAM::DescriptorDistance_orb32(const cv::Mat &a, const cv::Mat &b){
+float AF_VSLAM::DescriptorDistance_orb32(const cv::Mat &a, const cv::Mat &b){
     // Bit set count operation from
     // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
     const int *pa = a.ptr<int32_t>();
@@ -142,7 +142,7 @@ float ANYFEATURE_VSLAM::DescriptorDistance_orb32(const cv::Mat &a, const cv::Mat
     return Descriptor_Distance_Type(dist);
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor_orb32::ComputePyramid(cv::Mat image)
+void AF_VSLAM::FeatureExtractor_orb32::ComputePyramid(cv::Mat image)
 {
 
 
@@ -171,7 +171,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor_orb32::ComputePyramid(cv::Mat image)
 
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor_orb32::ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints)
+void AF_VSLAM::FeatureExtractor_orb32::ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints)
 {
     allKeypoints.resize(settings->nOctaves);
 

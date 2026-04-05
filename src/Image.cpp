@@ -11,7 +11,7 @@
 #include <iostream>
 #include <filesystem>
 
-ANYFEATURE_VSLAM::Image::Image(const std::string &imagePath): imageFile{imagePath} {
+AF_VSLAM::Image::Image(const std::string &imagePath): imageFile{imagePath} {
 
     img = cv::imread(imageFile,cv::IMREAD_UNCHANGED);
 
@@ -25,7 +25,7 @@ ANYFEATURE_VSLAM::Image::Image(const std::string &imagePath): imageFile{imagePat
     descriptorsBinFile = replaceAllOccurrences(descriptorsBinFile, "png", "bin");
 }
 
-ANYFEATURE_VSLAM::Image::Image(const cv::Mat& image){
+AF_VSLAM::Image::Image(const cv::Mat& image){
 
     img = image.clone();
     std::cout << "Image loaded with size: " << img.cols << " x " << img.rows << std::endl;
@@ -40,11 +40,11 @@ ANYFEATURE_VSLAM::Image::Image(const cv::Mat& image){
     // descriptorsBinFile = replaceAllOccurrences(descriptorsBinFile, "png", "bin");
 }
 
-void ANYFEATURE_VSLAM::Image::LoadMask(const std::string &maskPath) {
+void AF_VSLAM::Image::LoadMask(const std::string &maskPath) {
     mask = cv::imread( maskPath.substr(0, 43) + "mask" + maskPath.substr(46, 50),cv::IMREAD_UNCHANGED);
 }
 
-void ANYFEATURE_VSLAM::Image::GetGrayImage(const bool& rgb) {
+void AF_VSLAM::Image::GetGrayImage(const bool& rgb) {
     if(img.channels() == 3){
         if(rgb){
             cvtColor(img,grayImg,CV_RGB2GRAY);
@@ -69,7 +69,7 @@ void ANYFEATURE_VSLAM::Image::GetGrayImage(const bool& rgb) {
     grayImg = img;
 }
 
-void ANYFEATURE_VSLAM::Image::FixImageSize(const int& new_width, const int& new_height){
+void AF_VSLAM::Image::FixImageSize(const int& new_width, const int& new_height){
     cv::Size new_size(new_width, new_height);
     cv::Mat resized_gray;
     cv::resize(grayImg, grayImg, new_size);

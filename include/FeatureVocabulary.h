@@ -28,7 +28,7 @@
 #include"DBoW2/TemplatedVocabulary.h"
 #include"DBoW2/DBoW2.h"
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 //typedef DBoW2::TemplatedVocabulary<DBoW2::FOrb::TDescriptor, DBoW2::FOrb> OrbVocabulary;

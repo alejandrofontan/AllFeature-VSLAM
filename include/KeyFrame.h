@@ -33,7 +33,7 @@
 #include <mutex>
 
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class Map;
@@ -41,9 +41,9 @@ class Frame;
 class KeyFrameDatabase;
 
 class KeyFrame;
-typedef shared_ptr<ANYFEATURE_VSLAM::KeyFrame> Keyframe;
+typedef shared_ptr<AF_VSLAM::KeyFrame> Keyframe;
 class MapPoint;
-typedef shared_ptr<ANYFEATURE_VSLAM::MapPoint> Pt;
+typedef shared_ptr<AF_VSLAM::MapPoint> Pt;
 
 class KeyFrame : public std::enable_shared_from_this<KeyFrame>
 {
@@ -263,7 +263,7 @@ protected:
     std::mutex mMutexFeatures;
 };
 
-//typedef ANYFEATURE_VSLAM::Keyframe Keyframe;
+//typedef AF_VSLAM::Keyframe Keyframe;
 
 } //namespace ORB_SLAM
 

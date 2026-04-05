@@ -60,7 +60,7 @@
 
 using namespace std;
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 
@@ -93,7 +93,7 @@ PnPsolver::PnPsolver(const Frame &F, const vector<Pt> &vpMapPointMatches, const 
                 mvP3Dw.push_back(cv::Point3f(Pos(0),Pos(1), Pos(2)));
 
                 mvKeyPointIndices.push_back(i);
-                mvAllIndices.push_back(idx);               
+                mvAllIndices.push_back(idx);
 
                 idx++;
             }
@@ -159,7 +159,7 @@ void PnPsolver::SetRansacParameters(double probability, int minInliers, int maxI
 cv::Mat PnPsolver::find(vector<bool> &vbInliers, int &nInliers)
 {
     bool bFlag;
-    return iterate(mRansacMaxIts,bFlag,vbInliers,nInliers);    
+    return iterate(mRansacMaxIts,bFlag,vbInliers,nInliers);
 }
 
 cv::Mat PnPsolver::iterate(int nIterations, bool &bNoMore, vector<bool> &vbInliers, int &nInliers)

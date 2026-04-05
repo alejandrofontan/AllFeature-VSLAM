@@ -40,7 +40,7 @@
 #include <iomanip>
 #include <iostream>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 float Optimizer::chi2_2dof{5.991};

@@ -6,7 +6,7 @@
 #include "GL/glew.h"
 #include "math.h"
 
-ANYFEATURE_VSLAM::FeatureExtractor_sift128::FeatureExtractor_sift128(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::FeatureExtractor_sift128::FeatureExtractor_sift128(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
 
     // settings_->detectTh = (1.0f / settings_->detectTh);
@@ -70,7 +70,7 @@ ANYFEATURE_VSLAM::FeatureExtractor_sift128::FeatureExtractor_sift128(std::shared
     if(support != SiftGPU::SIFTGPU_FULL_SUPPORTED) std::terminate();
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor_sift128::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
+void AF_VSLAM::FeatureExtractor_sift128::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
 
     detectKeypoints(keypoints, img, settings->detectTh, settings->nOctaves);
     computeDescriptors(descriptors, img);
@@ -81,7 +81,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor_sift128::detectAndCompute(const Image& i
     }
 }
 
-void ANYFEATURE_VSLAM::FeatureExtractor_sift128::detectKeypoints(
+void AF_VSLAM::FeatureExtractor_sift128::detectKeypoints(
         std::vector<cv::KeyPoint>& keypoints,
         const Image& img, const float& detectTh, const int& nOctaves) const{
 
@@ -106,7 +106,7 @@ void ANYFEATURE_VSLAM::FeatureExtractor_sift128::detectKeypoints(
 typedef Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
     FeatureDescriptorsFloat;
 
-void ANYFEATURE_VSLAM::FeatureExtractor_sift128::computeDescriptors(
+void AF_VSLAM::FeatureExtractor_sift128::computeDescriptors(
     cv::Mat& descriptors, const Image& /*img*/) const
 {
     const int numKeypoints = sift->GetFeatureNum();
@@ -134,14 +134,14 @@ void ANYFEATURE_VSLAM::FeatureExtractor_sift128::computeDescriptors(
     }
 }
 
-int ANYFEATURE_VSLAM::FeatureExtractor_sift128::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
+int AF_VSLAM::FeatureExtractor_sift128::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
     return 0;
 }
 
-float ANYFEATURE_VSLAM::FeatureExtractor_sift128::GetKeypointSize(const cv::KeyPoint& keypoint) const{
+float AF_VSLAM::FeatureExtractor_sift128::GetKeypointSize(const cv::KeyPoint& keypoint) const{
     return 1.0f;
 }
 
-float ANYFEATURE_VSLAM::DescriptorDistance_sift128(const cv::Mat &a, const cv::Mat &b){
+float AF_VSLAM::DescriptorDistance_sift128(const cv::Mat &a, const cv::Mat &b){
     return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2);
 }

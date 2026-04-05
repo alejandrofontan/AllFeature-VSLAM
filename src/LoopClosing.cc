@@ -32,13 +32,13 @@
 #include<thread>
 
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
     LoopConnections::LoopConnections(const KeyframeId & keyframeId, const Keyframe& keyframe, const map<KeyframeId,Keyframe>& connections):
             keyframeId(keyframeId), keyframe(keyframe), connections(connections){}
 
-LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<KeyFrameDatabase>pDB, shared_ptr<Vocabulary> vocabulary, 
+LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<KeyFrameDatabase>pDB, shared_ptr<Vocabulary> vocabulary,
     const bool bFixScale, const FeatureType& featureType, int imageWidth, int imageHeight):
     mbResetRequested(false), mbFinishRequested(false), mbFinished(true), mpMap(pMap),
     mpKeyFrameDB(pDB), vocabulary(vocabulary), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
@@ -95,7 +95,7 @@ void LoopClosing::Run()
                    loopClosingTime.push_back(t_duration);
                }
             }
-        }       
+        }
 
         ResetIfRequested();
 
@@ -751,7 +751,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
 
                     pMP->SetWorldPos(Rwc*Xc+twc);
                 }
-            }            
+            }
 
             mpMap->InformNewBigChange();
 

@@ -2,8 +2,8 @@
 // Created by fontan on 15/02/24.
 //
 
-#ifndef ANYFEATURE_VSLAM_MATHFUNCTIONS_H
-#define ANYFEATURE_VSLAM_MATHFUNCTIONS_H
+#ifndef AF_VSLAM_MATHFUNCTIONS_H
+#define AF_VSLAM_MATHFUNCTIONS_H
 
 #include "iostream"
 #include "algorithm"
@@ -11,7 +11,7 @@
 #include "limits"
 #include "cmath"
 
-namespace ANYFEATURE_VSLAM{
+namespace AF_VSLAM{
 
     template <typename T>
     void vectorMedian(T& median, const std::vector<T>& v){
@@ -86,4 +86,4 @@ namespace ANYFEATURE_VSLAM{
 
 }
 
-#endif //ANYFEATURE_VSLAM_MATHFUNCTIONS_H
+#endif //AF_VSLAM_MATHFUNCTIONS_H

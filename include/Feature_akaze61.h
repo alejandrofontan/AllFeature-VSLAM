@@ -1,11 +1,11 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_AKAZE61_H
-#define ANYFEATURE_VSLAM_FEATURE_AKAZE61_H
+#ifndef AF_VSLAM_FEATURE_AKAZE61_H
+#define AF_VSLAM_FEATURE_AKAZE61_H
 
 #include "Feature.h"
 #include "FeatureExtractor.h"
 #include "akaze/AKAZE.h"
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor_akaze61;
 
@@ -50,4 +50,4 @@ namespace ANYFEATURE_VSLAM {
     float DescriptorDistance_akaze61(const cv::Mat &a, const cv::Mat &b);
 }
 
-#endif //ANYFEATURE_VSLAM_FEATURE_AKAZE61_H
+#endif //AF_VSLAM_FEATURE_AKAZE61_H

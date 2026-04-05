@@ -1,5 +1,5 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_H
-#define ANYFEATURE_VSLAM_FEATURE_H
+#ifndef AF_VSLAM_FEATURE_H
+#define AF_VSLAM_FEATURE_H
 
 #include <iostream>
 #include <memory>
@@ -8,7 +8,7 @@
 
 #include "Types.h"
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor;
     class FeatureExtractorSettings;
@@ -28,4 +28,4 @@ namespace ANYFEATURE_VSLAM {
     };
 }
 
-#endif //ANYFEATURE_VSLAM_FEATURE_H
+#endif //AF_VSLAM_FEATURE_H

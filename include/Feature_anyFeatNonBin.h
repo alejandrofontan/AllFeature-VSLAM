@@ -1,5 +1,5 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_ANYFEATNONBIN_H
-#define ANYFEATURE_VSLAM_FEATURE_ANYFEATNONBIN_H
+#ifndef AF_VSLAM_FEATURE_ANYFEATNONBIN_H
+#define AF_VSLAM_FEATURE_ANYFEATNONBIN_H
 
 #include "Feature.h"
 #include "FeatureExtractor.h"
@@ -8,7 +8,7 @@
 #include <opencv2/highgui/highgui.hpp>
 
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor_anyFeatNonBin;
 
@@ -48,4 +48,4 @@ namespace ANYFEATURE_VSLAM {
     float DescriptorDistance_anyFeatureNonBin(const cv::Mat &a, const cv::Mat &b);
 }
 
-#endif //ANYFEATURE_VSLAM_FEATURE_ANYFEATNONBIN_H
+#endif //AF_VSLAM_FEATURE_ANYFEATNONBIN_H

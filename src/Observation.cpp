@@ -4,7 +4,7 @@
 
 #include "Observation.h"
 
-ANYFEATURE_VSLAM::Observation::Observation(Keyframe projKeyframe, const KeypointIndex& projIndex,
+AF_VSLAM::Observation::Observation(Keyframe projKeyframe, const KeypointIndex& projIndex,
                                     Keyframe refKeyframe,  const KeypointIndex& refIndex):
         projKeyframe(projKeyframe), projIndex(projIndex),
         refKeyframe(refKeyframe), refIndex(refIndex){

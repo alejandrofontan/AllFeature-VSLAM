@@ -1,5 +1,5 @@
-#ifndef ANYFEATURE_VSLAM_FEATURE_superpoint256_H
-#define ANYFEATURE_VSLAM_FEATURE_superpoint256_H
+#ifndef AF_VSLAM_FEATURE_superpoint256_H
+#define AF_VSLAM_FEATURE_superpoint256_H
 
 #include "Feature.h"
 #include "FeatureExtractor.h"
@@ -10,7 +10,7 @@
 
 #include "Thirdparty/SuperPoint-LightGlue-TensorRT/include/super_point.h"
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
 
     class FeatureExtractor_superpoint256;
 
@@ -54,4 +54,4 @@ namespace ANYFEATURE_VSLAM {
 
 }
 
-#endif //ANYFEATURE_VSLAM_FEATURE_superpoint256_H
+#endif //AF_VSLAM_FEATURE_superpoint256_H

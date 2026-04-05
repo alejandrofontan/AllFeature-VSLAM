@@ -56,7 +56,7 @@
 #include "MapPoint.h"
 #include "Frame.h"
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class PnPsolver {

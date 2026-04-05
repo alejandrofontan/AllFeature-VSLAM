@@ -29,7 +29,7 @@
 
 
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class MapPoint;

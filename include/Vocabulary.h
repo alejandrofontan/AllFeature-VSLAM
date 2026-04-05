@@ -2,15 +2,15 @@
 // Created by fontan on 18/03/24.
 //
 
-#ifndef ANYFEATURE_VSLAM_VOCABULARY_H
-#define ANYFEATURE_VSLAM_VOCABULARY_H
+#ifndef AF_VSLAM_VOCABULARY_H
+#define AF_VSLAM_VOCABULARY_H
 
 #include "FeatureFactory.h"
 #include "Definitions.h"
 #include "DBoW2/TemplatedVocabulary.h"
 #include "DBoW2/DBoW2.h"
 
-namespace ANYFEATURE_VSLAM {
+namespace AF_VSLAM {
     class Vocabulary {
     public:
         Vocabulary(const string vocabularyFolder, const  FeatureType featureType);
@@ -38,4 +38,4 @@ namespace ANYFEATURE_VSLAM {
     };
 }
 
-#endif //ANYFEATURE_VSLAM_VOCABULARY_H
+#endif //AF_VSLAM_VOCABULARY_H

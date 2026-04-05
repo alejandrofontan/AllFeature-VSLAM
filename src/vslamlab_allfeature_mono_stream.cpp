@@ -13,7 +13,7 @@
 #include<FrameDrawer.h>
 
 using namespace std;
-namespace ANYFEATURE_VSLAM{
+namespace AF_VSLAM{
     using Seconds = double;
 }
 
@@ -107,9 +107,9 @@ int main() {
     }
 
     // Setting AllFeature-VSLAM
-    ANYFEATURE_VSLAM::System SLAM(path_to_vocabulary_folder,
+    AF_VSLAM::System SLAM(path_to_vocabulary_folder,
                                   calibration_yaml, settings_yaml,
-                                  ANYFEATURE_VSLAM::System::MONOCULAR,
+                                  AF_VSLAM::System::MONOCULAR,
                                   verbose,
                                   featureTypes,
                                   fixImageSize);
@@ -167,8 +167,8 @@ int main() {
 
     //     cv::imshow("UDP Stream", frame);
 
-    //     // ANYFEATURE_VSLAM::Image im(frame);
-    //     // ANYFEATURE_VSLAM::Seconds tframe = idx * (1.0/30.0); // or use a real timestamp
+    //     // AF_VSLAM::Image im(frame);
+    //     // AF_VSLAM::Seconds tframe = idx * (1.0/30.0); // or use a real timestamp
     //     // SLAM.TrackMonocular(im, tframe);
     //     idx++;
 
@@ -185,8 +185,8 @@ int main() {
             continue;
         }
 
-        ANYFEATURE_VSLAM::Image im(frame);
-        ANYFEATURE_VSLAM::Seconds tframe = idx * (1.f/30.f);
+        AF_VSLAM::Image im(frame);
+        AF_VSLAM::Seconds tframe = idx * (1.f/30.f);
 
         SLAM.TrackMonocular(im,tframe);
         idx++;

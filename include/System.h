@@ -39,7 +39,7 @@
 #include "DBoW2/TemplatedVocabulary.h"
 #include "Utils.h"
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class Viewer;

@@ -27,7 +27,7 @@
 
 using namespace std;
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 KeyFrameDatabase::KeyFrameDatabase (const shared_ptr<Vocabulary> vocabulary):

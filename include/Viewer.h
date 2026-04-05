@@ -29,7 +29,7 @@
 
 #include <mutex>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class Tracking;
@@ -41,7 +41,7 @@ class Viewer
 {
 public:
     Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> frameDrawer, std::shared_ptr<MapDrawer> mapDrawer,
-           std::shared_ptr<Tracking> tracker, 
+           std::shared_ptr<Tracking> tracker,
            const string &strCalibrationPath, const string &strSettingPath,
            const vector<FeatureType>& featureTypes);
 
@@ -63,14 +63,14 @@ public:
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Profiling
     std::mutex mutexProfileStats;
-    void set_grabImageMonocular_time_median(double time){ 
+    void set_grabImageMonocular_time_median(double time){
         std::unique_lock<std::mutex> lock(mutexProfileStats);
-        grabImageMonocular_time_median = time; 
+        grabImageMonocular_time_median = time;
     };
 
-    void set_runLocalMapping_time_median(double time){ 
+    void set_runLocalMapping_time_median(double time){
         std::unique_lock<std::mutex> lock(mutexProfileStats);
-        runLocalMapping_time_median = time; 
+        runLocalMapping_time_median = time;
     };
 
     double grabImageMonocular_time_median{0.0};
@@ -105,12 +105,12 @@ private:
     std::mutex mMutexStop;
 
     vector<FeatureType> featureTypes;
-    
+
 };
 
 }
 
 
 #endif // VIEWER_H
-	
+
 

@@ -31,7 +31,7 @@
 
 #include "DBoW2/Random.h"
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 
@@ -113,7 +113,7 @@ void Sim3Solver::SetRansacParameters(double probability, int minInliers, int max
 {
     mRansacProb = probability;
     mRansacMinInliers = minInliers;
-    mRansacMaxIts = maxIterations;    
+    mRansacMaxIts = maxIterations;
 
     N = mvpMapPoints1.size(); // number of correspondences
 

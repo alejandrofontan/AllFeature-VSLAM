@@ -39,7 +39,7 @@
 
 #include "light_glue.h"
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 
 class FeatureMatcher

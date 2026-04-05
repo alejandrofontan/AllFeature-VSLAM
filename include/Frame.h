@@ -35,16 +35,16 @@
 #include "Vocabulary.h"
 #include <opencv2/opencv.hpp>
 
-namespace ANYFEATURE_VSLAM
+namespace AF_VSLAM
 {
 #define FRAME_GRID_ROWS 48
 #define FRAME_GRID_COLS 64
 
 class MapPoint;
-typedef shared_ptr<ANYFEATURE_VSLAM::MapPoint> Pt;
+typedef shared_ptr<AF_VSLAM::MapPoint> Pt;
 
 class KeyFrame;
-typedef shared_ptr<ANYFEATURE_VSLAM::KeyFrame> Keyframe;
+typedef shared_ptr<AF_VSLAM::KeyFrame> Keyframe;
 
 class Frame
 {
