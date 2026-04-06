@@ -131,7 +131,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 
             nEdges++;
 
-            const cv::KeyPoint &kpUn = pKF->mvKeysUn.at(featType)[obs.second->projIndex];
+            const cv::KeyPoint &kpUn = pKF->keypoints.at(featType)[obs.second->projIndex];
 
             if(pKF->mvuRight.at(featType)[obs.second->projIndex]<0)
             {
@@ -304,7 +304,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                     pFrame->mvbOutlier[ft][i] = false;
 
                     Eigen::Matrix<double,2,1> obs2D;
-                    const cv::KeyPoint &kpUn = pFrame->mvKeysUn.at(ft)[i];
+                    const cv::KeyPoint &kpUn = pFrame->keypoints.at(ft)[i];
                     obs2D << kpUn.pt.x, kpUn.pt.y;
 
                     g2o::EdgeSE3ProjectXYZOnlyPose* e = new g2o::EdgeSE3ProjectXYZOnlyPose();
@@ -339,7 +339,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
 
                     //SET EDGE
                     Eigen::Matrix<double,3,1> obs3d;
-                    const cv::KeyPoint &kpUn = pFrame->mvKeysUn.at(ft)[i];
+                    const cv::KeyPoint &kpUn = pFrame->keypoints.at(ft)[i];
                     const float &kp_ur = pFrame->mvuRight.at(ft)[i];
                     obs3d << kpUn.pt.x, kpUn.pt.y, kp_ur;
 
@@ -609,7 +609,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
 
             if(!pKFi->isBad())
             {
-                const cv::KeyPoint &kpUn = pKFi->mvKeysUn.at(featType)[obs.second->projIndex];
+                const cv::KeyPoint &kpUn = pKFi->keypoints.at(featType)[obs.second->projIndex];
 
                 // mono observation
                 if(pKFi->mvuRight.at(featType)[obs.second->projIndex] < 0)
@@ -1158,7 +1158,7 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
 
         // Set edge x1 = S12*X2
         Eigen::Matrix<double,2,1> obs1;
-        const cv::KeyPoint &kpUn1 = pKF1->mvKeysUn.at(featType1)[i];
+        const cv::KeyPoint &kpUn1 = pKF1->keypoints.at(featType1)[i];
         obs1 << kpUn1.pt.x, kpUn1.pt.y;
 
         g2o::EdgeSim3ProjectXYZ* e12 = new g2o::EdgeSim3ProjectXYZ();
@@ -1175,7 +1175,7 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
 
         // Set edge x2 = S21*X1
         Eigen::Matrix<double,2,1> obs2;
-        const cv::KeyPoint &kpUn2 = pKF2->mvKeysUn.at(featType2)[i2];
+        const cv::KeyPoint &kpUn2 = pKF2->keypoints.at(featType2)[i2];
         obs2 << kpUn2.pt.x, kpUn2.pt.y;
 
         g2o::EdgeInverseSim3ProjectXYZ* e21 = new g2o::EdgeInverseSim3ProjectXYZ();

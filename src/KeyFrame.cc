@@ -38,7 +38,7 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>p
     mnFuseTargetForKF(0), mnBALocalForKF(0), mnBAFixedForKF(0),
     mnLoopQuery(0), mnLoopWords(0), mnRelocQuery(0), mnRelocWords(0), mnBAGlobalForKF(0),
     fx(F.fx), fy(F.fy), cx(F.cx), cy(F.cy), invfx(F.invfx), invfy(F.invfy),
-    mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), mvKeys(F.mvKeys), mvKeysUn(F.mvKeysUn),
+    mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), mvKeys(F.mvKeys), keypoints(F.keypoints),
     mvuRight(F.mvuRight), mvDepth(F.mvDepth),
     mBowVec(F.mBowVec), mFeatVec(F.mFeatVec),  sizeTolerance(F.sizeTolerance),
     mnMinX(F.mnMinX), mnMinY(F.mnMinY), mnMaxX(F.mnMaxX),
@@ -656,7 +656,7 @@ vector<size_t> KeyFrame::GetFeaturesInArea(const float &x, const float &y, const
             const vector<size_t> vCell = mGrid.at(featType)[ix][iy];
             for(size_t j=0, jend=vCell.size(); j<jend; j++)
             {
-                const cv::KeyPoint &kpUn = mvKeysUn.at(featType)[vCell[j]];
+                const cv::KeyPoint &kpUn = keypoints.at(featType)[vCell[j]];
                 const float distx = kpUn.pt.x-x;
                 const float disty = kpUn.pt.y-y;
 

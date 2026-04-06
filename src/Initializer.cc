@@ -33,7 +33,7 @@ Initializer::Initializer(const Frame &ReferenceFrame, float sigma_, int iteratio
 
     K = Converter::toMatrix3f(ReferenceFrame.mK.clone());
 
-    keypoints1 = ReferenceFrame.mvKeysUn.at(featureType);
+    keypoints1 = ReferenceFrame.keypoints.at(featureType);
 
     sigma = sigma_;
     sigma2 = sigma_ * sigma_;
@@ -47,7 +47,7 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &match
 {
     // Fill structures with current keypoints and matches with reference frame
     // Reference Frame: 1, Current Frame: 2
-    keypoints2 = CurrentFrame.mvKeysUn.at(featureType);
+    keypoints2 = CurrentFrame.keypoints.at(featureType);
 
     matches12.clear();
     matches12.reserve(keypoints2.size());

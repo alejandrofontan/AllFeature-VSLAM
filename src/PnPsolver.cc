@@ -84,7 +84,7 @@ PnPsolver::PnPsolver(const Frame &F, const vector<Pt> &vpMapPointMatches, const 
         {
             if(!pMP->isBad())
             {
-                const cv::KeyPoint &kp = F.mvKeysUn.at(featType)[i];
+                const cv::KeyPoint &kp = F.keypoints.at(featType)[i];
 
                 mvP2D.push_back(kp.pt);
                 mvSigma2.push_back(F.GetKeyPt1DSigma2(KeypointIndex(i), featType));

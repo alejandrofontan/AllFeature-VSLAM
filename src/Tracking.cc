@@ -327,9 +327,9 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
         {
             mInitialFrame = Frame(currentFrame);
             lastFrame = Frame(currentFrame);
-            mvbPrevMatched.resize(currentFrame.mvKeysUn[featureType].size());
-            for(size_t i = 0; i < currentFrame.mvKeysUn[featureType].size(); i++)
-                mvbPrevMatched[i] = currentFrame.mvKeysUn.at(featureType)[i].pt;
+            mvbPrevMatched.resize(currentFrame.keypoints[featureType].size());
+            for(size_t i = 0; i < currentFrame.keypoints[featureType].size(); i++)
+                mvbPrevMatched[i] = currentFrame.keypoints.at(featureType)[i].pt;
 
             mpInitializer =  make_shared<Initializer>(currentFrame, sigmaInitializer, numItInitializer, featureType);
             fill(mvIniMatches.begin(),mvIniMatches.end(),-1);

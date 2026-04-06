@@ -277,7 +277,7 @@ void LocalMapping::CreateNewMapPoints()
             // If some ft might be missing, you'd want find() guards here instead of at()
             out[k][i] = matcher->serialFeatureMatching(
                 mpCurrentKeyFrame->descriptors.at(ft), pKF2->descriptors.at(ft),
-                mpCurrentKeyFrame->mvKeysUn.at(ft),     pKF2->mvKeysUn.at(ft),
+                mpCurrentKeyFrame->keypoints.at(ft),     pKF2->keypoints.at(ft),
                 ft
             );
         }
@@ -296,8 +296,8 @@ void LocalMapping::CreateNewMapPoints()
         for (int i = 0; i < NF; ++i) {
             FeatureType ft = fts[i];
 
-            const int nq = (int)mpCurrentKeyFrame->mvKeysUn.at(ft).size();
-            const int nt = (int)pKF2->mvKeysUn.at(ft).size();
+            const int nq = (int)mpCurrentKeyFrame->keypoints.at(ft).size();
+            const int nt = (int)pKF2->keypoints.at(ft).size();
 
             auto& m = out[k][i];
             allMatches.reserve(allMatches.size() + m.size());
@@ -368,8 +368,8 @@ void LocalMapping::CreateNewMapPoints()
                 const int &idx1 = vMatchedIndices.at(featureType)[ikp].first;
                 const int &idx2 = vMatchedIndices.at(featureType)[ikp].second;
 
-                const cv::KeyPoint &kp1 = mpCurrentKeyFrame->mvKeysUn.at(featureType)[idx1];
-                const cv::KeyPoint &kp2 = pKF2->mvKeysUn.at(featureType)[idx2];
+                const cv::KeyPoint &kp1 = mpCurrentKeyFrame->keypoints.at(featureType)[idx1];
+                const cv::KeyPoint &kp2 = pKF2->keypoints.at(featureType)[idx2];
 
                 // Check parallax between rays
                 vec3f xn1{(kp1.pt.x-cx1)*invfx1, (kp1.pt.y-cy1)*invfy1, 1.0f};

@@ -189,7 +189,7 @@ public:
 
     // KeyPoints, stereo coordinate and descriptors (all associated by an index)
     const std::map<FeatureType, std::vector<cv::KeyPoint>> mvKeys;
-    const std::map<FeatureType, std::vector<cv::KeyPoint>> mvKeysUn;
+    const std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
     const std::map<FeatureType, std::vector<float>> mvuRight; // negative value for monocular points
     const std::map<FeatureType, std::vector<float>> mvDepth; // negative value for monocular points
     std::map<FeatureType, cv::Mat> descriptors;

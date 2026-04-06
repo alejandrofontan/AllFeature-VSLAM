@@ -163,10 +163,10 @@ public:
     std::map<FeatureType, int> N;
 
     // Vector of keypoints (original for visualization) and undistorted (actually used by the system).
-    // In the stereo case, mvKeysUn is redundant as images must be rectified.
+    // In the stereo case, keypoints is redundant as images must be rectified.
     // In the RGB-D case, RGB images can be distorted.
     std::map<FeatureType, std::vector<cv::KeyPoint>> mvKeys, mvKeysRight;
-    std::map<FeatureType, std::vector<cv::KeyPoint>> mvKeysUn;
+    std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
 
     // Corresponding stereo coordinate and depth for each keypoint.
     // "mono" keypoints have a negative value.

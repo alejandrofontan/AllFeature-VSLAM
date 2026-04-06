@@ -52,7 +52,7 @@ Frame::Frame(const Frame &frame)
     :vocabulary(frame.vocabulary), featureExtractorLeft(frame.featureExtractorLeft), featureExtractorRight(frame.featureExtractorRight),
      mTimeStamp(frame.mTimeStamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()),
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
-     mvKeysRight(frame.mvKeysRight), mvKeysUn(frame.mvKeysUn),  mvuRight(frame.mvuRight),
+     mvKeysRight(frame.mvKeysRight), keypoints(frame.keypoints),  mvuRight(frame.mvuRight),
      mvDepth(frame.mvDepth), mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec),
      pts(frame.pts), mvbOutlier(frame.mvbOutlier), mnId(frame.mnId), refKeyframe(frame.refKeyframe),
      sizeTolerance(frame.sizeTolerance),invSizeTolerance(frame.invSizeTolerance),
@@ -142,7 +142,7 @@ void Frame::AssignFeaturesToGrid()
 
         for(int i = 0; i < N_; i++)
         {
-            const cv::KeyPoint &kp = mvKeysUn.at(ft)[i];
+            const cv::KeyPoint &kp = keypoints.at(ft)[i];
             int nGridPosX, nGridPosY;
             if(PosInGrid(kp,nGridPosX,nGridPosY)){
                 mGrid[ft][nGridPosX][nGridPosY].push_back(i);
@@ -308,7 +308,7 @@ vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const f
 
             for(size_t j=0, jend=vCell.size(); j<jend; j++)
             {
-                const cv::KeyPoint &kpUn = mvKeysUn.at(featType)[vCell[j]];
+                const cv::KeyPoint &kpUn = keypoints.at(featType)[vCell[j]];
 
                 // if(keyPtsSize.at(featType)[vCell[j]] < minSize)
                 //     continue;
@@ -352,7 +352,7 @@ void Frame::UndistortKeyPoints()
     {
         if(mDistCoef.at<float>(0)==0.0)
         {
-            mvKeysUn[ft] = mvKeys[ft];
+            keypoints[ft] = mvKeys[ft];
             continue;
         }
 
@@ -370,13 +370,13 @@ void Frame::UndistortKeyPoints()
         mat=mat.reshape(1);
 
         // Fill undistorted keypoint vector
-        mvKeysUn[ft].resize(N.at(ft));
+        keypoints[ft].resize(N.at(ft));
         for(int i = 0; i < N.at(ft); i++)
         {
             cv::KeyPoint kp = mvKeys[ft][i];
             kp.pt.x=mat.at<float>(i,0);
             kp.pt.y=mat.at<float>(i,1);
-            mvKeysUn[ft][i]=kp;
+            keypoints[ft][i]=kp;
         }
     }
 }
@@ -494,7 +494,7 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
             }
         }
 
-        for(const auto& [ft, kpts]: mvKeysUn)
+        for(const auto& [ft, kpts]: keypoints)
         {
             for(const auto& kpt : kpts)
             {

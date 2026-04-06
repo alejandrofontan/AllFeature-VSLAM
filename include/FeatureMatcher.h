@@ -84,8 +84,11 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    // Tracking::TrackReferenceKeyFrame & Tracking::Relocalization
-    std::map<FeatureType, int> match_keyframe_to_frame(Keyframe& keyframe, Frame &frame,
+    // Matches features from a keyframe to a frame across all requested feature types.
+    // Runs brute-force NN matching, filters outliers with MAGSAC, and associates
+    // inlier matches to map points. Mutates both keyframe and frame (match cache).
+    // Returns the number of valid map point matches per feature type.
+    std::map<FeatureType, int> match_keyframe_to_frame(Keyframe& keyframe, Frame& frame,
         std::map<FeatureType, std::vector<Pt>>& mapPointMatches,
         const std::vector<FeatureType>& featureTypes);
 

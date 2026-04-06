@@ -198,7 +198,7 @@ mat4f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const d
     // unique_lock<mutex> lock2(mMutexState);
     // mTrackingState = tracker->mState;
     // mTrackedMapPoints = tracker->currentFrame.pts;
-    // mTrackedKeyPointsUn = tracker->currentFrame.mvKeysUn;
+    // mTrackedKeyPointsUn = tracker->currentFrame.keypoints;
     // return Tcw;
 }
 
@@ -251,7 +251,7 @@ mat4f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double
     // unique_lock<mutex> lock2(mMutexState);
     // mTrackingState = tracker->mState;
     // mTrackedMapPoints = tracker->currentFrame.pts;
-    // mTrackedKeyPointsUn = tracker->currentFrame.mvKeysUn;
+    // mTrackedKeyPointsUn = tracker->currentFrame.keypoints;
     // return Tcw;
 }
 
@@ -280,7 +280,7 @@ mat4f System::TrackMonocular(Image &im, const double &timestamp)
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = tracker->mState;
     mTrackedMapPoints = tracker->currentFrame.pts;
-    mTrackedKeyPointsUn = tracker->currentFrame.mvKeysUn;
+    mTrackedKeyPointsUn = tracker->currentFrame.keypoints;
 
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
