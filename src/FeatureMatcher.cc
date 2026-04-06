@@ -41,45 +41,51 @@ VerbosityLevel FeatureMatcher::verbosity{MEDIUM};
 const int FeatureMatcher::HISTO_LENGTH = 30;
 float FeatureMatcher::radiusScale{1.15f};
 
+// Initializes all feature matching backends: SiftMatchGPU, LightGlue, and SuperPoint-LightGlue (TensorRT).
 FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height, float nnratio, bool checkOri):
     mfNNratio(nnratio), mbCheckOrientation(checkOri), image_width(image_width), image_height(image_height)
 {
-    std::cout << "Initializing SiftMatchGPU..." << std::endl;
-
+    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing SiftMatchGPU..." << std::endl;
     sift_match_gpu_ = SiftMatchGPU();
     sift_match_gpu_.SetLanguage(SiftMatchGPU::SIFTMATCH_CUDA);
     if (sift_match_gpu_.VerifyContextGL() == 0) {
-       std::cout << "Initialization failed!" << std::endl;
+       std::cout << "\033[1;31m[FeatureMatcher]\033[0m SiftMatchGPU initialization failed!" << std::endl;
     }
-    int max_supported = 4000;
-    sift_match_gpu_ .Allocate(max_supported, 1);
-    std::cout << "Finished initializing SiftMatchGPU." << std::endl;
+    sift_match_gpu_.Allocate(FeatureMatcher::max_supported, 1);
+    std::cout << "\033[1;32m[FeatureMatcher]\033[0m SiftMatchGPU initialized." << std::endl;
 
-    std::cout << "Initializing LightGlue..." << std::endl;
+    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing LightGlue..." << std::endl;
+
+    // Select CUDA if available, fall back to CPU
     torch_device = std::make_shared<torch::Device>(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
     matcher_lightglue = std::make_shared<matcher::LightGlue>();
     matcher_lightglue->to(*torch_device);
-    std::cout << "Finished initializing LightGlue." << std::endl;
+    std::cout << "\033[1;32m[FeatureMatcher]\033[0m LightGlue initialized." << std::endl;
 
-    std::cout << "Initializing SuperPoint-LightGlue..." << std::endl;
+    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing SuperPoint-LightGlue..." << std::endl;
     std::string config_path = "Thirdparty/SuperPoint-LightGlue-TensorRT/config/config.yaml";
     std::string model_dir = "Thirdparty/SuperPoint-LightGlue-TensorRT/weights/";
     Configs configs(config_path, model_dir);
     matcher_lightglue_superpoint = std::make_shared<SuperPointLightGlue>(configs.superpoint_lightglue_config);
-    std::cout << "[SuperPoint-LightGlue config dump]\n";
-    std::cout << "  onnx_file:   " << configs.superpoint_lightglue_config.onnx_file << "\n";
-    std::cout << "  engine_file: " << configs.superpoint_lightglue_config.engine_file << "\n";
-    std::cout << "  input_tensor_names size: " << configs.superpoint_lightglue_config.input_tensor_names.size() << "\n";
-    std::cout << "  output_tensor_names size: " << configs.superpoint_lightglue_config.output_tensor_names.size() << "\n";
+    std::cout << "\033[1;33m[SuperPoint-LightGlue config]\033[0m\n"
+            << "  onnx_file:            " << configs.superpoint_lightglue_config.onnx_file << "\n"
+            << "  engine_file:          " << configs.superpoint_lightglue_config.engine_file << "\n"
+            << "  input_tensor_names:   " << configs.superpoint_lightglue_config.input_tensor_names.size() << "\n"
+            << "  output_tensor_names:  " << configs.superpoint_lightglue_config.output_tensor_names.size() << "\n";
+
+    // Build reuses a cached .engine file if present, or compiles from ONNX on first run
     if (!matcher_lightglue_superpoint->build()) {
         throw std::runtime_error(
                 "SuperPoint-LightGlue: failed to build/load TensorRT engine.\n"
                 "  config: " + config_path + "\n"
                 "  weights: " + model_dir);
     }
-    std::cout << "SuperPoint-LightGlue engine loaded from: " << model_dir << "\n";
-    std::cout << "Finished initializing SuperPoint-LightGlue." << std::endl;
 
+    // Warm up the model by running a dummy inference to avoid first-run overhead during actual matching
+    Eigen::Matrix<double, 258, Eigen::Dynamic> dummy = Eigen::Matrix<double, 258, Eigen::Dynamic>::Zero(258, 1);
+    std::vector<cv::DMatch> dummy_matches;
+    matcher_lightglue_superpoint->matching_points(dummy, dummy, dummy_matches);
+    std::cout << "\033[1;32m[FeatureMatcher]\033[0m SuperPoint-LightGlue initialized and warmed up from: " << model_dir << std::endl;
 }
 
 static inline std::vector<cv::DMatch> swap_match_direction(const std::vector<cv::DMatch>& in)

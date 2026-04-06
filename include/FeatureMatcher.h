@@ -46,6 +46,8 @@ class FeatureMatcher
 {
 public:
 
+    // Initializes all feature matching backends: SiftMatchGPU, LightGlue, and SuperPoint-LightGlue (TensorRT).
+    const int max_supported = 4000;
     FeatureMatcher(const int& image_width, const int& image_height, float nnratio=0.6, bool checkOri=true);
 
     // Computes the Hamming distance between two ORB descriptors
