@@ -107,17 +107,16 @@ static inline std::vector<cv::DMatch> swap_match_direction(const std::vector<cv:
 //
 // Returns the number of valid map point matches per feature type.
 // Used in: Tracking::TrackReferenceKeyFrame, Tracking::Relocalization
-map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe, Frame &frame,
+map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe, Frame& frame,
     map<FeatureType, vector<Pt>>& map_pts_matches, const vector<FeatureType>& feat_types)
 {
-
     vector<cv::KeyPoint> kps1, kps2;
     vector<int> kps1_indexes, kps2_indexes;
     vector<cv::DMatch> all_matches;
     vector<FeatureType> used_feature_types;
     map<FeatureType, vector<Pt>> map_pts_kf;
 
-    for (const auto& ft : feat_types){
+    for (const auto& ft : feat_types) {
         // Skip feature types not present in both keyframe and frame
         auto it1 = keyframe->descriptors.find(ft);
         auto it2 = frame.descriptors.find(ft);
@@ -129,16 +128,16 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
         map_pts_kf[ft] = keyframe->get_map_point_matches(ft);
 
         // Brute-force NN matching between keyframe and frame descriptors
-        auto const& v1 = keyframe->keypoints.at(ft);
-        auto const& v2 = frame.keypoints.at(ft);
+        const auto& v1 = keyframe->keypoints.at(ft);
+        const auto& v2 = frame.keypoints.at(ft);
         vector<cv::DMatch> matches = match_descriptors(
             it1->second, it2->second,
             v1, v2, ft);
 
         // Offset match indices to account for previously appended feature types
-        size_t size_kpts1 = kps1.size();
-        size_t size_kpts2 = kps2.size();
-        for(auto& m : matches) {
+        const size_t size_kpts1 = kps1.size();
+        const size_t size_kpts2 = kps2.size();
+        for (auto& m : matches) {
             m.queryIdx += size_kpts1;
             m.trainIdx += size_kpts2;
         }
@@ -149,7 +148,6 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
         kps2.insert(kps2.end(), v2.begin(), v2.end());
 
         // Track per-feature-type original keypoint indices for later map point lookup
-
         const size_t base1 = kps1_indexes.size();
         kps1_indexes.resize(base1 + v1.size());
         std::iota(kps1_indexes.begin() + base1, kps1_indexes.end(), 0);
@@ -169,12 +167,12 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
 
     // Associate surviving matches to map points
     map<FeatureType, int> matches_count;
-    for(const auto& m : robust_matches) {
+    for (const auto& m : robust_matches) {
         const int query_idx = kps1_indexes[m.queryIdx];
         const int train_idx = kps2_indexes[m.trainIdx];
         const FeatureType feat_type = used_feature_types[m.queryIdx];
-        Pt pt = map_pts_kf[feat_type][query_idx];
-        if(!pt || pt->isBad())
+        const Pt pt = map_pts_kf[feat_type][query_idx];
+        if (!pt || pt->isBad())
             continue;
         map_pts_matches[feat_type][train_idx] = pt;
         matches_count[feat_type]++;
@@ -318,8 +316,8 @@ void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Key
         kps2.insert(kps2.end(), keyframe2->keypoints.at(ft).begin(), keyframe2->keypoints.at(ft).end());
 
         // Track original indices inside v1 / v2
-        auto const& v1 = keyframe1->keypoints.at(ft);
-        auto const& v2 = keyframe2->keypoints.at(ft);
+        const auto& v1 = keyframe1->keypoints.at(ft);
+        const auto& v2 = keyframe2->keypoints.at(ft);
         const size_t base1 = kps1_indexes.size();
         kps1_indexes.resize(base1 + v1.size());
         std::iota(kps1_indexes.begin() + base1, kps1_indexes.end(), 0);
