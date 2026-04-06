@@ -307,7 +307,7 @@ int KeyFrame::TrackedMapPoints(const int &minObs)
                 {
                     if(bCheckObs)
                     {
-                        if(pts[i]->NumberOfObservations() >= minObs)
+                        if(pts[i]->number_of_observations() >= minObs)
                             nPoints++;
                     }
                     else
@@ -624,7 +624,7 @@ void KeyFrame::EraseConnection(Keyframe keyframe)
         UpdateBestCovisibles();
 }
 
-vector<size_t> KeyFrame::GetFeaturesInArea(const float &x, const float &y, const float &r, const FeatureType& featType) const
+vector<size_t> KeyFrame::get_features_in_area(const float &x, const float &y, const float &r, const FeatureType& featType) const
 {
     auto it1 = N.find(featType);
     if (it1 == N.end() )

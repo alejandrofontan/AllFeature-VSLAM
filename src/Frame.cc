@@ -266,9 +266,9 @@ bool Frame::isInFrustum(Pt pMP, float viewingCosLimit)
 
     // Data used by the tracking
     pMP->mbTrackInView = true;
-    pMP->mTrackProjX = u;
-    pMP->mTrackProjXR = u - mbf*invz;
-    pMP->mTrackProjY = v;
+    pMP->track_proj_x = u;
+    pMP->track_proj_xR = u - mbf*invz;
+    pMP->track_proj_y = v;
 
     pMP->trackSigma = pMP->PredictSigma(dist);
     pMP->trackSize = pMP->PredictSize(dist);
@@ -277,7 +277,7 @@ bool Frame::isInFrustum(Pt pMP, float viewingCosLimit)
     return true;
 }
 
-vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const float  &r, const FeatureType& featType) const
+vector<size_t> Frame::get_features_in_area(const float &x, const float  &y, const float  &r, const FeatureType& featType) const
 {
     vector<size_t> vIndices;
     vIndices.reserve(N.at(featType));
@@ -483,8 +483,8 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
                 if((!pt) || pt->isBad())
                     continue;
 
-                const int x = (int) pt->mTrackProjX;
-                const int y = (int) pt->mTrackProjY;
+                const int x = (int) pt->track_proj_x;
+                const int y = (int) pt->track_proj_y;
 
                 if (0 <= x && x < w && 0 <= y && y < h)
                 {

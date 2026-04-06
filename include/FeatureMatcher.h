@@ -55,7 +55,7 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     std::vector<cv::DMatch> match_descriptors(const cv::Mat& desc1, const cv::Mat& desc2,
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type);
-    std::vector<cv::DMatch> featureMatching_1(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& ft);
+    std::vector<cv::DMatch> match_descriptors_only(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& feat_type);
     std::vector<cv::DMatch> featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft,
        int outlierMehod = cv::FM_RANSAC);
 
@@ -88,9 +88,14 @@ public:
     // Runs brute-force NN matching, filters outliers with MAGSAC, and associates
     // inlier matches to map points. Mutates both keyframe and frame (match cache).
     // Returns the number of valid map point matches per feature type.
-    std::map<FeatureType, int> match_keyframe_to_frame(Keyframe& keyframe, Frame& frame,
-        std::map<FeatureType, std::vector<Pt>>& mapPointMatches,
-        const std::vector<FeatureType>& featureTypes);
+    map<FeatureType, int> match_keyframe_to_frame(Keyframe& keyframe, Frame& frame,
+        map<FeatureType, vector<Pt>>& map_pts_matches,
+        const vector<FeatureType>& feat_types);
+
+    // Matches a set of map points to frame keypoints via descriptor matching + projection check.
+    // Returns the number of new map point assignments made to the frame.
+    // Used in: Tracking::TrackLocalMap
+    int match_map_points_to_frame(Frame& Frame, const vector<Pt>& map_pts);
 
     void SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
                                 std::map<FeatureType, vector<pair<size_t,size_t>>>& matchedPairs,
@@ -105,18 +110,13 @@ public:
 
     int SearchForInitialization(const Frame &F1, const Frame &F2, std::vector<cv::Point2f> &pointsPrevMatched, std::vector<int> &matches12, const FeatureType& featureType);
 
-    // Search matches between Frame keypoints and projected MapPoints. Returns number of matches
-    // Used to track the local map (Tracking)
-    int SearchByProjection(Frame &F, const std::vector<Pt> &vpMapPoints, const float& radiusTh);
-    int SearchByProjection(Frame &Frame, const vector<Pt> &mapPoints);
-
     // Project MapPoints seen in KeyFrame into the Frame and search matches.
     // Used in relocalisation (Tracking)
     int SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const std::set<Pt> &sAlreadyFound, const float& radiusTh, const bool& useHighMatchingThreshold, const FeatureType& featureType);
 
     // Project MapPoints using a Similarity Transformation and search matches.
     // Used in loop detection (Loop Closing)
-     int SearchByProjection(Keyframe pKF, const mat4f& Scw, const std::vector<Pt> &vpPoints, std::vector<Pt> &vpMatched, const float& radiusTh, const FeatureType& featureType);
+    int SearchByProjection(Keyframe pKF, const mat4f& Scw, const std::vector<Pt> &vpPoints, std::vector<Pt> &vpMatched, const float& radiusTh, const FeatureType& featureType);
 
     // Search matches between MapPoints in a KeyFrame and ORB in a Frame.
     // Brute force constrained to ORB that belong to the same vocabulary node (at a certain level)

@@ -116,7 +116,7 @@ void MapPoint::AddObservation(Keyframe projKeyframe,  const KeypointIndex& projI
     ComputeDistinctiveDescriptors()->UpdateNormalAndDepth();
 }
 
-int MapPoint::GetNumberOfObservations()
+int MapPoint::Getnumber_of_observations()
 {
     return int(observations.size());
 }
@@ -158,7 +158,7 @@ void MapPoint::EraseObservation(Keyframe projKeyframe)
                 mpRefKF = observations.begin()->second->projKeyframe;
 
             // If only 2 observations or less, discard point
-            removePoint = (GetNumberOfObservations() <= 2);
+            removePoint = (Getnumber_of_observations() <= 2);
         }
     }
 
@@ -174,7 +174,7 @@ map<KeyframeId, Obs> MapPoint::GetObservations()
     return observations;
 }
 
-int MapPoint::NumberOfObservations()
+int MapPoint::number_of_observations()
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return nObs;
@@ -356,7 +356,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
     return thisPt();
 }
 
-cv::Mat MapPoint::GetDescriptor()
+cv::Mat MapPoint::get_descriptor()
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return mDescriptor.clone();

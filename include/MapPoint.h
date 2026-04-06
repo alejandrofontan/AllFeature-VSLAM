@@ -57,8 +57,8 @@ public:
     Keyframe GetReferenceKeyFrame();
 
     std::map<KeyframeId,shared_ptr<Observation>> GetObservations();
-    int NumberOfObservations();
-    int GetNumberOfObservations();
+    int number_of_observations();
+    int Getnumber_of_observations();
     void increasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex);
     void decreasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex);
 
@@ -86,7 +86,7 @@ public:
 
     Pt ComputeDistinctiveDescriptors();
 
-    cv::Mat GetDescriptor();
+    cv::Mat get_descriptor();
 
     void UpdateNormalAndDepth();
 
@@ -105,9 +105,9 @@ public:
     int nObs;
 
     // Variables used by the tracking
-    float mTrackProjX;
-    float mTrackProjY;
-    float mTrackProjXR;
+    float track_proj_x;
+    float track_proj_y;
+    float track_proj_xR;
     bool mbTrackInView;
 
     float trackSize;

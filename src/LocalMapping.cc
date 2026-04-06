@@ -188,7 +188,7 @@ void LocalMapping::MapPointCulling()
             pMP->SetBadFlag();
             lit = mlpRecentAddedMapPoints.erase(lit);
         }
-        else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=2 && pMP->NumberOfObservations() <= MAP_POINT_CULLING_MIN_NUM_OBSERVATIONS)
+        else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=2 && pMP->number_of_observations() <= MAP_POINT_CULLING_MIN_NUM_OBSERVATIONS)
         {
             pMP->SetBadFlag();
             lit = mlpRecentAddedMapPoints.erase(lit);
@@ -665,7 +665,7 @@ void LocalMapping::KeyFrameCulling()
                     {
                         FeatureType featType = pMP->featureType;
                         nMPs++;
-                        if(pMP->NumberOfObservations() > thObs)
+                        if(pMP->number_of_observations() > thObs)
                         {
                             const map<KeyframeId , Obs> observations = pMP->GetObservations();
                             int nObs=0;

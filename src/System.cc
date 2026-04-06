@@ -642,7 +642,7 @@ void System::SaveStatistics(const std::string &filename){
     //     if(pt->isBad())
     //         continue;
     //     numPts++;
-    //     numObservations += pt->NumberOfObservations();
+    //     numObservations += pt->number_of_observations();
     // }
     // float numObservationsPerPt = float(numObservations)/float(numPts);
 

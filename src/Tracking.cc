@@ -241,7 +241,7 @@ void Tracking::Track()
                 {
                     Pt pMP = currentFrame.pts.at(ft)[i];
                     if(pMP)
-                        if(pMP->NumberOfObservations() < 1)
+                        if(pMP->number_of_observations() < 1)
                         {
                             currentFrame.mvbOutlier.at(ft)[i] = false;
                             currentFrame.pts.at(ft)[i]=static_cast<Pt>(nullptr);
@@ -540,7 +540,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
                     pt->mbTrackInView = false;
                     pt->idLastFrameSeen = currentFrame.mnId;
                 }
-                else if(currentFrame.pts.at(ft)[i]->NumberOfObservations() > 0)
+                else if(currentFrame.pts.at(ft)[i]->number_of_observations() > 0)
                     nmatchesMap++;
             }
         }
@@ -586,7 +586,7 @@ bool Tracking::TrackLocalMap()
                 {
                     currentFrame.pts.at(ft)[i]->IncreaseFound();
 
-                    if(currentFrame.pts.at(ft)[i]->NumberOfObservations() > 0)
+                    if(currentFrame.pts.at(ft)[i]->number_of_observations() > 0)
                         mnMatchesInliers++;
 
                 }
@@ -730,7 +730,7 @@ bool Tracking::TrackLocalMap()
             if(currentFrame.mnId < lastRelocFrameId + idSum)
                 radiusTh = radiusTh_high_slp;
 
-            matcher->SearchByProjection(currentFrame, localPts);//, radiusTh);
+            matcher->match_map_points_to_frame(currentFrame, localPts);//, radiusTh);
 
         }
     }

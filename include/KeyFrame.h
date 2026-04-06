@@ -109,7 +109,7 @@ public:
     Pt GetMapPoint(const size_t &idx, const FeatureType& featType);
 
     // KeyPoint functions
-    std::vector<size_t> GetFeaturesInArea(const float &x, const float  &y, const float  &r, const FeatureType& featType) const;
+    std::vector<size_t> get_features_in_area(const float &x, const float  &y, const float  &r, const FeatureType& featType) const;
     vec3f UnprojectStereo(int i);
 
     // Image
