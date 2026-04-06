@@ -276,7 +276,7 @@ void LocalMapping::CreateNewMapPoints()
 
             // If some ft might be missing, you'd want find() guards here instead of at()
             out[k][i] = matcher->serialFeatureMatching(
-                mpCurrentKeyFrame->mDescriptors.at(ft), pKF2->mDescriptors.at(ft),
+                mpCurrentKeyFrame->descriptors.at(ft), pKF2->descriptors.at(ft),
                 mpCurrentKeyFrame->mvKeysUn.at(ft),     pKF2->mvKeysUn.at(ft),
                 ft
             );

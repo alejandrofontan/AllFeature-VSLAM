@@ -64,11 +64,11 @@ Frame::Frame(const Frame &frame)
             for(int j=0; j<FRAME_GRID_ROWS; j++)
                 mGrid[ft][i][j] = frame.mGrid.at(ft)[i][j];
 
-    for (auto const& [featType, descriptors] : frame.mDescriptors){
-            descriptors.copyTo(mDescriptors[featType]);
+    for (auto const& [featType, desc] : frame.descriptors){
+            desc.copyTo(descriptors[featType]);
     }
-    for (auto const& [featType, descriptors] : frame.mDescriptorsRight){
-            descriptors.copyTo(mDescriptorsRight[featType]);
+    for (auto const& [featType, desc] : frame.descriptorsRight){
+            desc.copyTo(descriptorsRight[featType]);
     }
 
     if(frame.Tcw(3,3) == 1.0f)
@@ -192,7 +192,7 @@ void Frame::ExtractFeatures(int flag, const Image& img)
         auto& o = outs[i];
 
         mvKeys[ft]        = std::move(o.keys);
-        mDescriptors[ft]  = std::move(o.desc);
+        descriptors[ft]  = std::move(o.desc);
         keyPtsSigma2[ft]  = std::move(o.sigma2);
         keyPtsInf[ft]     = std::move(o.inf);
         keyPtsSize[ft]    = std::move(o.size);
@@ -343,7 +343,7 @@ bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 void Frame::ComputeBoW(const FeatureType& featType)
 {
     if(mBowVec.empty())
-        vocabulary->transform(mDescriptors[featType], mBowVec,mFeatVec);
+        vocabulary->transform(descriptors[featType], mBowVec,mFeatVec);
 }
 
 void Frame::UndistortKeyPoints()

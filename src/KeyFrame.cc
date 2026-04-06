@@ -62,7 +62,7 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>p
 
     for(auto& [ft, N_] : N)
         if (N_ > 0){
-            mDescriptors[ft] = F.mDescriptors.at(ft).clone();
+            descriptors[ft] = F.descriptors.at(ft).clone();
         }
 }
 
@@ -72,7 +72,7 @@ void KeyFrame::ComputeBoW(const FeatureType &featType)
     {
         // Feature vector associate features with nodes in the 4th level (from leaves up)
         // We assume the vocabulary tree has 6 levels, change the 4 otherwise
-        vocabulary->transform(mDescriptors.at(featType),mBowVec,mFeatVec);
+        vocabulary->transform(descriptors.at(featType),mBowVec,mFeatVec);
     }
 }
 

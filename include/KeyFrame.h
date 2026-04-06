@@ -192,7 +192,7 @@ public:
     const std::map<FeatureType, std::vector<cv::KeyPoint>> mvKeysUn;
     const std::map<FeatureType, std::vector<float>> mvuRight; // negative value for monocular points
     const std::map<FeatureType, std::vector<float>> mvDepth; // negative value for monocular points
-    std::map<FeatureType, cv::Mat> mDescriptors;
+    std::map<FeatureType, cv::Mat> descriptors;
 
     //BoW
     DBoW2::BowVector mBowVec;

@@ -67,7 +67,7 @@ MapPoint::MapPoint(const vec3f &XYZ_, shared_ptr<Map> pMap, Frame* pFrame, const
     maxDistance = dist * levelScaleFactor;
     minDistance = maxDistance / pFrame->maxKeyPtSize;
 
-    pFrame->mDescriptors[featureType].row(idxF).copyTo(mDescriptor);
+    pFrame->descriptors[featureType].row(idxF).copyTo(mDescriptor);
 
     // MapPoints can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
     unique_lock<mutex> lock(mpMap->mMutexPointCreation);
@@ -294,7 +294,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
     {
         Keyframe projKeyframe = obs.second->projKeyframe;
         if(!projKeyframe->isBad()){
-            descriptors.push_back(projKeyframe->mDescriptors.at(featureType).row(obs.second->projIndex));
+            descriptors.push_back(projKeyframe->descriptors.at(featureType).row(obs.second->projIndex));
             projIndexes.push_back(obs.second->projIndex);
             projKeyframes.push_back(projKeyframe);
         }

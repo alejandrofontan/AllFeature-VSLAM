@@ -178,7 +178,7 @@ public:
     DBoW2::FeatureVector mFeatVec;
 
     // ORB descriptor, each row associated to a keypoint.
-    std::map<FeatureType, cv::Mat> mDescriptors, mDescriptorsRight;
+    std::map<FeatureType, cv::Mat> descriptors, descriptorsRight;
 
     // MapPoints associated to keypoints, NULL pointer if no association.
     std::map<FeatureType, std::vector<Pt>> pts;
