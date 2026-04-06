@@ -56,12 +56,12 @@ Viewer::Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> fram
         fps=30;
     mT = 1e3/fps;
 
-    imageWidth = cam["image_dimension"][0].as<int>();
-    imageHeight = cam["image_dimension"][1].as<int>();
+    image_width = cam["image_dimension"][0].as<int>();
+    image_height = cam["image_dimension"][1].as<int>();
 
     cout << endl << "[Viewer.cc] Camera Parameters: " << strCalibrationPath << endl;
-    cout << "- w: " << imageWidth << endl;
-    cout << "- h: " << imageHeight << endl;
+    cout << "- w: " << image_width << endl;
+    cout << "- h: " << image_height << endl;
     cout << "- fps: " << fps << endl;
 
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
@@ -88,7 +88,7 @@ void Viewer::Run()
     const float wS{0.35f};
     const float wS_inv{1.0f - wS};
     const float w_pixel = wS * w;
-    const float h_pixel = (imageHeight / float(imageWidth)) * w_pixel;
+    const float h_pixel = (image_height / float(image_width)) * w_pixel;
     const float hS = h_pixel / h;
 
     string title = "AllFeature-VSLAM : Map Viewer (";

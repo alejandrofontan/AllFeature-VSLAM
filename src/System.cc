@@ -699,8 +699,8 @@ void System::SaveStatistics(const std::string &filename){
 }
 
 void System::setImageSize(const int width, const int height){
-    imageWidth = width;
-    imageHeight = height;
+    image_width = width;
+    image_height = height;
 }
 
 void System::GBA(){

@@ -39,14 +39,14 @@ namespace AF_VSLAM
             keyframeId(keyframeId), keyframe(keyframe), connections(connections){}
 
 LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<KeyFrameDatabase>pDB, shared_ptr<Vocabulary> vocabulary,
-    const bool bFixScale, const FeatureType& featureType, int imageWidth, int imageHeight):
+    const bool bFixScale, const FeatureType& featureType, int image_width, int image_height):
     mbResetRequested(false), mbFinishRequested(false), mbFinished(true), mpMap(pMap),
     mpKeyFrameDB(pDB), vocabulary(vocabulary), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
     mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), featureType(featureType), mnFullBAIdx(0),
-    imageWidth(imageWidth), imageHeight(imageHeight)
+    image_width(image_width), image_height(image_height)
 {
     mnCovisibilityConsistencyTh = 3;
-    matcher = std::make_shared<FeatureMatcher>(0.8, true, imageWidth, imageHeight);
+    matcher = std::make_shared<FeatureMatcher>(image_width, image_height, 0.8, true);
 }
 
 void LoopClosing::SetTracker(std::shared_ptr<Tracking> tracker_)

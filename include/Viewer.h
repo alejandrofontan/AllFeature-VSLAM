@@ -90,7 +90,7 @@ private:
 
     // 1/fps in ms
     double mT{1e3/30.0};
-    float imageWidth{640.0}, imageHeight{480.0};
+    float image_width{640.0}, image_height{480.0};
 
     float mViewpointX{0.0f}, mViewpointY{-0.7f}, mViewpointZ{-1.8f}, mViewpointF{500.0f};
 

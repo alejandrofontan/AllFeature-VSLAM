@@ -41,8 +41,8 @@ VerbosityLevel FeatureMatcher::verbosity{MEDIUM};
 const int FeatureMatcher::HISTO_LENGTH = 30;
 float FeatureMatcher::radiusScale{1.15f};
 
-FeatureMatcher::FeatureMatcher(const int& imageWidth, const int& imageHeight, float nnratio, bool checkOri):
-    mfNNratio(nnratio), mbCheckOrientation(checkOri), imageWidth(imageWidth), imageHeight(imageHeight)
+FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height, float nnratio, bool checkOri):
+    mfNNratio(nnratio), mbCheckOrientation(checkOri), image_width(image_width), image_height(image_height)
 {
     std::cout << "Initializing SiftMatchGPU..." << std::endl;
 

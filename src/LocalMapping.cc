@@ -12,12 +12,12 @@
 namespace AF_VSLAM
 {
 
-LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& imageWidth, const int& imageHeight):
+LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& image_width, const int& image_height):
     mbMonocular(bMonocular), mbResetRequested(false), mbFinishRequested(false), mbFinished(true), mpMap(pMap),
     mbAbortBA(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), mbAcceptKeyFrames(true), featureTypes(featureTypes),
-    imageWidth(imageWidth), imageHeight(imageHeight)
+    image_width(image_width), image_height(image_height)
 {
-    matcher = std::make_shared<FeatureMatcher>(imageWidth, imageHeight);
+    matcher = std::make_shared<FeatureMatcher>(image_width, image_height);
 }
 
 void LocalMapping::Run()

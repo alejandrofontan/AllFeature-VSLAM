@@ -24,7 +24,7 @@ class Viewer;
 class LocalMapping
 {
 public:
-    LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& imageWidth, const int& imageHeight);
+    LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& image_width, const int& image_height);
 
     void SetLoopCloser(std::shared_ptr<LoopClosing>  loopCloser_){loopCloser = loopCloser_;};
     void SetTracker(std::shared_ptr<Tracking> tracker_){tracker = tracker_;};
@@ -143,8 +143,8 @@ protected:
     bool mbFinishRequested;
     bool mbFinished;
 
-    const int imageWidth;
-    const int imageHeight;
+    const int image_width;
+    const int image_height;
 
 };
 

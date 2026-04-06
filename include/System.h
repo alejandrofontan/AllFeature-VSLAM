@@ -133,8 +133,8 @@ public:
     int featureLoopClosure{0};
 
     void setImageSize(const int width, const int height);
-    int imageWidth{};
-    int imageHeight{};
+    int image_width{};
+    int image_height{};
 
     void GBA();
 

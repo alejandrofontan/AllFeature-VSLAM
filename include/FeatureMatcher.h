@@ -46,7 +46,7 @@ class FeatureMatcher
 {
 public:
 
-    FeatureMatcher(const int& imageWidth, const int& imageHeight, float nnratio=0.6, bool checkOri=true);
+    FeatureMatcher(const int& image_width, const int& image_height, float nnratio=0.6, bool checkOri=true);
 
     // Computes the Hamming distance between two ORB descriptors
     static Descriptor_Distance_Type descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_);
@@ -175,8 +175,8 @@ protected:
     std::shared_ptr<matcher::LightGlue> matcher_lightglue;
     std::shared_ptr<torch::Device> torch_device;
     std::shared_ptr<SuperPointLightGlue> matcher_lightglue_superpoint;
-    int imageWidth;
-    int imageHeight;
+    int image_width;
+    int image_height;
 
 
     // Matching options

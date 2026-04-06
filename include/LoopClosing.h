@@ -63,7 +63,7 @@ public:
 
 public:
 
-    LoopClosing(shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase> pDB, shared_ptr<Vocabulary> vocabulary,const bool bFixScale, const FeatureType& featureType, int imageWidth, int imageHeight);
+    LoopClosing(shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase> pDB, shared_ptr<Vocabulary> vocabulary,const bool bFixScale, const FeatureType& featureType, int image_width, int image_height);
 
     void SetTracker(std::shared_ptr<Tracking> tracker);
 
@@ -163,8 +163,8 @@ protected:
     bool mbFixScale;
     bool mnFullBAIdx;
 
-    int imageWidth;
-    int imageHeight;
+    int image_width;
+    int image_height;
 
     std::shared_ptr<FeatureMatcher> matcher;
 };
