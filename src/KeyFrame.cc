@@ -33,7 +33,7 @@ static bool KeyframeComparison(pair<int , Keyframe> a, pair<int , Keyframe> b){
 long unsigned int KeyFrame::nNextId=0;
 
 KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>pKFDB):
-    mnFrameId(F.mnId),  mTimeStamp(F.mTimeStamp), mnGridCols(FRAME_GRID_COLS), mnGridRows(FRAME_GRID_ROWS),
+    frame_id(F.mnId),  mTimeStamp(F.mTimeStamp), mnGridCols(FRAME_GRID_COLS), mnGridRows(FRAME_GRID_ROWS),
     mfGridElementWidthInv(F.mfGridElementWidthInv), mfGridElementHeightInv(F.mfGridElementHeightInv),
     mnFuseTargetForKF(0), mnBALocalForKF(0), mnBAFixedForKF(0),
     mnLoopQuery(0), mnLoopWords(0), mnRelocQuery(0), mnRelocWords(0), mnBAGlobalForKF(0),
@@ -502,7 +502,7 @@ void KeyFrame::SetBadFlag()
     {
         unique_lock<mutex> lock(mMutexConnections);
         #ifdef ALLFEATURE_EVALUATION
-        if ((int(mnFrameId) % ALLFEATURE_EVALUATION) == 0)
+        if ((int(frame_id) % ALLFEATURE_EVALUATION) == 0)
             return;
         #endif
         if(keyId==0)

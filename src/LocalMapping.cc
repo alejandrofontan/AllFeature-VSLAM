@@ -256,7 +256,7 @@ void LocalMapping::CreateNewMapPoints()
     for (int k = 0; k < NK; ++k) {
         auto pKF2 = vpNeighKFs[k];
 
-        auto it = mpCurrentKeyFrame->cache_matched_pairs.find(pKF2->mnFrameId);
+        auto it = mpCurrentKeyFrame->cache_matched_pairs.find(pKF2->frame_id);
         if (it != mpCurrentKeyFrame->cache_matched_pairs.end() && !it->second.empty()) {
             skipK[k] = 1;
         }
@@ -313,7 +313,7 @@ void LocalMapping::CreateNewMapPoints()
             trainOffset += nt;
         }
 
-        mpCurrentKeyFrame->cache_matched_pairs.insert_or_assign(pKF2->mnFrameId, std::move(allMatches));
+        mpCurrentKeyFrame->cache_matched_pairs.insert_or_assign(pKF2->frame_id, std::move(allMatches));
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////
@@ -626,9 +626,9 @@ void LocalMapping::KeyFrameCulling()
     //     Keyframe  pKF = *vit;
     //     if(pKF->keyId == 0)
     //         continue;
-    //     if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) == 0)
+    //     if ((int(pKF->frame_id) % ALLFEATURE_EVALUATION) == 0)
     //         continue;
-    //     if ((int(pKF->mnFrameId) % ALLFEATURE_KEYFRAMES) == 0)
+    //     if ((int(pKF->frame_id) % ALLFEATURE_KEYFRAMES) == 0)
     //         continue;
     //     if(mpCurrentKeyFrame->keyId - pKF->keyId < 3)
     //         continue;
@@ -696,8 +696,8 @@ void LocalMapping::KeyFrameCulling()
             if(nRedundantObservations > KEYFRAME_CULLING_COVISIBILITY_THRESHOLD * nMPs){
                 #ifdef ALLFEATURE_EVALUATION
 
-                    if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) != 0){
-                        if ((int(pKF->mnFrameId) % ALLFEATURE_MAX_KEYFRAMES) != 0)
+                    if ((int(pKF->frame_id) % ALLFEATURE_EVALUATION) != 0){
+                        if ((int(pKF->frame_id) % ALLFEATURE_MAX_KEYFRAMES) != 0)
                             pKF->SetBadFlag();
                     }
                 #else

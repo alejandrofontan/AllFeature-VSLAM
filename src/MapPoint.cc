@@ -30,7 +30,7 @@ long unsigned int MapPoint::nNextId=0;
 mutex MapPoint::mGlobalMutex;
 
 MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType):
-    mnFirstKFid(pRefKF->keyId), mnFirstFrame(pRefKF->mnFrameId), nObs(0),
+    mnFirstKFid(pRefKF->keyId), mnFirstFrame(pRefKF->frame_id), nObs(0),
     idLastFrameSeen(0), mnBALocalForKF(0), mnFuseCandidateForKF(0), mnLoopPointForKF(0), mnCorrectedByKF(0),
     mnCorrectedReference(0), mnBAGlobalForKF(0), mpRefKF(pRefKF), mnVisible(1), mnFound(1), mbBad(false),
     mpReplaced(static_cast<Pt>(NULL)), minDistance(0), maxDistance(0), mpMap(pMap), featureType(featureType)
@@ -301,12 +301,12 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
     }
 
     int latestIndex{0};
-    int index{int(projKeyframes[0]->mnFrameId)};
+    int index{int(projKeyframes[0]->frame_id)};
     for (size_t i = 0; i < projKeyframes.size(); i++)
     {
-        if(projKeyframes[i]->mnFrameId > index)
+        if(projKeyframes[i]->frame_id > index)
         {
-            index = int(projKeyframes[i]->mnFrameId);
+            index = int(projKeyframes[i]->frame_id);
             latestIndex = static_cast<int>(i);
         }
     }

@@ -179,7 +179,7 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
     }
 
     // Cache matched pairs in both keyframe and frame for downstream use
-    frame.cache_matched_pairs.insert_or_assign(keyframe->mnFrameId, swap_match_direction(robust_matches));
+    frame.cache_matched_pairs.insert_or_assign(keyframe->frame_id, swap_match_direction(robust_matches));
     keyframe->cache_matched_pairs.insert_or_assign(frame.mnId, std::move(robust_matches));
 
     return matches_count;
@@ -259,7 +259,7 @@ void FeatureMatcher::match_keyframes_for_triangulation(const Keyframe& keyframe1
                                 const std::vector<FeatureType>& feat_types){
 
     // Reuse cached matches if keyframe1 already has matches stored for keyframe2
-    auto cache_it = keyframe1->cache_matched_pairs.find(keyframe2->mnFrameId);
+    auto cache_it = keyframe1->cache_matched_pairs.find(keyframe2->frame_id);
     bool cached = (cache_it != keyframe1->cache_matched_pairs.end() && !cache_it->second.empty());
 
     // No cache — run parallel descriptor matching across all feature types

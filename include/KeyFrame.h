@@ -151,7 +151,7 @@ public:
 
     static long unsigned int nNextId;
     KeyframeId keyId;
-    const long unsigned int mnFrameId;
+    const long unsigned int frame_id;
 
     const double mTimeStamp;
 

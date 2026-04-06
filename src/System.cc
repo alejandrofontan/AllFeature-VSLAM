@@ -413,7 +413,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 
         Keyframe pKF = vpKFs[i];
         #ifdef ALLFEATURE_EVALUATION
-        if ((int(pKF->mnFrameId) % ALLFEATURE_EVALUATION) != 0){
+        if ((int(pKF->frame_id) % ALLFEATURE_EVALUATION) != 0){
             continue;
         }
         #endif
@@ -505,7 +505,7 @@ void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>
 
         auto keyfram = mp->GetCurrentRefKeyframe();
         int idx = mp->GetIndexInKeyFrame(keyfram);
-        int imgIdx = keyfram->mnFrameId;
+        int imgIdx = keyfram->frame_id;
 
         if (imageCache.find(imgIdx) == imageCache.end()) {
             cv::Mat cvimg = cv::imread(imageFilenames[imgIdx],cv::IMREAD_UNCHANGED);
