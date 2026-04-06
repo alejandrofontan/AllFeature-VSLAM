@@ -89,7 +89,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
     for(size_t i=0; i<vpKFs.size(); i++)
     {
         Keyframe pKF = vpKFs[i];
-        if(pKF->isBad())
+        if(pKF->is_bad())
             continue;
         g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
         vSE3->setEstimate(Converter::toSE3Quat(pKF->GetPose()));
@@ -108,7 +108,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
         Pt pMP = vpMP[i];
         FeatureType featType = pMP->featureType;
 
-        if(pMP->isBad())
+        if(pMP->is_bad())
             continue;
         g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
 
@@ -126,7 +126,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
         {
 
             Keyframe pKF = obs.second->projKeyframe;
-            if(pKF->isBad() || pKF->keyId > maxKFid)
+            if(pKF->is_bad() || pKF->keyId > maxKFid)
                 continue;
 
             nEdges++;
@@ -217,7 +217,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
     for(size_t i=0; i<vpKFs.size(); i++)
     {
         Keyframe pKF = vpKFs[i];
-        if(pKF->isBad())
+        if(pKF->is_bad())
             continue;
         g2o::VertexSE3Expmap* vSE3 = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(pKF->keyId));
         g2o::SE3Quat SE3quat = vSE3->estimate();
@@ -241,7 +241,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 
         Pt pMP = vpMP[i];
 
-        if(pMP->isBad())
+        if(pMP->is_bad())
             continue;
 
         g2o::VertexSBAPointXYZ* vPoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pMP->ptId + maxKFid+1));
@@ -486,7 +486,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
     {
         Keyframe pKFi = vNeighKFs[i];
         pKFi->mnBALocalForKF = pKF->keyId;
-        if(!pKFi->isBad())
+        if(!pKFi->is_bad())
             lLocalKeyFrames.push_back(pKFi);
     }
 
@@ -500,7 +500,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
             {
                 Pt pMP = *vit;
                 if(pMP)
-                    if(!pMP->isBad())
+                    if(!pMP->is_bad())
                         if(pMP->mnBALocalForKF!=pKF->keyId)
                         {
                             llocalPts.push_back(pMP);
@@ -522,7 +522,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
             if(pKFi->mnBALocalForKF!=pKF->keyId && pKFi->mnBAFixedForKF != pKF->keyId)
             {
                 pKFi->mnBAFixedForKF=pKF->keyId;
-                if(!pKFi->isBad())
+                if(!pKFi->is_bad())
                     lFixedCameras.push_back(pKFi);
             }
         }
@@ -607,7 +607,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
         {
             Keyframe pKFi = obs.second->projKeyframe;
 
-            if(!pKFi->isBad())
+            if(!pKFi->is_bad())
             {
                 const cv::KeyPoint &kpUn = pKFi->keypoints.at(featType)[obs.second->projIndex];
 
@@ -694,7 +694,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
         g2o::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
         Pt pMP = vpMapPointEdgeMono[i];
 
-        if(pMP->isBad())
+        if(pMP->is_bad())
             continue;
 
         if(e->chi2() > chi2_2dof || !e->isDepthPositive())
@@ -710,7 +710,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
         g2o::EdgeStereoSE3ProjectXYZ* e = vpEdgesStereo[i];
         Pt pMP = vpMapPointEdgeStereo[i];
 
-        if(pMP->isBad())
+        if(pMP->is_bad())
             continue;
 
         if(e->chi2() > chi2_3dof || !e->isDepthPositive())
@@ -737,7 +737,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
         g2o::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
         Pt pMP = vpMapPointEdgeMono[i];
 
-        if(pMP->isBad())
+        if(pMP->is_bad())
             continue;
 
         if(e->chi2() > chi2_2dof || !e->isDepthPositive())
@@ -752,7 +752,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
         g2o::EdgeStereoSE3ProjectXYZ* e = vpEdgesStereo[i];
         Pt pMP = vpMapPointEdgeStereo[i];
 
-        if(pMP->isBad())
+        if(pMP->is_bad())
             continue;
 
         if(e->chi2() > chi2_3dof || !e->isDepthPositive())
@@ -827,7 +827,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
     for(size_t i=0, iend=vpKFs.size(); i<iend;i++)
     {
         Keyframe pKF = vpKFs[i];
-        if(pKF->isBad())
+        if(pKF->is_bad())
             continue;
         g2o::VertexSim3Expmap* VSim3 = new g2o::VertexSim3Expmap();
 
@@ -973,7 +973,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
             Keyframe pKFn = *vit;
             if(pKFn && pKFn!=pParentKF && !pKF->hasChild(pKFn) && !sLoopEdges.count(pKFn))
             {
-                if(!pKFn->isBad() && pKFn->keyId<pKF->keyId)
+                if(!pKFn->is_bad() && pKFn->keyId<pKF->keyId)
                 {
                     if(sInsertedEdges.count(make_pair(min(pKF->keyId,pKFn->keyId),max(pKF->keyId,pKFn->keyId))))
                         continue;
@@ -1032,7 +1032,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
     {
         Pt pMP = vpMPs[i];
 
-        if(pMP->isBad())
+        if(pMP->is_bad())
             continue;
 
         int nIDr;
@@ -1130,7 +1130,7 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
 
         if(pMP1 && pMP2)
         {
-            if(!pMP1->isBad() && !pMP2->isBad() && i2>=0)
+            if(!pMP1->is_bad() && !pMP2->is_bad() && i2>=0)
             {
                 g2o::VertexSBAPointXYZ* vPoint1 = new g2o::VertexSBAPointXYZ();
                 vec3f P3D1w = pMP1->get_world_pos();

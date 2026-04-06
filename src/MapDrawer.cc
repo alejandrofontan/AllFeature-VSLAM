@@ -66,9 +66,9 @@ void MapDrawer::DrawMapPoints()
 
     for(size_t i=0, iend=vpMPs.size(); i<iend;i++)
     {
-        // if((vpMPs[i]->isBad()) || spRefMPs.count(vpMPs[i]))
+        // if((vpMPs[i]->is_bad()) || spRefMPs.count(vpMPs[i]))
         //     continue;
-        if(vpMPs[i]->isBad())
+        if(vpMPs[i]->is_bad())
              continue;
 
         vec3f pos = vpMPs[i]->get_world_pos();
@@ -82,7 +82,7 @@ void MapDrawer::DrawMapPoints()
     // glBegin(GL_POINTS);
     // for(set<Pt>::iterator sit=spRefMPs.begin(), send=spRefMPs.end(); sit!=send; sit++)
     // {
-    //     if((*sit)->isBad())
+    //     if((*sit)->is_bad())
     //         continue;
     //     vec3f pos = (*sit)->get_world_pos();
     //     cv::Scalar color = getFeatureColor((*sit)->featureType,0, true);

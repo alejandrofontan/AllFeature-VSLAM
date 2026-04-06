@@ -70,7 +70,7 @@ Sim3Solver::Sim3Solver(Keyframe pKF1, Keyframe pKF2, const vector<Pt> &vpMatched
             if(!pMP1)
                 continue;
 
-            if(pMP1->isBad() || pMP2->isBad())
+            if(pMP1->is_bad() || pMP2->is_bad())
                 continue;
 
             KeypointIndex indexKF1 = pMP1->GetIndexInKeyFrame(pKF1);

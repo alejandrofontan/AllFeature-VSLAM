@@ -72,7 +72,7 @@ public:
     bool is_in_keyframe(Keyframe keyframe);
 
     void SetBadFlag();
-    bool isBad();
+    bool is_bad();
 
     void replace(Pt pMP);
     Pt GetReplaced();

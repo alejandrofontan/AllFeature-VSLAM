@@ -696,7 +696,7 @@ bool Tracking::TrackLocalMap()
         // Do not search map points already matched
         for (const auto& [ft, N] : currentFrame.N) {
             for(auto& pt: currentFrame.pts.at(ft)){
-                if(pt && !pt->isBad()){
+                if(pt && !pt->is_bad()){
                     pt->IncreaseVisible();
                     pt->idLastFrameSeen = currentFrame.mnId;
                     pt->mbTrackInView = false;
@@ -711,7 +711,7 @@ bool Tracking::TrackLocalMap()
         for(auto& pt: localPts){
             if(pt->idLastFrameSeen == currentFrame.mnId)
                 continue;
-            if(pt->isBad())
+            if(pt->is_bad())
                 continue;
 
             // Project (this fills MapPoint variables for matching)
@@ -756,7 +756,7 @@ bool Tracking::TrackLocalMap()
                         continue;
                     if (ptIds.find(pt->ptId) != ptIds.end())
                         continue;
-                    if(!pt->isBad()){
+                    if(!pt->is_bad()){
                         localPts.push_back(pt);
                         ptIds.insert(pt->ptId);
                     }
@@ -778,7 +778,7 @@ bool Tracking::TrackLocalMap()
 
             for (auto& [ft, pts] : currentFrame.pts) {
                 for(auto& pt: pts){
-                    if(pt && !pt->isBad()) {
+                    if(pt && !pt->is_bad()) {
                         const std::map<KeyframeId, Obs> observations = pt->GetObservations();
                         for (const auto &[keyId, obs]: observations) {
                             keyframeCounter[keyId]++;
@@ -796,7 +796,7 @@ bool Tracking::TrackLocalMap()
             localKeyframes.clear();
             localKeyframes.reserve(scaleReserveKey * keyframeCounter.size());
             for (const auto &[keyId, keyframe]: keyframes) {
-                if(keyframe->isBad())
+                if(keyframe->is_bad())
                     continue;
 
                 int keyFrameCount = keyframeCounter[keyframe->keyId];
@@ -824,7 +824,7 @@ bool Tracking::TrackLocalMap()
 
             const vector<Keyframe> neighbors = keyframe->GetBestCovisibilityKeyFrames(_bestCovKey_);
             for(const auto& neighbor: neighbors){
-                if(!neighbor->isBad()){
+                if(!neighbor->is_bad()){
                     if (keyframeIds.find(neighbor->keyId) == keyframeIds.end()){
                         localKeyframes.push_back(neighbor);
                         keyframeIds.insert(neighbor->keyId);
@@ -835,7 +835,7 @@ bool Tracking::TrackLocalMap()
 
             const set<Keyframe> childs = keyframe->GetChilds();
             for(const auto& child: childs){
-                if(!child->isBad()){
+                if(!child->is_bad()){
                     if (keyframeIds.find(child->keyId) == keyframeIds.end()){
                         localKeyframes.push_back(child);
                         keyframeIds.insert(child->keyId);
@@ -845,7 +845,7 @@ bool Tracking::TrackLocalMap()
             }
 
             Keyframe parent = keyframe->GetParent();
-            if(parent and !parent->isBad()){
+            if(parent and !parent->is_bad()){
                 if (keyframeIds.find(parent->keyId) == keyframeIds.end()){
                     localKeyframes.push_back(parent);
                     keyframeIds.insert(parent->keyId);
@@ -886,7 +886,7 @@ bool Tracking::Relocalization(const FeatureType& featureType)
     for(int i=0; i<nKFs; i++)
     {
         Keyframe pKF = vpCandidateKFs[i];
-        if(pKF->isBad())
+        if(pKF->is_bad())
             vbDiscarded[i] = true;
         else
         {

@@ -106,7 +106,12 @@ public:
                                 map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
                                 const vector<FeatureType>& feat_types);
 
+    // Projects map points into a keyframe and fuses them with existing keypoints.
+    // Applies visibility checks (depth, image bounds, scale, viewing angle), then matches by descriptor distance within radius_th.
+    // Replaces the weaker map point if one already exists, or adds a new observation.
+    // Used in: LocalMapping::SearchInNeighbors
     const float cos_viewing_angle_th = 0.5f;
+    const float chi2_perc = 5.991f;
     int fuse_map_points_to_keyframe(Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type);
 
     int SearchForInitialization(const Frame &F1, const Frame &F2, std::vector<cv::Point2f> &pointsPrevMatched, std::vector<int> &matches12, const FeatureType& featureType);

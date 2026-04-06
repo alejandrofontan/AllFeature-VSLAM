@@ -148,7 +148,7 @@ void LocalMapping::ProcessNewKeyFrame()
             Pt pMP = vpMapPointMatches[i];
             if(pMP)
             {
-                if(!pMP->isBad())
+                if(!pMP->is_bad())
                 {
                     if(!pMP->is_in_keyframe(mpCurrentKeyFrame))
                     {
@@ -179,7 +179,7 @@ void LocalMapping::MapPointCulling()
     while(lit!=mlpRecentAddedMapPoints.end())
     {
         Pt pMP = *lit;
-        if(pMP->isBad())
+        if(pMP->is_bad())
         {
             lit = mlpRecentAddedMapPoints.erase(lit);
         }
@@ -475,7 +475,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
     for(vector<Keyframe >::const_iterator vit=vpNeighKFs.begin(), vend=vpNeighKFs.end(); vit!=vend; vit++)
     {
         Keyframe  pKFi = *vit;
-        if(pKFi->isBad() || pKFi->mnFuseTargetForKF == mpCurrentKeyFrame->keyId)
+        if(pKFi->is_bad() || pKFi->mnFuseTargetForKF == mpCurrentKeyFrame->keyId)
             continue;
         vpTargetKFs.push_back(pKFi);
         pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->keyId;
@@ -485,7 +485,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
         for(vector<Keyframe >::const_iterator vit2=vpSecondNeighKFs.begin(), vend2=vpSecondNeighKFs.end(); vit2!=vend2; vit2++)
         {
             Keyframe  pKFi2 = *vit2;
-            if(pKFi2->isBad() || pKFi2->mnFuseTargetForKF==mpCurrentKeyFrame->keyId || pKFi2->keyId == mpCurrentKeyFrame->keyId)
+            if(pKFi2->is_bad() || pKFi2->mnFuseTargetForKF==mpCurrentKeyFrame->keyId || pKFi2->keyId == mpCurrentKeyFrame->keyId)
                 continue;
             vpTargetKFs.push_back(pKFi2);
         }
@@ -515,7 +515,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
             Pt pMP = *vitMP;
             if(!pMP)
                 continue;
-            if(pMP->isBad() || pMP->mnFuseCandidateForKF == mpCurrentKeyFrame->keyId)
+            if(pMP->is_bad() || pMP->mnFuseCandidateForKF == mpCurrentKeyFrame->keyId)
                 continue;
             pMP->mnFuseCandidateForKF = mpCurrentKeyFrame->keyId;
             vpFuseCandidates.push_back(pMP);
@@ -531,7 +531,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
         Pt pMP=vpMapPointMatches[i];
         if(pMP)
         {
-            if(!pMP->isBad())
+            if(!pMP->is_bad())
             {
                 pMP->ComputeDistinctiveDescriptors();
                 pMP->UpdateNormalAndDepth();
@@ -661,7 +661,7 @@ void LocalMapping::KeyFrameCulling()
 
                 if(pMP)
                 {
-                    if(!pMP->isBad())
+                    if(!pMP->is_bad())
                     {
                         FeatureType featType = pMP->featureType;
                         nMPs++;
@@ -674,7 +674,7 @@ void LocalMapping::KeyFrameCulling()
                                 Keyframe keyframe_i = obs.second->projKeyframe;
                                 if(keyframe_i->keyId == pKF->keyId)
                                     continue;
-                                if(keyframe_i->isBad())
+                                if(keyframe_i->is_bad())
                                     continue;
 
                                 nObs++;

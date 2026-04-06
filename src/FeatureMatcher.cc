@@ -172,7 +172,7 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
         const int train_idx = kps2_indexes[m.trainIdx];
         const FeatureType feat_type = used_feature_types[m.queryIdx];
         const Pt pt = map_pts_kf[feat_type][query_idx];
-        if (!pt || pt->isBad())
+        if (!pt || pt->is_bad())
             continue;
         map_pts_matches[feat_type][train_idx] = pt;
         matches_count[feat_type]++;
@@ -197,7 +197,7 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
     // Collect valid map points grouped by feature type
     for (size_t idx = 0; idx < map_pts.size(); idx++) {
         const auto& pt = map_pts[idx];
-        if (!pt || pt->isBad())
+        if (!pt || pt->is_bad())
             continue;
 
         FeatureType ft = pt->featureType;
@@ -360,7 +360,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector
         if (!pt)
             continue;
 
-        if (pt->isBad() || pt->is_in_keyframe(keyframe))
+        if (pt->is_bad() || pt->is_in_keyframe(keyframe))
             continue;
 
         const vec3f pos_world = pt->get_world_pos();
@@ -412,7 +412,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector
             const float ey = v - kps_ft[idx].pt.y;
             const float e2 = ex * ex + ey * ey;
 
-            if (e2 * keyframe->get_keypt_1Dinf(KeypointIndex(idx), feat_type) > 5.99f)
+            if (e2 * keyframe->get_keypt_1Dinf(KeypointIndex(idx), feat_type) > chi2_perc)
                 continue;
 
             const cv::Mat &descriptor = desc_ft.row(idx);
@@ -429,7 +429,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector
         if (best_dist <= th_low) {
             Pt existing_pt = keyframe->get_map_point(best_idx, feat_type);
             if (existing_pt) {
-                if (!existing_pt->isBad()) {
+                if (!existing_pt->is_bad()) {
                     if (existing_pt->number_of_observations() > pt->number_of_observations())
                         pt->replace(existing_pt);
                     else
@@ -539,7 +539,7 @@ int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vec
         Pt pMP = vpPoints[iMP];
 
         // Discard Bad MapPoints and already found
-        if(pMP->isBad() || spAlreadyFound.count(pMP))
+        if(pMP->is_bad() || spAlreadyFound.count(pMP))
             continue;
 
         // Get 3D Coords.
@@ -662,7 +662,7 @@ int FeatureMatcher::SearchByBoW(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMat
                 Pt pMP1 = vpMapPoints1[idx1];
                 if(!pMP1)
                     continue;
-                if(pMP1->isBad())
+                if(pMP1->is_bad())
                     continue;
 
                 const cv::Mat &refDescriptor = Descriptors1.row(idx1);
@@ -678,7 +678,7 @@ int FeatureMatcher::SearchByBoW(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMat
                     if(vbMatched2[idx2] || !pMP2)
                         continue;
 
-                    if(pMP2->isBad())
+                    if(pMP2->is_bad())
                         continue;
 
                     const cv::Mat &descriptor = Descriptors2.row(idx2);
@@ -759,7 +759,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
         Pt pMP = vpPoints[iMP];
 
         // Discard Bad MapPoints and already found
-        if(pMP->isBad() || spAlreadyFound.count(pMP))
+        if(pMP->is_bad() || spAlreadyFound.count(pMP))
             continue;
 
         // Get 3D Coords.
@@ -837,7 +837,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
             Pt pMPinKF = pKF->get_map_point(bestIdx, featType);
             if(pMPinKF)
             {
-                if(!pMPinKF->isBad())
+                if(!pMPinKF->is_bad())
                     vpReplacePoint[iMP] = pMPinKF;
             }
             else
@@ -906,7 +906,7 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
         if(!pMP || vbAlreadyMatched1[i1])
             continue;
 
-        if(pMP->isBad())
+        if(pMP->is_bad())
             continue;
 
         vec3f p3Dw = pMP->get_world_pos();
@@ -984,7 +984,7 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
         if(!pMP || vbAlreadyMatched2[i2])
             continue;
 
-        if(pMP->isBad())
+        if(pMP->is_bad())
             continue;
 
         vec3f p3Dw = pMP->get_world_pos();
@@ -1101,7 +1101,7 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
 
         if(pMP)
         {
-            if(!pMP->isBad() && !sAlreadyFound.count(pMP))
+            if(!pMP->is_bad() && !sAlreadyFound.count(pMP))
             {
                 //Project
                 vec3f x3Dw = pMP->get_world_pos();

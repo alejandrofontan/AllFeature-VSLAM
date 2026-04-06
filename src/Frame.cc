@@ -480,7 +480,7 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
         {
             for(const auto& pt : pts)
             {
-                if((!pt) || pt->isBad())
+                if((!pt) || pt->is_bad())
                     continue;
 
                 const int x = (int) pt->track_proj_x;

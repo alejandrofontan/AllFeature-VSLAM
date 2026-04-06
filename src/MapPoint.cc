@@ -247,7 +247,7 @@ void MapPoint::replace(Pt pMP)
     mpMap->EraseMapPoint(thisPt());
 }
 
-bool MapPoint::isBad()
+bool MapPoint::is_bad()
 {
     unique_lock<mutex> lock(mMutexFeatures);
     unique_lock<mutex> lock2(mMutexPos);
@@ -293,7 +293,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
     for(auto& obs: observations_tmp)
     {
         Keyframe projKeyframe = obs.second->projKeyframe;
-        if(!projKeyframe->isBad()){
+        if(!projKeyframe->is_bad()){
             descriptors.push_back(projKeyframe->descriptors.at(featureType).row(obs.second->projIndex));
             projIndexes.push_back(obs.second->projIndex);
             projKeyframes.push_back(projKeyframe);

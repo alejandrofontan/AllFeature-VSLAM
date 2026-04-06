@@ -82,7 +82,7 @@ PnPsolver::PnPsolver(const Frame &F, const vector<Pt> &vpMapPointMatches, const 
 
         if(pMP)
         {
-            if(!pMP->isBad())
+            if(!pMP->is_bad())
             {
                 const cv::KeyPoint &kp = F.keypoints.at(featType)[i];
 

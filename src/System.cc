@@ -369,7 +369,7 @@ void System::SaveTrajectoryTUM(const string &filename)
         mat4f Trw{mat4f::Identity()};
 
         // If the reference keyframe was culled, traverse the spanning tree to get a suitable keyframe.
-        while(pKF->isBad())
+        while(pKF->is_bad())
         {
             Trw = Trw * pKF->Tcp;
             pKF = pKF->GetParent();
@@ -419,7 +419,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
         #endif
        // pKF->SetPose(pKF->GetPose()*Two);
 
-        if(pKF->isBad())
+        if(pKF->is_bad())
             continue;
 
         mat3f R = pKF->get_rotation().transpose();
@@ -489,7 +489,7 @@ void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>
     std::map<int, cv::Mat> imageCache;
     float alpha = 0.0f;
     for (auto& mp: mapPoints) {
-        if (mp->isBad()) continue;
+        if (mp->is_bad()) continue;
         numPoints++;
         PointRGB p;
         vec3f pos = mp->get_world_pos();
@@ -585,7 +585,7 @@ void System::SaveTrajectoryKITTI(const string &filename)
 
         mat4f Trw{mat4f::Identity()};
 
-        while(pKF->isBad())
+        while(pKF->is_bad())
         {
           //  cout << "bad parent" << endl;
             Trw = Trw * pKF->Tcp;
@@ -631,7 +631,7 @@ void System::SaveStatistics(const std::string &filename){
 
     // size_t numKeyframes{0};
     // for (auto& keyframe: keyframes) {
-    //     if(keyframe->isBad())
+    //     if(keyframe->is_bad())
     //         continue;
     //     numKeyframes++;
     // }
@@ -639,7 +639,7 @@ void System::SaveStatistics(const std::string &filename){
     // size_t numPts{0};
     // size_t numObservations{0};
     // for (auto& pt: pts) {
-    //     if(pt->isBad())
+    //     if(pt->is_bad())
     //         continue;
     //     numPts++;
     //     numObservations += pt->number_of_observations();

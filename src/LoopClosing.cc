@@ -148,7 +148,7 @@ bool LoopClosing::DetectLoop()
     for(size_t i=0; i<vpConnectedKeyFrames.size(); i++)
     {
         Keyframe pKF = vpConnectedKeyFrames[i];
-        if(pKF->isBad())
+        if(pKF->is_bad())
             continue;
         const DBoW2::BowVector &BowVec = pKF->mBowVec;
 
@@ -276,7 +276,7 @@ bool LoopClosing::ComputeSim3()
         // avoid that local mapping erase it while it is being processed in this thread
         pKF->SetNotErase();
 
-        if(pKF->isBad())
+        if(pKF->is_bad())
         {
             vbDiscarded[i] = true;
             continue;
@@ -382,7 +382,7 @@ bool LoopClosing::ComputeSim3()
             Pt pMP = vpMapPoints[i];
             if(pMP)
             {
-                if(!pMP->isBad() && pMP->mnLoopPointForKF!=mpCurrentKF->keyId)
+                if(!pMP->is_bad() && pMP->mnLoopPointForKF!=mpCurrentKF->keyId)
                 {
                     mvpLoopMapPoints.push_back(pMP);
                     pMP->mnLoopPointForKF=mpCurrentKF->keyId;
@@ -503,7 +503,7 @@ void LoopClosing::CorrectLoop()
                 Pt pMPi = vpMPsi[iMP];
                 if(!pMPi)
                     continue;
-                if(pMPi->isBad())
+                if(pMPi->is_bad())
                     continue;
                 if(pMPi->mnCorrectedByKF==mpCurrentKF->keyId)
                     continue;
@@ -723,7 +723,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
             {
                 Pt pMP = vpMPs[i];
 
-                if(pMP->isBad())
+                if(pMP->is_bad())
                     continue;
 
                 if(pMP->mnBAGlobalForKF==nLoopKF)

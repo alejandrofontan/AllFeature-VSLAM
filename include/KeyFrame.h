@@ -121,7 +121,7 @@ public:
 
     // Set/check bad flag
     void SetBadFlag();
-    bool isBad();
+    bool is_bad();
 
     // Compute Scene Depth (q=2 median). Used in monocular.
     float ComputeSceneMedianDepth(const int q);

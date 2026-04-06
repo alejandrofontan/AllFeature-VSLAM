@@ -285,7 +285,7 @@ set<Pt> KeyFrame::get_map_points(const FeatureType& featType)
         if(!mvpMapPoints.at(featType)[i])
             continue;
         Pt pMP = mvpMapPoints.at(featType)[i];
-        if(!pMP->isBad())
+        if(!pMP->is_bad())
             s.insert(pMP);
     }
     return s;
@@ -303,7 +303,7 @@ int KeyFrame::TrackedMapPoints(const int &minObs)
             Pt pMP = pts[i];
             if(pMP)
             {
-                if(!pMP->isBad())
+                if(!pMP->is_bad())
                 {
                     if(bCheckObs)
                     {
@@ -351,7 +351,7 @@ void KeyFrame::UpdateConnections()
             if(!pt)
                 continue;
 
-            if(pt->isBad())
+            if(pt->is_bad())
                 continue;
 
             map<KeyframeId , Obs> observations = pt->GetObservations();
@@ -551,7 +551,7 @@ void KeyFrame::SetBadFlag()
             for(set<Keyframe>::iterator sit=mspChildrens.begin(), send=mspChildrens.end(); sit!=send; sit++)
             {
                 Keyframe pKF = *sit;
-                if(pKF->isBad())
+                if(pKF->is_bad())
                     continue;
 
                 // Check if a parent candidate is connected to the keyframe
@@ -601,7 +601,7 @@ void KeyFrame::SetBadFlag()
     mpKeyFrameDB->erase(thisKeyframe());
 }
 
-bool KeyFrame::isBad()
+bool KeyFrame::is_bad()
 {
     unique_lock<mutex> lock(mMutexConnections);
     return mbBad;
