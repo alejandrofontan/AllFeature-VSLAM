@@ -16,7 +16,7 @@ namespace AF_VSLAM {
         const MatcherType getMatcherType()     const override { return BF_HAMMING; }
         const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
         const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
-        float DescriptorDistance(const cv::Mat &a, const cv::Mat &b) const override { return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_HAMMING); };
+        float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override { return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_HAMMING); };
         std::shared_ptr<FeatureExtractor> createExtractor(
             std::shared_ptr<FeatureExtractorSettings> settings) const override;
     private:

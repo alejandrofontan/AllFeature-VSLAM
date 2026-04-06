@@ -16,7 +16,7 @@ namespace AF_VSLAM {
         const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
 
         const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
-        float DescriptorDistance(const cv::Mat &a, const cv::Mat &b) const override;
+        float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override;
         std::shared_ptr<FeatureExtractor> createExtractor(
             std::shared_ptr<FeatureExtractorSettings> settings) const override;
     private:

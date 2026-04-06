@@ -1,6 +1,6 @@
 #include "Feature_orb32.h"
 
-float AF_VSLAM::Orb32::DescriptorDistance(const cv::Mat &a, const cv::Mat &b) const {
+float AF_VSLAM::Orb32::descriptor_distance(const cv::Mat &a, const cv::Mat &b) const {
     // Bit set count operation from
     // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
     const int *pa = a.ptr<int32_t>();

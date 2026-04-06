@@ -323,7 +323,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
         Distances[i][i] = Descriptor_Distance_Type(0.0);
         for(size_t j = i + 1;j < N; j++)
         {
-            Descriptor_Distance_Type distij = FeatureMatcher::DescriptorDistance(descriptors[i], descriptors[j], featureType);
+            Descriptor_Distance_Type distij = FeatureMatcher::descriptor_distance(descriptors[i], descriptors[j], featureType);
             Distances[i][j] = distij;
             Distances[j][i] = distij;
         }

@@ -385,10 +385,10 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector
         const float max_distance = pt->get_max_distance_invariance();
         const float min_distance = pt->get_min_distance_invariance();
         const vec3f dir_to_pt = pos_world - cam_center;
-        const float dist3D = dir_to_pt.squaredNorm();
+        const float dist3D = dir_to_pt.norm();
 
         // Depth must be inside the scale pyramid of the image
-        if (dist3D < min_distance * min_distance || dist3D > max_distance * max_distance)
+        if (dist3D < min_distance || dist3D > max_distance)
             continue;
 
         // Viewing angle must be less than 60 deg
@@ -416,7 +416,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector
                 continue;
 
             const cv::Mat &descriptor = desc_ft.row(idx);
-            const Descriptor_Distance_Type desc_dist = DescriptorDistance(ref_descriptor, descriptor, pt->featureType);
+            const Descriptor_Distance_Type desc_dist = descriptor_distance(ref_descriptor, descriptor, pt->featureType);
 
             // Keep only the closest descriptor match
             if (desc_dist < best_dist) {
@@ -604,7 +604,7 @@ int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vec
             //    continue;
 
             const cv::Mat &descriptor = pKF->descriptors.at(featType).row(idx);
-            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
+            const Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -682,7 +682,7 @@ int FeatureMatcher::SearchByBoW(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMat
                         continue;
 
                     const cv::Mat &descriptor = Descriptors2.row(idx2);
-                    Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP2->featureType);
+                    Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP2->featureType);
 
                     if(descDist < bestDist1)
                     {
@@ -822,7 +822,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
             //    continue;
 
             const cv::Mat &descriptor = pKF->descriptors.at(featType).row(idx);
-            Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
+            Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -961,7 +961,7 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
             //    continue;
 
             const cv::Mat &descriptor = pKF2->descriptors.at(featType).row(idx);
-            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
+            const Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -1039,7 +1039,7 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
             //    continue;
 
             const cv::Mat &descriptor = pKF1->descriptors.at(featType).row(idx);
-            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
+            const Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -1150,7 +1150,7 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
                         continue;
 
                     const cv::Mat &descriptor = CurrentFrame.descriptors.at(featType).row(i2);
-                    const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
+                    const Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
 
                     if(descDist < bestDist)
                     {
@@ -1177,10 +1177,10 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
     return nMatches;
 }
 
-Descriptor_Distance_Type FeatureMatcher::DescriptorDistance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_)
+Descriptor_Distance_Type FeatureMatcher::descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_)
 {
     std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType_);
-    return ft->DescriptorDistance(a,b);
+    return ft->descriptor_distance(a,b);
 }
 
 void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType) {
