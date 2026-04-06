@@ -495,7 +495,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
     for(list<Keyframe>::iterator lit=lLocalKeyFrames.begin() , lend=lLocalKeyFrames.end(); lit!=lend; lit++)
     {
         for (const auto& ft : (*lit)->featureTypes){
-            vector<Pt> vpMPs = (*lit)->GetMapPointMatches(ft);
+            vector<Pt> vpMPs = (*lit)->get_map_point_matches(ft);
             for(vector<Pt>::iterator vit=vpMPs.begin(), vend=vpMPs.end(); vit!=vend; vit++)
             {
                 Pt pMP = *vit;
@@ -1098,7 +1098,7 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
 
     // Set MapPoint vertices
     const int N = vpMatches1.size();
-    const vector<Pt> vpMapPoints1 = pKF1->GetMapPointMatches(featureType);
+    const vector<Pt> vpMapPoints1 = pKF1->get_map_point_matches(featureType);
     vector<g2o::EdgeSim3ProjectXYZ*> vpEdges12;
     vector<g2o::EdgeInverseSim3ProjectXYZ*> vpEdges21;
     vector<size_t> vnIndexEdge;

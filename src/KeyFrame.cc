@@ -46,7 +46,7 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>p
     maxKeyPtSize(F.maxKeyPtSize),maxKeyPtSigma(F.maxKeyPtSigma),
     mnMaxY(F.mnMaxY), mK(F.mK), mvpMapPoints(F.pts), mpKeyFrameDB(pKFDB),
     vocabulary(F.vocabulary), mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
-    mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap), featureTypes(F.featureTypes), cache_matchedPairs(F.cache_matchedPairs)
+    mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap), featureTypes(F.featureTypes), cache_matched_pairs(F.cache_matched_pairs)
 {
     keyId = nNextId++;
     for(auto& [ft, N_] : N){
@@ -319,12 +319,12 @@ int KeyFrame::TrackedMapPoints(const int &minObs)
     return nPoints;
 }
 
-vector<Pt> KeyFrame::GetMapPointMatches(const FeatureType& featType)
+vector<Pt> KeyFrame::get_map_point_matches(const FeatureType& feat_type)
 {
     unique_lock<mutex> lock(mMutexFeatures);
-    if (mvpMapPoints.count(featType) == 0)
+    if (mvpMapPoints.count(feat_type) == 0)
         return vector<Pt>();
-    return mvpMapPoints.at(featType);
+    return mvpMapPoints.at(feat_type);
 }
 
 Pt KeyFrame::GetMapPoint(const size_t &idx, const FeatureType& featType)

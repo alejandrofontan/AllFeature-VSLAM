@@ -376,7 +376,7 @@ bool LoopClosing::ComputeSim3()
     for(vector<Keyframe>::iterator vit=vpLoopConnectedKFs.begin(); vit!=vpLoopConnectedKFs.end(); vit++)
     {
         Keyframe pKF = *vit;
-        vector<Pt> vpMapPoints = pKF->GetMapPointMatches(featureType);
+        vector<Pt> vpMapPoints = pKF->get_map_point_matches(featureType);
         for(size_t i=0, iend=vpMapPoints.size(); i<iend; i++)
         {
             Pt pMP = vpMapPoints[i];
@@ -497,7 +497,7 @@ void LoopClosing::CorrectLoop()
 
             g2o::Sim3 g2oSiw =NonCorrectedSim3[pKFi];
 
-            vector<Pt> vpMPsi = pKFi->GetMapPointMatches(featureType);
+            vector<Pt> vpMPsi = pKFi->get_map_point_matches(featureType);
             for(size_t iMP=0, endMPi = vpMPsi.size(); iMP<endMPi; iMP++)
             {
                 Pt pMPi = vpMPsi[iMP];

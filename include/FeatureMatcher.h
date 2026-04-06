@@ -53,7 +53,8 @@ public:
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    std::vector<cv::DMatch> featureMatching_0(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft);
+    std::vector<cv::DMatch> match_descriptors(const cv::Mat& desc1, const cv::Mat& desc2,
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type);
     std::vector<cv::DMatch> featureMatching_1(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& ft);
     std::vector<cv::DMatch> featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft,
        int outlierMehod = cv::FM_RANSAC);
@@ -68,7 +69,7 @@ public:
             const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
             float min_score = 0.0f);
 
-    std::vector<cv::DMatch> robustFeatureMatching(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
+    std::vector<cv::DMatch> filter_matches_by_fundamental(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
          int outlierMehod = cv::FM_RANSAC, const int maxForRansac = 2000);
 
     std::map<FeatureType, std::vector<cv::DMatch>> parallelFeatureMatching(const std::vector<FeatureType>& featureTypes,
@@ -83,12 +84,8 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    // AllFeature-VSLAM SearchBruteForce
-
-    int SearchBruteForce(Frame &CurrentFrame, const Frame &LastFrame,
-        const std::vector<FeatureType>& featureTypes);
-
-    std::map<FeatureType, int> SearchBruteForce(const Keyframe& keyframe, Frame &frame,
+    // Tracking::TrackReferenceKeyFrame & Tracking::Relocalization
+    std::map<FeatureType, int> match_keyframe_to_frame(Keyframe& keyframe, Frame &frame,
         std::map<FeatureType, std::vector<Pt>>& mapPointMatches,
         const std::vector<FeatureType>& featureTypes);
 
@@ -178,13 +175,9 @@ protected:
 
     // Matching options
 
-    // SearchBruteForce Keyframe-Frame
-    // Tracking::TrackReferenceKeyframe & Tracking::Relocalization
+    // match_keyframe_to_frame Keyframe-Frame
+    // Tracking::match_keyframe_to_frame & Tracking::Relocalization
     static const bool sBF_kf_lightglue = true;
-
-    // SearchBruteForce Frame-Frame
-    // Tracking::TrackWithMotionModel
-    static const bool sBF_ff_lightglue = true;
 
     // SearchForTriangulation Keyframe-Keyframe
     // LocalMapping::CreateNewMapPoints

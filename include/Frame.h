@@ -123,7 +123,7 @@ public:
 public:
 
     std::vector<FeatureType> featureTypes;
-    std::map<FrameId, std::vector<cv::DMatch>> cache_matchedPairs{};
+    std::map<FrameId, std::vector<cv::DMatch>> cache_matched_pairs{};
 
     // Vocabulary used for relocalization.
     shared_ptr<Vocabulary> vocabulary;

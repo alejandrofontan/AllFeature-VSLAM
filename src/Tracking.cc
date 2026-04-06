@@ -436,7 +436,7 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
     pKFcur->SetPose(Tc2w);
 
     // Scale points
-    vector<Pt> vpAllMapPoints = pKFini->GetMapPointMatches(featureType);
+    vector<Pt> vpAllMapPoints = pKFini->get_map_point_matches(featureType);
     for(size_t iMP=0; iMP<vpAllMapPoints.size(); iMP++)
     {
         if(vpAllMapPoints[iMP])
@@ -498,7 +498,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
 
     // Feature Matching
     std::map<FeatureType, std::vector<Pt>> mapPointMatches;
-    std::map<FeatureType, int> nmatches_ft = matcher->SearchBruteForce(refKeyframe, currentFrame, mapPointMatches, currentFrame.featureTypes);
+    std::map<FeatureType, int> nmatches_ft = matcher->match_keyframe_to_frame(refKeyframe, currentFrame, mapPointMatches, currentFrame.featureTypes);
     int nmatches = 0;
     for (auto& [ft, N] : currentFrame.N)
     {
@@ -562,50 +562,6 @@ void Tracking::UpdateLastFrame()
     mat4f Tlr = mlRelativeFramePoses.back();
 
     lastFrame.SetPose(Tlr * pRef->GetPose());
-}
-
-bool Tracking::TrackWithMotionModel()
-{
-    UpdateLastFrame();
-
-    currentFrame.SetPose(mVelocity * lastFrame.Tcw);
-
-    for (auto& [ft, N] : currentFrame.N) {
-        fill(currentFrame.pts.at(ft).begin(),currentFrame.pts.at(ft).end(),static_cast<Pt>(nullptr));
-    }
-
-    // Feature Matching
-    int nmatches= matcher->SearchBruteForce(currentFrame, lastFrame, currentFrame.featureTypes);
-
-    if(nmatches < TRACK_WITH_MOTION_MODEL_MIN_MATCHES_HIGH)
-        return false;
-
-    // Optimize frame pose with all matches
-    Optimizer::PoseOptimization(&currentFrame);
-
-    // Discard outliers
-    int nmatchesMap = 0;
-    for (auto& [ft, N_] : currentFrame.N)
-    {
-        for(int i{0}; i < N_; i++)
-        {
-            Pt pt = currentFrame.pts.at(ft)[i];
-            if(pt)
-            {
-                if(currentFrame.mvbOutlier.at(ft)[i])
-                {
-                    currentFrame.pts.at(ft)[i] = static_cast<Pt>(nullptr);
-                    currentFrame.mvbOutlier.at(ft)[i] = false;
-                    pt->mbTrackInView = false;
-                    pt->idLastFrameSeen = currentFrame.mnId;
-                }
-                else if(currentFrame.pts.at(ft)[i]->NumberOfObservations() > 0)
-                    nmatchesMap++;
-            }
-        }
-    }
-
-    return nmatchesMap >= TRACK_WITH_MOTION_MODEL_MIN_MATCHES_LOW;
 }
 
 bool Tracking::TrackLocalMap()
@@ -794,7 +750,7 @@ bool Tracking::TrackLocalMap()
         set<PtId> ptIds{};
         for(const auto& keyframe : localKeyframes){
             for(const auto& ft: featureTypes){
-                const vector<Pt> pts = keyframe->GetMapPointMatches(ft);
+                const vector<Pt> pts = keyframe->get_map_point_matches(ft);
                 for(const auto& pt : pts){
                     if(!pt)
                         continue;
@@ -934,7 +890,7 @@ bool Tracking::Relocalization(const FeatureType& featureType)
             vbDiscarded[i] = true;
         else
         {
-            std::map<FeatureType, int> nmatches_ft = matcher->SearchBruteForce(pKF, currentFrame, vvpMapPointMatches[i], std::vector<FeatureType>{featureType});
+            std::map<FeatureType, int> nmatches_ft = matcher->match_keyframe_to_frame(pKF, currentFrame, vvpMapPointMatches[i], std::vector<FeatureType>{featureType});
             if(nmatches_ft[featureType] < minNmatches)
             {
                 vbDiscarded[i] = true;

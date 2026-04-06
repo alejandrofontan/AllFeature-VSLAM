@@ -41,7 +41,7 @@ Sim3Solver::Sim3Solver(Keyframe pKF1, Keyframe pKF2, const vector<Pt> &vpMatched
     mpKF1 = pKF1;
     mpKF2 = pKF2;
 
-    vector<Pt> vpKeyFrameMP1 = pKF1->GetMapPointMatches(featureType);
+    vector<Pt> vpKeyFrameMP1 = pKF1->get_map_point_matches(featureType);
 
     mN1 = vpMatched12.size();
 

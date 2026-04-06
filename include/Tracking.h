@@ -148,7 +148,6 @@ protected:
     void CheckReplacedInLastFrame();
     bool TrackReferenceKeyFrame(const bool& optimizePose = true);
     void UpdateLastFrame();
-    bool TrackWithMotionModel();
 
     bool Relocalization(const FeatureType& featureType);
 
@@ -285,10 +284,6 @@ protected:
     // TrackReferenceKeyFrame()
     const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH{15};
     const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW{10};
-
-    // TrackWithMotionModel()
-    const int TRACK_WITH_MOTION_MODEL_MIN_MATCHES_HIGH{20};
-    const int TRACK_WITH_MOTION_MODEL_MIN_MATCHES_LOW{10};
 
     // TrackLocalMap()
     const int minMatches_trackLocalMap_high{50};

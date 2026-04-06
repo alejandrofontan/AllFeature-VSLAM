@@ -104,7 +104,7 @@ public:
     void EraseMapPointMatch(Pt pMP);
     void ReplaceMapPointMatch(const size_t &idx, Pt pMP);
     std::set<Pt> GetMapPoints(const FeatureType& featType);
-    std::vector<Pt> GetMapPointMatches(const FeatureType& featType);
+    std::vector<Pt> get_map_point_matches(const FeatureType& feat_type);
     int TrackedMapPoints(const int &minObs);
     Pt GetMapPoint(const size_t &idx, const FeatureType& featType);
 
@@ -147,7 +147,7 @@ public:
 public:
 
     std::vector<FeatureType> featureTypes{};
-    std::map<FrameId, std::vector<cv::DMatch>> cache_matchedPairs{};
+    std::map<FrameId, std::vector<cv::DMatch>> cache_matched_pairs{};
 
     static long unsigned int nNextId;
     KeyframeId keyId;

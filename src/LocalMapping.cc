@@ -141,7 +141,7 @@ void LocalMapping::ProcessNewKeyFrame()
 
     // Associate MapPoints to the new keyframe and update normal and descriptor
     for(const auto& feat: mpCurrentKeyFrame->featureTypes){
-        const vector<Pt> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches(feat);
+        const vector<Pt> vpMapPointMatches = mpCurrentKeyFrame->get_map_point_matches(feat);
 
         for(size_t i=0; i<vpMapPointMatches.size(); i++)
         {
@@ -256,8 +256,8 @@ void LocalMapping::CreateNewMapPoints()
     for (int k = 0; k < NK; ++k) {
         auto pKF2 = vpNeighKFs[k];
 
-        auto it = mpCurrentKeyFrame->cache_matchedPairs.find(pKF2->mnFrameId);
-        if (it != mpCurrentKeyFrame->cache_matchedPairs.end() && !it->second.empty()) {
+        auto it = mpCurrentKeyFrame->cache_matched_pairs.find(pKF2->mnFrameId);
+        if (it != mpCurrentKeyFrame->cache_matched_pairs.end() && !it->second.empty()) {
             skipK[k] = 1;
         }
     }
@@ -313,7 +313,7 @@ void LocalMapping::CreateNewMapPoints()
             trainOffset += nt;
         }
 
-        mpCurrentKeyFrame->cache_matchedPairs.insert_or_assign(pKF2->mnFrameId, std::move(allMatches));
+        mpCurrentKeyFrame->cache_matched_pairs.insert_or_assign(pKF2->mnFrameId, std::move(allMatches));
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////
@@ -493,7 +493,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
 
     // Search matches by projection from current KF in target KFs
     //FeatureMatcher matcher;
-    vector<Pt> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches(featureType);
+    vector<Pt> vpMapPointMatches = mpCurrentKeyFrame->get_map_point_matches(featureType);
     for(vector<Keyframe >::iterator vit=vpTargetKFs.begin(), vend=vpTargetKFs.end(); vit!=vend; vit++)
     {
         Keyframe  pKFi = *vit;
@@ -508,7 +508,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
     {
         Keyframe  pKFi = *vitKF;
 
-        vector<Pt> vpMapPointsKFi = pKFi->GetMapPointMatches(featureType);
+        vector<Pt> vpMapPointsKFi = pKFi->get_map_point_matches(featureType);
 
         for(vector<Pt>::iterator vitMP=vpMapPointsKFi.begin(), vendMP=vpMapPointsKFi.end(); vitMP!=vendMP; vitMP++)
         {
@@ -525,7 +525,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
     matcher->Fuse(mpCurrentKeyFrame,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
 
     // Update points
-    vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches(featureType);
+    vpMapPointMatches = mpCurrentKeyFrame->get_map_point_matches(featureType);
     for(size_t i=0, iend=vpMapPointMatches.size(); i<iend; i++)
     {
         Pt pMP=vpMapPointMatches[i];
@@ -649,7 +649,7 @@ void LocalMapping::KeyFrameCulling()
         for(const auto feat: pKF->featureTypes){
             if(pKF->keyId == 0)
                 continue;
-            const vector<Pt> vpMapPoints = pKF->GetMapPointMatches(feat);
+            const vector<Pt> vpMapPoints = pKF->get_map_point_matches(feat);
 
             int nObs = KEYFRAME_CULLING_MIN_NUM_OBSERVATIONS;
             const int thObs=nObs;
