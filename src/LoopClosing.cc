@@ -350,7 +350,7 @@ bool LoopClosing::ComputeSim3()
                 {
                     bMatch = true;
                     mpMatchedKF = pKF;
-                    g2o::Sim3 gSmw(pKF->GetRotation().cast<double>(),pKF->GetTranslation().cast<double>(),1.0);
+                    g2o::Sim3 gSmw(pKF->get_rotation().cast<double>(),pKF->get_translation().cast<double>(),1.0);
                     mg2oScw = gScm*gSmw;
                     mScw = Converter::toMatrix4f(mg2oScw);
 
@@ -509,7 +509,7 @@ void LoopClosing::CorrectLoop()
                     continue;
 
                 // Project with non-corrected pose and project back with corrected pose
-                vec3f P3Dw = pMPi->GetWorldPos();
+                vec3f P3Dw = pMPi->get_world_pos();
                 Eigen::Matrix<double,3,1> eigP3Dw = P3Dw.cast<double>();
                 Eigen::Matrix<double,3,1> eigCorrectedP3Dw = g2oCorrectedSwi.map(g2oSiw.map(eigP3Dw));
 
@@ -543,11 +543,11 @@ void LoopClosing::CorrectLoop()
                 Pt pLoopMP = mvpCurrentMatchedPoints[i];
                 Pt pCurMP = mpCurrentKF->get_map_point(i, featureType);
                 if(pCurMP)
-                    pCurMP->Replace(pLoopMP);
+                    pCurMP->replace(pLoopMP);
                 else
                 {
-                    mpCurrentKF->AddMapPoint(pLoopMP,KeypointIndex (i));
-                    pLoopMP->AddObservation(mpCurrentKF,KeypointIndex (i));
+                    mpCurrentKF->add_map_point(pLoopMP,KeypointIndex (i));
+                    pLoopMP->add_observation(mpCurrentKF,KeypointIndex (i));
                 }
             }
         }
@@ -623,7 +623,7 @@ void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap)
             Pt pRep = vpReplacePoints[i];
             if(pRep)
             {
-                pRep->Replace(mvpLoopMapPoints[i]);
+                pRep->replace(mvpLoopMapPoints[i]);
             }
         }
     }
@@ -742,7 +742,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
                     // Map to non-corrected camera
                     mat3f Rcw = pRefKF->TcwBefGBA.block<3,3>(0,0);
                     vec3f tcw = pRefKF->TcwBefGBA.block<3,1>(0,3);
-                    vec3f Xc = Rcw*pMP->GetWorldPos()+tcw;
+                    vec3f Xc = Rcw*pMP->get_world_pos()+tcw;
 
                     // Backproject using corrected camera
                     mat4f Twc = pRefKF->GetPoseInverse();

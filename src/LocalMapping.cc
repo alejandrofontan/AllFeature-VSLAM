@@ -150,9 +150,9 @@ void LocalMapping::ProcessNewKeyFrame()
             {
                 if(!pMP->isBad())
                 {
-                    if(!pMP->IsInKeyFrame(mpCurrentKeyFrame))
+                    if(!pMP->is_in_keyframe(mpCurrentKeyFrame))
                     {
-                        pMP->AddObservation(mpCurrentKeyFrame, i);
+                        pMP->add_observation(mpCurrentKeyFrame, i);
                     }
                     else // this can only happen for new stereo points inserted by the Tracking
                     {
@@ -212,10 +212,10 @@ mat3f LocalMapping::SkewSymmetricMatrix(const vec3f &v)
 
 mat3f LocalMapping::ComputeF12(Keyframe &pKF1, Keyframe &pKF2)
 {
-    mat3f R1w = pKF1->GetRotation();
-    vec3f t1w = pKF1->GetTranslation();
-    mat3f R2w = pKF2->GetRotation();
-    vec3f t2w = pKF2->GetTranslation();
+    mat3f R1w = pKF1->get_rotation();
+    vec3f t1w = pKF1->get_translation();
+    mat3f R2w = pKF2->get_rotation();
+    vec3f t2w = pKF2->get_translation();
 
     mat3f R12 = R1w * R2w.transpose();
     vec3f t12 = -R1w * R2w.transpose() * t2w + t1w;
@@ -497,7 +497,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
     for(vector<Keyframe >::iterator vit=vpTargetKFs.begin(), vend=vpTargetKFs.end(); vit!=vend; vit++)
     {
         Keyframe  pKFi = *vit;
-        matcher->Fuse(pKFi,vpMapPointMatches, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
+        matcher->fuse_map_points_to_keyframe(pKFi,vpMapPointMatches, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
     }
 
     // Search matches by projection from target KFs in current KF
@@ -522,7 +522,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
         }
     }
 
-    matcher->Fuse(mpCurrentKeyFrame,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
+    matcher->fuse_map_points_to_keyframe(mpCurrentKeyFrame,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
 
     // Update points
     vpMapPointMatches = mpCurrentKeyFrame->get_map_point_matches(featureType);

@@ -422,9 +422,9 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
         if(pKF->isBad())
             continue;
 
-        mat3f R = pKF->GetRotation().transpose();
+        mat3f R = pKF->get_rotation().transpose();
         Eigen::Quaternionf q(R);
-        vec3f t = pKF->GetCameraCenter();
+        vec3f t = pKF->get_camera_center();
 
         long long ts_ns = static_cast<long long>(std::round(pKF->mTimeStamp * 1e9));
         f << std::fixed << std::setprecision(9) << ts_ns << ','
@@ -492,7 +492,7 @@ void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>
         if (mp->isBad()) continue;
         numPoints++;
         PointRGB p;
-        vec3f pos = mp->GetWorldPos();
+        vec3f pos = mp->get_world_pos();
         p.x = pos(0);
         p.y = pos(1);
         p.z = pos(2);

@@ -41,7 +41,7 @@ public:
     Map();
 
     void AddKeyFrame(Keyframe pKF);
-    void AddMapPoint(Pt pMP);
+    void add_map_point(Pt pMP);
     void EraseMapPoint(Pt pMP);
     void EraseKeyFrame(Keyframe pKF);
     void SetReferenceMapPoints(const std::vector<Pt> &vpMPs);

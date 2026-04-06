@@ -112,7 +112,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
             continue;
         g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
 
-        vPoint->setEstimate(pMP->GetWorldPos().cast<double>());
+        vPoint->setEstimate(pMP->get_world_pos().cast<double>());
         const int id = pMP->ptId + maxKFid+1;
         vPoint->setId(id);
         vPoint->setMarginalized(true);
@@ -322,7 +322,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                     e->fy = pFrame->fy;
                     e->cx = pFrame->cx;
                     e->cy = pFrame->cy;
-                    vec3f Xw = pMP->GetWorldPos();
+                    vec3f Xw = pMP->get_world_pos();
                     e->Xw[0] = Xw(0);
                     e->Xw[1] = Xw(1);
                     e->Xw[2] = Xw(2);
@@ -359,7 +359,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                     e->cx = pFrame->cx;
                     e->cy = pFrame->cy;
                     e->bf = pFrame->mbf;
-                    vec3f Xw = pMP->GetWorldPos();
+                    vec3f Xw = pMP->get_world_pos();
                     e->Xw[0] = Xw(0);
                     e->Xw[1] = Xw(1);
                     e->Xw[2] = Xw(2);
@@ -594,7 +594,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr
         const FeatureType featType = pMP->featureType;
 
         g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
-        vPoint->setEstimate(pMP->GetWorldPos().cast<double>());
+        vPoint->setEstimate(pMP->get_world_pos().cast<double>());
         int id = pMP->ptId + maxKFid+1;
         vPoint->setId(id);
         vPoint->setMarginalized(true);
@@ -842,8 +842,8 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         }
         else
         {
-            Eigen::Matrix<double,3,3> Rcw = pKF->GetRotation().cast<double>();
-            Eigen::Matrix<double,3,1> tcw = pKF->GetTranslation().cast<double>();
+            Eigen::Matrix<double,3,3> Rcw = pKF->get_rotation().cast<double>();
+            Eigen::Matrix<double,3,1> tcw = pKF->get_translation().cast<double>();
             g2o::Sim3 Siw(Rcw,tcw,1.0);
             vScw[nIDi] = Siw;
             VSim3->setEstimate(Siw);
@@ -1050,7 +1050,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         g2o::Sim3 Srw = vScw[nIDr];
         g2o::Sim3 correctedSwr = vCorrectedSwc[nIDr];
 
-        vec3f P3Dw = pMP->GetWorldPos();
+        vec3f P3Dw = pMP->get_world_pos();
         Eigen::Matrix<double,3,1> eigP3Dw = P3Dw.cast<double>();
         Eigen::Matrix<double,3,1> eigCorrectedP3Dw = correctedSwr.map(Srw.map(eigP3Dw));
 
@@ -1075,10 +1075,10 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
     const cv::Mat &K2 = pKF2->mK;
 
     // Camera poses
-    const mat3f R1w = pKF1->GetRotation();
-    const vec3f t1w = pKF1->GetTranslation();
-    const mat3f R2w = pKF2->GetRotation();
-    const vec3f t2w = pKF2->GetTranslation();
+    const mat3f R1w = pKF1->get_rotation();
+    const vec3f t1w = pKF1->get_translation();
+    const mat3f R2w = pKF2->get_rotation();
+    const vec3f t2w = pKF2->get_translation();
 
     // Set Sim3 vertex
     g2o::VertexSim3Expmap * vSim3 = new g2o::VertexSim3Expmap();
@@ -1133,7 +1133,7 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
             if(!pMP1->isBad() && !pMP2->isBad() && i2>=0)
             {
                 g2o::VertexSBAPointXYZ* vPoint1 = new g2o::VertexSBAPointXYZ();
-                vec3f P3D1w = pMP1->GetWorldPos();
+                vec3f P3D1w = pMP1->get_world_pos();
                 vec3f P3D1c = R1w * P3D1w + t1w;
                 vPoint1->setEstimate(P3D1c.cast<double>());
                 vPoint1->setId(id1);
@@ -1141,7 +1141,7 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
                 optimizer.addVertex(vPoint1);
 
                 g2o::VertexSBAPointXYZ* vPoint2 = new g2o::VertexSBAPointXYZ();
-                vec3f P3D2w = pMP2->GetWorldPos();
+                vec3f P3D2w = pMP2->get_world_pos();
                 vec3f P3D2c = R2w * P3D2w + t2w;
                 vPoint2->setEstimate(P3D2c.cast<double>());
                 vPoint2->setId(id2);

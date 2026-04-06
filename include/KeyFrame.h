@@ -57,10 +57,10 @@ public:
     void SetPose(const mat4f &Tcw_);
     mat4f GetPose();
     mat4f GetPoseInverse();
-    vec3f GetCameraCenter();
+    vec3f get_camera_center();
     vec4f GetStereoCenter();
-    mat3f GetRotation();
-    vec3f GetTranslation();
+    mat3f get_rotation();
+    vec3f get_translation();
     void getFullIntrinsics(float &fx, float &fy, float &cx, float &cy, float& invfx, float& invfy) const;
     void getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_);
 
@@ -99,7 +99,7 @@ public:
                       const KeypointIndex& refIndex,
                       const FeatureType& featureType);
 
-    void AddMapPoint(Pt pt, const KeypointIndex& index);
+    void add_map_point(Pt pt, const KeypointIndex& index);
     void EraseMapPointMatch(const size_t &idx, const FeatureType& featType);
     void EraseMapPointMatch(Pt pMP);
     void ReplaceMapPointMatch(const size_t &idx, Pt pMP);
@@ -113,7 +113,7 @@ public:
     vec3f UnprojectStereo(int i);
 
     // Image
-    bool IsInImage(const float &x, const float &y) const;
+    bool is_in_image(const float &x, const float &y) const;
 
     // Enable/Disable bad flag changes
     void SetNotErase();
@@ -138,7 +138,7 @@ public:
     [[nodiscard]] float GetKeyPt1DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat2f GetKeyPt2DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat3f GetKeyPt3DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float GetKeyPt1DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] float get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat2f GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat3f GetKeyPt3DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] float GetKeyPt1DSigma(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;

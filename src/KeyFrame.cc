@@ -107,7 +107,7 @@ mat4f KeyFrame::GetPoseInverse()
     return Twc;
 }
 
-vec3f KeyFrame::GetCameraCenter()
+vec3f KeyFrame::get_camera_center()
 {
     unique_lock<mutex> lock(mMutexPose);
     return twc;
@@ -120,13 +120,13 @@ vec4f KeyFrame::GetStereoCenter()
 }
 
 
-mat3f KeyFrame::GetRotation()
+mat3f KeyFrame::get_rotation()
 {
     unique_lock<mutex> lock(mMutexPose);
     return Tcw.block<3,3>(0,0);
 }
 
-vec3f KeyFrame::GetTranslation()
+vec3f KeyFrame::get_translation()
 {
     unique_lock<mutex> lock(mMutexPose);
     return Tcw.block<3,1>(0,3);
@@ -229,26 +229,26 @@ Pt KeyFrame::CreateMonocularMapPoint(const vec3f& worldPos,
 {
     auto pt = make_shared<MapPoint>(worldPos,thisKeyframe(),mpMap, featureType);
 
-    AddMapPoint(pt,refIndex);
-    pt->AddObservation(thisKeyframe(), refIndex);
+    add_map_point(pt,refIndex);
+    pt->add_observation(thisKeyframe(), refIndex);
 
-    projKeyframe->AddMapPoint(pt,projIndex);
-    pt->AddObservation(projKeyframe, projIndex);
+    projKeyframe->add_map_point(pt,projIndex);
+    pt->add_observation(projKeyframe, projIndex);
 
-    mpMap->AddMapPoint(pt);
+    mpMap->add_map_point(pt);
     return pt;
 }
 
 Pt KeyFrame::CreateMapPoint(const vec3f& worldPos, const KeypointIndex& refIndex, const FeatureType& featureType){
         auto pt = make_shared<MapPoint>(worldPos,thisKeyframe(),mpMap,featureType);
 
-        AddMapPoint(pt,refIndex);
-        pt->AddObservation(thisKeyframe(), refIndex);
-        mpMap->AddMapPoint(pt);
+        add_map_point(pt,refIndex);
+        pt->add_observation(thisKeyframe(), refIndex);
+        mpMap->add_map_point(pt);
         return pt;
 }
 
-void KeyFrame::AddMapPoint(Pt pt, const KeypointIndex& index)
+void KeyFrame::add_map_point(Pt pt, const KeypointIndex& index)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     mvpMapPoints[pt->featureType][index] = pt;
@@ -669,7 +669,7 @@ vector<size_t> KeyFrame::get_features_in_area(const float &x, const float &y, co
     return vIndices;
 }
 
-bool KeyFrame::IsInImage(const float &x, const float &y) const
+bool KeyFrame::is_in_image(const float &x, const float &y) const
 {
     return (x>=mnMinX && x<mnMaxX && y>=mnMinY && y<mnMaxY);
 }
@@ -714,7 +714,7 @@ float KeyFrame::ComputeSceneMedianDepth(const int q)
             if(mvpMapPoints[ft][i])
             {
                 Pt pMP = mvpMapPoints[ft][i];
-                vec3f x3Dw = pMP->GetWorldPos();
+                vec3f x3Dw = pMP->get_world_pos();
                 float z = Rcw2.dot(x3Dw)+zcw;
                 vDepths.push_back(z);
             }
@@ -747,7 +747,7 @@ float KeyFrame::ComputeSceneMedianDepth(const int q)
         return sigma2Matrix;
     }
 
-    float KeyFrame::GetKeyPt1DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    float KeyFrame::get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return 0.5f * (keyPtsInf.at(featType)[keyPtIdx](0,0) + keyPtsInf.at(featType)[keyPtIdx](1,1));
     }
@@ -761,7 +761,7 @@ float KeyFrame::ComputeSceneMedianDepth(const int q)
     {
         mat3f infMatrix{mat3f::Zero()};
         infMatrix.block<2,2>(0,0) = keyPtsInf.at(featType)[keyPtIdx];
-        infMatrix(2,2) = GetKeyPt1DInf(keyPtIdx, featType);
+        infMatrix(2,2) = get_keypt_1Dinf(keyPtIdx, featType);
         return infMatrix;
     }
 

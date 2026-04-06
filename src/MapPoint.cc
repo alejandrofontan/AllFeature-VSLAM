@@ -56,7 +56,7 @@ MapPoint::MapPoint(const vec3f &XYZ_, shared_ptr<Map> pMap, Frame* pFrame, const
 {
 
     XYZ = XYZ_;
-    vec3f twc = pFrame->GetCameraCenter();
+    vec3f twc = pFrame->get_camera_center();
 
     vec3f PC = XYZ - twc;
     const float dist = PC.norm();
@@ -84,13 +84,13 @@ void MapPoint::SetWorldPos(const vec3f &XYZ_)
     XYZ = XYZ_;
 }
 
-vec3f MapPoint::GetWorldPos()
+vec3f MapPoint::get_world_pos()
 {
     unique_lock<mutex> lock(mMutexPos);
     return XYZ;
 }
 
-vec3f MapPoint::GetNormal()
+vec3f MapPoint::get_normal()
 {
     unique_lock<mutex> lock(mMutexPos);
     return normalVector;
@@ -102,7 +102,7 @@ Keyframe MapPoint::GetReferenceKeyFrame()
     return mpRefKF;
 }
 
-void MapPoint::AddObservation(Keyframe projKeyframe,  const KeypointIndex& projIndex)
+void MapPoint::add_observation(Keyframe projKeyframe,  const KeypointIndex& projIndex)
 {
     {
         unique_lock<mutex> lock(mMutexFeatures);
@@ -206,7 +206,7 @@ Pt MapPoint::GetReplaced()
     return mpReplaced;
 }
 
-void MapPoint::Replace(Pt pMP)
+void MapPoint::replace(Pt pMP)
 {
     if(pMP->ptId == this->ptId)
         return;
@@ -230,10 +230,10 @@ void MapPoint::Replace(Pt pMP)
         // Replace measurement in keyframe
         Keyframe keyframe = obs.second->projKeyframe;
 
-        if(!pMP->IsInKeyFrame(keyframe))
+        if(!pMP->is_in_keyframe(keyframe))
         {
             keyframe->ReplaceMapPointMatch(obs.second->projIndex, pMP);
-            pMP->AddObservation(keyframe,obs.second->projIndex);
+            pMP->add_observation(keyframe,obs.second->projIndex);
         }
         else
         {
@@ -371,7 +371,7 @@ int MapPoint::GetIndexInKeyFrame(Keyframe keyframe)
         return -1;
 }
 
-bool MapPoint::IsInKeyFrame(Keyframe keyframe)
+bool MapPoint::is_in_keyframe(Keyframe keyframe)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return (observations.count(keyframe->keyId));
@@ -400,13 +400,13 @@ void MapPoint::UpdateNormalAndDepth()
     for(auto& obs: observations_tmp)
     {
         Keyframe projKeyframe = obs.second->projKeyframe;
-        vec3f twc_i = projKeyframe->GetCameraCenter();
+        vec3f twc_i = projKeyframe->get_camera_center();
         vec3f normal_i = XYZ_ - twc_i;
         normal = normal + normal_i / normal_i.norm();
         n++;
     }
 
-    vec3f PC = XYZ_ - refKeyframe_->GetCameraCenter();
+    vec3f PC = XYZ_ - refKeyframe_->get_camera_center();
     const float dist = PC.norm();
     const float levelScaleFactor =  refKeyframe_->GetKeyPtSize(observations_tmp[refKeyframe_->keyId]->projIndex, featureType);
 
@@ -425,13 +425,13 @@ void MapPoint::UpdateNormalAndDepth()
     }
 }
 
-float MapPoint::GetMinDistanceInvariance()
+float MapPoint::get_min_distance_invariance()
 {
     unique_lock<mutex> lock(mMutexPos);
     return 0.8f * minDistance;
 }
 
-float MapPoint::GetMaxDistanceInvariance()
+float MapPoint::get_max_distance_invariance()
 {
     unique_lock<mutex> lock(mMutexPos);
     return 1.2f * maxDistance;

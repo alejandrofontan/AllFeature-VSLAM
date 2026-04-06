@@ -227,7 +227,7 @@ void Tracking::Track()
             {
                 mat4f LastTwc{mat4f::Identity()};
                 LastTwc.block<3,3>(0,0) = lastFrame.GetRotationInverse();
-                LastTwc.block<3,1>(0,3) = lastFrame.GetCameraCenter();
+                LastTwc.block<3,1>(0,3) = lastFrame.get_camera_center();
                 mVelocity = currentFrame.Tcw * LastTwc;
             }
             else
@@ -407,7 +407,7 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
         currentFrame.mvbOutlier[featureType][mvIniMatches[i]] = false;
 
         //Add to Map
-        map->AddMapPoint(pMP);
+        map->add_map_point(pMP);
     }
 
     // Update Connections
@@ -442,7 +442,7 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
         if(vpAllMapPoints[iMP])
         {
             Pt pMP = vpAllMapPoints[iMP];
-            pMP->SetWorldPos(pMP->GetWorldPos()*invMedianDepth);
+            pMP->SetWorldPos(pMP->get_world_pos()*invMedianDepth);
         }
     }
 

@@ -82,7 +82,7 @@ public:
     void UpdatePoseMatrices();
 
     // Returns the camera center.
-    inline vec3f GetCameraCenter(){
+    inline vec3f get_camera_center(){
         return twc;
     }
 
@@ -114,7 +114,7 @@ public:
     [[nodiscard]] float GetKeyPt1DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat2f GetKeyPt2DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat3f GetKeyPt3DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float GetKeyPt1DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] float get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat2f GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat3f GetKeyPt3DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
 

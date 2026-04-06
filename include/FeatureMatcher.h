@@ -106,6 +106,9 @@ public:
                                 map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
                                 const vector<FeatureType>& feat_types);
 
+    const float cos_viewing_angle_th = 0.5f;
+    int fuse_map_points_to_keyframe(Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type);
+
     int SearchForInitialization(const Frame &F1, const Frame &F2, std::vector<cv::Point2f> &pointsPrevMatched, std::vector<int> &matches12, const FeatureType& featureType);
 
     // Project MapPoints seen in KeyFrame into the Frame and search matches.
@@ -124,9 +127,6 @@ public:
     // Search matches between MapPoints seen in KF1 and KF2 transforming by a Sim3 [s12*R12|t12]
     // In the stereo and RGB-D case, s12=1
     int SearchBySim3(Keyframe pKF1, Keyframe pKF2, std::vector<Pt> &vpMatches12, const float &s12, const mat3f &R12, const vec3f &t12, const float& radiusTh, const FeatureType& featureType);
-
-    // Project MapPoints into KeyFrame and search for duplicated MapPoints.
-    int Fuse(Keyframe pKF, const vector<Pt> &vpMapPoints, const float& radiusTh, const FeatureType& featureType);
 
     // Project MapPoints into KeyFrame using a given Sim3 and search for duplicated MapPoints.
     int Fuse(Keyframe pKF, const mat4f& Scw, const std::vector<Pt> &vpPoints, const float& radiusTh, vector<Pt> &vpReplacePoint, const FeatureType& featureType);
@@ -162,7 +162,7 @@ protected:
     float mfNNratio;
     bool mbCheckOrientation;
 
-    const Descriptor_Distance_Type highestPossibleDistance{std::numeric_limits<Descriptor_Distance_Type>::max()};
+    const Descriptor_Distance_Type highest_possible_distance{std::numeric_limits<Descriptor_Distance_Type>::max()};
 
     SiftMatchGPU sift_match_gpu_{};
     cv::BFMatcher bf_matcher_hamming{cv::NORM_HAMMING, true};

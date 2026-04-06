@@ -52,10 +52,10 @@ Sim3Solver::Sim3Solver(Keyframe pKF1, Keyframe pKF2, const vector<Pt> &vpMatched
     mvX3Dc1.reserve(mN1);
     mvX3Dc2.reserve(mN1);
 
-    mat3f Rcw1 = pKF1->GetRotation();
-    vec3f tcw1 = pKF1->GetTranslation();
-    mat3f Rcw2 = pKF2->GetRotation();
-    vec3f tcw2 = pKF2->GetTranslation();
+    mat3f Rcw1 = pKF1->get_rotation();
+    vec3f tcw1 = pKF1->get_translation();
+    mat3f Rcw2 = pKF2->get_rotation();
+    vec3f tcw2 = pKF2->get_translation();
 
     mvAllIndices.reserve(mN1);
 
@@ -89,10 +89,10 @@ Sim3Solver::Sim3Solver(Keyframe pKF1, Keyframe pKF2, const vector<Pt> &vpMatched
             mvpMapPoints2.push_back(pMP2);
             mvnIndices1.push_back(i1);
 
-            vec3f X3D1w = pMP1->GetWorldPos();
+            vec3f X3D1w = pMP1->get_world_pos();
             mvX3Dc1.push_back(Rcw1 * X3D1w + tcw1);
 
-            vec3f X3D2w = pMP2->GetWorldPos();
+            vec3f X3D2w = pMP2->get_world_pos();
             mvX3Dc2.push_back(Rcw2 * X3D2w + tcw2);
 
             mvAllIndices.push_back(idx);

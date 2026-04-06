@@ -225,7 +225,7 @@ bool Frame::isInFrustum(Pt pMP, float viewingCosLimit)
     pMP->mbTrackInView = false;
 
     // 3D in absolute coordinates
-    vec3f P = pMP->GetWorldPos();
+    vec3f P = pMP->get_world_pos();
 
     // 3D in camera coordinates
     const vec3f Pc = Rcw * P + tcw;
@@ -248,8 +248,8 @@ bool Frame::isInFrustum(Pt pMP, float viewingCosLimit)
         return false;
 
     // Check distance is in the scale invariance region of the MapPoint
-    const float maxDistance = pMP->GetMaxDistanceInvariance();
-    const float minDistance = pMP->GetMinDistanceInvariance();
+    const float maxDistance = pMP->get_max_distance_invariance();
+    const float minDistance = pMP->get_min_distance_invariance();
     const vec3f PO = P - twc;
     const float dist = PO.norm();
 
@@ -257,7 +257,7 @@ bool Frame::isInFrustum(Pt pMP, float viewingCosLimit)
         return false;
 
     // Check viewing angle
-    vec3f Pn = pMP->GetNormal();
+    vec3f Pn = pMP->get_normal();
 
     const float viewCos = PO.dot(Pn) / dist;
 
@@ -452,7 +452,7 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
         return sigma2Matrix;
     }
 
-    float Frame::GetKeyPt1DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    float Frame::get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return 0.5f * (keyPtsInf.at(featType)[keyPtIdx](0,0) + keyPtsInf.at(featType)[keyPtIdx](1,1));
     }
@@ -466,7 +466,7 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
     {
         mat3f infMatrix{mat3f::Zero()};
         infMatrix.block<2,2>(0,0) = keyPtsInf.at(featType)[keyPtIdx];
-        infMatrix(2,2) = GetKeyPt1DInf(keyPtIdx, featType);
+        infMatrix(2,2) = get_keypt_1Dinf(keyPtIdx, featType);
         return infMatrix;
     }
 

@@ -71,7 +71,7 @@ void MapDrawer::DrawMapPoints()
         if(vpMPs[i]->isBad())
              continue;
 
-        vec3f pos = vpMPs[i]->GetWorldPos();
+        vec3f pos = vpMPs[i]->get_world_pos();
         cv::Scalar color = getFeatureColor(vpMPs[i]->featureType,0, true);
         glColor3f(GLfloat(color[0]),GLfloat(color[1]),GLfloat(color[2]));
         glVertex3f(pos(0),pos(1),pos(2));
@@ -84,7 +84,7 @@ void MapDrawer::DrawMapPoints()
     // {
     //     if((*sit)->isBad())
     //         continue;
-    //     vec3f pos = (*sit)->GetWorldPos();
+    //     vec3f pos = (*sit)->get_world_pos();
     //     cv::Scalar color = getFeatureColor((*sit)->featureType,0, true);
 
     //     //glColor3f(float(color[0])/255.0f, float(color[1])/255.0f, float(color[2])/255.0f);
@@ -155,14 +155,14 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
         {
             // Covisibility Graph
             const vector<Keyframe > vCovKFs = vpKFs[i]->GetCovisiblesByWeight(100);
-            vec3f Ow = vpKFs[i]->GetCameraCenter();
+            vec3f Ow = vpKFs[i]->get_camera_center();
             if(!vCovKFs.empty())
             {
                 for(vector<Keyframe >::const_iterator vit=vCovKFs.begin(), vend=vCovKFs.end(); vit!=vend; vit++)
                 {
                     if((*vit)->keyId < vpKFs[i]->keyId)
                         continue;
-                    vec3f Ow2 = (*vit)->GetCameraCenter();
+                    vec3f Ow2 = (*vit)->get_camera_center();
                     glVertex3f(Ow(0),Ow(1),Ow(2));
                     glVertex3f(Ow2(0),Ow2(1),Ow2(2));
                 }
@@ -172,7 +172,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
             Keyframe pParent = vpKFs[i]->GetParent();
             if(pParent)
             {
-                vec3f Owp = pParent->GetCameraCenter();
+                vec3f Owp = pParent->get_camera_center();
                 glVertex3f(Ow(0),Ow(1),Ow(2));
                 glVertex3f(Owp(0),Owp(1),Owp(2));
             }
@@ -183,7 +183,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
             {
                 if((*sit)->keyId < vpKFs[i]->keyId)
                     continue;
-                vec3f Owl = (*sit)->GetCameraCenter();
+                vec3f Owl = (*sit)->get_camera_center();
                 glVertex3f(Ow(0),Ow(1),Ow(2));
                 glVertex3f(Owl(0),Owl(1),Owl(2));
             }
@@ -203,7 +203,7 @@ void MapDrawer::DrawTrajectory(vec3f& trajectoryCenter, float& cameraHeight) {
         // Draw Keyframes
         trajectoryCenter = vec3f::Zero();
         for (auto& keyframe: keyframes) {
-            vec3f twc = keyframe->GetCameraCenter();
+            vec3f twc = keyframe->get_camera_center();
             glVertex3f(twc(0), twc(1), twc(2));
             trajectoryCenter += twc;
         }

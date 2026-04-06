@@ -334,6 +334,118 @@ void FeatureMatcher::match_keyframes_for_triangulation(const Keyframe& keyframe1
     }
 }
 
+// Projects each map point into the keyframe and attempts to fuse it with an existing keypoint.
+// For each map point, applies visibility checks (depth, image bounds, scale, viewing angle),
+// then finds the closest keypoint by descriptor distance within radius_th.
+// If a match is found: replaces the weaker map point if one already exists, or adds a new observation.
+// Returns the number of fused map points.
+// Used in: LocalMapping::SearchInNeighbors
+int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type)
+{
+    const mat3f Rcw = keyframe->get_rotation();
+    const vec3f tcw = keyframe->get_translation();
+    const float fx = keyframe->fx;
+    const float fy = keyframe->fy;
+    const float cx = keyframe->cx;
+    const float cy = keyframe->cy;
+
+    const Descriptor_Distance_Type th_low = TH_LOW[feat_type];
+
+    const vec3f cam_center = keyframe->get_camera_center();
+
+    int n_fused = 0;
+    const auto& kps_ft  = keyframe->keypoints.at(feat_type);
+    const auto& desc_ft = keyframe->descriptors.at(feat_type);
+    for (const auto& pt : map_pts) {
+        if (!pt)
+            continue;
+
+        if (pt->isBad() || pt->is_in_keyframe(keyframe))
+            continue;
+
+        const vec3f pos_world = pt->get_world_pos();
+
+        // Project map point into keyframe
+        const vec3f pos_cam = Rcw * pos_world + tcw;
+
+        // Depth must be positive
+        if (pos_cam(2) < 0.0f)
+            continue;
+
+        const float invz = 1.0f / pos_cam(2);
+
+        // Compute projected image coordinates
+        const float u = fx * pos_cam(0) * invz + cx;
+        const float v = fy * pos_cam(1) * invz + cy;
+
+        // Point must be inside the image
+        if (!keyframe->is_in_image(u, v))
+            continue;
+
+        const float max_distance = pt->get_max_distance_invariance();
+        const float min_distance = pt->get_min_distance_invariance();
+        const vec3f dir_to_pt = pos_world - cam_center;
+        const float dist3D = dir_to_pt.squaredNorm();
+
+        // Depth must be inside the scale pyramid of the image
+        if (dist3D < min_distance * min_distance || dist3D > max_distance * max_distance)
+            continue;
+
+        // Viewing angle must be less than 60 deg
+        const vec3f normal = pt->get_normal();
+
+        if (dir_to_pt.dot(normal) < cos_viewing_angle_th * dist3D)
+            continue;
+
+        // Search in a radius
+        const vector<size_t> area_indices = keyframe->get_features_in_area(u, v, radius_th, feat_type);
+        if (area_indices.empty())
+            continue;
+
+        // Match to the most similar keypoint in the radius
+        const cv::Mat ref_descriptor = pt->get_descriptor();
+        Descriptor_Distance_Type best_dist{highest_possible_distance};
+        int best_idx{-1};
+        for (const size_t idx : area_indices) {
+            // Skip reprojection outliers
+            const float ex = u - kps_ft[idx].pt.x;
+            const float ey = v - kps_ft[idx].pt.y;
+            const float e2 = ex * ex + ey * ey;
+
+            if (e2 * keyframe->get_keypt_1Dinf(KeypointIndex(idx), feat_type) > 5.99f)
+                continue;
+
+            const cv::Mat &descriptor = desc_ft.row(idx);
+            const Descriptor_Distance_Type desc_dist = DescriptorDistance(ref_descriptor, descriptor, pt->featureType);
+
+            // Keep only the closest descriptor match
+            if (desc_dist < best_dist) {
+                best_dist = desc_dist;
+                best_idx = idx;
+            }
+        }
+
+        // Fuse: replace weaker map point or add new observation
+        if (best_dist <= th_low) {
+            Pt existing_pt = keyframe->get_map_point(best_idx, feat_type);
+            if (existing_pt) {
+                if (!existing_pt->isBad()) {
+                    if (existing_pt->number_of_observations() > pt->number_of_observations())
+                        pt->replace(existing_pt);
+                    else
+                        existing_pt->replace(pt);
+                }
+            }
+            else {
+                pt->add_observation(keyframe, best_idx);
+                keyframe->add_map_point(pt, best_idx);
+            }
+            n_fused++;
+        }
+    }
+
+    return n_fused;
+}
 
 // SearchForInitialization Frame-Frame
 // Tracking::MonocularInitialization
@@ -366,192 +478,6 @@ int FeatureMatcher::SearchForInitialization(const Frame &F1, const Frame &F2,
         numMatches++;
     }
     return numMatches;
-}
-
-static std::array<float, 9> computeDistancePercentiles_10_to_90(
-    const std::vector<cv::DMatch>& robustMatches)
-{
-    // Static storage for distances (cleared each call)
-    static std::vector<float> distances;
-    //distances.clear();
-    //distances.reserve(robustMatches.size());
-
-    for (const auto& m : robustMatches) {
-        distances.push_back(m.distance);
-    }
-
-    std::array<float, 9> out{};
-    if (distances.empty()) {
-        out.fill(std::numeric_limits<float>::quiet_NaN());
-        return out;
-    }
-
-    std::sort(distances.begin(), distances.end());
-
-    auto percentileLinear = [&](float p) -> float {
-        // p in [0, 1], linear interpolation between nearest ranks
-        const size_t n = distances.size();
-        if (n == 1) return distances[0];
-
-        const float pos = p * float(n - 1);           // 0..n-1
-        const size_t lo = (size_t)std::floor(pos);
-        const size_t hi = (size_t)std::ceil(pos);
-        const float frac = pos - float(lo);
-
-        const float a = distances[lo];
-        const float b = distances[hi];
-        return a + (b - a) * frac;
-    };
-
-    // Fill p10..p90 (10,20,...,90)
-    for (int i = 1; i <= 9; ++i) {
-        const float p = float(i) / 10.0f; // 0.1 .. 0.9
-        out[i - 1] = percentileLinear(p);
-    }
-
-    return out;
-}
-
-// Fuse 1
-// Local Mapping
-int FeatureMatcher::Fuse(Keyframe pKF, const vector<Pt> &vpMapPoints, const float& radiusTh, const FeatureType& featType)
-{
-
-    mat3f Rcw = pKF->GetRotation();
-    vec3f tcw = pKF->GetTranslation();
-
-    const float &fx = pKF->fx;
-    const float &fy = pKF->fy;
-    const float &cx = pKF->cx;
-    const float &cy = pKF->cy;
-    const float &bf = pKF->mbf;
-
-    vec3f Ow = pKF->GetCameraCenter();
-
-    int nFused=0;
-
-    const int nMPs = vpMapPoints.size();
-    for(int i=0; i<nMPs; i++)
-    {
-        Pt pMP = vpMapPoints[i];
-
-        if(!pMP)
-            continue;
-
-        if(pMP->isBad() || pMP->IsInKeyFrame(pKF))
-            continue;
-
-        vec3f p3Dw = pMP->GetWorldPos();
-        vec3f p3Dc = Rcw * p3Dw + tcw;
-
-        // Depth must be positive
-        if(p3Dc(2) < 0.0f)
-            continue;
-
-        const float invz = 1.0f / p3Dc(2);
-        const float x = p3Dc(0) * invz;
-        const float y = p3Dc(1) * invz;
-
-        const float u = fx*x+cx;
-        const float v = fy*y+cy;
-        // Point must be inside the image
-        if(!pKF->IsInImage(u,v))
-            continue;
-
-        const float ur = u-bf*invz;
-
-        const float maxDistance = pMP->GetMaxDistanceInvariance();
-        const float minDistance = pMP->GetMinDistanceInvariance();
-        vec3f PO = p3Dw - Ow;
-        const float dist3D = PO.norm();
-        // Depth must be inside the scale pyramid of the image
-        if(dist3D < minDistance || dist3D > maxDistance )
-            continue;
-
-        // Viewing angle must be less than 60 deg
-        vec3f Pn = pMP->GetNormal();
-
-        if(PO.dot(Pn) < 0.5 * dist3D)
-            continue;
-
-        // Search in a radius
-        const vector<size_t> vIndices = pKF->get_features_in_area(u,v,radiusTh, featType);
-        if(vIndices.empty())
-            continue;
-        // Match to the most similar keypoint in the radius
-        const cv::Mat refDescriptor = pMP->get_descriptor();
-        Descriptor_Distance_Type bestDist{highestPossibleDistance};
-        int bestIdx{-1};
-        for(vector<size_t>::const_iterator vit=vIndices.begin(), vend=vIndices.end(); vit!=vend; vit++)
-        {
-            const size_t idx = *vit;
-
-            const cv::KeyPoint &kp = pKF->keypoints.at(featType)[idx];
-
-            //const float keyPtSize = pKF->GetKeyPtSize(KeypointIndex (idx), featType);
-            //if((keyPtSize < predictedSize / pKF->sizeTolerance) || (keyPtSize > predictedSize * pKF->sizeTolerance))
-            //    continue;
-
-            if(pKF->mvuRight.at(featType)[idx]>=0)
-            {
-                // Check reprojection error in stereo
-                const float &kpx = kp.pt.x;
-                const float &kpy = kp.pt.y;
-                const float &kpr = pKF->mvuRight.at(featType)[idx];
-                const float ex = u-kpx;
-                const float ey = v-kpy;
-                const float er = ur-kpr;
-                const float e2 = ex*ex+ey*ey+er*er;
-
-                if(e2 * pKF->GetKeyPt1DInf(KeypointIndex (idx), featType) > 7.8)
-                    continue;
-            }
-            else
-            {
-                const float &kpx = kp.pt.x;
-                const float &kpy = kp.pt.y;
-                const float ex = u-kpx;
-                const float ey = v-kpy;
-                const float e2 = ex*ex+ey*ey;
-
-                if(e2 * pKF->GetKeyPt1DInf(KeypointIndex (idx), featType) > 5.99)
-                    continue;
-            }
-
-            const cv::Mat &descriptor = pKF->descriptors.at(featType).row(idx);
-            const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,pMP->featureType);
-
-            if(descDist < bestDist)
-            {
-                bestDist = descDist;
-                bestIdx = idx;
-            }
-        }
-
-        // If there is already a MapPoint replace otherwise add new measurement
-        if(bestDist <= TH_LOW[featType])
-        {
-            Pt pMPinKF = pKF->get_map_point(bestIdx, featType);
-            if(pMPinKF)
-            {
-                if(!pMPinKF->isBad())
-                {
-                    if(pMPinKF->number_of_observations() > pMP->number_of_observations())
-                        pMP->Replace(pMPinKF);
-                    else
-                        pMPinKF->Replace(pMP);
-                }
-            }
-            else
-            {
-                pMP->AddObservation(pKF,bestIdx);
-                pKF->AddMapPoint(pMP,bestIdx);
-            }
-            nFused++;
-        }
-    }
-
-    return nFused;
 }
 
 float FeatureMatcher::RadiusByViewingCos(const float &viewCos)
@@ -617,7 +543,7 @@ int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vec
             continue;
 
         // Get 3D Coords.
-        vec3f p3Dw = pMP->GetWorldPos();
+        vec3f p3Dw = pMP->get_world_pos();
 
         // Transform into Camera Coords.
         vec3f p3Dc = Rcw * p3Dw + tcw;
@@ -635,12 +561,12 @@ int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vec
         const float v = fy*y+cy;
 
         // Point must be inside the image
-        if(!pKF->IsInImage(u,v))
+        if(!pKF->is_in_image(u,v))
             continue;
 
         // Depth must be inside the scale invariance region of the point
-        const float maxDistance = pMP->GetMaxDistanceInvariance();
-        const float minDistance = pMP->GetMinDistanceInvariance();
+        const float maxDistance = pMP->get_max_distance_invariance();
+        const float minDistance = pMP->get_min_distance_invariance();
         vec3f PO = p3Dw - Ow;
         const float dist3D = PO.norm();
 
@@ -648,7 +574,7 @@ int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vec
             continue;
 
         // Viewing angle must be less than 60 deg
-        vec3f Pn = pMP->GetNormal();
+        vec3f Pn = pMP->get_normal();
 
         if(PO.dot(Pn) < 0.5f * dist3D)
             continue;
@@ -664,7 +590,7 @@ int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vec
 
         // Match to the most similar keypoint in the radius
         const cv::Mat refDescriptor = pMP->get_descriptor();
-        Descriptor_Distance_Type bestDist{highestPossibleDistance};
+        Descriptor_Distance_Type bestDist{highest_possible_distance};
         int bestIdx{-1};
 
         for(vector<size_t>::const_iterator vit=vIndices.begin(), vend=vIndices.end(); vit!=vend; vit++)
@@ -740,7 +666,7 @@ int FeatureMatcher::SearchByBoW(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMat
                     continue;
 
                 const cv::Mat &refDescriptor = Descriptors1.row(idx1);
-                Descriptor_Distance_Type bestDist1{highestPossibleDistance},bestDist2{highestPossibleDistance};
+                Descriptor_Distance_Type bestDist1{highest_possible_distance},bestDist2{highest_possible_distance};
                 int bestIdx2{-1};
 
                 for(size_t i2=0, iend2=f2it->second.size(); i2<iend2; i2++)
@@ -837,7 +763,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
             continue;
 
         // Get 3D Coords.
-        vec3f p3Dw = pMP->GetWorldPos();
+        vec3f p3Dw = pMP->get_world_pos();
 
         // Transform into Camera Coords.
         vec3f p3Dc = Rcw * p3Dw + tcw;
@@ -855,12 +781,12 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
         const float v = fy*y+cy;
 
         // Point must be inside the image
-        if(!pKF->IsInImage(u,v))
+        if(!pKF->is_in_image(u,v))
             continue;
 
         // Depth must be inside the scale pyramid of the image
-        const float maxDistance = pMP->GetMaxDistanceInvariance();
-        const float minDistance = pMP->GetMinDistanceInvariance();
+        const float maxDistance = pMP->get_max_distance_invariance();
+        const float minDistance = pMP->get_min_distance_invariance();
         vec3f PO = p3Dw-Ow;
         const float dist3D = PO.norm();
 
@@ -868,7 +794,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
             continue;
 
         // Viewing angle must be less than 60 deg
-        vec3f Pn = pMP->GetNormal();
+        vec3f Pn = pMP->get_normal();
 
         if(PO.dot(Pn) < 0.5f * dist3D)
             continue;
@@ -884,7 +810,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
 
         // Match to the most similar keypoint in the radius
         const cv::Mat refDescriptor = pMP->get_descriptor();
-        Descriptor_Distance_Type bestDist{highestPossibleDistance};
+        Descriptor_Distance_Type bestDist{highest_possible_distance};
         int bestIdx{-1};
 
         for(vector<size_t>::const_iterator vit=vIndices.begin(); vit!=vIndices.end(); vit++)
@@ -916,8 +842,8 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
             }
             else
             {
-                pMP->AddObservation(pKF,bestIdx);
-                pKF->AddMapPoint(pMP,bestIdx);
+                pMP->add_observation(pKF,bestIdx);
+                pKF->add_map_point(pMP,bestIdx);
             }
             nFused++;
         }
@@ -936,12 +862,12 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
     const float &cy = pKF1->cy;
 
     // Camera 1 from world
-    mat3f R1w = pKF1->GetRotation();
-    vec3f t1w = pKF1->GetTranslation();
+    mat3f R1w = pKF1->get_rotation();
+    vec3f t1w = pKF1->get_translation();
 
     //Camera 2 from world
-    mat3f R2w = pKF2->GetRotation();
-    vec3f t2w = pKF2->GetTranslation();
+    mat3f R2w = pKF2->get_rotation();
+    vec3f t2w = pKF2->get_translation();
 
     //Transformation between cameras
     mat3f sR12 = s12 * R12;
@@ -983,7 +909,7 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
         if(pMP->isBad())
             continue;
 
-        vec3f p3Dw = pMP->GetWorldPos();
+        vec3f p3Dw = pMP->get_world_pos();
         vec3f p3Dc1 = R1w * p3Dw + t1w;
         vec3f p3Dc2 = sR21 * p3Dc1 + t21;
 
@@ -999,11 +925,11 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
         const float v = fy*y+cy;
 
         // Point must be inside the image
-        if(!pKF2->IsInImage(u,v))
+        if(!pKF2->is_in_image(u,v))
             continue;
 
-        const float maxDistance = pMP->GetMaxDistanceInvariance();
-        const float minDistance = pMP->GetMinDistanceInvariance();
+        const float maxDistance = pMP->get_max_distance_invariance();
+        const float minDistance = pMP->get_min_distance_invariance();
         const float dist3D = p3Dc2.norm();
 
         // Depth must be inside the scale invariance region
@@ -1021,7 +947,7 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
 
         // Match to the most similar keypoint in the radius
         const cv::Mat refDescriptor = pMP->get_descriptor();
-        Descriptor_Distance_Type bestDist{highestPossibleDistance};
+        Descriptor_Distance_Type bestDist{highest_possible_distance};
         int bestIdx{-1};
 
         for(vector<size_t>::const_iterator vit=vIndices.begin(), vend=vIndices.end(); vit!=vend; vit++)
@@ -1061,7 +987,7 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
         if(pMP->isBad())
             continue;
 
-        vec3f p3Dw = pMP->GetWorldPos();
+        vec3f p3Dw = pMP->get_world_pos();
         vec3f p3Dc2 = R2w * p3Dw + t2w;
         vec3f p3Dc1 = sR12 * p3Dc2 + t12;
 
@@ -1077,11 +1003,11 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
         const float v = fy*y+cy;
 
         // Point must be inside the image
-        if(!pKF1->IsInImage(u,v))
+        if(!pKF1->is_in_image(u,v))
             continue;
 
-        const float maxDistance = pMP->GetMaxDistanceInvariance();
-        const float minDistance = pMP->GetMinDistanceInvariance();
+        const float maxDistance = pMP->get_max_distance_invariance();
+        const float minDistance = pMP->get_min_distance_invariance();
         const float dist3D = p3Dc1.norm();
 
         // Depth must be inside the scale pyramid of the image
@@ -1099,7 +1025,7 @@ int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMat
 
         // Match to the most similar keypoint in the radius
         const cv::Mat refDescriptor = pMP->get_descriptor();
-        Descriptor_Distance_Type bestDist{highestPossibleDistance};
+        Descriptor_Distance_Type bestDist{highest_possible_distance};
         int bestIdx{-1};
 
         for(vector<size_t>::const_iterator vit=vIndices.begin(), vend=vIndices.end(); vit!=vend; vit++)
@@ -1178,7 +1104,7 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
             if(!pMP->isBad() && !sAlreadyFound.count(pMP))
             {
                 //Project
-                vec3f x3Dw = pMP->GetWorldPos();
+                vec3f x3Dw = pMP->get_world_pos();
                 vec3f x3Dc = Rcw * x3Dw + tcw;
 
                 const float xc = x3Dc(0);
@@ -1197,8 +1123,8 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
                 vec3f PO = x3Dw - Ow;
                 float dist3D = PO.norm();
 
-                const float maxDistance = pMP->GetMaxDistanceInvariance();
-                const float minDistance = pMP->GetMinDistanceInvariance();
+                const float maxDistance = pMP->get_max_distance_invariance();
+                const float minDistance = pMP->get_min_distance_invariance();
 
                 // Depth must be inside the scale pyramid of the image
                 if(dist3D<minDistance || dist3D>maxDistance)
@@ -1214,7 +1140,7 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
                     continue;
 
                 const cv::Mat refDescriptor = pMP->get_descriptor();
-                Descriptor_Distance_Type bestDist{highestPossibleDistance};
+                Descriptor_Distance_Type bestDist{highest_possible_distance};
                 int bestIdx2{-1};
 
                 for(vector<size_t>::const_iterator vit=vIndices2.begin(); vit!=vIndices2.end(); vit++)

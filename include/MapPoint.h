@@ -51,9 +51,9 @@ public:
     }
 
     void SetWorldPos(const vec3f &XYZ_);
-    vec3f GetWorldPos();
+    vec3f get_world_pos();
 
-    vec3f GetNormal();
+    vec3f get_normal();
     Keyframe GetReferenceKeyFrame();
 
     std::map<KeyframeId,shared_ptr<Observation>> GetObservations();
@@ -65,16 +65,16 @@ public:
     Keyframe GetCurrentRefKeyframe();
     void SetRefIndex(const KeypointIndex& refIndex_);
 
-    void AddObservation(Keyframe projKeyframe, const KeypointIndex& projIndex);
+    void add_observation(Keyframe projKeyframe, const KeypointIndex& projIndex);
     void EraseObservation(Keyframe projKeyframe);
 
     int GetIndexInKeyFrame(Keyframe pKF);
-    bool IsInKeyFrame(Keyframe keyframe);
+    bool is_in_keyframe(Keyframe keyframe);
 
     void SetBadFlag();
     bool isBad();
 
-    void Replace(Pt pMP);
+    void replace(Pt pMP);
     Pt GetReplaced();
 
     void IncreaseVisible(int n=1);
@@ -90,8 +90,8 @@ public:
 
     void UpdateNormalAndDepth();
 
-    float GetMinDistanceInvariance();
-    float GetMaxDistanceInvariance();
+    float get_min_distance_invariance();
+    float get_max_distance_invariance();
 
     float PredictSize(const float &currentDist);
     float PredictSigma(const float &currentDist);

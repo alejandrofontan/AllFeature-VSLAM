@@ -37,7 +37,7 @@ void Map::AddKeyFrame(Keyframe pKF)
         mnMaxKFid = pKF->keyId;
 }
 
-void Map::AddMapPoint(Pt pMP)
+void Map::add_map_point(Pt pMP)
 {
     unique_lock<mutex> lock(mMutexMap);
     mspMapPoints.insert(pMP);
@@ -155,7 +155,7 @@ float Map::NormalizeMap()
         Pt pMP = mspMapPoints_[iMP];
         if(pMP)
         {
-            pMP->SetWorldPos(pMP->GetWorldPos()/medianDepth);
+            pMP->SetWorldPos(pMP->get_world_pos()/medianDepth);
         }
     }
 
