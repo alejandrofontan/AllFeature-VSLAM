@@ -541,7 +541,7 @@ void LoopClosing::CorrectLoop()
             if(mvpCurrentMatchedPoints[i])
             {
                 Pt pLoopMP = mvpCurrentMatchedPoints[i];
-                Pt pCurMP = mpCurrentKF->GetMapPoint(i, featureType);
+                Pt pCurMP = mpCurrentKF->get_map_point(i, featureType);
                 if(pCurMP)
                     pCurMP->Replace(pLoopMP);
                 else

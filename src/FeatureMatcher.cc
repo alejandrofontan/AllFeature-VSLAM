@@ -236,7 +236,7 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
             size_t query_idx = f_idx[m.queryIdx];
             size_t train_idx = p_idx[m.trainIdx];
             Pt pt = map_pts[train_idx];
-            const vector<size_t> area_indices = frame.get_features_in_area(pt->track_proj_x, pt->track_proj_y, 20, ft);
+            const vector<size_t> area_indices = frame.get_features_in_area(pt->track_proj_x, pt->track_proj_y, projection_match_radius_th, ft);
             if (area_indices.empty())
                 continue;
 
@@ -248,6 +248,92 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
     }
     return num_matches;
 }
+
+// Matches two keyframes across all feature types to find candidate pairs for triangulation.
+// Reuses cached matches from a prior tracking step if available; otherwise runs parallel
+// descriptor matching followed by LMEDS fundamental matrix filtering.
+// Outputs only pairs where neither keyframe has an existing 3D map point for those keypoints.
+// Used in: LocalMapping::CreateNewMapPoints
+void FeatureMatcher::match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
+                                std::map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
+                                const std::vector<FeatureType>& feat_types){
+
+    // Reuse cached matches if keyframe1 already has matches stored for keyframe2
+    auto cache_it = keyframe1->cache_matched_pairs.find(keyframe2->mnFrameId);
+    bool cached = (cache_it != keyframe1->cache_matched_pairs.end() && !cache_it->second.empty());
+
+    // No cache — run parallel descriptor matching across all feature types
+    map<FeatureType, vector<cv::DMatch>> matches_by_type;
+    if (!cached) {
+        matches_by_type = match_descriptors_parallel(feat_types,
+            keyframe1->descriptors, keyframe2->descriptors, keyframe1->keypoints, keyframe2->keypoints);
+    }
+
+    // Offset match indices to account for previously appended feature types
+    vector<cv::KeyPoint> kps1, kps2;
+    vector<size_t> kps1_indexes, kps2_indexes;
+    vector<cv::DMatch> all_matches;
+    vector<FeatureType> used_feature_types;
+    for (const auto& ft : feat_types) {
+        matched_pairs[ft].clear();
+
+        // Ensure both frames contain the requested feature type
+        auto it1 = keyframe1->descriptors.find(ft);
+        auto it2 = keyframe2->descriptors.find(ft);
+        if (it1 == keyframe1->descriptors.end() || it2 == keyframe2->descriptors.end())
+            continue;
+
+        // Accumulate keypoints and track per-feature-type original indices for later lookup
+        auto const& v1 = keyframe1->keypoints.at(ft);
+        auto const& v2 = keyframe2->keypoints.at(ft);
+
+        if (!cached) {
+            auto matches = std::move(matches_by_type[ft]);
+            size_t size_kpts1 = kps1.size();
+            size_t size_kpts2 = kps2.size();
+            for (auto& m : matches) {
+                m.queryIdx += size_kpts1;
+                m.trainIdx += size_kpts2;
+            }
+            all_matches.insert(all_matches.end(),
+                std::make_move_iterator(matches.begin()),
+                std::make_move_iterator(matches.end()));
+
+            kps1.insert(kps1.end(), v1.begin(), v1.end());
+            kps2.insert(kps2.end(), v2.begin(), v2.end());
+        }
+
+        const size_t base1 = kps1_indexes.size();
+        kps1_indexes.resize(base1 + v1.size());
+        std::iota(kps1_indexes.begin() + base1, kps1_indexes.end(), 0);
+        const size_t base2 = kps2_indexes.size();
+        kps2_indexes.resize(base2 + v2.size());
+        std::iota(kps2_indexes.begin() + base2, kps2_indexes.end(), 0);
+        used_feature_types.insert(used_feature_types.end(), v1.size(), ft);
+    }
+
+    // Filter outliers jointly across all feature types, or retrieve from cache
+    vector<cv::DMatch> computed_matches;
+    if (!cached) {
+        if (all_matches.size() < min_matches_for_triangulation)
+            return;
+
+        computed_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::FM_LMEDS);
+    }
+    const vector<cv::DMatch>& filtered_matches = cached ? cache_it->second : computed_matches;
+
+    for (const auto& m : filtered_matches) {
+        const size_t query_idx = kps1_indexes[m.queryIdx];
+        const size_t train_idx = kps2_indexes[m.trainIdx];
+        const FeatureType feat_type = used_feature_types[m.queryIdx];
+
+        // Only triangulate points that don't already have a 3D MapPoint
+        if (!keyframe1->get_map_point(query_idx, feat_type) && !keyframe2->get_map_point(train_idx, feat_type)) {
+            matched_pairs[feat_type].emplace_back(query_idx, train_idx);
+        }
+    }
+}
+
 
 // SearchForInitialization Frame-Frame
 // Tracking::MonocularInitialization
@@ -324,326 +410,6 @@ static std::array<float, 9> computeDistancePercentiles_10_to_90(
     }
 
     return out;
-}
-
-
-// SearchForTriangulation Keyframe-Keyframe
-// LocalMapping::CreateNewMapPoints
-void FeatureMatcher::SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                std::map<FeatureType, vector<pair<size_t,size_t>>>& matchedPairs,
-                                const std::vector<FeatureType>& featureTypes){
-
-
-    bool cached_1 = (keyframe1->cache_matched_pairs.find(keyframe2->mnFrameId) != keyframe1->cache_matched_pairs.end() &&
-        !keyframe1->cache_matched_pairs.at(keyframe2->mnFrameId).empty());
-    bool cached_2 = true;//(keyframe2->cache_matched_pairs.find(keyframe1->mnFrameId) != keyframe2->cache_matched_pairs.end() &&
-        //!keyframe2->cache_matched_pairs.at(keyframe1->mnFrameId).empty());
-
-
-    // if(cached_1){
-    //     std::cout << " - Using cached matches for triangulation between Keyframe " << keyframe1->mnFrameId << " and Keyframe " << keyframe2->mnFrameId << std::endl;
-    // }
-
-    std::map<FeatureType, std::vector<cv::DMatch>> matchesByType;
-    if ((!cached_1) || (!cached_2)){
-        matchesByType = parallelFeatureMatching(featureTypes,
-            keyframe1->descriptors, keyframe2->descriptors, keyframe1->keypoints, keyframe2->keypoints);
-    }
-
-    std::vector<cv::KeyPoint> kps1, kps2;
-    std::vector<int> kps1_indexes, kps2_indexes;
-    std::vector<cv::DMatch> allMatches;
-    std::vector<FeatureType> usedFeatureTypes;
-    std::map<FeatureType, int> matchesCount;
-    for (const auto& ft : featureTypes){
-        matchedPairs[ft].clear();
-
-        // Ensure both frames contain the requested feature type
-        auto it1 = keyframe1->descriptors.find(ft);
-        auto it2 = keyframe2->descriptors.find(ft);
-        if (it1 == keyframe1->descriptors.end() || it2 == keyframe2->descriptors.end())
-            continue;
-
-        if ((!cached_1) || (!cached_2)){
-
-            std::vector<cv::DMatch> matches = matchesByType[ft];
-            int size_kpts1 = kps1.size();
-            int size_kpts2 = kps2.size();
-            for(auto& m : matches) {
-                m.queryIdx += size_kpts1;
-                m.trainIdx += size_kpts2;
-            }
-            allMatches.insert(allMatches.end(), matches.begin(), matches.end());
-        }
-
-        kps1.insert(kps1.end(), keyframe1->keypoints.at(ft).begin(), keyframe1->keypoints.at(ft).end());
-        kps2.insert(kps2.end(), keyframe2->keypoints.at(ft).begin(), keyframe2->keypoints.at(ft).end());
-
-        // Track original indices inside v1 / v2
-        const auto& v1 = keyframe1->keypoints.at(ft);
-        const auto& v2 = keyframe2->keypoints.at(ft);
-        const size_t base1 = kps1_indexes.size();
-        kps1_indexes.resize(base1 + v1.size());
-        std::iota(kps1_indexes.begin() + base1, kps1_indexes.end(), 0);
-        const size_t base2 = kps2_indexes.size();
-        kps2_indexes.resize(base2 + v2.size());
-        std::iota(kps2_indexes.begin() + base2, kps2_indexes.end(), 0);
-        usedFeatureTypes.insert(usedFeatureTypes.end(), v1.size(), ft);
-        matchesCount[ft] = 0;
-        // matchedPairs[ft].reserve(matches.size());
-    }
-
-    std::vector<cv::DMatch> robustMatches{};
-    if ((!cached_1) || (!cached_2)){
-        if (allMatches.size() < 10)
-            return;
-
-        robustMatches = filter_matches_by_fundamental(allMatches, kps1, kps2, cv::FM_LMEDS);
-    }
-    else{
-        //std::cout << " - Using cached matches for triangulation between Keyframe " << keyframe1->mnFrameId << " and Keyframe " << keyframe2->mnFrameId << std::endl;
-        robustMatches = keyframe1->cache_matched_pairs.at(keyframe2->mnFrameId);
-    }
-
-    int numMatchesTotal = 0;
-    for(const auto& m : robustMatches) {
-        //std::cout << "Evaluating match for triangulation..." << std::endl;
-        const int queryIdx = kps1_indexes[m.queryIdx];
-        const int trainIdx = kps2_indexes[m.trainIdx];
-        const FeatureType featType = usedFeatureTypes[m.queryIdx];
-
-        // Only triangulate points that don't already have a 3D MapPoint
-        //std::cout << "Checking match: queryIdx=" << queryIdx << ", trainIdx=" << trainIdx << ", featType=" << featType << std::endl;
-        if(!keyframe1->GetMapPoint(queryIdx, featType) && !keyframe2->GetMapPoint(trainIdx, featType)){
-                matchedPairs[featType].emplace_back(static_cast<size_t>(queryIdx), static_cast<size_t>(trainIdx));
-                numMatchesTotal++;
-                matchesCount[featType]++;
-        }
-        //std::cout << " - Match accepted for triangulation." << std::endl;
-    }
-
-    // CODE FOR CALIBRATION THE THRESHOLDS BASED ON DISTANCE PERCENTILES
-    // std::map<FeatureType, std::vector<cv::DMatch>> matches_by_featuretype;
-    // for(const auto& m : robustMatches) {
-    //     const FeatureType featType = usedFeatureTypes[m.queryIdx];
-    //     matches_by_featuretype[featType].push_back(m);
-    // }
-    // for (const auto& [ft, matches_] : matches_by_featuretype){
-    //     if(ft != FEAT_ALIKED128)
-    //         continue;
-    //     auto p = computeDistancePercentiles_10_to_90(matches_);
-    //     std::cout << "FeatureType " << ft << " - ";
-    //     for (int i = 0; i < 9; ++i)
-    //         //std::cout << (i + 1) * 10 << "th percentile distance: " << p[i] << "\n";
-    //         std::cout <<  p[i] << ", ";
-    // }
-    // std::cout << " " << std::endl;
-    // std::cout << "\nLocalMapping::CreateNewMapPoints::FeatureMatcher::SearchForTriangulation" << std::endl;
-    // std::cout << " - SearchForTriangulation: " << allMatches.size() << " matches found." << std::endl;
-    // std::cout << " - robustMatches.size(): " << robustMatches.size() << std::endl;
-    // for (const auto& [ft, count] : matchesCount){
-    //     std::cout << "   - FeatureType " << ft << ": " << count << " matches." << std::endl;
-    // }
-    // std::cout << " - numMatchesTotal: " << numMatchesTotal << std::endl;
-}
-
-void FeatureMatcher::SearchForTriangulation_bybow(const Keyframe& pKF1, const Keyframe& pKF2, const mat3f& F12,
-                                            vector<pair<size_t, size_t> > &vMatchedPairs,
-                                            const FeatureType& ft)
-{
-    const DBoW2::FeatureVector &vFeatVec1 = pKF1->mFeatVec;
-    const DBoW2::FeatureVector &vFeatVec2 = pKF2->mFeatVec;
-
-    //Compute epipole in second image
-    vec3f Cw = pKF1->GetCameraCenter();
-    mat3f R2w = pKF2->GetRotation();
-    vec3f t2w = pKF2->GetTranslation();
-    vec3f C2 = R2w * Cw + t2w;
-    const float invz = 1.0f / C2(2);
-    const float ex = pKF2->fx * C2(0) * invz + pKF2->cx;
-    const float ey = pKF2->fy * C2(1) * invz + pKF2->cy;
-
-    // Find matches between not tracked keypoints
-    // Matching speed-up by ORB Vocabulary
-    // Compare only ORB that share the same node
-
-    vector<bool> vbMatched2(pKF2->N.at(ft),false);
-    vector<int> vMatches12(pKF1->N.at(ft),-1);
-
-    int nMatches{0};
-
-    DBoW2::FeatureVector::const_iterator f1it = vFeatVec1.begin();
-    DBoW2::FeatureVector::const_iterator f2it = vFeatVec2.begin();
-    DBoW2::FeatureVector::const_iterator f1end = vFeatVec1.end();
-    DBoW2::FeatureVector::const_iterator f2end = vFeatVec2.end();
-
-    while(f1it!=f1end && f2it!=f2end)
-    {
-        if(f1it->first == f2it->first)
-        {
-            for(size_t i1=0, iend1=f1it->second.size(); i1<iend1; i1++)
-            {
-                const size_t idx1 = f1it->second[i1];
-
-                Pt pMP1 = pKF1->GetMapPoint(idx1, ft);
-
-                // If there is already a MapPoint skip
-                if(pMP1)
-                    continue;
-
-                const cv::KeyPoint &kp1 = pKF1->keypoints.at(ft)[idx1];
-
-                const cv::Mat &refDescriptor = pKF1->descriptors.at(ft).row(idx1);
-                Descriptor_Distance_Type bestDist{TH_LOW[ft]};
-                int bestIdx2{-1};
-
-                for(size_t i2=0, iend2=f2it->second.size(); i2<iend2; i2++)
-                {
-                    size_t idx2 = f2it->second[i2];
-
-                    Pt pMP2 = pKF2->GetMapPoint(idx2, ft);
-
-                    // If we have already matched or there is a MapPoint skip
-                    if(vbMatched2[idx2] || pMP2)
-                        continue;
-
-                    const cv::Mat &descriptor = pKF2->descriptors.at(ft).row(idx2);
-                    const Descriptor_Distance_Type descDist = DescriptorDistance(refDescriptor,descriptor,ft);
-
-                    if(descDist > TH_LOW[ft] || descDist > bestDist)
-                        continue;
-
-                    const cv::KeyPoint &kp2 = pKF2->keypoints.at(ft)[idx2];
-
-                    float sigma2_kp2 = pKF2->GetKeyPt1DSigma2(KeypointIndex(idx2), ft);
-                    if(CheckDistEpipolarLine(kp1,kp2,F12,pKF2,sigma2_kp2))
-                    {
-                        bestIdx2 = idx2;
-                        bestDist = descDist;
-                    }
-                }
-
-                if(bestIdx2>=0)
-                {
-                    const cv::KeyPoint &kp2 = pKF2->keypoints.at(ft)[bestIdx2];
-                    vMatches12[idx1] = bestIdx2;
-                    nMatches++;
-                }
-            }
-
-            f1it++;
-            f2it++;
-        }
-        else if(f1it->first < f2it->first)
-        {
-            f1it = vFeatVec1.lower_bound(f2it->first);
-        }
-        else
-        {
-            f2it = vFeatVec2.lower_bound(f1it->first);
-        }
-    }
-
-    vMatchedPairs.clear();
-    vMatchedPairs.reserve(nMatches);
-
-    for(size_t i=0, iend=vMatches12.size(); i<iend; i++)
-    {
-        if(vMatches12[i]<0)
-            continue;
-        vMatchedPairs.push_back(make_pair(i,vMatches12[i]));
-    }
-
-    //return nMatches;
-}
-
-void FeatureMatcher::SearchForTriangulation(const Keyframe& pKF1,
-                                            const Keyframe& pKF2,
-                                            const mat3f& F12,
-                                            std::vector<std::pair<size_t, size_t>> &vMatchedPairs,
-                                            const FeatureType& ft)
-{
-    auto it1 = pKF1->descriptors.find(ft);
-    auto it2 = pKF2->descriptors.find(ft);
-    if (it1 == pKF1->descriptors.end() || it2 == pKF2->descriptors.end())
-        return;
-
-    // Compute epipole in second image (kept from original; not used below but harmless)
-    vec3f Cw  = pKF1->GetCameraCenter();
-    mat3f R2w = pKF2->GetRotation();
-    vec3f t2w = pKF2->GetTranslation();
-    vec3f C2  = R2w * Cw + t2w;
-    const float invz = 1.0f / C2(2);
-    const float ex   = pKF2->fx * C2(0) * invz + pKF2->cx;
-    const float ey   = pKF2->fy * C2(1) * invz + pKF2->cy;
-    (void)ex; (void)ey;
-
-    // Find matches between not tracked keypoints (no BoW available -> brute force with epipolar pruning)
-
-    std::vector<bool> vbMatched2(pKF2->N.at(ft), false);
-    std::vector<int>  vMatches12(pKF1->N.at(ft), -1);
-
-    int nMatches{0};
-
-    const size_t N1 = pKF1->N.at(ft);
-    const size_t N2 = pKF2->N.at(ft);
-
-    for (size_t idx1 = 0; idx1 < N1; ++idx1)
-    {
-        Pt pMP1 = pKF1->GetMapPoint(idx1, ft);
-
-        // If there is already a MapPoint skip
-        if (pMP1)
-            continue;
-
-        const cv::KeyPoint &kp1 = pKF1->keypoints.at(ft)[idx1];
-        const cv::Mat &refDescriptor = pKF1->descriptors.at(ft).row((int)idx1);
-
-        Descriptor_Distance_Type bestDist{TH_LOW[ft]};
-        int bestIdx2{-1};
-
-        for (size_t idx2 = 0; idx2 < N2; ++idx2)
-        {
-            Pt pMP2 = pKF2->GetMapPoint(idx2, ft);
-
-            // If we have already matched or there is a MapPoint skip
-            if (vbMatched2[idx2] || pMP2)
-                continue;
-
-            const cv::Mat &descriptor = pKF2->descriptors.at(ft).row((int)idx2);
-            const Descriptor_Distance_Type descDist =
-                DescriptorDistance(refDescriptor, descriptor, ft);
-
-            if (descDist > TH_LOW[ft] || descDist > bestDist)
-                continue;
-
-            const cv::KeyPoint &kp2 = pKF2->keypoints.at(ft)[idx2];
-
-            const float sigma2_kp2 = pKF2->GetKeyPt1DSigma2(KeypointIndex(idx2), ft);
-            if (CheckDistEpipolarLine(kp1, kp2, F12, pKF2, sigma2_kp2))
-            {
-                bestIdx2 = (int)idx2;
-                bestDist = descDist;
-            }
-        }
-
-        if (bestIdx2 >= 0)
-        {
-            vMatches12[idx1] = bestIdx2;
-            vbMatched2[(size_t)bestIdx2] = true; // prevent duplicates
-            nMatches++;
-        }
-    }
-
-    vMatchedPairs.clear();
-    vMatchedPairs.reserve((size_t)nMatches);
-
-    for (size_t i = 0, iend = vMatches12.size(); i < iend; ++i)
-    {
-        if (vMatches12[i] < 0)
-            continue;
-        vMatchedPairs.emplace_back(i, (size_t)vMatches12[i]);
-    }
 }
 
 // Fuse 1
@@ -765,7 +531,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const vector<Pt> &vpMapPoints, const floa
         // If there is already a MapPoint replace otherwise add new measurement
         if(bestDist <= TH_LOW[featType])
         {
-            Pt pMPinKF = pKF->GetMapPoint(bestIdx, featType);
+            Pt pMPinKF = pKF->get_map_point(bestIdx, featType);
             if(pMPinKF)
             {
                 if(!pMPinKF->isBad())
@@ -1055,7 +821,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
     vec3f Ow = -Rcw.transpose() * tcw;
 
     // Set of MapPoints already found in the KeyFrame
-    const set<Pt> spAlreadyFound = pKF->GetMapPoints(featType);
+    const set<Pt> spAlreadyFound = pKF->get_map_points(featType);
 
     int nFused=0;
 
@@ -1142,7 +908,7 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
         // If there is already a MapPoint replace otherwise add new measurement
         if(bestDist <= TH_LOW[featType])
         {
-            Pt pMPinKF = pKF->GetMapPoint(bestIdx, featType);
+            Pt pMPinKF = pKF->get_map_point(bestIdx, featType);
             if(pMPinKF)
             {
                 if(!pMPinKF->isBad())
@@ -1775,7 +1541,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         return inlierMatches;
     }
 
-    std::map<FeatureType, std::vector<cv::DMatch>> FeatureMatcher::parallelFeatureMatching(
+    std::map<FeatureType, std::vector<cv::DMatch>> FeatureMatcher::match_descriptors_parallel(
         const std::vector<FeatureType>& featureTypes,
         const std::map<FeatureType, cv::Mat> &desc1_, const std::map<FeatureType, cv::Mat> &desc2_,
         const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps1_, const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps2_
@@ -1816,12 +1582,12 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
             o.matches = match_descriptors(desc1, desc2, kps1, kps2, ft);
         }
 
-        std::map<FeatureType, std::vector<cv::DMatch>> matchesByType;
+        std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type;
         for (auto& o : outs) {
             if (!o.valid) continue;
-            matchesByType[o.ft] = std::move(o.matches);
+            matches_by_type[o.ft] = std::move(o.matches);
         }
-        return matchesByType;
+        return matches_by_type;
     }
 
     std::vector<cv::DMatch> FeatureMatcher::serialFeatureMatching(

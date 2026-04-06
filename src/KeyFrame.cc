@@ -276,7 +276,7 @@ void KeyFrame::ReplaceMapPointMatch(const size_t &idx, Pt pMP)
     mvpMapPoints[pMP->featureType][idx]=pMP;
 }
 
-set<Pt> KeyFrame::GetMapPoints(const FeatureType& featType)
+set<Pt> KeyFrame::get_map_points(const FeatureType& featType)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     set<Pt> s;
@@ -327,7 +327,7 @@ vector<Pt> KeyFrame::get_map_point_matches(const FeatureType& feat_type)
     return mvpMapPoints.at(feat_type);
 }
 
-Pt KeyFrame::GetMapPoint(const size_t &idx, const FeatureType& featType)
+Pt KeyFrame::get_map_point(const size_t &idx, const FeatureType& featType)
 {
     return mvpMapPoints.at(featType)[idx];
 }

@@ -103,10 +103,10 @@ public:
     void EraseMapPointMatch(const size_t &idx, const FeatureType& featType);
     void EraseMapPointMatch(Pt pMP);
     void ReplaceMapPointMatch(const size_t &idx, Pt pMP);
-    std::set<Pt> GetMapPoints(const FeatureType& featType);
+    std::set<Pt> get_map_points(const FeatureType& featType);
     std::vector<Pt> get_map_point_matches(const FeatureType& feat_type);
     int TrackedMapPoints(const int &minObs);
-    Pt GetMapPoint(const size_t &idx, const FeatureType& featType);
+    Pt get_map_point(const size_t &idx, const FeatureType& featType);
 
     // KeyPoint functions
     std::vector<size_t> get_features_in_area(const float &x, const float  &y, const float  &r, const FeatureType& featType) const;

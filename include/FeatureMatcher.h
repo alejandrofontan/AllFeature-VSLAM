@@ -72,7 +72,7 @@ public:
     std::vector<cv::DMatch> filter_matches_by_fundamental(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
          int outlierMehod = cv::FM_RANSAC, const int maxForRansac = 2000);
 
-    std::map<FeatureType, std::vector<cv::DMatch>> parallelFeatureMatching(const std::vector<FeatureType>& featureTypes,
+    std::map<FeatureType, std::vector<cv::DMatch>> match_descriptors_parallel(const std::vector<FeatureType>& featureTypes,
         const std::map<FeatureType, cv::Mat> &desc1, const std::map<FeatureType, cv::Mat> &desc2,
         const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps1, const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps2);
 
@@ -95,18 +95,16 @@ public:
     // Matches a set of map points to frame keypoints via descriptor matching + projection check.
     // Returns the number of new map point assignments made to the frame.
     // Used in: Tracking::TrackLocalMap
+    const float projection_match_radius_th = 20.0f;
     int match_map_points_to_frame(Frame& Frame, const vector<Pt>& map_pts);
 
-    void SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                std::map<FeatureType, vector<pair<size_t,size_t>>>& matchedPairs,
-                                const std::vector<FeatureType>& featureTypes);
-
-    void SearchForTriangulation(const Keyframe& keyframe1, const Keyframe& keyframe2, const mat3f& F12,
-                                std::vector<pair<size_t,size_t>>& matchedPairs,
-                                const FeatureType& featureType);
-    void SearchForTriangulation_bybow(const Keyframe& keyframe1, const Keyframe& keyframe2, const mat3f& F12,
-                                std::vector<pair<size_t,size_t>>& matchedPairs,
-                                const FeatureType& featureType);
+    // Matches two keyframes across all feature types to find candidate pairs for triangulation.
+    // Reuses cached matches if available; otherwise runs parallel descriptor matching + LMEDS filtering.
+    // Used in: LocalMapping::CreateNewMapPoints
+    const int min_matches_for_triangulation = 10;
+    void match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
+                                map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
+                                const vector<FeatureType>& feat_types);
 
     int SearchForInitialization(const Frame &F1, const Frame &F2, std::vector<cv::Point2f> &pointsPrevMatched, std::vector<int> &matches12, const FeatureType& featureType);
 
@@ -182,7 +180,7 @@ protected:
     // Tracking::match_keyframe_to_frame & Tracking::Relocalization
     static const bool sBF_kf_lightglue = true;
 
-    // SearchForTriangulation Keyframe-Keyframe
+    // match_keyframes_for_triangulation Keyframe-Keyframe
     // LocalMapping::CreateNewMapPoints
     static const bool sFT_kk_lightglue = true;
 

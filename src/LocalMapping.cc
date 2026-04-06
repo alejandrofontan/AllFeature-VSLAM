@@ -351,10 +351,10 @@ void LocalMapping::CreateNewMapPoints()
 
         #ifdef ALLFEATURE_REAL_TIME
         if ((j <= 1) || (t_duration < 10.05))
-            matcher->SearchForTriangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
+            matcher->match_keyframes_for_triangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
         ++j;
         #else
-        matcher->SearchForTriangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
+        matcher->match_keyframes_for_triangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
         #endif
 
         for(auto& [featureType, N_]: pKF2->N){
