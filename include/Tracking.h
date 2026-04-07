@@ -100,7 +100,6 @@ public:
     // Initialization Variables (mono)
     std::vector<int> mvIniLastMatches;
     std::vector<int> mvIniMatches;
-    std::vector<cv::Point2f> mvbPrevMatched;
     std::vector<vec3f> mvIniP3D;
     Frame mInitialFrame;
 

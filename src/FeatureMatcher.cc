@@ -453,37 +453,68 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector
     return n_fused;
 }
 
-// SearchForInitialization Frame-Frame
-// Tracking::MonocularInitialization
-int FeatureMatcher::SearchForInitialization(const Frame &F1, const Frame &F2,
-    vector<cv::Point2f> &pointsPrevMatched, vector<int> &matches12, const FeatureType& featType)
+// Matches keypoints between two frames across all feature types for monocular initialization.
+// Descriptors are matched in parallel per feature type, then all matches are pooled and filtered
+// jointly via LMEDS fundamental matrix estimation. Matched index pairs are written into
+// matched_pairs per feature type.
+// Used in: Tracking::MonocularInitialization
+void FeatureMatcher::match_frames_for_initialization(const Frame& F1, const Frame& F2,
+    map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
+    const vector<FeatureType>& feat_types)
 {
-    matches12.clear();
+    map<FeatureType, vector<cv::DMatch>> matches_by_type;
+    matches_by_type = match_descriptors_parallel(feat_types, F1.descriptors, F2.descriptors, F1.keypoints, F2.keypoints);
 
-    // Ensure both frames contain the requested feature type
-    auto it1 = F1.descriptors.find(featType);
-    auto it2 = F2.descriptors.find(featType);
-    if (it1 == F1.descriptors.end() || it2 == F2.descriptors.end())
-        return 0;
+    // Offset match indices to account for previously appended feature types
+    vector<cv::KeyPoint> kps1, kps2;
+    vector<size_t> kps1_indexes, kps2_indexes;
+    vector<cv::DMatch> all_matches;
+    vector<FeatureType> used_feature_types;
+    for (const auto& ft : feat_types) {
+        matched_pairs[ft].clear();
 
-    std::vector<cv::DMatch> matches = featureMatching_2(F1.descriptors.at(featType), F2.descriptors.at(featType),
-         F1.keypoints.at(featType), F2.keypoints.at(featType), featType, sFI_ff_outlierMethod);
-
-    int numMatches = 0;
-    matches12 = vector<int>(F1.keypoints.at(featType).size(),-1);
-    for(const auto& m : matches) {
-        if (F1.keyPtsSize.at(featType)[m.queryIdx] > 1.0)
-            continue;
-        if (F2.keyPtsSize.at(featType)[m.trainIdx] > 1.0)
-            continue;
-        if (F1.keyPtsSize.at(featType)[m.queryIdx] != F2.keyPtsSize.at(featType)[m.trainIdx])
+        // Ensure both frames contain the requested feature type
+        auto it1 = F1.descriptors.find(ft);
+        auto it2 = F2.descriptors.find(ft);
+        if (it1 == F1.descriptors.end() || it2 == F2.descriptors.end())
             continue;
 
-        matches12[m.queryIdx] = m.trainIdx;
-        pointsPrevMatched[m.queryIdx] = F2.keypoints.at(featType)[m.trainIdx].pt;
-        numMatches++;
+        // Accumulate keypoints and track per-feature-type original indices for later lookup
+        auto const& v1 = F1.keypoints.at(ft);
+        auto const& v2 = F2.keypoints.at(ft);
+
+        auto matches = std::move(matches_by_type[ft]);
+        size_t size_kpts1 = kps1.size();
+        size_t size_kpts2 = kps2.size();
+        for (auto& m : matches) {
+            m.queryIdx += size_kpts1;
+            m.trainIdx += size_kpts2;
+        }
+        all_matches.insert(all_matches.end(),
+            std::make_move_iterator(matches.begin()),
+            std::make_move_iterator(matches.end()));
+
+        kps1.insert(kps1.end(), v1.begin(), v1.end());
+        kps2.insert(kps2.end(), v2.begin(), v2.end());
+
+        const size_t base1 = kps1_indexes.size();
+        kps1_indexes.resize(base1 + v1.size());
+        std::iota(kps1_indexes.begin() + base1, kps1_indexes.end(), 0);
+        const size_t base2 = kps2_indexes.size();
+        kps2_indexes.resize(base2 + v2.size());
+        std::iota(kps2_indexes.begin() + base2, kps2_indexes.end(), 0);
+        used_feature_types.insert(used_feature_types.end(), v1.size(), ft);
     }
-    return numMatches;
+
+    // Filter outliers jointly across all feature types using fundamental matrix (LMEDS)
+    vector<cv::DMatch> filtered_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::FM_LMEDS);
+
+    for (const auto& m : filtered_matches) {
+        const int query_idx = kps1_indexes[m.queryIdx];
+        const int train_idx = kps2_indexes[m.trainIdx];
+        const FeatureType feat_type = used_feature_types[m.queryIdx];
+        matched_pairs[feat_type].push_back(std::make_pair(query_idx, train_idx));
+    }
 }
 
 float FeatureMatcher::RadiusByViewingCos(const float &viewCos)

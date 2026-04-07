@@ -327,10 +327,6 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
         {
             mInitialFrame = Frame(currentFrame);
             lastFrame = Frame(currentFrame);
-            mvbPrevMatched.resize(currentFrame.keypoints[featureType].size());
-            for(size_t i = 0; i < currentFrame.keypoints[featureType].size(); i++)
-                mvbPrevMatched[i] = currentFrame.keypoints.at(featureType)[i].pt;
-
             mpInitializer =  make_shared<Initializer>(currentFrame, sigmaInitializer, numItInitializer, featureType);
             fill(mvIniMatches.begin(),mvIniMatches.end(),-1);
             return;
@@ -345,9 +341,18 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
             fill(mvIniMatches.begin(),mvIniMatches.end(),-1);
             return;
         }
-        // Find correspondences
-        int nmatches = matcher->SearchForInitialization(mInitialFrame, currentFrame, mvbPrevMatched, mvIniMatches, featureType);
 
+        // Find correspondences
+        std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs;
+        const vector<FeatureType> feat_types {FEAT_ORB, FEAT_SUPERPOINT256};
+        matcher->match_frames_for_initialization(mInitialFrame, currentFrame, matched_pairs, feat_types);
+        mvIniMatches.clear();
+        mvIniMatches = vector<int>(mInitialFrame.keypoints.at(featureType).size(),-1);
+        for (const auto& m : matched_pairs[featureType]) {
+            mvIniMatches[m.first] = m.second;
+        }
+        int nmatches = matched_pairs[featureType].size();
+        
         // Check if there are enough correspondences
         if(nmatches < minMatches_monoInit)
         {
