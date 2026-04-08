@@ -343,10 +343,19 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
         }
 
         // Find correspondences
-        //const vector<FeatureType> feat_types {FEAT_ORB, FEAT_SUPERPOINT256};
-
         std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs =
             matcher->match_frames_for_initialization(mInitialFrame, currentFrame, featureTypes);
+
+        // for (const auto& ft : featureTypes_) {
+        //     const auto& matches = matched_pairs[ft];
+        //     for (const auto& m : matches) {
+        //         const auto& kp1 = mInitialFrame.keypoints.at(ft).at(m.first);
+        //         const auto& kp2 = currentFrame.keypoints.at(ft).at(m.second);
+        //         if (kp1.octave != 0 || kp2.octave != 0) {
+        //             matched_pairs[ft].erase(std::remove(matched_pairs[ft].begin(), matched_pairs[ft].end(), m), matched_pairs[ft].end());
+        //         }
+        //     }
+        // }
 
         // Convert matches to mvIniMatches, which is the structure used by the initializer
         mvIniMatches.clear();
@@ -383,8 +392,8 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
         if(mpInitializer->Initialize(currentFrame, mvIniMatches, Rcw, tcw, mvIniP3D, vbTriangulated))
         {
             int j = 0;
-            for (auto& [ft, matches] : matches_featType) {
-                for (size_t i = 0; i < matches.size(); i++) {
+            for (const auto& ft : featureTypes) {
+                for (size_t i = 0; i < matches_featType[ft].size(); i++) {
                     if (mvIniMatches[j] >= 0 && !vbTriangulated[j]) {
                         mvIniMatches[j] = -1;
                         nmatches--;
@@ -392,15 +401,6 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
                     j++;
                 }
             }
-
-            // for(size_t i=0, iend=mvIniMatches.size(); i<iend;i++)
-            // {
-            //     if(mvIniMatches[i]>=0 && !vbTriangulated[i])
-            //     {
-            //         mvIniMatches[i]=-1;
-            //         nmatches--;
-            //     }
-            // }
 
             // Set Frame Poses
             mInitialFrame.SetPose(mat4f::Identity());
@@ -415,6 +415,7 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
 
 void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
 {
+
     // Create KeyFrames
     Keyframe pKFini = make_shared<KeyFrame>(mInitialFrame, map, keyFrameDB);
     Keyframe pKFcur = make_shared<KeyFrame>(currentFrame, map, keyFrameDB);
@@ -429,7 +430,9 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
 
     // Create MapPoints and asscoiate to keyframes
     int j = -1;
-    for (const auto& [ft, matches] : matches_featType) {
+    for (const auto& ft : featureTypes) {
+        const auto matches = matches_featType[ft];
+
         for (size_t i = 0; i < matches.size(); i++) {
             j++;
             if (mvIniMatches[j] < 0)
@@ -548,6 +551,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
         nmatches += nmatches_ft[ft];
     }
 
+
     if (!optimizePose)
         return true;
 
@@ -587,7 +591,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
         }
     }
 
-#ifdef PROFILING_EXHAUSTIVE
+    #ifdef PROFILING_EXHAUSTIVE
     t_end = std::chrono::steady_clock::now();
     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
     pose_opt_times.push_back(t_duration);

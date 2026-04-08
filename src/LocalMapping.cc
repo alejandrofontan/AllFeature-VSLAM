@@ -689,10 +689,7 @@ void LocalMapping::KeyFrameCulling()
                     }
                 }
             }
-            if (pKF->featureTypes.size() < 2){
-                pKF->SetBadFlag();
-                continue;
-            }
+
             if(nRedundantObservations > KEYFRAME_CULLING_COVISIBILITY_THRESHOLD * nMPs){
                 #ifdef ALLFEATURE_EVALUATION
 
