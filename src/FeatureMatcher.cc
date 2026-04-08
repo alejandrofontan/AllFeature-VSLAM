@@ -169,7 +169,7 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
     }
 
     // Filter outliers using MAGSAC across all feature types jointly
-    vector<cv::DMatch> robust_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::USAC_MAGSAC);
+    auto robust_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::USAC_MAGSAC);
 
     // Associate surviving matches to map points
     map<FeatureType, int> matches_count;
@@ -458,8 +458,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector
 // jointly via LMEDS fundamental matrix estimation. Matched index pairs are written into
 // matched_pairs per feature type.
 // Used in: Tracking::MonocularInitialization
-void FeatureMatcher::match_frames_for_initialization(const Frame& F1, const Frame& F2,
-    map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
+map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_initialization(const Frame& F1, const Frame& F2,
     const vector<FeatureType>& feat_types)
 {
     map<FeatureType, vector<cv::DMatch>> matches_by_type;
@@ -471,8 +470,6 @@ void FeatureMatcher::match_frames_for_initialization(const Frame& F1, const Fram
     vector<cv::DMatch> all_matches;
     vector<FeatureType> used_feature_types;
     for (const auto& ft : feat_types) {
-        matched_pairs[ft].clear();
-
         // Ensure both frames contain the requested feature type
         auto it1 = F1.descriptors.find(ft);
         auto it2 = F2.descriptors.find(ft);
@@ -507,14 +504,17 @@ void FeatureMatcher::match_frames_for_initialization(const Frame& F1, const Fram
     }
 
     // Filter outliers jointly across all feature types using fundamental matrix (LMEDS)
-    vector<cv::DMatch> filtered_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::FM_LMEDS);
+    auto filtered_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::FM_LMEDS);
 
+    std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs;
     for (const auto& m : filtered_matches) {
         const int query_idx = kps1_indexes[m.queryIdx];
         const int train_idx = kps2_indexes[m.trainIdx];
         const FeatureType feat_type = used_feature_types[m.queryIdx];
         matched_pairs[feat_type].push_back(std::make_pair(query_idx, train_idx));
     }
+
+    return matched_pairs;
 }
 
 float FeatureMatcher::RadiusByViewingCos(const float &viewCos)
@@ -1403,42 +1403,6 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         return matches;
     }
 
-    std::vector<cv::DMatch> FeatureMatcher::featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& featType_,
-        int outlierMehod){
-
-        std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featType_);
-        MatcherType matcherType = ft->getMatcherType();
-
-        std::vector<cv::DMatch> matches;
-
-        switch(matcherType) {
-            case LIGHTGLUE_SIFT:
-            case LIGHTGLUE_ALIKED:
-            {
-                matches = lightglueMatching(kps1, desc1, kps2, desc2, 0.0f);
-                break;
-            }
-            case LIGHTGLUE_SUPERPOINT:
-            {
-                matches = matcherLightglueSuperpoint(kps1, desc1, kps2, desc2, 0.0f);
-                break;
-            }
-            case BF_L2:
-            {
-                bf_matcher_L2.match(desc1, desc2, matches);
-                break;
-            }
-            case BF_HAMMING:
-            {
-                bf_matcher_hamming.match(desc1, desc2, matches);
-                break;
-            }
-        }
-
-        return filter_matches_by_fundamental(matches, kps1, kps2, outlierMehod);
-    }
-
     std::vector<cv::DMatch> FeatureMatcher::filter_matches_by_fundamental(std::vector<cv::DMatch>& matches,
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
         int outlierMethod, const int maxForRansac){
@@ -1496,10 +1460,6 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         for (size_t i = 0; i < inlierMask.size(); ++i) {
             if (inlierMask[i]) inlierMatches.push_back(matchesUsed[i]);
         }
-
-        // std::cout << "FeatureMatcher::featureMatching: "
-        //           << inlierMatches.size() << " inliers found out of "
-        //           << matches.size() << " matches." << std::endl;
 
         return inlierMatches;
     }

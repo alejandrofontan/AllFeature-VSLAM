@@ -103,6 +103,7 @@ public:
     std::vector<vec3f> mvIniP3D;
     Frame mInitialFrame;
 
+    std::map<FeatureType, std::vector<int>> matches_featType;
     // Lists used to recover the full camera trajectory at the end of the execution.
     // Basically we store the reference keyframe for each frame and its relative transformation
     list<mat4f> mlRelativeFramePoses;

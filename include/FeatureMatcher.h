@@ -58,8 +58,6 @@ public:
     std::vector<cv::DMatch> match_descriptors(const cv::Mat& desc1, const cv::Mat& desc2,
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type);
     std::vector<cv::DMatch> match_descriptors_only(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& feat_type);
-    std::vector<cv::DMatch> featureMatching_2(const cv::Mat& desc1, const cv::Mat& desc2,  const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& ft,
-       int outlierMehod = cv::FM_RANSAC);
 
     std::vector<cv::DMatch> lightglueMatching(
             const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
@@ -72,7 +70,7 @@ public:
             float min_score = 0.0f);
 
     std::vector<cv::DMatch> filter_matches_by_fundamental(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-         int outlierMehod = cv::FM_RANSAC, const int maxForRansac = 2000);
+        int outlierMehod = cv::FM_RANSAC, const int maxForRansac = 2000);
 
     std::map<FeatureType, std::vector<cv::DMatch>> match_descriptors_parallel(const std::vector<FeatureType>& featureTypes,
         const std::map<FeatureType, cv::Mat> &desc1, const std::map<FeatureType, cv::Mat> &desc2,
@@ -112,8 +110,7 @@ public:
     // Runs parallel descriptor matching, filters outliers jointly with LMEDS fundamental matrix
     // estimation, and populates matched_pairs per feature type.
     // Used in: Tracking::MonocularInitialization
-    void match_frames_for_initialization(const Frame& F1, const Frame& F2,
-        map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
+    map<FeatureType, vector<pair<size_t, size_t>>> match_frames_for_initialization(const Frame& F1, const Frame& F2,
         const vector<FeatureType>& feat_types);
 
     // Projects map points into a keyframe and fuses them with existing keypoints.

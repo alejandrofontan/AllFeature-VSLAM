@@ -343,16 +343,34 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
         }
 
         // Find correspondences
-        std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs;
-        const vector<FeatureType> feat_types {FEAT_ORB, FEAT_SUPERPOINT256};
-        matcher->match_frames_for_initialization(mInitialFrame, currentFrame, matched_pairs, feat_types);
+        //const vector<FeatureType> feat_types {FEAT_ORB, FEAT_SUPERPOINT256};
+
+        std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs =
+            matcher->match_frames_for_initialization(mInitialFrame, currentFrame, featureTypes);
+
+        // Convert matches to mvIniMatches, which is the structure used by the initializer
         mvIniMatches.clear();
-        mvIniMatches = vector<int>(mInitialFrame.keypoints.at(featureType).size(),-1);
-        for (const auto& m : matched_pairs[featureType]) {
-            mvIniMatches[m.first] = m.second;
+        int numKeypoints = 0;
+        for (const auto& ft : featureTypes)
+            numKeypoints += mInitialFrame.keypoints.at(ft).size();
+        mvIniMatches = vector<int>(numKeypoints,-1);
+
+        // Also fill matches_featType for later use in CreateInitialMapMonocular
+        int num_keypoints1 = 0;
+        int num_keypoints2 = 0;
+        for (const auto& ft : featureTypes) {
+            matches_featType[ft].clear();
+            matches_featType[ft] = vector<int>(mInitialFrame.keypoints.at(ft).size(), -1);
+            for (const auto& m : matched_pairs[ft]) {
+                matches_featType[ft][m.first] = m.second;
+                mvIniMatches[m.first + num_keypoints1] = m.second + num_keypoints2;
+            }
+            num_keypoints1 += mInitialFrame.keypoints.at(ft).size();
+            num_keypoints2 += currentFrame.keypoints.at(ft).size();
         }
+
         int nmatches = matched_pairs[featureType].size();
-        
+
         // Check if there are enough correspondences
         if(nmatches < minMatches_monoInit)
         {
@@ -364,14 +382,25 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
         vector<bool> vbTriangulated; // Triangulated Correspondences (mvIniMatches)
         if(mpInitializer->Initialize(currentFrame, mvIniMatches, Rcw, tcw, mvIniP3D, vbTriangulated))
         {
-            for(size_t i=0, iend=mvIniMatches.size(); i<iend;i++)
-            {
-                if(mvIniMatches[i]>=0 && !vbTriangulated[i])
-                {
-                    mvIniMatches[i]=-1;
-                    nmatches--;
+            int j = 0;
+            for (auto& [ft, matches] : matches_featType) {
+                for (size_t i = 0; i < matches.size(); i++) {
+                    if (mvIniMatches[j] >= 0 && !vbTriangulated[j]) {
+                        mvIniMatches[j] = -1;
+                        nmatches--;
+                    }
+                    j++;
                 }
             }
+
+            // for(size_t i=0, iend=mvIniMatches.size(); i<iend;i++)
+            // {
+            //     if(mvIniMatches[i]>=0 && !vbTriangulated[i])
+            //     {
+            //         mvIniMatches[i]=-1;
+            //         nmatches--;
+            //     }
+            // }
 
             // Set Frame Poses
             mInitialFrame.SetPose(mat4f::Identity());
@@ -399,20 +428,23 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
     map->AddKeyFrame(pKFcur);
 
     // Create MapPoints and asscoiate to keyframes
-    for(size_t i=0; i<mvIniMatches.size();i++)
-    {
-        if(mvIniMatches[i]<0)
-            continue;
+    int j = -1;
+    for (const auto& [ft, matches] : matches_featType) {
+        for (size_t i = 0; i < matches.size(); i++) {
+            j++;
+            if (mvIniMatches[j] < 0)
+                continue;
 
-        //Create MapPoint.
-        Pt pMP = pKFcur->CreateMonocularMapPoint(mvIniP3D[i],KeypointIndex(mvIniMatches[i]),
-                                                 pKFini,KeypointIndex(i), featureType);
-        //Fill Current Frame structure
-        currentFrame.pts[featureType][mvIniMatches[i]] = pMP;
-        currentFrame.mvbOutlier[featureType][mvIniMatches[i]] = false;
+            //Create MapPoint.
+            Pt pMP = pKFcur->CreateMonocularMapPoint(mvIniP3D[j], KeypointIndex(matches[i]),
+                                                    pKFini, KeypointIndex(i), ft);
+            //Fill Current Frame structure
+            currentFrame.pts[ft][matches[i]] = pMP;
+            currentFrame.mvbOutlier[ft][matches[i]] = false;
 
-        //Add to Map
-        map->add_map_point(pMP);
+            //Add to Map
+            map->add_map_point(pMP);
+        }
     }
 
     // Update Connections
@@ -441,15 +473,19 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
     pKFcur->SetPose(Tc2w);
 
     // Scale points
-    vector<Pt> vpAllMapPoints = pKFini->get_map_point_matches(featureType);
-    for(size_t iMP=0; iMP<vpAllMapPoints.size(); iMP++)
-    {
-        if(vpAllMapPoints[iMP])
+
+    for (const auto& ft : featureTypes) {
+        vector<Pt> vpAllMapPoints = pKFini->get_map_point_matches(ft);
+        for(size_t iMP=0; iMP<vpAllMapPoints.size(); iMP++)
         {
-            Pt pMP = vpAllMapPoints[iMP];
-            pMP->SetWorldPos(pMP->get_world_pos()*invMedianDepth);
+            if(vpAllMapPoints[iMP])
+            {
+                Pt pMP = vpAllMapPoints[iMP];
+                pMP->SetWorldPos(pMP->get_world_pos()*invMedianDepth);
+            }
         }
     }
+
 
     localMapper->InsertKeyFrame(pKFini);
     localMapper->InsertKeyFrame(pKFcur);
