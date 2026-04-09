@@ -313,6 +313,7 @@ void LocalMapping::CreateNewMapPoints()
             trainOffset += nt;
         }
 
+        pKF2->cache_matched_pairs.insert_or_assign(mpCurrentKeyFrame->frame_id, FeatureMatcher::swap_match_direction(allMatches));
         mpCurrentKeyFrame->cache_matched_pairs.insert_or_assign(pKF2->frame_id, std::move(allMatches));
     }
 

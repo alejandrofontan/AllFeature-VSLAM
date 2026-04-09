@@ -88,7 +88,7 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height, 
     std::cout << "\033[1;32m[FeatureMatcher]\033[0m SuperPoint-LightGlue initialized and warmed up from: " << model_dir << std::endl;
 }
 
-static inline std::vector<cv::DMatch> swap_match_direction(const std::vector<cv::DMatch>& in)
+std::vector<cv::DMatch> FeatureMatcher::swap_match_direction(const std::vector<cv::DMatch>& in)
 {
     std::vector<cv::DMatch> out = in;
     for (auto& m : out)
