@@ -336,6 +336,10 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
         matched_pairs[feat_type].emplace_back(query_idx, train_idx);
     }
 
+    if(!cached){
+        keyframe2->cache_matched_pairs.insert_or_assign(keyframe1->frame_id, swap_match_direction(computed_matches));
+        keyframe1->cache_matched_pairs.insert_or_assign(keyframe2->frame_id, std::move(computed_matches));
+    }
     return matched_pairs;
 }
 
@@ -820,6 +824,9 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
 int FeatureMatcher::SearchBySim3(Keyframe pKF1, Keyframe pKF2, vector<Pt> &vpMatches12,
                                  const float &s12, const mat3f  &R12, const vec3f &t12, const float& radiusTh, const FeatureType& featType)
 {
+
+    auto cache_it = pKF1->cache_matched_pairs.find(pKF2->frame_id);
+    std::cout << "SearchBySim3: cache " << (cache_it != pKF1->cache_matched_pairs.end() ? "hit" : "miss") << std::endl;
 
     const float &fx = pKF1->fx;
     const float &fy = pKF1->fy;
