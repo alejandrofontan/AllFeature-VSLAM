@@ -39,10 +39,12 @@ namespace AF_VSLAM
             keyframeId(keyframeId), keyframe(keyframe), connections(connections){}
 
 LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<KeyFrameDatabase>pDB, shared_ptr<Vocabulary> vocabulary,
-    const bool bFixScale, const FeatureType& featureType, int image_width, int image_height):
+    const bool bFixScale,
+    const FeatureType& featureType, const std::vector<FeatureType>& feat_types,
+    int image_width, int image_height):
     mbResetRequested(false), mbFinishRequested(false), mbFinished(true), mpMap(pMap),
     mpKeyFrameDB(pDB), vocabulary(vocabulary), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
-    mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), featureType(featureType), mnFullBAIdx(0),
+    mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), featureType(featureType), feat_types(feat_types), mnFullBAIdx(0),
     image_width(image_width), image_height(image_height)
 {
     mnCovisibilityConsistencyTh = 3;
@@ -282,7 +284,17 @@ bool LoopClosing::ComputeSim3()
             continue;
         }
 
-        int nmatches = matcher->SearchByBoW(mpCurrentKF,pKF,vvpMapPointMatches[i], featureType);
+        std::map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs;
+        matcher->match_keyframes_for_compute_sim3(mpCurrentKF, pKF, matched_pairs, feat_types);
+
+        // TO DO
+        // Currently we use only one feature type downstream
+        int nmatches=0;
+        vvpMapPointMatches[i] = vector<Pt>(mpCurrentKF->get_map_point_matches(featureType).size(),static_cast<Pt>(NULL));
+        for (const auto& matches : matched_pairs[featureType]) {
+            vvpMapPointMatches[i][matches.first] = pKF->get_map_point_matches(featureType)[matches.second];
+            nmatches++;
+        }
 
         if(nmatches<20)
         {

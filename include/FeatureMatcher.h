@@ -101,8 +101,13 @@ public:
     // Matches two keyframes across all feature types to find candidate pairs for triangulation.
     // Reuses cached matches if available; otherwise runs parallel descriptor matching + LMEDS filtering.
     // Used in: LocalMapping::CreateNewMapPoints
-    const int min_matches_for_triangulation = 10;
+    const int min_match_keyframes = 10;
+    map<FeatureType, vector<pair<size_t,size_t>>> match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
+                                const vector<FeatureType>& feat_types);
     void match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
+                                map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
+                                const vector<FeatureType>& feat_types);
+    void match_keyframes_for_compute_sim3(const Keyframe& keyframe1, const Keyframe& keyframe2,
                                 map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
                                 const vector<FeatureType>& feat_types);
 
@@ -141,11 +146,6 @@ public:
     // Project MapPoints using a Similarity Transformation and search matches.
     // Used in loop detection (Loop Closing)
     int SearchByProjection(Keyframe pKF, const mat4f& Scw, const std::vector<Pt> &vpPoints, std::vector<Pt> &vpMatched, const float& radiusTh, const FeatureType& featureType);
-
-    // Search matches between MapPoints in a KeyFrame and ORB in a Frame.
-    // Brute force constrained to ORB that belong to the same vocabulary node (at a certain level)
-    // Used in Relocalisation and Loop Detection
-    int SearchByBoW(Keyframe pKF1, Keyframe pKF2, std::vector<Pt> &vpMatches12, const FeatureType& featureType);
 
     // Search matches between MapPoints seen in KF1 and KF2 transforming by a Sim3 [s12*R12|t12]
     // In the stereo and RGB-D case, s12=1

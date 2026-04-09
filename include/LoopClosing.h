@@ -63,7 +63,9 @@ public:
 
 public:
 
-    LoopClosing(shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase> pDB, shared_ptr<Vocabulary> vocabulary,const bool bFixScale, const FeatureType& featureType, int image_width, int image_height);
+    LoopClosing(shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase> pDB, shared_ptr<Vocabulary> vocabulary,const bool bFixScale,
+        const FeatureType& featureType, const std::vector<FeatureType>& feat_types,
+        int image_width, int image_height);
 
     void SetTracker(std::shared_ptr<Tracking> tracker);
 
@@ -122,6 +124,7 @@ protected:
     std::mutex mMutexFinish;
 
     FeatureType featureType;
+    std::vector<FeatureType> feat_types;
 
     shared_ptr<Map> mpMap;
     std::shared_ptr<Tracking> tracker;

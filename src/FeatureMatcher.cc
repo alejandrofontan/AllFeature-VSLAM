@@ -260,8 +260,7 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
 // descriptor matching followed by LMEDS fundamental matrix filtering.
 // Outputs only pairs where neither keyframe has an existing 3D map point for those keypoints.
 // Used in: LocalMapping::CreateNewMapPoints
-void FeatureMatcher::match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                std::map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
+map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
                                 const std::vector<FeatureType>& feat_types){
 
     // Reuse cached matches if keyframe1 already has matches stored for keyframe2
@@ -281,7 +280,6 @@ void FeatureMatcher::match_keyframes_for_triangulation(const Keyframe& keyframe1
     vector<cv::DMatch> all_matches;
     vector<FeatureType> used_feature_types;
     for (const auto& ft : feat_types) {
-        matched_pairs[ft].clear();
 
         // Ensure both frames contain the requested feature type
         auto it1 = keyframe1->descriptors.find(ft);
@@ -321,21 +319,55 @@ void FeatureMatcher::match_keyframes_for_triangulation(const Keyframe& keyframe1
     // Filter outliers jointly across all feature types, or retrieve from cache
     vector<cv::DMatch> computed_matches;
     if (!cached) {
-        if (all_matches.size() < min_matches_for_triangulation)
-            return;
+        if (all_matches.size() < min_match_keyframes)
+            return map<FeatureType, vector<pair<size_t,size_t>>>(); // Not enough matches to reliably estimate fundamental matrix
 
         computed_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::FM_LMEDS);
     }
     const vector<cv::DMatch>& filtered_matches = cached ? cache_it->second : computed_matches;
 
+    map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs;
     for (const auto& m : filtered_matches) {
         const size_t query_idx = kps1_indexes[m.queryIdx];
         const size_t train_idx = kps2_indexes[m.trainIdx];
         const FeatureType feat_type = used_feature_types[m.queryIdx];
 
         // Only triangulate points that don't already have a 3D MapPoint
-        if (!keyframe1->get_map_point(query_idx, feat_type) && !keyframe2->get_map_point(train_idx, feat_type)) {
-            matched_pairs[feat_type].emplace_back(query_idx, train_idx);
+        matched_pairs[feat_type].emplace_back(query_idx, train_idx);
+    }
+
+    return matched_pairs;
+}
+
+void FeatureMatcher::match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
+                                std::map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
+                                const std::vector<FeatureType>& feat_types){
+
+
+    std::map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs_ = match_keyframes(keyframe1, keyframe2, feat_types);
+
+    // Only triangulate points that don't already have a 3D MapPoint
+    for (const auto& [ft, matches] : matched_pairs_) {
+        for (const auto& m : matches) {
+            if (!keyframe1->get_map_point(m.first, ft) && !keyframe2->get_map_point(m.second, ft))
+                matched_pairs[ft].emplace_back(m.first, m.second);
+        }
+    }
+}
+
+void FeatureMatcher::match_keyframes_for_compute_sim3(const Keyframe& keyframe1, const Keyframe& keyframe2,
+                                std::map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
+                                const std::vector<FeatureType>& feat_types){
+
+    std::map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs_ = match_keyframes(keyframe1, keyframe2, feat_types);
+
+    // Only match valid points
+    for (const auto& [ft, matches] : matched_pairs_) {
+        for (const auto& m : matches) {
+            auto pMP1 = keyframe1->get_map_point(m.first, ft);
+            auto pMP2 = keyframe2->get_map_point(m.second, ft);
+            if (pMP1 && pMP2 && (!pMP1->is_bad() || !pMP2->is_bad()))
+                matched_pairs[ft].emplace_back(m.first, m.second);
         }
     }
 }
@@ -659,110 +691,6 @@ int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vec
     }
 
     return nmatches;
-}
-
-// SearchByBoW 2
-// ComputeSim3
-int FeatureMatcher::SearchByBoW(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches12, const FeatureType&  featType)
-{
-
-    const vector<cv::KeyPoint> &vKeysUn1 = pKF1->keypoints.at(featType);
-    const DBoW2::FeatureVector &vFeatVec1 = pKF1->mFeatVec;
-    const vector<Pt> vpMapPoints1 = pKF1->get_map_point_matches(featType);
-    const cv::Mat &Descriptors1 = pKF1->descriptors.at(featType);
-
-    const vector<cv::KeyPoint> &vKeysUn2 = pKF2->keypoints.at(featType);
-    const DBoW2::FeatureVector &vFeatVec2 = pKF2->mFeatVec;
-    const vector<Pt> vpMapPoints2 = pKF2->get_map_point_matches(featType);
-    const cv::Mat &Descriptors2 = pKF2->descriptors.at(featType);
-
-    vpMatches12 = vector<Pt>(vpMapPoints1.size(),static_cast<Pt>(NULL));
-    vector<bool> vbMatched2(vpMapPoints2.size(),false);
-
-    int nMatches{0};
-    float rotFactor{};
-    vector<vector<int>> rotHist = initRotationHistogram(rotFactor,HISTO_LENGTH);
-
-    DBoW2::FeatureVector::const_iterator f1it = vFeatVec1.begin();
-    DBoW2::FeatureVector::const_iterator f2it = vFeatVec2.begin();
-    DBoW2::FeatureVector::const_iterator f1end = vFeatVec1.end();
-    DBoW2::FeatureVector::const_iterator f2end = vFeatVec2.end();
-
-    while(f1it != f1end && f2it != f2end)
-    {
-        if(f1it->first == f2it->first)
-        {
-            for(size_t i1=0, iend1=f1it->second.size(); i1<iend1; i1++)
-            {
-                const size_t idx1 = f1it->second[i1];
-
-                Pt pMP1 = vpMapPoints1[idx1];
-                if(!pMP1)
-                    continue;
-                if(pMP1->is_bad())
-                    continue;
-
-                const cv::Mat &refDescriptor = Descriptors1.row(idx1);
-                Descriptor_Distance_Type bestDist1{highest_possible_distance},bestDist2{highest_possible_distance};
-                int bestIdx2{-1};
-
-                for(size_t i2=0, iend2=f2it->second.size(); i2<iend2; i2++)
-                {
-                    const size_t idx2 = f2it->second[i2];
-
-                    Pt pMP2 = vpMapPoints2[idx2];
-
-                    if(vbMatched2[idx2] || !pMP2)
-                        continue;
-
-                    if(pMP2->is_bad())
-                        continue;
-
-                    const cv::Mat &descriptor = Descriptors2.row(idx2);
-                    Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP2->featureType);
-
-                    if(descDist < bestDist1)
-                    {
-                        bestDist2 = bestDist1;
-                        bestDist1 = descDist;
-                        bestIdx2 = idx2;
-                    }
-                    else if(descDist < bestDist2)
-                    {
-                        bestDist2 = descDist;
-                    }
-                }
-
-                if(bestDist1 < TH_LOW[featType])
-                {
-                    if(static_cast<float>(bestDist1) < mfNNratio * static_cast<float>(bestDist2))
-                    {
-                        vpMatches12[idx1] = vpMapPoints2[bestIdx2];
-                        vbMatched2[bestIdx2] = true;
-                        nMatches++;
-                        if(mbCheckOrientation)
-                            updateRotationHistogram(rotHist,idx1,vKeysUn1[idx1],vKeysUn2[bestIdx2],rotFactor,HISTO_LENGTH);
-                    }
-                }
-            }
-
-            f1it++;
-            f2it++;
-        }
-        else if(f1it->first < f2it->first)
-        {
-            f1it = vFeatVec1.lower_bound(f2it->first);
-        }
-        else
-        {
-            f2it = vFeatVec2.lower_bound(f1it->first);
-        }
-    }
-
-    if(mbCheckOrientation)
-        filterMatchesWithOrientation(rotHist,vpMatches12,nMatches);
-
-    return nMatches;
 }
 
 // Fuse 2

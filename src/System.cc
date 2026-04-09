@@ -121,7 +121,8 @@ System::System(const string &vocabularyFolder,
     mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::Run, localMapper);
 
     //Initialize the Loop Closing thread and launch
-    loopCloser =  make_shared<LoopClosing>(mpMap, mpKeyFrameDatabase, vocabulary, mSensor!=MONOCULAR, featureTypes[featureLoopClosure],
+    loopCloser =  make_shared<LoopClosing>(mpMap, mpKeyFrameDatabase, vocabulary, mSensor!=MONOCULAR,
+        featureTypes[featureLoopClosure], featureTypes,
         tracker->get_image_width(), tracker->get_image_height());
     mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::Run, loopCloser);
 
