@@ -339,7 +339,7 @@ bool LoopClosing::ComputeSim3()
                 nCandidates--;
             }
 
-            // If RANSAC returns a Sim3, perform a guided matching and optimize with all correspondences
+            // If RANSAC returns a Sim3 optimize with all correspondences
             if(!Scm.empty())
             {
                 vector<Pt> vpMapPointMatches(vvpMapPointMatches[i].size(), static_cast<Pt>(NULL));
@@ -352,7 +352,6 @@ bool LoopClosing::ComputeSim3()
                 mat3f R = pSolver->GetEstimatedRotation();
                 vec3f t = pSolver->GetEstimatedTranslation();
                 const float s = pSolver->GetEstimatedScale();
-                matcher->SearchBySim3(mpCurrentKF,pKF,vpMapPointMatches,s,R,t,7.5f, featureType);
 
                 g2o::Sim3 gScm(R.cast<double>(),t.cast<double>(),s);
                 const int nInliers = Optimizer::OptimizeSim3(mpCurrentKF, pKF, vpMapPointMatches, gScm, 10, mbFixScale, featureType);
