@@ -19,9 +19,6 @@ namespace AF_VSLAM {
         const string vocabularyFolder;
 
         // Vocabulary variables
-        std::shared_ptr<AnyFeatNonBinVocabulary> anyFeatNonBinVocabulary;
-        std::shared_ptr<AnyFeatBinVocabulary> anyFeatBinVocabulary;
-        std::shared_ptr<R2d2Vocabulary> r2d2Vocabulary;
         std::shared_ptr<Sift128Vocabulary> sift128Vocabulary;
         std::shared_ptr<Kaze64Vocabulary> kaze64Vocabulary;
         std::shared_ptr<Surf64Vocabulary> surf64Vocabulary;

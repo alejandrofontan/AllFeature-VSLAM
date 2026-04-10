@@ -2,14 +2,13 @@
 
 # aliked128 parameters
 
-# Feature Extractor 
+# Feature Extractor
 FeatureExtractor.nOctaves: 8
 FeatureExtractor.scaleFactor: 2.0
 FeatureExtractor.detectTh: 0.0
 FeatureExtractor.maxNumFeatures: 1000
 
-# Feature Matcher 
-FeatureMatcher.TH_HIGH: 1.69
+# Feature Matcher
 FeatureMatcher.TH_LOW: 0.82
 FeatureMatcher.descDistTh_high_reloc: 1.69
 FeatureMatcher.descDistTh_low_reloc: 1.04

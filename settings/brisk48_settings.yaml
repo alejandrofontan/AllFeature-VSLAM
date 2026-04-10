@@ -2,14 +2,13 @@
 
 # brisk48 parameters
 
-# Feature Extractor 
+# Feature Extractor
 FeatureExtractor.nOctaves: 8
 FeatureExtractor.scaleFactor: 1.5
 FeatureExtractor.detectTh: 30.0
 FeatureExtractor.maxNumFeatures: 1000
 
-# Feature Matcher 
-FeatureMatcher.TH_HIGH: 157.0
+# Feature Matcher
 FeatureMatcher.TH_LOW: 81.0
 FeatureMatcher.descDistTh_high_reloc: 157.0
 FeatureMatcher.descDistTh_low_reloc: 102.0

@@ -9,17 +9,14 @@
 #include <iostream>
 
 enum FeatureType {
-    FEAT_SUPERPOINT256 = 10,
-    FEAT_ALIKED128 = 9,
-    FEAT_ANYFEATNONBIN = 8,
-    FEAT_ANYFEATBIN = 7,
-    FEAT_R2D2 = 6,
+    FEAT_SUPERPOINT256 = 7,
+    FEAT_ALIKED128 = 6,
     FEAT_SIFT128 = 5,
     FEAT_KAZE64 = 4,
     FEAT_SURF64 = 3,
-    FEAT_BRISK = 2,
+    FEAT_BRISK48 = 2,
     FEAT_AKAZE61 = 1,
-    FEAT_ORB = 0,
+    FEAT_ORB32 = 0,
 };
 
 enum MatcherType {

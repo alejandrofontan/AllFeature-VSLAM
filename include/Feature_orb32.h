@@ -11,7 +11,7 @@ namespace AF_VSLAM {
     class Orb32 : public Feature {
     public:
         const std::string& getFeatureName()    const override { return s_featureName; }
-        const FeatureType  getType()           const override { return FEAT_ORB; }
+        const FeatureType  getType()           const override { return FEAT_ORB32; }
         const MatcherType getMatcherType()     const override { return BF_HAMMING; }
         const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
 

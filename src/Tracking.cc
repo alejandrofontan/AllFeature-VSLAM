@@ -52,7 +52,7 @@ Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
         initFeatureExtractor[ft] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , feature_settings_yaml_file.at(ft), ft);
     }
 
-    matcher = std::make_shared<FeatureMatcher>(w, h, "Tracking");
+    matcher = std::make_shared<FeatureMatcher>(w, h, featureTypes, "Tracking");
 }
 
 void Tracking::SetLocalMapper(std::shared_ptr<LocalMapping> localMapper_)

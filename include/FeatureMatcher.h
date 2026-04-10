@@ -28,7 +28,9 @@ public:
 
     // Initializes all feature matching backends: SiftMatchGPU, LightGlue, and SuperPoint-LightGlue (TensorRT).
     const int max_supported = 4000;
-    FeatureMatcher(const int& image_width, const int& image_height, std::string name = "Extractor", float nnratio=0.6, bool checkOri=true);
+    FeatureMatcher(const int& image_width, const int& image_height,
+        const std::vector<FeatureType>& feature_types,
+        std::string name = "Extractor", float nnratio=0.6, bool checkOri=true);
 
     // Computes the Hamming distance between two ORB descriptors
     static Descriptor_Distance_Type descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_);
@@ -141,7 +143,6 @@ public:
 
     static VerbosityLevel verbosity;
     static std::map<FeatureType, Descriptor_Distance_Type> TH_LOW;
-    static std::map<FeatureType, Descriptor_Distance_Type> TH_HIGH;
     static std::map<FeatureType, Descriptor_Distance_Type> descDistTh_high_reloc;
     static std::map<FeatureType, Descriptor_Distance_Type> descDistTh_low_reloc;
 
@@ -176,6 +177,7 @@ protected:
 
 
     // Matching options
+    std::vector<FeatureType> feature_types;
 
     // match_keyframe_to_frame Keyframe-Frame
     // Tracking::match_keyframe_to_frame & Tracking::Relocalization

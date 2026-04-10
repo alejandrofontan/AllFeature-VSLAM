@@ -17,7 +17,7 @@ LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const v
     mbAbortBA(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), mbAcceptKeyFrames(true), featureTypes(featureTypes),
     image_width(image_width), image_height(image_height)
 {
-    matcher = std::make_shared<FeatureMatcher>(image_width, image_height, "LocalMapping");
+    matcher = std::make_shared<FeatureMatcher>(image_width, image_height, featureTypes, "LocalMapping");
 }
 
 void LocalMapping::Run()

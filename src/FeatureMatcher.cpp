@@ -11,7 +11,6 @@ using namespace std;
 namespace AF_VSLAM
 {
 
-std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::TH_HIGH = {};
 std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::TH_LOW = {};
 std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::descDistTh_high_reloc = {};
 std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::descDistTh_low_reloc = {};
@@ -21,57 +20,63 @@ VerbosityLevel FeatureMatcher::verbosity{MEDIUM};
 float FeatureMatcher::radiusScale{1.15f};
 
 // Initializes all feature matching backends: SiftMatchGPU, LightGlue, and SuperPoint-LightGlue (TensorRT).
-FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height, std::string name, float nnratio, bool checkOri):
-    mfNNratio(nnratio), mbCheckOrientation(checkOri), image_width(image_width), image_height(image_height), name(name)
+FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
+    const std::vector<FeatureType>& feature_types,
+    std::string name, float nnratio, bool checkOri):
+    mfNNratio(nnratio), mbCheckOrientation(checkOri), image_width(image_width), image_height(image_height),
+    feature_types(feature_types), name(name)
 {
     AF_INFO("Initializing FeatureMatcher: " + name);
-    AF_INFO("Initializing SiftMatchGPU...");
+    for(const auto& feat_type : feature_types) {
+        if (feat_type == FEAT_SIFT128) {
+            AF_INFO("Initializing SiftMatchGPU...");
+            sift_match_gpu_ = SiftMatchGPU();
+            sift_match_gpu_.SetLanguage(SiftMatchGPU::SIFTMATCH_CUDA);
+            if (sift_match_gpu_.VerifyContextGL() == 0) {
+                AF_ERROR("SiftMatchGPU initialization failed!");
+            }
+            sift_match_gpu_.Allocate(FeatureMatcher::max_supported, 1);
+            AF_INFO("SiftMatchGPU initialized.");
+        }
 
-    sift_match_gpu_ = SiftMatchGPU();
-    sift_match_gpu_.SetLanguage(SiftMatchGPU::SIFTMATCH_CUDA);
-    if (sift_match_gpu_.VerifyContextGL() == 0) {
-       AF_ERROR("SiftMatchGPU initialization failed!");
+        if (feat_type == FEAT_SUPERPOINT256) {
+            AF_INFO("Initializing SuperPoint-LightGlue...");
+            std::string config_path = "Thirdparty/SuperPoint-LightGlue-TensorRT/config/config.yaml";
+            std::string model_dir = "Thirdparty/SuperPoint-LightGlue-TensorRT/weights/";
+            Configs configs(config_path, model_dir);
+            matcher_lightglue_superpoint = std::make_shared<SuperPointLightGlue>(configs.superpoint_lightglue_config);
+
+            AF_CONFIG_BEGIN("SuperPoint-LightGlue config");
+            AF_CONFIG_FIELD("onnx_file:           ", configs.superpoint_lightglue_config.onnx_file);
+            AF_CONFIG_FIELD("engine_file:         ", configs.superpoint_lightglue_config.engine_file);
+            AF_CONFIG_FIELD("input_tensor_names:  ", configs.superpoint_lightglue_config.input_tensor_names.size());
+            AF_CONFIG_FIELD("output_tensor_names: ", configs.superpoint_lightglue_config.output_tensor_names.size());
+            AF_CONFIG_END();
+
+            // Build reuses a cached .engine file if present, or compiles from ONNX on first run
+            if (!matcher_lightglue_superpoint->build()) {
+                throw std::runtime_error(
+                        "SuperPoint-LightGlue: failed to build/load TensorRT engine.\n"
+                        "  config: " + config_path + "\n"
+                        "  weights: " + model_dir);
+            }
+
+            // Warm up the model by running a dummy inference to avoid first-run overhead during actual matching
+            Eigen::Matrix<double, 258, Eigen::Dynamic> dummy = Eigen::Matrix<double, 258, Eigen::Dynamic>::Zero(258, 1);
+            std::vector<cv::DMatch> dummy_matches;
+            matcher_lightglue_superpoint->matching_points(dummy, dummy, dummy_matches);
+
+            AF_INFO("SuperPoint-LightGlue initialized and warmed up from: " + model_dir);
+        }
+        if (feat_type == FEAT_ALIKED128 || feat_type == FEAT_SIFT128) {
+            AF_INFO("Initializing LightGlue...");
+            // Select CUDA if available, fall back to CPU
+            torch_device = std::make_shared<torch::Device>(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
+            matcher_lightglue = std::make_shared<matcher::LightGlue>();
+            matcher_lightglue->to(*torch_device);
+            AF_INFO("LightGlue initialized.");
+        }
     }
-    sift_match_gpu_.Allocate(FeatureMatcher::max_supported, 1);
-
-    AF_INFO("SiftMatchGPU initialized.");
-
-    AF_INFO("Initializing LightGlue...");
-
-    // Select CUDA if available, fall back to CPU
-    torch_device = std::make_shared<torch::Device>(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
-    matcher_lightglue = std::make_shared<matcher::LightGlue>();
-    matcher_lightglue->to(*torch_device);
-
-    AF_INFO("LightGlue initialized.");
-
-    AF_INFO("Initializing SuperPoint-LightGlue...");
-
-    std::string config_path = "Thirdparty/SuperPoint-LightGlue-TensorRT/config/config.yaml";
-    std::string model_dir = "Thirdparty/SuperPoint-LightGlue-TensorRT/weights/";
-    Configs configs(config_path, model_dir);
-    matcher_lightglue_superpoint = std::make_shared<SuperPointLightGlue>(configs.superpoint_lightglue_config);
-    AF_CONFIG_BEGIN("SuperPoint-LightGlue config");
-    AF_CONFIG_FIELD("onnx_file:           ", configs.superpoint_lightglue_config.onnx_file);
-    AF_CONFIG_FIELD("engine_file:         ", configs.superpoint_lightglue_config.engine_file);
-    AF_CONFIG_FIELD("input_tensor_names:  ", configs.superpoint_lightglue_config.input_tensor_names.size());
-    AF_CONFIG_FIELD("output_tensor_names: ", configs.superpoint_lightglue_config.output_tensor_names.size());
-    AF_CONFIG_END();
-
-    // Build reuses a cached .engine file if present, or compiles from ONNX on first run
-    if (!matcher_lightglue_superpoint->build()) {
-        throw std::runtime_error(
-                "SuperPoint-LightGlue: failed to build/load TensorRT engine.\n"
-                "  config: " + config_path + "\n"
-                "  weights: " + model_dir);
-    }
-
-    // Warm up the model by running a dummy inference to avoid first-run overhead during actual matching
-    Eigen::Matrix<double, 258, Eigen::Dynamic> dummy = Eigen::Matrix<double, 258, Eigen::Dynamic>::Zero(258, 1);
-    std::vector<cv::DMatch> dummy_matches;
-    matcher_lightglue_superpoint->matching_points(dummy, dummy, dummy_matches);
-
-    AF_INFO("SuperPoint-LightGlue initialized and warmed up from: " + model_dir);
 }
 
 std::vector<cv::DMatch> FeatureMatcher::swap_match_direction(const std::vector<cv::DMatch>& in)
@@ -861,13 +866,11 @@ void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_setti
     cv::FileStorage fSettings(feature_settings_yaml_file, cv::FileStorage::READ);
 
     FeatureMatcher::TH_LOW[featureType] = fSettings["FeatureMatcher.TH_LOW"];
-    FeatureMatcher::TH_HIGH[featureType] = fSettings["FeatureMatcher.TH_HIGH"];
     FeatureMatcher::descDistTh_low_reloc[featureType] = fSettings["FeatureMatcher.descDistTh_high_reloc"];
     FeatureMatcher::descDistTh_high_reloc[featureType] = fSettings["FeatureMatcher.descDistTh_low_reloc"];
 
     AF_CONFIG_BEGIN("feature_settings_yaml_file");
         AF_CONFIG_FIELD("FeatureMatcher.TH_LOW", FeatureMatcher::TH_LOW[featureType]);
-        AF_CONFIG_FIELD("FeatureMatcher.TH_HIGH", FeatureMatcher::TH_HIGH[featureType]);
         AF_CONFIG_FIELD("FeatureMatcher.descDistTh_low_reloc", FeatureMatcher::descDistTh_low_reloc[featureType]);
         AF_CONFIG_FIELD("FeatureMatcher.descDistTh_high_reloc", FeatureMatcher::descDistTh_high_reloc[featureType]);
     AF_CONFIG_END();

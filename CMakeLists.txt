@@ -46,9 +46,6 @@ set(SRCS_ALLFEATURE
         src/Feature_surf64.cpp
         src/Feature_kaze64.cpp
         src/Feature_sift128.cpp
-        src/Feature_r2d2_128.cpp
-        src/Feature_anyFeatBin.cpp
-        src/Feature_anyFeatNonBin.cpp
         src/Feature_aliked128.cpp
         src/Feature_superpoint256.cpp
         src/FeatureMatcher_lightglue.cpp
