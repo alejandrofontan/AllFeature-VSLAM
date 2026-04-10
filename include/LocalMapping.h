@@ -53,10 +53,10 @@ public:
         return mlNewKeyFrames.size();
     }
 
-    vector<double> localMapping_times{};
-    vector<double> createNewMapPoints_times{};
-    vector<double> localbundleadjustment_times{};
-    vector<double> searchInNeighbors_times{};
+    std::map<int, int> localMapping_times{};
+    std::map<int, int> createNewMapPoints_times{};
+    std::map<int, int> localbundleadjustment_times{};
+    std::map<int, int> searchInNeighbors_times{};
 
     // void medianLocalMappingTime(){
     //     if(!localMappingTime.empty()){

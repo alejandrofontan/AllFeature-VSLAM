@@ -51,7 +51,7 @@ void LocalMapping::Run()
             CreateNewMapPoints();
             std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
             double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-            //medianTrackingTime(t_duration, createNewMapPoints_times, "\n    - Create New Map Points ", LOCALMAPPING_PROFILING);
+            //median_tracking_time(t_duration, createNewMapPoints_times, "\n    - Create New Map Points ", LOCALMAPPING_PROFILING);
             //////////////////////////////////////////////////////////////////////////////////////////////////////
 
             if(!CheckNewKeyFrames())
@@ -63,7 +63,7 @@ void LocalMapping::Run()
                 }
                 t_end = std::chrono::steady_clock::now();
                 t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-                //medianTrackingTime(t_duration, searchInNeighbors_times, "    - Search In Neighbors ", LOCALMAPPING_PROFILING);
+                //median_tracking_time(t_duration, searchInNeighbors_times, "    - Search In Neighbors ", LOCALMAPPING_PROFILING);
             }
             mbAbortBA = false;
             //if(!CheckNewKeyFrames() && !stopRequested())
@@ -75,20 +75,20 @@ void LocalMapping::Run()
                     Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);
                     t_end = std::chrono::steady_clock::now();
                     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-                    //medianTrackingTime(t_duration, localbundleadjustment_times, "    - Local BA ", LOCALMAPPING_PROFILING);
+                    //median_tracking_time(t_duration, localbundleadjustment_times, "    - Local BA ", LOCALMAPPING_PROFILING);
                 }
                 // Check redundant local Keyframes
                 KeyFrameCulling();
             }
             loopCloser->InsertKeyFrame(mpCurrentKeyFrame);
 
-            viewer->set_runLocalMapping_time_median(vector_median(localMapping_times));
+            viewer->set_runLocalMapping_time_median(map_median(localMapping_times));
 
             //////////////////////////////////////////////////////////////////////////////////////////////////////
             //////////////////////////////////////////////////////////////////////////////////////////////////////
             t_end = std::chrono::steady_clock::now();
             t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
-            localMapping_times.push_back(t_duration);
+            localMapping_times[int(1000 * t_duration)]++;
         }
         else if(Stop())
         {
@@ -295,7 +295,7 @@ void LocalMapping::CreateNewMapPoints()
 
         auto& it1 = mpCurrentKeyFrame->cache_matched_pairs_feat_type[pKF2->frame_id];
         auto& it2 = pKF2->cache_matched_pairs_feat_type[mpCurrentKeyFrame->frame_id];
-        
+
         for (int i = 0; i < NF; ++i) {
             FeatureType ft = fts[i];
 

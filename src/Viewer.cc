@@ -156,8 +156,8 @@ void Viewer::Run()
         glClearColor(1.0f,1.0f,1.0f,1.0f);
 
         ////////////////////////////////////////////////////////////////////////////////////
-        menuTrackingTime = static_cast<float>(1000.0 * grabImageMonocular_time_median);
-        menuLocalMappingTime = static_cast<float>(1000.0 * runLocalMapping_time_median);
+        menuTrackingTime = static_cast<float>(grabImageMonocular_time_median);
+        menuLocalMappingTime = static_cast<float>(runLocalMapping_time_median);
 
         ////////////////////////////////////////////////////////////////////////////////////
         mapDrawer->GetCurrentOpenGLCameraMatrix(Twc);

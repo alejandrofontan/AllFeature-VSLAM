@@ -93,37 +93,44 @@ int AF_VSLAM::RandomIntegerGenerator::GetRandomInteger(const int& minNumber, con
     return distrib(randomIntGenerator);
 }
 
-void AF_VSLAM::medianTrackingTime(std::vector<double> &timeVector, const std::string& stage, const bool& activate){
-    if(!activate)
+void AF_VSLAM::median_tracking_time(std::map<int, int> &timeMap, const std::string& stage, const bool& activate){
+    if (!activate)
         return;
-    if(timeVector.empty()){
+    if (timeMap.empty()) {
         return;
     }
-    std::vector<double> tmp = timeVector;
-    std::sort(tmp.begin(), tmp.end());
-    double median;
-    size_t n = tmp.size();
-    if(n % 2 == 1) median = tmp[n/2];
-    else median = 0.5*(tmp[n/2 - 1] + tmp[n/2]);
-    const double sum = std::accumulate(timeVector.begin(), timeVector.end(), 0.0);
-    double stddev = 0.0;
-    if (n >= 2) {
-        double sq_sum = 0.0;
-        for (double x : timeVector) {
-            const double d = x - median;
-            sq_sum += d * d;
-        }
-        stddev = std::sqrt(sq_sum / static_cast<double>(n - 1));
-    }
-    std::cout << stage + "median / std  / max time: " << " / " << 1000*median << " / " << 1000*stddev << " / " << 1000*tmp.back() << " ms" << std::endl;
+
+    double median = AF_VSLAM::map_median(timeMap);
+    std::cout << stage + "median / std  / max time: " << " / " << median << " ms" << std::endl;
 }
 
-double AF_VSLAM::vector_median(std::vector<double>& vector_){
-    std::vector<double> tmp = vector_;
-    std::sort(tmp.begin(), tmp.end());
-    size_t n = tmp.size();
-    if(n == 0)
-        return 0.0;
-    if(n % 2 == 1) return tmp[n/2];
-    else return 0.5*(tmp[n/2 - 1] + tmp[n/2]);
+double AF_VSLAM::map_median(std::map<int, int>& map_){
+    // Calculate total count of all elements
+    int totalCount = 0;
+    for (const auto& pair : map_) {
+        totalCount += pair.second;
+    }
+
+    int midLow = (totalCount - 1) / 2;  // Lower middle index
+    int midHigh = totalCount / 2;        // Upper middle index (same as midLow if odd)
+
+    int cumulative = 0;
+    int lowVal = -1, highVal = -1;
+
+    for (const auto& pair : map_) {
+        cumulative += pair.second;
+
+        if (lowVal == -1 && cumulative > midLow) {
+            lowVal = pair.first;
+        }
+        if (highVal == -1 && cumulative > midHigh) {
+            highVal = pair.first;
+        }
+        if (lowVal != -1 && highVal != -1) {
+            break;
+        }
+    }
+
+    double median = (lowVal + highVal) / 2.0;
+    return median;
 }

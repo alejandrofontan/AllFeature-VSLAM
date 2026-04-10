@@ -125,13 +125,13 @@ public:
     ////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////
     // Profiling
-    vector<double> resize_times{};
-    vector<double> frame_times{};
-    vector<double> tracking_times{};
-    vector<double> track_ref_times{};
-    vector<double> pose_opt_times{};
-    vector<double> local_map_times{};
-    vector<double> grabImageMonocular_times{};
+    std::map<int, int> resize_times{};
+    std::map<int, int> frame_times{};
+    std::map<int, int> tracking_times{};
+    std::map<int, int> track_ref_times{};
+    std::map<int, int> pose_opt_times{};
+    std::map<int, int> local_map_times{};
+    std::map<int, int> grabImageMonocular_times{};
 
     ////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////

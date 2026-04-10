@@ -647,8 +647,8 @@ void System::SaveStatistics(const std::string &filename){
     // }
     // float numObservationsPerPt = float(numObservations)/float(numPts);
 
-    // double medianTrackingTime{};
-    // AF_VSLAM::vectorMedian(medianTrackingTime,trackingTime);
+    // double median_tracking_time{};
+    // AF_VSLAM::vectorMedian(median_tracking_time,trackingTime);
 
     // double medianLocalMapppingTime{};
     // AF_VSLAM::vectorMedian(medianLocalMapppingTime,localMapper->localMappingTime);
@@ -666,7 +666,7 @@ void System::SaveStatistics(const std::string &filename){
     // f.open(statisticsFile.c_str());
     // f << fixed;
     // f << setprecision(0) << numKeyframes << " " << numPts << " " << numObservations << " " << setprecision(3) << numObservationsPerPt  <<
-    // " " << setprecision(9) << medianTrackingTime << " " << medianLocalMapppingTime << " " << medianLoopClosingTime <<
+    // " " << setprecision(9) << median_tracking_time << " " << medianLocalMapppingTime << " " << medianLoopClosingTime <<
     // " " << tracker->numTrackedFrames <<" " << loopCloser->numOfLoopClosures << setprecision(0) <<
     // " " << firstVirtualMemUsed <<" " << maxVirtualMemUsed << " " << finalVirtualMemUsed <<
     // endl;
@@ -680,7 +680,7 @@ void System::SaveStatistics(const std::string &filename){
     // node["graph"]["numObservations"] = numObservations;
     // node["graph"]["numObservationsPerPt"] = numObservationsPerPt;
 
-    // node["profiling"]["medianTrackingTime"] = medianTrackingTime;
+    // node["profiling"]["median_tracking_time"] = median_tracking_time;
     // node["profiling"]["medianLocalMapppingTime"] = medianLocalMapppingTime;
     // node["profiling"]["medianLoopClosingTime"] = medianLoopClosingTime;
 

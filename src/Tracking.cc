@@ -97,7 +97,7 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
 #ifdef PROFILING_EXHAUSTIVE
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
-    resize_times.push_back(t_duration);
+    resize_times[int(1000 * t_duration)]++;
 #endif
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -114,7 +114,7 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
 #ifdef PROFILING_EXHAUSTIVE
     t_end = std::chrono::steady_clock::now();
     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_1).count();
-    frame_times.push_back(t_duration);
+    frame_times[int(1000 * t_duration)]++;
 #endif
     ///////////////////////////////////////////////////////////////////////////////
     // Track Frame
@@ -128,20 +128,20 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     t_end = std::chrono::steady_clock::now();
     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_2).count();
     if(mState == OK)
-        tracking_times.push_back(t_duration);
+        tracking_times[int(1000 * t_duration)]++;
 #endif
 
-    viewer->set_grabImageMonocular_time_median(vector_median(grabImageMonocular_times));
+    viewer->set_grabImageMonocular_time_median(map_median(grabImageMonocular_times));
 
 #ifdef PROFILING_EXHAUSTIVE
-    // std::cout << "\n Tracking Profiling " << std::endl;
-    // medianTrackingTime(resize_times            , "    - Resize Image   ", TRACKING_PROFILING);
-    // medianTrackingTime(frame_times             , "    - Frame Creation ", TRACKING_PROFILING);
-    // medianTrackingTime(tracking_times          , "    - Tracking       ", TRACKING_PROFILING);
-    // medianTrackingTime(track_ref_times         , "        - Track Ref   ", TRACKING_PROFILING);
-    // medianTrackingTime(pose_opt_times          , "        - Pose Optimization   ", TRACKING_PROFILING);
-    // medianTrackingTime(local_map_times         , "        - Track Local Map   ", TRACKING_PROFILING);
-    // medianTrackingTime(grabImageMonocular_times, "\033[1;32mGrab Image Monocular   \033[0m", TRACKING_PROFILING);
+    std::cout << "\n Tracking Profiling " << std::endl;
+    median_tracking_time(resize_times            , "    - Resize Image   ", TRACKING_PROFILING);
+    median_tracking_time(frame_times             , "    - Frame Creation ", TRACKING_PROFILING);
+    median_tracking_time(tracking_times          , "    - Tracking       ", TRACKING_PROFILING);
+    median_tracking_time(track_ref_times         , "        - Track Ref   ", TRACKING_PROFILING);
+    median_tracking_time(pose_opt_times          , "        - Pose Optimization   ", TRACKING_PROFILING);
+    median_tracking_time(local_map_times         , "        - Track Local Map   ", TRACKING_PROFILING);
+    median_tracking_time(grabImageMonocular_times, "\033[1;32mGrab Image Monocular   \033[0m", TRACKING_PROFILING);
 #endif
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -149,7 +149,7 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     t_end = std::chrono::steady_clock::now();
     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
     if(mState == OK)
-        grabImageMonocular_times.push_back(t_duration);
+        grabImageMonocular_times[int(1000 * t_duration)]++;
 
     return currentFrame.Tcw;
 }
@@ -206,7 +206,7 @@ void Tracking::Track()
 #ifdef PROFILING_EXHAUSTIVE
         std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
         double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-        local_map_times.push_back(t_duration);
+        local_map_times[int(1000 * t_duration)]++;
 #endif
 
         if(bOK)
@@ -561,7 +561,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
 #ifdef PROFILING_EXHAUSTIVE
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    track_ref_times.push_back(t_duration);
+    track_ref_times[int(1000 * t_duration)]++;
     t_start = std::chrono::steady_clock::now();
 #endif
 
@@ -594,7 +594,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     #ifdef PROFILING_EXHAUSTIVE
     t_end = std::chrono::steady_clock::now();
     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    pose_opt_times.push_back(t_duration);
+    pose_opt_times[int(1000 * t_duration)]++;
 #endif
 
     return nmatchesMap >= TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW;

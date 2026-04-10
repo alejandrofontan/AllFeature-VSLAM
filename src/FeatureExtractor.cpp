@@ -46,7 +46,7 @@ void AF_VSLAM::FeatureExtractor::operator()(const Image& img,
 
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    //medianTrackingTime(t_duration, extractorTime, "        - Extractor Time   ", TRACKING_PROFILING);
+    //median_tracking_time(t_duration, extractorTime, "        - Extractor Time   ", TRACKING_PROFILING);
 }
 
 void AF_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints){
