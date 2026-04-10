@@ -14,6 +14,8 @@
   <p align="center">
     <a href="https://scholar.google.com/citations?user=SDtnGogAAAAJ&hl=en&oi=a"><strong>Alejandro Fontan</strong></a>
     ·
+    <a href="https://scholar.google.com/citations?user=eq46ylAAAAAJ&hl=en"><strong>Tobias Fischer</strong></a>
+    ·
     <a href="https://scholar.google.com/citations?user=j_sMzokAAAAJ&hl=en&oi=a"><strong>Javier Civera</strong></a>
     ·
     <a href="https://scholar.google.com/citations?user=TDSmCKgAAAAJ&hl=en&oi=ao"><strong>Michael Milford</strong></a>
