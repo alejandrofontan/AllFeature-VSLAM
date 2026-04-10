@@ -1,6 +1,9 @@
 [comment]: <> (# AllFeature-VSLAM)
 
-<!-- PROJECT LOGO -->
+<p align="center">
+<div align="center">
+    <img src="wisdom_kookaburra.png" width="100"/>
+</div>
 
 <p align="center">
   <h1 align="center"> AllFeature-VSLAM
