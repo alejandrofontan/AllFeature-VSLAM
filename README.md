@@ -1,11 +1,11 @@
 [comment]: <> (# AllFeature-VSLAM)
 
-<table align="center">
+<table align="center" style="border-collapse: collapse; border: none;">
   <tr>
-    <td>
+    <td style="border: none;">
       <img src="wisdom_kookaburra.png" width="100"/>
     </td>
-    <td>
+    <td style="border: none;">
       <h1>AllFeature-VSLAM</h1>
       <p>
         <a href="https://scholar.google.com/citations?user=SDtnGogAAAAJ&hl=en&oi=a"><strong>Alejandro Fontan</strong></a>
