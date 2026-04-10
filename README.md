@@ -2,11 +2,10 @@
 
 <p align="center">
 <div align="center">
-    <img src="wisdom_kookaburra.png" width="100"/>
+    <img src="wisdom_kookaburra.png" width="500"/>
 </div>
 
 <p align="center">
-  <h1 align="center"> AllFeature-VSLAM
   </h1>
   <p align="center">
     <a href="https://scholar.google.com/citations?user=SDtnGogAAAAJ&hl=en&oi=a"><strong>Alejandro Fontan</strong></a>
