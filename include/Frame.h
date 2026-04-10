@@ -124,6 +124,7 @@ public:
 
     std::vector<FeatureType> featureTypes;
     std::map<FrameId, std::vector<cv::DMatch>> cache_matched_pairs{};
+    std::map<FrameId, std::map<FeatureType, std::vector<cv::DMatch>>> cache_matched_pairs_feat_type{};
 
     // Vocabulary used for relocalization.
     shared_ptr<Vocabulary> vocabulary;

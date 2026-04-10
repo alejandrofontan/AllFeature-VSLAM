@@ -134,14 +134,14 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     viewer->set_grabImageMonocular_time_median(vector_median(grabImageMonocular_times));
 
 #ifdef PROFILING_EXHAUSTIVE
-    std::cout << "\n Tracking Profiling " << std::endl;
-    medianTrackingTime(resize_times            , "    - Resize Image   ", TRACKING_PROFILING);
-    medianTrackingTime(frame_times             , "    - Frame Creation ", TRACKING_PROFILING);
-    medianTrackingTime(tracking_times          , "    - Tracking       ", TRACKING_PROFILING);
-    medianTrackingTime(track_ref_times         , "        - Track Ref   ", TRACKING_PROFILING);
-    medianTrackingTime(pose_opt_times          , "        - Pose Optimization   ", TRACKING_PROFILING);
-    medianTrackingTime(local_map_times         , "        - Track Local Map   ", TRACKING_PROFILING);
-    medianTrackingTime(grabImageMonocular_times, "\033[1;32mGrab Image Monocular   \033[0m", TRACKING_PROFILING);
+    // std::cout << "\n Tracking Profiling " << std::endl;
+    // medianTrackingTime(resize_times            , "    - Resize Image   ", TRACKING_PROFILING);
+    // medianTrackingTime(frame_times             , "    - Frame Creation ", TRACKING_PROFILING);
+    // medianTrackingTime(tracking_times          , "    - Tracking       ", TRACKING_PROFILING);
+    // medianTrackingTime(track_ref_times         , "        - Track Ref   ", TRACKING_PROFILING);
+    // medianTrackingTime(pose_opt_times          , "        - Pose Optimization   ", TRACKING_PROFILING);
+    // medianTrackingTime(local_map_times         , "        - Track Local Map   ", TRACKING_PROFILING);
+    // medianTrackingTime(grabImageMonocular_times, "\033[1;32mGrab Image Monocular   \033[0m", TRACKING_PROFILING);
 #endif
 
     ///////////////////////////////////////////////////////////////////////////////////////////////

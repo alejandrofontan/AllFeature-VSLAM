@@ -172,6 +172,9 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
     auto robust_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::USAC_MAGSAC);
 
     // Associate surviving matches to map points
+    auto& it1 = keyframe->cache_matched_pairs_feat_type[frame.mnId];
+    auto& it2 = frame.cache_matched_pairs_feat_type[keyframe->frame_id];
+
     map<FeatureType, int> matches_count;
     for (const auto& m : robust_matches) {
         const int query_idx = kps1_indexes[m.queryIdx];
@@ -182,6 +185,9 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
             continue;
         map_pts_matches[feat_type][train_idx] = pt;
         matches_count[feat_type]++;
+
+        it1[feat_type].push_back(cv::DMatch(m.queryIdx, m.trainIdx, m.distance));
+        it2[feat_type].push_back(cv::DMatch(m.trainIdx, m.queryIdx, m.distance));
     }
 
     // Cache matched pairs in both keyframe and frame for downstream use
@@ -326,6 +332,8 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
     }
     const vector<cv::DMatch>& filtered_matches = cached ? cache_it->second : computed_matches;
 
+    auto& it1 = keyframe1->cache_matched_pairs_feat_type[keyframe2->frame_id];
+    auto& it2 = keyframe2->cache_matched_pairs_feat_type[keyframe1->frame_id];
     map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs;
     for (const auto& m : filtered_matches) {
         const size_t query_idx = kps1_indexes[m.queryIdx];
@@ -334,6 +342,10 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
 
         // Only triangulate points that don't already have a 3D MapPoint
         matched_pairs[feat_type].emplace_back(query_idx, train_idx);
+        if (!cached){
+            it1[feat_type].push_back(cv::DMatch(m.queryIdx, m.trainIdx, m.distance));
+            it2[feat_type].push_back(cv::DMatch(m.trainIdx, m.queryIdx, m.distance));
+        }
     }
 
     if(!cached){
@@ -590,13 +602,13 @@ int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyfra
 
         // Look up cached match index for this map point
         const Keyframe& ref_kf = pt_to_keyframe_id.at(pt->ptId);
-        const auto cache_it = keyframe->cache_matched_pairs.find(ref_kf->frame_id);
-        if (cache_it == keyframe->cache_matched_pairs.end())
+        const auto cache_it = keyframe->cache_matched_pairs_feat_type.find(ref_kf->frame_id);
+        if (cache_it == keyframe->cache_matched_pairs_feat_type.end())
             continue;
 
         const int ref_idx = pt->GetIndexInKeyFrame(ref_kf);
         int bestIdx{-1};
-        for (const auto& m : cache_it->second) {
+        for (const auto& m : cache_it->second[pt->featureType]) {
             if (m.trainIdx == ref_idx) {
                 bestIdx = m.queryIdx;
                 break;
@@ -624,7 +636,6 @@ int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyfra
             num_matches++;
         }
     }
-
     return num_matches;
 }
 

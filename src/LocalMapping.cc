@@ -293,6 +293,9 @@ void LocalMapping::CreateNewMapPoints()
         int queryOffset = 0;
         int trainOffset = 0;
 
+        auto& it1 = mpCurrentKeyFrame->cache_matched_pairs_feat_type[pKF2->frame_id];
+        auto& it2 = pKF2->cache_matched_pairs_feat_type[mpCurrentKeyFrame->frame_id];
+        
         for (int i = 0; i < NF; ++i) {
             FeatureType ft = fts[i];
 
@@ -306,9 +309,11 @@ void LocalMapping::CreateNewMapPoints()
                 cv::DMatch dd = d;
                 dd.queryIdx += queryOffset;
                 dd.trainIdx += trainOffset;
+
+                it1[ft].push_back(d);
+                it2[ft].push_back(cv::DMatch(d.trainIdx, d.queryIdx, d.distance));
                 allMatches.push_back(dd);
             }
-
             queryOffset += nq;
             trainOffset += nt;
         }
