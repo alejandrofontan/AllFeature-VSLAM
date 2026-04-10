@@ -5,6 +5,8 @@
     <img src="wisdom_kookaburra.png" width="500"/>
 </div>
 
+<h1 align="center">AllFeature-VSLAM  |  v1.0</h1>
+
 <p align="center">
   </h1>
   <p align="center">
