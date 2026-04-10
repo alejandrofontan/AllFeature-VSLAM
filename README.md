@@ -1,6 +1,24 @@
 [comment]: <> (# AllFeature-VSLAM)
 
-<p align="center">
+<table align="center">
+  <tr>
+    <td>
+      <img src="wisdom_kookaburra.png" width="100"/>
+    </td>
+    <td>
+      <h1>AllFeature-VSLAM</h1>
+      <p>
+        <a href="https://scholar.google.com/citations?user=SDtnGogAAAAJ&hl=en&oi=a"><strong>Alejandro Fontan</strong></a>
+        ·
+        <a href="https://scholar.google.com/citations?user=j_sMzokAAAAJ&hl=en&oi=a"><strong>Javier Civera</strong></a>
+        ·
+        <a href="https://scholar.google.com/citations?user=TDSmCKgAAAAJ&hl=en&oi=ao"><strong>Michael Milford</strong></a>
+      </p>
+    </td>
+  </tr>
+</table>
+
+<!-- <p align="center">
 <div align="center">
     <img src="wisdom_kookaburra.png" width="100"/>
 </div>
@@ -14,7 +32,7 @@
     <a href="https://scholar.google.com/citations?user=j_sMzokAAAAJ&hl=en&oi=a"><strong>Javier Civera</strong></a>
     ·
     <a href="https://scholar.google.com/citations?user=TDSmCKgAAAAJ&hl=en&oi=ao"><strong>Michael Milford</strong></a>
-  </p>
+  </p> -->
 
 ## Getting Started
 
