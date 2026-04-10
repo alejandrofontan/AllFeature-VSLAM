@@ -26,7 +26,7 @@
 
 ## Getting Started
 
-To ensure all dependencies are installed in a reproducible manner, we use the package management tool [**pixi**](https://pixi.sh/latest/). If you haven't installed [**pixi**](https://pixi.sh/latest/) yet, please run the following command in your terminal:
+If you haven't installed [**pixi**](https://pixi.sh/latest/) yet, please run the following command in your terminal:
 ```bash
 curl -fsSL https://pixi.sh/install.sh | bash
 ```
@@ -38,15 +38,10 @@ Clone the repository and navigate to the project directory:
 ```bash
 git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git --recursive && cd AllFeature-VSLAM
 ```
-Build with
+Build and run demo
 ```bash
-pixi run build
+pixi run build && pixi run demo
 ```
-Run demo
-```bash
-pixi run demo
-```
-
 
 ## License
 **AllFeature-VSLAM** builds on [**ORB-SLAM2**](https://github.com/raulmur/ORB_SLAM2) and inherits its release under a [GPLv3 license](https://github.com/alejandrofontan/AnyFeature-VSLAM/blob/main/docs/License-gpl.txt). For a list of all other code/library dependencies (and associated licenses), please see [Dependencies.md](https://github.com/alejandrofontan/AnyFeature-VSLAM/blob/main/docs/Dependencies.md).
