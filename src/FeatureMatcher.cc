@@ -45,24 +45,24 @@ float FeatureMatcher::radiusScale{1.15f};
 FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height, float nnratio, bool checkOri):
     mfNNratio(nnratio), mbCheckOrientation(checkOri), image_width(image_width), image_height(image_height)
 {
-    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing SiftMatchGPU..." << std::endl;
+    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing SiftMatchGPU...\n";
     sift_match_gpu_ = SiftMatchGPU();
     sift_match_gpu_.SetLanguage(SiftMatchGPU::SIFTMATCH_CUDA);
     if (sift_match_gpu_.VerifyContextGL() == 0) {
-       std::cout << "\033[1;31m[FeatureMatcher]\033[0m SiftMatchGPU initialization failed!" << std::endl;
+       std::cout << "\033[1;31m[FeatureMatcher]\033[0m SiftMatchGPU initialization failed!\n";
     }
     sift_match_gpu_.Allocate(FeatureMatcher::max_supported, 1);
-    std::cout << "\033[1;32m[FeatureMatcher]\033[0m SiftMatchGPU initialized." << std::endl;
+    std::cout << "\033[1;32m[FeatureMatcher]\033[0m SiftMatchGPU initialized.\n";
 
-    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing LightGlue..." << std::endl;
+    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing LightGlue...\n";
 
     // Select CUDA if available, fall back to CPU
     torch_device = std::make_shared<torch::Device>(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
     matcher_lightglue = std::make_shared<matcher::LightGlue>();
     matcher_lightglue->to(*torch_device);
-    std::cout << "\033[1;32m[FeatureMatcher]\033[0m LightGlue initialized." << std::endl;
+    std::cout << "\033[1;32m[FeatureMatcher]\033[0m LightGlue initialized.\n";
 
-    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing SuperPoint-LightGlue..." << std::endl;
+    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing SuperPoint-LightGlue...\n";
     std::string config_path = "Thirdparty/SuperPoint-LightGlue-TensorRT/config/config.yaml";
     std::string model_dir = "Thirdparty/SuperPoint-LightGlue-TensorRT/weights/";
     Configs configs(config_path, model_dir);
@@ -85,7 +85,7 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height, 
     Eigen::Matrix<double, 258, Eigen::Dynamic> dummy = Eigen::Matrix<double, 258, Eigen::Dynamic>::Zero(258, 1);
     std::vector<cv::DMatch> dummy_matches;
     matcher_lightglue_superpoint->matching_points(dummy, dummy, dummy_matches);
-    std::cout << "\033[1;32m[FeatureMatcher]\033[0m SuperPoint-LightGlue initialized and warmed up from: " << model_dir << std::endl;
+    std::cout << "\033[1;32m[FeatureMatcher]\033[0m SuperPoint-LightGlue initialized and warmed up from: " << model_dir << "\n";
 }
 
 std::vector<cv::DMatch> FeatureMatcher::swap_match_direction(const std::vector<cv::DMatch>& in)
@@ -556,10 +556,10 @@ map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_
 
     std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs;
     for (const auto& m : filtered_matches) {
-        const int query_idx = kps1_indexes[m.queryIdx];
-        const int train_idx = kps2_indexes[m.trainIdx];
+        const size_t query_idx = kps1_indexes[m.queryIdx];
+        const size_t train_idx = kps2_indexes[m.trainIdx];
         const FeatureType feat_type = used_feature_types[m.queryIdx];
-        matched_pairs[feat_type].push_back(std::make_pair(query_idx, train_idx));
+        matched_pairs[feat_type].emplace_back(query_idx, train_idx);
     }
 
     return matched_pairs;
@@ -639,45 +639,46 @@ int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyfra
     return num_matches;
 }
 
-// Fuse 2
-// Loop Closing
-int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoints, const float& radiusTh, vector<Pt> &vpReplacePoint, const FeatureType& featType)
+// Sim3 overload: projects map points into a keyframe using a Sim3 transform and fuses them.
+// Used in: LoopClosing
+int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f& Scw,
+    const vector<Pt> &map_pts, const float& radius_th, vector<Pt> &replace_pts, const FeatureType& feat_type)
 {
 
     // Get Calibration Parameters for later projection
-    const float &fx = pKF->fx;
-    const float &fy = pKF->fy;
-    const float &cx = pKF->cx;
-    const float &cy = pKF->cy;
+    const float &fx = keyframe->fx;
+    const float &fy = keyframe->fy;
+    const float &cx = keyframe->cx;
+    const float &cy = keyframe->cy;
 
     // Decompose Scw
-    mat3f sRcw = Scw.block<3,3>(0,0);
+    const mat3f sRcw = Scw.block<3,3>(0,0);
     const float scw = sqrt(sRcw.row(0).dot(sRcw.row(0)));
-    mat3f Rcw = sRcw / scw;
-    vec3f tcw = Scw.block<3,1>(0,3);
-    vec3f Ow = -Rcw.transpose() * tcw;
+    const mat3f Rcw = sRcw / scw;
+    const vec3f tcw = Scw.block<3,1>(0,3);
+    const vec3f Ow = -Rcw.transpose() * tcw;
 
     // Set of MapPoints already found in the KeyFrame
-    const set<Pt> spAlreadyFound = pKF->get_map_points(featType);
+    const set<Pt> spAlreadyFound = keyframe->get_map_points(feat_type);
 
     int nFused=0;
 
-    const int nPoints = vpPoints.size();
+    const size_t nPoints = map_pts.size();
 
     // For each candidate MapPoint project and match
-    for(int iMP=0; iMP<nPoints; iMP++)
+    for(size_t iMP=0; iMP<nPoints; iMP++)
     {
-        Pt pMP = vpPoints[iMP];
+        Pt pMP = map_pts[iMP];
 
         // Discard Bad MapPoints and already found
         if(pMP->is_bad() || spAlreadyFound.count(pMP))
             continue;
 
         // Get 3D Coords.
-        vec3f p3Dw = pMP->get_world_pos();
+        const vec3f p3Dw = pMP->get_world_pos();
 
         // Transform into Camera Coords.
-        vec3f p3Dc = Rcw * p3Dw + tcw;
+        const vec3f p3Dc = Rcw * p3Dw + tcw;
 
         // Depth must be positive
         if(p3Dc(2) < 0.0f)
@@ -692,29 +693,29 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
         const float v = fy*y+cy;
 
         // Point must be inside the image
-        if(!pKF->is_in_image(u,v))
+        if(!keyframe->is_in_image(u,v))
             continue;
 
         // Depth must be inside the scale pyramid of the image
         const float maxDistance = pMP->get_max_distance_invariance();
         const float minDistance = pMP->get_min_distance_invariance();
-        vec3f PO = p3Dw-Ow;
+        const vec3f PO = p3Dw-Ow;
         const float dist3D = PO.norm();
 
         if(dist3D<minDistance || dist3D>maxDistance)
             continue;
 
         // Viewing angle must be less than 60 deg
-        vec3f Pn = pMP->get_normal();
+        const vec3f Pn = pMP->get_normal();
 
         if(PO.dot(Pn) < 0.5f * dist3D)
             continue;
 
         // Search in a radius
         const float predictedSize = pMP->PredictSize(dist3D);
-        const float radius = radiusScale * radiusTh * predictedSize;
+        const float radius = radiusScale * radius_th * predictedSize;
 
-        const vector<size_t> vIndices = pKF->get_features_in_area(u,v,radius, featType);
+        const vector<size_t> vIndices = keyframe->get_features_in_area(u,v,radius, feat_type);
 
         if(vIndices.empty())
             continue;
@@ -724,16 +725,14 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
         Descriptor_Distance_Type bestDist{highest_possible_distance};
         int bestIdx{-1};
 
-        for(vector<size_t>::const_iterator vit=vIndices.begin(); vit!=vIndices.end(); vit++)
+        for(const size_t idx : vIndices)
         {
-            const size_t idx = *vit;
-
             //const float keyPtSize = pKF->GetKeyPtSize(KeypointIndex (idx), featType);
             //if((keyPtSize < predictedSize / pKF->sizeTolerance) || (keyPtSize > predictedSize * pKF->sizeTolerance))
             //    continue;
 
-            const cv::Mat &descriptor = pKF->descriptors.at(featType).row(idx);
-            Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
+            const cv::Mat &descriptor = keyframe->descriptors.at(feat_type).row(idx);
+            const Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
 
             if(descDist < bestDist)
             {
@@ -743,18 +742,18 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
         }
 
         // If there is already a MapPoint replace otherwise add new measurement
-        if(bestDist <= TH_LOW[featType])
+        if(bestDist <= TH_LOW[feat_type])
         {
-            Pt pMPinKF = pKF->get_map_point(bestIdx, featType);
+            Pt pMPinKF = keyframe->get_map_point(bestIdx, feat_type);
             if(pMPinKF)
             {
                 if(!pMPinKF->is_bad())
-                    vpReplacePoint[iMP] = pMPinKF;
+                    replace_pts[iMP] = pMPinKF;
             }
             else
             {
-                pMP->add_observation(pKF,bestIdx);
-                pKF->add_map_point(pMP,bestIdx);
+                pMP->add_observation(keyframe,bestIdx);
+                keyframe->add_map_point(pMP,bestIdx);
             }
             nFused++;
         }
@@ -763,8 +762,8 @@ int FeatureMatcher::Fuse(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoi
     return nFused;
 }
 
-// SearchByProjection 4
-// Relocalization
+// Projects map points from a keyframe into a current frame for relocalization.
+// Applies rotation histogram filtering to reject orientation-inconsistent matches.
 int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const set<Pt> &sAlreadyFound, const float& radiusTh,
      const bool& useHighMatchingThreshold, const FeatureType& featType)
 {
@@ -792,8 +791,8 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
             if(!pMP->is_bad() && !sAlreadyFound.count(pMP))
             {
                 //Project
-                vec3f x3Dw = pMP->get_world_pos();
-                vec3f x3Dc = Rcw * x3Dw + tcw;
+                const vec3f x3Dw = pMP->get_world_pos();
+                const vec3f x3Dc = Rcw * x3Dw + tcw;
 
                 const float xc = x3Dc(0);
                 const float yc = x3Dc(1);
@@ -808,8 +807,8 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
                     continue;
 
                 // Compute predicted scale level
-                vec3f PO = x3Dw - Ow;
-                float dist3D = PO.norm();
+                const vec3f PO = x3Dw - Ow;
+                const float dist3D = PO.norm();
 
                 const float maxDistance = pMP->get_max_distance_invariance();
                 const float minDistance = pMP->get_min_distance_invariance();
@@ -819,7 +818,7 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
                     continue;
 
                 // Search in a window
-                float predictedSize = pMP->PredictSize(dist3D);
+                const float predictedSize = pMP->PredictSize(dist3D);
                 const float radius = radiusScale * radiusTh * predictedSize;
 
                 const vector<size_t> vIndices2 = CurrentFrame.get_features_in_area(u, v, radius, featType);
@@ -831,9 +830,8 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
                 Descriptor_Distance_Type bestDist{highest_possible_distance};
                 int bestIdx2{-1};
 
-                for(vector<size_t>::const_iterator vit=vIndices2.begin(); vit!=vIndices2.end(); vit++)
+                for(const size_t i2 : vIndices2)
                 {
-                    const size_t i2 = *vit;
                     if(CurrentFrame.pts.at(featType)[i2])
                         continue;
 
@@ -874,15 +872,15 @@ Descriptor_Distance_Type FeatureMatcher::descriptor_distance(const cv::Mat &a, c
 void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType) {
 
     cv::FileStorage fSettings(feature_settings_yaml_file, cv::FileStorage::READ);
-    cout << endl  << "Loading Feature Matcher Settings from : " << feature_settings_yaml_file << endl;
+    cout << "\nLoading Feature Matcher Settings from : " << feature_settings_yaml_file << "\n";
     FeatureMatcher::TH_LOW[featureType] = fSettings["FeatureMatcher.TH_LOW"];
     FeatureMatcher::TH_HIGH[featureType] = fSettings["FeatureMatcher.TH_HIGH"];
     FeatureMatcher::descDistTh_low_reloc[featureType] = fSettings["FeatureMatcher.descDistTh_high_reloc"];
     FeatureMatcher::descDistTh_high_reloc[featureType] = fSettings["FeatureMatcher.descDistTh_low_reloc"];
-    cout <<  "- TH_LOW: " << FeatureMatcher::TH_LOW[featureType] << endl;
-    cout <<  "- TH_HIGH: " << FeatureMatcher::TH_HIGH[featureType] << endl;
-    cout <<  "- descDistTh_low_reloc: " << FeatureMatcher::descDistTh_low_reloc[featureType] << endl;
-    cout <<  "- descDistTh_high_reloc: " << FeatureMatcher::descDistTh_high_reloc[featureType] << endl;
+    cout <<  "- TH_LOW: " << FeatureMatcher::TH_LOW[featureType] << "\n";
+    cout <<  "- TH_HIGH: " << FeatureMatcher::TH_HIGH[featureType] << "\n";
+    cout <<  "- descDistTh_low_reloc: " << FeatureMatcher::descDistTh_low_reloc[featureType] << "\n";
+    cout <<  "- descDistTh_high_reloc: " << FeatureMatcher::descDistTh_high_reloc[featureType] << "\n";
 }
 
 vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, const int& histLength){
@@ -900,7 +898,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         float rot = keyPt.angle - refKeyPt.angle;
         if(rot < 0.0)
             rot += 360.0f;
-        int bin = (int) round(rot * rotFactor);
+        int bin = static_cast<int>(round(rot * rotFactor));
         if(bin == histLength)
             bin = 0;
         assert(bin >= 0 && bin < histLength);
@@ -941,7 +939,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         int max1{0}, max2{0}, max3{0};
         for(int i = 0; i < rotHist.size(); i++)
         {
-            const int s = (int) rotHist[i].size();
+            const int s = static_cast<int>(rotHist[i].size());
             if(s > max1)
             {
                 max3=max2;
@@ -965,12 +963,12 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
             }
         }
 
-        if(max2 < 0.1f*(float)max1)
+        if(max2 < 0.1f * static_cast<float>(max1))
         {
             ind2=-1;
             ind3=-1;
         }
-        else if(max3 < 0.1f*(float)max1)
+        else if(max3 < 0.1f * static_cast<float>(max1))
         {
             ind3=-1;
         }
@@ -994,9 +992,9 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
             {
                 sift_match_gpu_.SetDescriptors(0, desc1.rows, desc1.ptr<float>());
                 sift_match_gpu_.SetDescriptors(1, desc2.rows, desc2.ptr<float>());
-                const int max_out = 4000;
-                uint32_t (*match_buffer)[2] = new uint32_t[max_out][2];
-                int num_matches = sift_match_gpu_.GetSiftMatch(max_out, match_buffer, 0.7f, 0.8f, 1);
+                constexpr int max_out = 4000;
+                std::vector<std::array<uint32_t, 2>> match_buffer(max_out);
+                int num_matches = sift_match_gpu_.GetSiftMatch(max_out, reinterpret_cast<uint32_t(*)[2]>(match_buffer.data()), 0.7f, 0.8f, 1);
                 matches.clear();
                 matches.reserve(num_matches);
                 for (int i = 0; i < num_matches; ++i) {
@@ -1005,7 +1003,6 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
                         static_cast<int>(match_buffer[i][1]),
                         0.0f);
                 }
-                delete[] match_buffer;
                 break;
             }
             case BF_HAMMING:
@@ -1068,8 +1065,8 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         std::vector<cv::Point2f> pts2; pts2.reserve(matches.size());
         for (const auto& m : matches) {
             // Safety: ensure indices are valid
-            if (m.queryIdx < 0 || m.queryIdx >= (int)kps1.size()) continue;
-            if (m.trainIdx < 0 || m.trainIdx >= (int)kps2.size()) continue;
+            if (m.queryIdx < 0 || m.queryIdx >= static_cast<int>(kps1.size())) continue;
+            if (m.trainIdx < 0 || m.trainIdx >= static_cast<int>(kps2.size())) continue;
 
             pts1.push_back(kps1[m.queryIdx].pt);
             pts2.push_back(kps2[m.trainIdx].pt);
@@ -1077,8 +1074,8 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
 
         if (pts1.size() < 8) return matches; // not enough after filtering
 
-        const double reprojThreshold = 3.0;  // pixels
-        const double confidence      = 0.95;
+        constexpr double reprojThreshold = 3.0;  // pixels
+        constexpr double confidence      = 0.95;
 
         std::vector<uchar> inlierMask;
         cv::Mat F = cv::findFundamentalMat(
@@ -1100,8 +1097,8 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         matchesUsed.reserve(matches.size());
 
         for (const auto& m : matches) {
-            if (m.queryIdx < 0 || m.queryIdx >= (int)kps1.size()) continue;
-            if (m.trainIdx < 0 || m.trainIdx >= (int)kps2.size()) continue;
+            if (m.queryIdx < 0 || m.queryIdx >= static_cast<int>(kps1.size())) continue;
+            if (m.trainIdx < 0 || m.trainIdx >= static_cast<int>(kps2.size())) continue;
             matchesUsed.push_back(m);
         }
 

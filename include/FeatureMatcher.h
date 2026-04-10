@@ -136,6 +136,9 @@ public:
         const vector<Pt>& pts, vector<Pt>& pts_matched,
         const map<PtId, Keyframe>& pt_to_keyframe_id);
 
+    int fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f& Scw,
+        const std::vector<Pt> &map_pts, const float& radius_th, vector<Pt> &replace_pts, const FeatureType& feat_type);
+        
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -154,7 +157,7 @@ public:
     int SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const std::set<Pt> &sAlreadyFound, const float& radiusTh, const bool& useHighMatchingThreshold, const FeatureType& featureType);
 
     // Project MapPoints into KeyFrame using a given Sim3 and search for duplicated MapPoints.
-    int Fuse(Keyframe pKF, const mat4f& Scw, const std::vector<Pt> &vpPoints, const float& radiusTh, vector<Pt> &vpReplacePoint, const FeatureType& featureType);
+
 
     static void setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType);
 
@@ -198,15 +201,15 @@ protected:
 
     // match_keyframe_to_frame Keyframe-Frame
     // Tracking::match_keyframe_to_frame & Tracking::Relocalization
-    static const bool sBF_kf_lightglue = true;
+    static constexpr bool sBF_kf_lightglue = true;
 
     // match_keyframes_for_triangulation Keyframe-Keyframe
     // LocalMapping::CreateNewMapPoints
-    static const bool sFT_kk_lightglue = true;
+    static constexpr bool sFT_kk_lightglue = true;
 
     // SearchForInitialization Frame-Frame
     // Tracking::MonocularInitialization
-    static const int  sFI_ff_outlierMethod = cv::FM_RANSAC;
+    static constexpr int sFI_ff_outlierMethod = cv::FM_RANSAC;
 
     std::mutex lightglue_superpoint_mutex_;
 };

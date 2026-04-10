@@ -629,7 +629,7 @@ void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap)
         mat4f cvScw = Converter::toMatrix4f(g2oScw);
 
         vector<Pt> vpReplacePoints(mvpLoopMapPoints.size(),static_cast<Pt>(NULL));
-        matcher->Fuse(pKF,cvScw,mvpLoopMapPoints,4.0f,vpReplacePoints, featureType);
+        matcher->fuse_map_points_to_keyframe(pKF,cvScw,mvpLoopMapPoints,4.0f,vpReplacePoints, featureType);
 
         // Get Map Mutex
         unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
