@@ -2,7 +2,7 @@
 
 <p align="center">
 <div align="center">
-    <img src="wisdom_kookaburra.png" width="400"/>
+    <img src="wisdom_kookaburra.png" width="500"/>
 </div>
 
 <p align="center">
