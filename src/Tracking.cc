@@ -10,6 +10,7 @@
 #include "Converter.h"
 #include "Map.h"
 #include "Initializer.h"
+#include "afvslam_log.hpp"
 
 #include "Optimizer.h"
 #include "PnPsolver.h"
@@ -20,18 +21,6 @@
 #include <mutex>
 
 #include <yaml-cpp/yaml.h>
-
-#include "Feature_orb32.h"
-#include "Feature_brisk48.h"
-#include "Feature_akaze61.h"
-#include "Feature_surf64.h"
-#include "Feature_kaze64.h"
-#include "Feature_sift128.h"
-#include "Feature_r2d2_128.h"
-#include "Feature_anyFeatBin.h"
-#include "Feature_anyFeatNonBin.h"
-#include "Feature_aliked128.h"
-#include "Feature_superpoint256.h"
 
 using namespace std;
 
@@ -63,7 +52,7 @@ Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
         initFeatureExtractor[ft] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , feature_settings_yaml_file.at(ft), ft);
     }
 
-    matcher = std::make_shared<FeatureMatcher>(w, h);
+    matcher = std::make_shared<FeatureMatcher>(w, h, "Tracking");
 }
 
 void Tracking::SetLocalMapper(std::shared_ptr<LocalMapping> localMapper_)
@@ -94,9 +83,10 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     mImGray = im.grayImg;
     imName = im.imageName;
 
-#ifdef PROFILING_EXHAUSTIVE
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
+
+#ifdef PROFILING_EXHAUSTIVE
     resize_times[int(1000 * t_duration)]++;
 #endif
 
@@ -134,20 +124,20 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     viewer->set_grabImageMonocular_time_median(map_median(grabImageMonocular_times));
 
 #ifdef PROFILING_EXHAUSTIVE
-    std::cout << "\n Tracking Profiling " << std::endl;
-    median_tracking_time(resize_times            , "    - Resize Image   ", TRACKING_PROFILING);
-    median_tracking_time(frame_times             , "    - Frame Creation ", TRACKING_PROFILING);
-    median_tracking_time(tracking_times          , "    - Tracking       ", TRACKING_PROFILING);
-    median_tracking_time(track_ref_times         , "        - Track Ref   ", TRACKING_PROFILING);
-    median_tracking_time(pose_opt_times          , "        - Pose Optimization   ", TRACKING_PROFILING);
-    median_tracking_time(local_map_times         , "        - Track Local Map   ", TRACKING_PROFILING);
-    median_tracking_time(grabImageMonocular_times, "\033[1;32mGrab Image Monocular   \033[0m", TRACKING_PROFILING);
+    AF_PROFILE_BEGIN("Tracking Profiling");
+    AF_PROFILE_FIELD(resize_times,             "Resize Image");
+    AF_PROFILE_FIELD(frame_times,              "Frame Creation");
+    AF_PROFILE_FIELD(tracking_times,           "Tracking");
+    AF_PROFILE_FIELD(track_ref_times,          "  Track Ref");
+    AF_PROFILE_FIELD(pose_opt_times,           "  Pose Optimization");
+    AF_PROFILE_FIELD(local_map_times,          "  Track Local Map");
+    AF_PROFILE_FIELD(grabImageMonocular_times, "Grab Image Monocular");
+    AF_PROFILE_END();
 #endif
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////
     t_end = std::chrono::steady_clock::now();
     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
+
     if(mState == OK)
         grabImageMonocular_times[int(1000 * t_duration)]++;
 
@@ -455,7 +445,7 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
     pKFcur->UpdateConnections();
 
     // Bundle Adjustment
-    cout << "New Map created with " << map->MapPointsInMap() << " points" << endl;
+    AF_INFO("New Map created with " << map->MapPointsInMap() << " points");
 
     Optimizer::GlobalBundleAdjustemnt(map,numItGBA);
 
@@ -1208,57 +1198,23 @@ void Tracking::loadCameraParameters(const string &strCalibrationPath, const stri
     // Load settings file
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
 
-    // Stereo baseline
-    // if(mSensor==System::STEREO || mSensor==System::RGBD)
-    // {
-    //     cout << endl  << "[Tracking.cc] RGB-D/STEREO Parameters: " << strSettingPath << endl;
-
-    //     mbf = float(fCalibration["Stereo.bf"]) * fx;
-    //     cout << "- bf: " << mbf << endl;
-
-    //     mThDepth = mbf *(float)fSettings["ThDepth"] / fx;
-    //     cout << "- Depth Threshold: " << mThDepth << endl;
-
-    // }
-
-    // if(mSensor==System::RGBD)
-    //     {
-    //         mDepthMapFactor = float(fCalibration["Depth0.factor"]);
-    //         cout << "- Depth Map Factor: " << mDepthMapFactor << endl;
-    //         if(fabs(mDepthMapFactor)<1e-5)
-    //             mDepthMapFactor=1;
-    //         else
-    //             mDepthMapFactor = 1.0f/mDepthMapFactor;
-    //     }
-
     // Print camera parameters
-    cout << endl << "Camera Parameters: " << endl;
-    cout << "- cam_name: " << cam["cam_name"].as<std::string>() << endl;
-    cout << "- cam_type: " << cam["cam_type"].as<std::string>() << endl;
-    cout << "- cam_model: " << cam["cam_model"].as<std::string>() << endl;
+    AF_CONFIG_BEGIN("Camera Parameters");
+    AF_CONFIG_FIELD("cam_name:           ", cam["cam_name"].as<std::string>());
+    AF_CONFIG_FIELD("cam_type:           ", cam["cam_type"].as<std::string>());
+    AF_CONFIG_FIELD("cam_model:          ", cam["cam_model"].as<std::string>());
     if (cam["distortion_type"] && cam["distortion_coefficients"])
-        cout << "- distortion_type: " << cam["distortion_type"].as<std::string>() << endl;
-    cout << "- fx: " << mK.at<float>(0,0) << endl;
-    cout << "- fy: " << mK.at<float>(1,1) << endl;
-    cout << "- cx: " << mK.at<float>(0,2) << endl;
-    cout << "- cy: " << mK.at<float>(1,2) << endl;
-    if (cam["distortion_type"] && cam["distortion_coefficients"]){
-        cout << "- distortion_coefficients: " << mDistCoef.t() << endl;
-    }
-    cout << "- fps: " << cam["fps"].as<float>() << endl;
-    if(mbRGB)
-        cout << "- color order: RGB (ignored if grayscale)" << endl;
-    else
-        cout << "- color order: BGR (ignored if grayscale)" << endl;
-
-    // if(mSensor == System::STEREO || mSensor == System::RGBD) {
-    //     cout << "mbf: " << mbf << endl;
-    //     cout << "Depth Threshold (Close/Far Points): " << mThDepth << endl;
-    // }
-    // if(mSensor == System::RGBD)
-    // {
-    //     cout << "mDepthMapFactor: " << mDepthMapFactor << endl;
-    // }
+        AF_CONFIG_FIELD("distortion_type:    ", cam["distortion_type"].as<std::string>());
+    AF_CONFIG_FIELD("fx:                 ", mK.at<float>(0,0));
+    AF_CONFIG_FIELD("fy:                 ", mK.at<float>(1,1));
+    AF_CONFIG_FIELD("cx:                 ", mK.at<float>(0,2));
+    AF_CONFIG_FIELD("cy:                 ", mK.at<float>(1,2));
+    if (cam["distortion_type"] && cam["distortion_coefficients"])
+        AF_CONFIG_FIELD("distortion_coefficients: ", mDistCoef.t());
+    AF_CONFIG_FIELD("fps:                ", cam["fps"].as<float>());
+    if(mbRGB)        AF_CONFIG_FIELD("color order:        ", "RGB (ignored if grayscale)");
+    else            AF_CONFIG_FIELD("color order:        ", "BGR (ignored if grayscale)");
+    AF_CONFIG_END();
 }
 
 shared_ptr<FeatureExtractor> Tracking::getFeatureExtractor(const int& scaleNumFeaturesMonocular_,

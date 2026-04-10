@@ -17,7 +17,7 @@ LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const v
     mbAbortBA(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), mbAcceptKeyFrames(true), featureTypes(featureTypes),
     image_width(image_width), image_height(image_height)
 {
-    matcher = std::make_shared<FeatureMatcher>(image_width, image_height);
+    matcher = std::make_shared<FeatureMatcher>(image_width, image_height, "LocalMapping");
 }
 
 void LocalMapping::Run()
@@ -51,7 +51,6 @@ void LocalMapping::Run()
             CreateNewMapPoints();
             std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
             double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-            //median_tracking_time(t_duration, createNewMapPoints_times, "\n    - Create New Map Points ", LOCALMAPPING_PROFILING);
             //////////////////////////////////////////////////////////////////////////////////////////////////////
 
             if(!CheckNewKeyFrames())
@@ -63,7 +62,6 @@ void LocalMapping::Run()
                 }
                 t_end = std::chrono::steady_clock::now();
                 t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-                //median_tracking_time(t_duration, searchInNeighbors_times, "    - Search In Neighbors ", LOCALMAPPING_PROFILING);
             }
             mbAbortBA = false;
             //if(!CheckNewKeyFrames() && !stopRequested())
@@ -75,7 +73,6 @@ void LocalMapping::Run()
                     Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);
                     t_end = std::chrono::steady_clock::now();
                     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-                    //median_tracking_time(t_duration, localbundleadjustment_times, "    - Local BA ", LOCALMAPPING_PROFILING);
                 }
                 // Check redundant local Keyframes
                 KeyFrameCulling();

@@ -1,15 +1,18 @@
 #include "Feature_superpoint256.h"
+#include "afvslam_log.hpp"
 
 #include <opencv2/opencv.hpp>
 
 AF_VSLAM::FeatureExtractor_superpoint256::FeatureExtractor_superpoint256(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
 
-        std::cout << "Building SuperPoint inference engine...\n";
+        AF_INFO("Initializing SuperPoint256 feature extractor...");
+        AF_INFO("Building SuperPoint inference engine...");
+
         std::string config_path = "Thirdparty/SuperPoint-LightGlue-TensorRT/config/config.yaml";
         std::string model_dir = "Thirdparty/SuperPoint-LightGlue-TensorRT/weights";
         Configs configs(config_path, model_dir);
-        std::cout << "SuperPoint256 config loaded.\n";
+        AF_INFO("SuperPoint256 config loaded.");
         extractor = std::make_shared<SuperPoint>(configs.superpoint_config);
         if (!extractor->build()) {
             throw std::runtime_error(
@@ -17,8 +20,8 @@ AF_VSLAM::FeatureExtractor_superpoint256::FeatureExtractor_superpoint256(std::sh
                 "  config: " + config_path + "\n"
                 "  weights: " + model_dir);
         }
-        std::cout << "SuperPoint engine loaded from: " << model_dir << "\n";
-        std::cout << "Engine ready.\n\n";
+        AF_INFO("SuperPoint engine loaded from: " + model_dir);
+        AF_INFO("Engine ready.");
 }
 
 

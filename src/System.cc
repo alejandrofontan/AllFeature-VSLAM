@@ -1,28 +1,5 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
-
-
-
 #include "System.h"
 #include "Converter.h"
-#include "MathFunctions.h"
 #include "FeatureMatcher.h"
 #include "Optimizer.h"
 
@@ -32,6 +9,7 @@
 #include <pangolin/pangolin.h>
 #include <iomanip>
 #include <yaml-cpp/yaml.h>
+#include "afvslam_log.hpp"
 
 namespace AF_VSLAM
 {
@@ -45,20 +23,13 @@ System::System(const string &vocabularyFolder,
                mSensor(sensor), viewer(static_cast<shared_ptr<Viewer>>(nullptr)), mbReset(false), featureTypes(featureTypes)
 {
     // Output welcome message
-    cout << "Any-Feature V-SLAM 2024, Alejandro Fontan Villacampa, Queensland University of Technology\n"
-    "    Acknowledgments to: Javier Civera and Michael Milford (Any-Feature V-SLAM)\n"
-    "    Raul Mur-Artal, Juan D. Tardos, J. M. M. Montiel (ORB-SLAM2), Dorian Galvez-Lopez (DBoW2),\n    Carlos Campos, Richard Elvira and Juan J. Gómez Rodríguez (ORB-SLAM3)."
-    "\n\nThis program comes with ABSOLUTELY NO WARRANTY;" << endl  <<
-    "This is free software, and you are welcome to redistribute it under certain conditions. See LICENSE.txt." << endl << endl;
-
-    cout << "Input sensor was set to: ";
 
     if(mSensor==MONOCULAR)
-        cout << "mono" << endl;
+        AF_INFO("Monocular sensor selected");
     else if(mSensor==STEREO)
-        cout << "Stereo" << endl;
+        AF_INFO("Stereo sensor selected");
     else if(mSensor==RGBD)
-        cout << "RGB-D" << endl;
+        AF_INFO("RGB-D sensor selected");
 
     //Check settings file
     cv::FileStorage fsCalibration(strCalibrationFile.c_str(), cv::FileStorage::READ);
@@ -82,7 +53,7 @@ System::System(const string &vocabularyFolder,
     vocabulary->createVocabulary();
     bool vocabularyLoaded = vocabulary->loadFromTextFile();
     if(!vocabularyLoaded){
-        std::cout <<"[System] Vocabulary loading failed" << std::endl;
+        AF_ERROR("[System] Vocabulary loading failed");
         terminate();
     }
 
@@ -332,7 +303,7 @@ void System::Shutdown()
 
 void System::SaveTrajectoryTUM(const string &filename)
 {
-    cout << endl << "Saving camera trajectory to " << filename << " ..." << endl;
+    AF_INFO("Saving camera trajectory to " << filename << " ...");
     if(mSensor==MONOCULAR)
     {
         cerr << "ERROR: SaveTrajectoryTUM cannot be used for monocular." << endl;
@@ -388,13 +359,13 @@ void System::SaveTrajectoryTUM(const string &filename)
             q.x() << " " << q.y() << " " << q.z()<< " " << q.w() << endl;
     }
     f.close();
-    cout << endl << "trajectory saved!" << endl;
+    AF_INFO("Trajectory saved!");
 }
 
 
 void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 {
-    cout << endl << "Saving keyframe trajectory to " << filename << " ..." << endl;
+    AF_INFO("Saving keyframe trajectory to " << filename << " ...");
 
     vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
     sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
@@ -440,7 +411,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
     }
 
     f.close();
-    cout << endl << "trajectory saved!" << endl;
+    AF_INFO("Keyframe trajectory saved!");
 }
 
 struct PointRGB {
@@ -482,7 +453,7 @@ auto to_u8 = [](double v) {
 
 void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>& imageFilenames)
 {
-    cout << endl << "Saving point cloud to " << filename << " ..." << endl;
+    AF_INFO("Saving point cloud to " << filename << " ...");
 
     std::vector<PointRGB> pts;
     auto mapPoints = mpMap->GetAllMapPoints();
@@ -522,31 +493,13 @@ void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>
             p.b = intensity;
         } else if (cvimg.channels() == 3) {
             cv::Vec3b bgr = cvimg.at<cv::Vec3b>(v, u);
-            // std::cout << " - Color from image. ";
-            // std::cout << " - bgr[0]: " << static_cast<int>(bgr[0]) <<  std::endl;
-            // std::cout << " - bgr[1]: " << static_cast<int>(bgr[1]) <<  std::endl;
-            // std::cout << " - bgr[2]: " << static_cast<int>(bgr[2]) <<  std::endl;
-            // std::cout << " - color[0]: " << color[0] <<  std::endl;
-            // std::cout << " - color[1]: " << color[1] <<  std::endl;
-            // std::cout << " - color[2]: " << color[2] <<  std::endl;
-            // p.b = uint8_t(alpha * float(bgr[2]) + (1.0f - alpha) * float(color[0]));
-            // p.g = uint8_t(alpha * float(bgr[1]) + (1.0f - alpha) * float(color[1]));
-            // p.r = uint8_t(alpha * float(bgr[0]) + (1.0f - alpha) * float(color[2]));
             p.r = to_u8(alpha * (float(bgr[2]) / 255.0f) + (1.0f - alpha) * (float(color[0])));
             p.g = to_u8(alpha * (float(bgr[1]) / 255.0f) + (1.0f - alpha) * (float(color[1])));
             p.b = to_u8(alpha * (float(bgr[0]) / 255.0f) + (1.0f - alpha) * (float(color[2])));
-            // std::cout << " - p.r: " << static_cast<int>(p.r) <<  std::endl;
-            // std::cout << " - p.g: " << static_cast<int>(p.g) <<  std::endl;
-            // std::cout << " - p.b: " << static_cast<int>(p.b) <<  std::endl;
         }
-
-        // p.r = to_u8(color[0]); // R
-        // p.g = to_u8(color[1]); // G
-        // p.b = to_u8(color[2]); // B
-
         pts.push_back(p);
     }
-    cout << endl << "point cloud saved! Number of points: " << numPoints << endl;
+    AF_INFO("Point cloud saved! Number of points: " << numPoints);
     write_ply_binary(filename, pts);
 }
 
@@ -554,7 +507,7 @@ void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>
 
 void System::SaveTrajectoryKITTI(const string &filename)
 {
-    cout << endl << "Saving camera trajectory to " << filename << " ..." << endl;
+    AF_INFO("Saving camera trajectory to " << filename << " ...");
     if(mSensor==MONOCULAR)
     {
         cerr << "ERROR: SaveTrajectoryKITTI cannot be used for monocular." << endl;
@@ -588,7 +541,6 @@ void System::SaveTrajectoryKITTI(const string &filename)
 
         while(pKF->is_bad())
         {
-          //  cout << "bad parent" << endl;
             Trw = Trw * pKF->Tcp;
             pKF = pKF->GetParent();
         }
@@ -605,7 +557,7 @@ void System::SaveTrajectoryKITTI(const string &filename)
              Rwc(2,0) << " " << Rwc(2,1)  << " " << Rwc(2,2) << " "  << twc(2) << endl;
     }
     f.close();
-    cout << endl << "trajectory saved!" << endl;
+    AF_INFO("Camera trajectory saved!");
 }
 
 int System::GetTrackingState()
@@ -695,7 +647,7 @@ void System::SaveStatistics(const std::string &filename){
 
     // fout << node;
     // fout.close();
-    std::cout << statisticsFile_yaml + " file written successfully!" << std::endl;
+    AF_INFO(statisticsFile_yaml + " file written successfully!");
 
 }
 
@@ -705,9 +657,9 @@ void System::setImageSize(const int width, const int height){
 }
 
 void System::GBA(){
-    std::cout << "Starting Global Bundle Adjustment..." <<std::endl;
+    AF_INFO("Starting Global Bundle Adjustment...");
     Optimizer::GlobalBundleAdjustemnt(mpMap, 100);
-    std::cout << "Global Bundle Adjustment finished." <<std::endl;
+    AF_INFO("Global Bundle Adjustment finished.");
 }
 
 }

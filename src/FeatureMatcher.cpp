@@ -1,30 +1,10 @@
 
-#include<stdint-gcc.h>
-#include <memory>
-#include<limits.h>
-
-#include "FeatureMatcher.h"
-#include "Converter.h"
-#include "MathFunctions.h"
 #include <cmath>
+#include <cstdint>
+#include <memory>
 
-#include "Feature_orb32.h"
-#include "Feature_akaze61.h"
-#include "Feature_brisk48.h"
-#include "Feature_surf64.h"
-#include "Feature_kaze64.h"
-#include "Feature_sift128.h"
-#include "Feature_r2d2_128.h"
-#include "Feature_anyFeatBin.h"
-#include "Feature_anyFeatNonBin.h"
-#include "Feature_aliked128.h"
-#include "Feature_superpoint256.h"
-
-
-#include<opencv2/core/core.hpp>
-//#include<opencv2/features2d/features2d.hpp>
-
-#include "DBoW2/FeatureVector.h"
+#include "afvslam_log.hpp"
+#include "FeatureMatcher.h"
 
 using namespace std;
 
@@ -38,40 +18,45 @@ std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::descDistTh_low_r
 
 VerbosityLevel FeatureMatcher::verbosity{MEDIUM};
 
-const int FeatureMatcher::HISTO_LENGTH = 30;
 float FeatureMatcher::radiusScale{1.15f};
 
 // Initializes all feature matching backends: SiftMatchGPU, LightGlue, and SuperPoint-LightGlue (TensorRT).
-FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height, float nnratio, bool checkOri):
-    mfNNratio(nnratio), mbCheckOrientation(checkOri), image_width(image_width), image_height(image_height)
+FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height, std::string name, float nnratio, bool checkOri):
+    mfNNratio(nnratio), mbCheckOrientation(checkOri), image_width(image_width), image_height(image_height), name(name)
 {
-    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing SiftMatchGPU...\n";
+    AF_INFO("Initializing FeatureMatcher: " + name);
+    AF_INFO("Initializing SiftMatchGPU...");
+
     sift_match_gpu_ = SiftMatchGPU();
     sift_match_gpu_.SetLanguage(SiftMatchGPU::SIFTMATCH_CUDA);
     if (sift_match_gpu_.VerifyContextGL() == 0) {
-       std::cout << "\033[1;31m[FeatureMatcher]\033[0m SiftMatchGPU initialization failed!\n";
+       AF_ERROR("SiftMatchGPU initialization failed!");
     }
     sift_match_gpu_.Allocate(FeatureMatcher::max_supported, 1);
-    std::cout << "\033[1;32m[FeatureMatcher]\033[0m SiftMatchGPU initialized.\n";
 
-    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing LightGlue...\n";
+    AF_INFO("SiftMatchGPU initialized.");
+
+    AF_INFO("Initializing LightGlue...");
 
     // Select CUDA if available, fall back to CPU
     torch_device = std::make_shared<torch::Device>(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
     matcher_lightglue = std::make_shared<matcher::LightGlue>();
     matcher_lightglue->to(*torch_device);
-    std::cout << "\033[1;32m[FeatureMatcher]\033[0m LightGlue initialized.\n";
 
-    std::cout << "\033[1;36m[FeatureMatcher]\033[0m Initializing SuperPoint-LightGlue...\n";
+    AF_INFO("LightGlue initialized.");
+
+    AF_INFO("Initializing SuperPoint-LightGlue...");
+
     std::string config_path = "Thirdparty/SuperPoint-LightGlue-TensorRT/config/config.yaml";
     std::string model_dir = "Thirdparty/SuperPoint-LightGlue-TensorRT/weights/";
     Configs configs(config_path, model_dir);
     matcher_lightglue_superpoint = std::make_shared<SuperPointLightGlue>(configs.superpoint_lightglue_config);
-    std::cout << "\033[1;33m[SuperPoint-LightGlue config]\033[0m\n"
-            << "  onnx_file:            " << configs.superpoint_lightglue_config.onnx_file << "\n"
-            << "  engine_file:          " << configs.superpoint_lightglue_config.engine_file << "\n"
-            << "  input_tensor_names:   " << configs.superpoint_lightglue_config.input_tensor_names.size() << "\n"
-            << "  output_tensor_names:  " << configs.superpoint_lightglue_config.output_tensor_names.size() << "\n";
+    AF_CONFIG_BEGIN("SuperPoint-LightGlue config");
+    AF_CONFIG_FIELD("onnx_file:           ", configs.superpoint_lightglue_config.onnx_file);
+    AF_CONFIG_FIELD("engine_file:         ", configs.superpoint_lightglue_config.engine_file);
+    AF_CONFIG_FIELD("input_tensor_names:  ", configs.superpoint_lightglue_config.input_tensor_names.size());
+    AF_CONFIG_FIELD("output_tensor_names: ", configs.superpoint_lightglue_config.output_tensor_names.size());
+    AF_CONFIG_END();
 
     // Build reuses a cached .engine file if present, or compiles from ONNX on first run
     if (!matcher_lightglue_superpoint->build()) {
@@ -85,7 +70,8 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height, 
     Eigen::Matrix<double, 258, Eigen::Dynamic> dummy = Eigen::Matrix<double, 258, Eigen::Dynamic>::Zero(258, 1);
     std::vector<cv::DMatch> dummy_matches;
     matcher_lightglue_superpoint->matching_points(dummy, dummy, dummy_matches);
-    std::cout << "\033[1;32m[FeatureMatcher]\033[0m SuperPoint-LightGlue initialized and warmed up from: " << model_dir << "\n";
+
+    AF_INFO("SuperPoint-LightGlue initialized and warmed up from: " + model_dir);
 }
 
 std::vector<cv::DMatch> FeatureMatcher::swap_match_direction(const std::vector<cv::DMatch>& in)
@@ -212,7 +198,7 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
         if (!pt || pt->is_bad())
             continue;
 
-        FeatureType ft = pt->featureType;
+        const FeatureType ft = pt->featureType;
         pt_idx[ft].push_back(idx);
         desc_pts[ft].push_back(pt->get_descriptor());
     }
@@ -245,9 +231,9 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
         const auto& f_idx = frame_idx.at(ft);
         const auto& p_idx = pt_idx.at(ft);
         for (const auto& m : matches) {
-            size_t query_idx = f_idx[m.queryIdx];
-            size_t train_idx = p_idx[m.trainIdx];
-            Pt pt = map_pts[train_idx];
+            const size_t query_idx = f_idx[m.queryIdx];
+            const size_t train_idx = p_idx[m.trainIdx];
+            const Pt pt = map_pts[train_idx];
             const vector<size_t> area_indices = frame.get_features_in_area(pt->track_proj_x, pt->track_proj_y, projection_match_radius_th, ft);
             if (area_indices.empty())
                 continue;
@@ -271,7 +257,7 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
 
     // Reuse cached matches if keyframe1 already has matches stored for keyframe2
     auto cache_it = keyframe1->cache_matched_pairs.find(keyframe2->frame_id);
-    bool cached = (cache_it != keyframe1->cache_matched_pairs.end() && !cache_it->second.empty());
+    const bool cached = (cache_it != keyframe1->cache_matched_pairs.end() && !cache_it->second.empty());
 
     // No cache — run parallel descriptor matching across all feature types
     map<FeatureType, vector<cv::DMatch>> matches_by_type;
@@ -299,8 +285,8 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
 
         if (!cached) {
             auto matches = std::move(matches_by_type[ft]);
-            size_t size_kpts1 = kps1.size();
-            size_t size_kpts2 = kps2.size();
+            const size_t size_kpts1 = kps1.size();
+            const size_t size_kpts2 = kps2.size();
             for (auto& m : matches) {
                 m.queryIdx += size_kpts1;
                 m.trainIdx += size_kpts2;
@@ -529,8 +515,8 @@ map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_
         auto const& v2 = F2.keypoints.at(ft);
 
         auto matches = std::move(matches_by_type[ft]);
-        size_t size_kpts1 = kps1.size();
-        size_t size_kpts2 = kps2.size();
+        const size_t size_kpts1 = kps1.size();
+        const size_t size_kpts2 = kps2.size();
         for (auto& m : matches) {
             m.queryIdx += size_kpts1;
             m.trainIdx += size_kpts2;
@@ -668,7 +654,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f&
     // For each candidate MapPoint project and match
     for(size_t iMP=0; iMP<nPoints; iMP++)
     {
-        Pt pMP = map_pts[iMP];
+        const Pt pMP = map_pts[iMP];
 
         // Discard Bad MapPoints and already found
         if(pMP->is_bad() || spAlreadyFound.count(pMP))
@@ -744,7 +730,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f&
         // If there is already a MapPoint replace otherwise add new measurement
         if(bestDist <= TH_LOW[feat_type])
         {
-            Pt pMPinKF = keyframe->get_map_point(bestIdx, feat_type);
+            const Pt pMPinKF = keyframe->get_map_point(bestIdx, feat_type);
             if(pMPinKF)
             {
                 if(!pMPinKF->is_bad())
@@ -784,7 +770,7 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
 
     for(size_t i=0, iend=vpMPs.size(); i<iend; i++)
     {
-        Pt pMP = vpMPs[i];
+        const Pt pMP = vpMPs[i];
 
         if(pMP)
         {
@@ -871,24 +857,28 @@ Descriptor_Distance_Type FeatureMatcher::descriptor_distance(const cv::Mat &a, c
 
 void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType) {
 
+    AF_INFO("Loading Feature Matcher Settings from : " + feature_settings_yaml_file);
     cv::FileStorage fSettings(feature_settings_yaml_file, cv::FileStorage::READ);
-    cout << "\nLoading Feature Matcher Settings from : " << feature_settings_yaml_file << "\n";
+
     FeatureMatcher::TH_LOW[featureType] = fSettings["FeatureMatcher.TH_LOW"];
     FeatureMatcher::TH_HIGH[featureType] = fSettings["FeatureMatcher.TH_HIGH"];
     FeatureMatcher::descDistTh_low_reloc[featureType] = fSettings["FeatureMatcher.descDistTh_high_reloc"];
     FeatureMatcher::descDistTh_high_reloc[featureType] = fSettings["FeatureMatcher.descDistTh_low_reloc"];
-    cout <<  "- TH_LOW: " << FeatureMatcher::TH_LOW[featureType] << "\n";
-    cout <<  "- TH_HIGH: " << FeatureMatcher::TH_HIGH[featureType] << "\n";
-    cout <<  "- descDistTh_low_reloc: " << FeatureMatcher::descDistTh_low_reloc[featureType] << "\n";
-    cout <<  "- descDistTh_high_reloc: " << FeatureMatcher::descDistTh_high_reloc[featureType] << "\n";
+
+    AF_CONFIG_BEGIN("feature_settings_yaml_file");
+        AF_CONFIG_FIELD("FeatureMatcher.TH_LOW", FeatureMatcher::TH_LOW[featureType]);
+        AF_CONFIG_FIELD("FeatureMatcher.TH_HIGH", FeatureMatcher::TH_HIGH[featureType]);
+        AF_CONFIG_FIELD("FeatureMatcher.descDistTh_low_reloc", FeatureMatcher::descDistTh_low_reloc[featureType]);
+        AF_CONFIG_FIELD("FeatureMatcher.descDistTh_high_reloc", FeatureMatcher::descDistTh_high_reloc[featureType]);
+    AF_CONFIG_END();
 }
 
 vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, const int& histLength){
-    vector<vector<int>> rotHist;
-    rotHist.resize(histLength);
+    vector<vector<int>> rotHist(histLength);
     for(int i = 0; i < histLength; i++)
         rotHist[i].reserve(500);
-    rotFactor = 1.0f / float(histLength);return rotHist;
+    rotFactor = 1.0f / static_cast<float>(histLength);
+    return rotHist;
 }
 
     void FeatureMatcher::updateRotationHistogram(vector<vector<int>>& rotHist,
@@ -909,7 +899,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         int ind1{-1}, ind2{-1}, ind3{-1};
         computeThreeMaxima(rotHist,ind1,ind2,ind3);
 
-        for(int i = 0; i < rotHist.size(); i++){
+        for(int i = 0; i < static_cast<int>(rotHist.size()); i++){
             if(i == ind1 || i == ind2 || i == ind3)
                 continue;
             for(int j : rotHist[i]){
@@ -923,7 +913,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         int ind1{-1}, ind2{-1}, ind3{-1};
         computeThreeMaxima(rotHist,ind1,ind2,ind3);
 
-        for(int i = 0; i < rotHist.size(); i++){
+        for(int i = 0; i < static_cast<int>(rotHist.size()); i++){
             if(i == ind1 || i == ind2 || i == ind3)
                 continue;
             for(int idx1 : rotHist[i]){
@@ -937,7 +927,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
 
     void FeatureMatcher::computeThreeMaxima(vector<vector<int>>& rotHist, int &ind1, int &ind2, int &ind3){
         int max1{0}, max2{0}, max3{0};
-        for(int i = 0; i < rotHist.size(); i++)
+        for(int i = 0; i < static_cast<int>(rotHist.size()); i++)
         {
             const int s = static_cast<int>(rotHist[i].size());
             if(s > max1)
@@ -978,7 +968,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& featType_){
 
         std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featType_);
-        MatcherType matcherType = ft->getMatcherType();
+        const MatcherType matcherType = ft->getMatcherType();
 
         std::vector<cv::DMatch> matches;
         switch(matcherType) {
@@ -1021,7 +1011,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         const FeatureType& featType_){
 
         std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featType_);
-        MatcherType matcherType = ft->getMatcherType();
+        const MatcherType matcherType = ft->getMatcherType();
 
         std::vector<cv::DMatch> matches;
         switch(matcherType) {
@@ -1058,7 +1048,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         std::sort(matches.begin(), matches.end(),
             [](const cv::DMatch& a, const cv::DMatch& b) { return a.distance < b.distance; });
 
-        if (matches.size() > maxForRansac) matches.resize(maxForRansac);
+        if (matches.size() > static_cast<size_t>(maxForRansac)) matches.resize(maxForRansac);
 
         // Build point correspondences ---
         std::vector<cv::Point2f> pts1; pts1.reserve(matches.size());
@@ -1138,8 +1128,8 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
             std::vector<MatchOut> outs(jobs.size());
 
         #pragma omp parallel for schedule(static)
-        for (int i = 0; i < (int)jobs.size(); ++i) {
-            auto ft = jobs[i];
+        for (int i = 0; i < static_cast<int>(jobs.size()); ++i) {
+            const auto ft = jobs[i];
             auto& o = outs[i];
             o.ft = ft;
             o.valid = true;

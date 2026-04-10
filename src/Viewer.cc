@@ -22,6 +22,7 @@
 #include "Utils.h"
 #include <pangolin/pangolin.h>
 #include <yaml-cpp/yaml.h>
+#include "afvslam_log.hpp"
 
 #include <mutex>
 
@@ -59,10 +60,13 @@ Viewer::Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> fram
     image_width = cam["image_dimension"][0].as<int>();
     image_height = cam["image_dimension"][1].as<int>();
 
-    cout << endl << "[Viewer.cc] Camera Parameters: " << strCalibrationPath << endl;
-    cout << "- w: " << image_width << endl;
-    cout << "- h: " << image_height << endl;
-    cout << "- fps: " << fps << endl;
+    AF_INFO("Camera Parameters: " << strCalibrationPath);
+    AF_CONFIG_BEGIN("Camera Parameters");
+     AF_CONFIG_FIELD("Camera Name:        ", cam_name);
+     AF_CONFIG_FIELD("FPS:                ", fps);
+     AF_CONFIG_FIELD("Image Width:        ", image_width);
+     AF_CONFIG_FIELD("Image Height:       ", image_height);
+    AF_CONFIG_END();
 
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
     mViewpointX = fSettings["Viewer.ViewpointX"];
@@ -70,11 +74,13 @@ Viewer::Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> fram
     mViewpointZ = fSettings["Viewer.ViewpointZ"];
     mViewpointF = fSettings["Viewer.ViewpointF"];
 
-    cout << endl << "[Viewer.cc] Viewer Parameters: " << strSettingPath << endl;
-    cout << "- mViewpointX: " << mViewpointX << endl;
-    cout << "- mViewpointY: " << mViewpointY << endl;
-    cout << "- mViewpointZ: " << mViewpointZ << endl;
-    cout << "- mViewpointF: " << mViewpointF << endl;
+    AF_INFO("Viewer Parameters: " << strSettingPath);
+    AF_CONFIG_BEGIN("Viewer Parameters");
+     AF_CONFIG_FIELD("Viewpoint X:        ", mViewpointX);
+     AF_CONFIG_FIELD("Viewpoint Y:        ", mViewpointY);
+     AF_CONFIG_FIELD("Viewpoint Z:        ", mViewpointZ);
+     AF_CONFIG_FIELD("Viewpoint F:        ", mViewpointF);
+    AF_CONFIG_END();
 }
 
 void Viewer::Run()

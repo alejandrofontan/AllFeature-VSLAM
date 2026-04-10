@@ -9,6 +9,7 @@
 #include<FeatureFactory.h>
 #include <yaml-cpp/yaml.h>
 #include<FrameDrawer.h>
+#include "afvslam_log.hpp"
 
 using namespace std;
 namespace AF_VSLAM{
@@ -98,6 +99,8 @@ void removeSubstring(std::string& str, const std::string& substring) {
 
 int main(int argc, char **argv)
 {
+    af_print_banner();
+
     // AF_VSLAM inputs
     string sequence_path;
     string calibration_yaml;
@@ -112,75 +115,65 @@ int main(int argc, char **argv)
     bool fixImageSize = true;
 
     cout << endl;
+
+    AF_CONFIG_BEGIN("Arguments:");
     for (int i = 0; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg.find("sequence_path:") != std::string::npos) {
             removeSubstring(arg, "sequence_path:");
             sequence_path =  arg;
-            std::cout << "[vslamlab_anyfeature_mono.cpp] Path to sequence = " << sequence_path << std::endl;
+            AF_CONFIG_FIELD("Path to sequence: ", sequence_path);
             continue;
         }
         if (arg.find("calibration_yaml:") != std::string::npos) {
             removeSubstring(arg, "calibration_yaml:");
             calibration_yaml =  arg;
-            std::cout << "[vslamlab_anyfeature_mono.cpp] Path to calibration.yaml = " << calibration_yaml << std::endl;
+            AF_CONFIG_FIELD("Path to calibration.yaml: ", calibration_yaml);
             continue;
         }
         if (arg.find("rgb_csv:") != std::string::npos) {
             removeSubstring(arg, "rgb_csv:");
             rgb_csv =  arg;
-            std::cout << "[vslamlab_anyfeature_mono.cpp] Path to rgb_csv = " << rgb_csv << std::endl;
+            AF_CONFIG_FIELD("Path to rgb_csv: ", rgb_csv);
             continue;
         }
         if (arg.find("exp_folder:") != std::string::npos) {
             removeSubstring(arg, "exp_folder:");
             exp_folder =  arg;
-            std::cout << "[vslamlab_anyfeature_mono.cpp] Path to exp_folder = " << exp_folder << std::endl;
+            AF_CONFIG_FIELD("Path to exp_folder: ", exp_folder);
             continue;
         }
         if (arg.find("exp_id:") != std::string::npos) {
             removeSubstring(arg, "exp_id:");
             exp_id =  arg;
-            std::cout << "[vslamlab_anyfeature_mono.cpp] Exp id = " << exp_id << std::endl;
+            AF_CONFIG_FIELD("Experiment id: ", exp_id);
             continue;
         }
         if (arg.find("settings_yaml:") != std::string::npos) {
             removeSubstring(arg, "settings_yaml:");
             settings_yaml =  arg;
-            std::cout << "[vslamlab_anyfeature_mono.cpp] Path to settings_yaml = " << settings_yaml << std::endl;
+            AF_CONFIG_FIELD("Path to settings_yaml: ", settings_yaml);
             continue;
         }
         if (arg.find("verbose:") != std::string::npos) {
             removeSubstring(arg, "verbose:");
             verbose = bool(std::stoi(arg));
-            std::cout << "[vslamlab_anyfeature_mono.cpp] Activate Visualization = " << verbose << std::endl;
+            AF_CONFIG_FIELD("Verbose mode: ", verbose);
             continue;
         }
         if (arg.find("vocabulary_folder:") != std::string::npos) {
             removeSubstring(arg, "vocabulary_folder:");
             path_to_vocabulary_folder = arg;
-            std::cout << "[vslamlab_anyfeature_mono.cpp] Path to vocabulary folder = " << path_to_vocabulary_folder << std::endl;
+            AF_CONFIG_FIELD("Path to vocabulary folder: ", path_to_vocabulary_folder);
             continue;
         }
-        if (arg.find("feature:") != std::string::npos) {
-            removeSubstring(arg, "feature:");
-            feature =  arg;
-            std::cout << "[vslamlab_anyfeature_mono.cpp] Feature = " << feature << std::endl;
-            continue;
-        }
-        // if (arg.find("feature_yaml:") != std::string::npos) {
-        //     removeSubstring(arg, "feature_yaml:");
-        //     feature_settings_yaml_file =  arg;
-        //     std::cout << "[vslamlab_anyfeature_mono.cpp] Path to feature_yaml = " << feature_settings_yaml_file << std::endl;
-        //     continue;
-        // }
     }
 
     // AnyFeature-VSLAM inputs
     YAML::Node settings = YAML::LoadFile(settings_yaml);
     const vector<std::string> features = settings["features"].as<vector<std::string>>();
     bool debug = (bool)settings["debug"].as<bool>();
-    std::cout << "[vslamlab_anyfeature_mono.cpp] Debug mode = " << debug << std::endl;
+    AF_CONFIG_FIELD("Debug mode: ", debug);
 
     AF_VSLAM::FrameDrawer::exp_folder = exp_folder;
 
@@ -188,8 +181,9 @@ int main(int argc, char **argv)
     for(const auto& feat : features) {
         auto featureType = get_feature_type(feat);
         featureTypes.push_back(featureType);
-        std::cout << "[vslamlab_anyfeature_mono.cpp] Loaded feature from settings YAML: " << feat << std::endl;
+        AF_CONFIG_FIELD("Feature added: ", feat);
     }
+    AF_CONFIG_END();
 
     // Retrieve paths to images
     vector<string> imageFilenames{};
@@ -212,9 +206,9 @@ int main(int argc, char **argv)
     vector<AF_VSLAM::Seconds> vTimesTrack;
     vTimesTrack.resize(nImages);
 
-    cout << endl << "-------" << endl;
-    cout << "Start processing sequence ..." << endl;
-    cout << "Images in the sequence: " << nImages << endl << endl;
+    cout << endl << "-------------------------------" << endl;
+    AF_INFO("Start processing sequence ...");
+    AF_INFO("Images in the sequence: " << nImages);
 
     // Main loop
     std::atomic<int> allowance{0};

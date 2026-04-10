@@ -48,7 +48,7 @@ LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<KeyFrameDatabase>pDB, s
     image_width(image_width), image_height(image_height)
 {
     mnCovisibilityConsistencyTh = 3;
-    matcher = std::make_shared<FeatureMatcher>(image_width, image_height, 0.8, true);
+    matcher = std::make_shared<FeatureMatcher>(image_width, image_height, "LoopClosing", 0.8, true);
 }
 
 void LoopClosing::SetTracker(std::shared_ptr<Tracking> tracker_)

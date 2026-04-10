@@ -1,37 +1,17 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
+#ifndef AF_VSLAM_FEATURE_MATCHER_H
+#define AF_VSLAM_FEATURE_MATCHER_H
 
-
-#ifndef FEATUREMATCHER_H
-#define FEATUREMATCHER_H
-
+#include <mutex>
 #include <vector>
+
 #include <opencv2/core/core.hpp>
 
-#include "MapPoint.h"
-#include "KeyFrame.h"
-#include "Frame.h"
 #include "Feature_sift128.h"
+#include "Frame.h"
+#include "KeyFrame.h"
+#include "MapPoint.h"
 
 #include "matcher/lightglue/matcher.hpp"
-#include <mutex>
 
 #ifdef CHECK
 #undef CHECK
@@ -48,7 +28,7 @@ public:
 
     // Initializes all feature matching backends: SiftMatchGPU, LightGlue, and SuperPoint-LightGlue (TensorRT).
     const int max_supported = 4000;
-    FeatureMatcher(const int& image_width, const int& image_height, float nnratio=0.6, bool checkOri=true);
+    FeatureMatcher(const int& image_width, const int& image_height, std::string name = "Extractor", float nnratio=0.6, bool checkOri=true);
 
     // Computes the Hamming distance between two ORB descriptors
     static Descriptor_Distance_Type descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_);
@@ -138,7 +118,7 @@ public:
 
     int fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f& Scw,
         const std::vector<Pt> &map_pts, const float& radius_th, vector<Pt> &replace_pts, const FeatureType& feat_type);
-        
+
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -155,10 +135,6 @@ public:
     // Project MapPoints seen in KeyFrame into the Frame and search matches.
     // Used in relocalisation (Tracking)
     int SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const std::set<Pt> &sAlreadyFound, const float& radiusTh, const bool& useHighMatchingThreshold, const FeatureType& featureType);
-
-    // Project MapPoints into KeyFrame using a given Sim3 and search for duplicated MapPoints.
-
-
     static void setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType);
 
 public:
@@ -169,10 +145,12 @@ public:
     static std::map<FeatureType, Descriptor_Distance_Type> descDistTh_high_reloc;
     static std::map<FeatureType, Descriptor_Distance_Type> descDistTh_low_reloc;
 
-    static const int HISTO_LENGTH;
+    static constexpr int HISTO_LENGTH = 30;
     static float radiusScale;
 
 protected:
+
+    string name{};
     static vector<vector<int>> initRotationHistogram(float& rotFactor, const int& histLength);
     static void updateRotationHistogram(vector<vector<int>>& rotHist,
                                         const KeypointIndex& idx,
@@ -214,6 +192,6 @@ protected:
     std::mutex lightglue_superpoint_mutex_;
 };
 
-}// namespace ORB_SLAM
+}
 
-#endif // FEATUREMATCHER_H
+#endif // AF_VSLAM_FEATURE_MATCHER_H

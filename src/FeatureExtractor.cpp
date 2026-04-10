@@ -1,6 +1,6 @@
 #include "FeatureExtractor.h"
 #include "Utils.h"
-#include "MathFunctions.h"
+#include "afvslam_log.hpp"
 
 #include <opencv2/core/core.hpp>
 #include <vector>
@@ -16,16 +16,19 @@ AF_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
         featureType(featureType_){
 
     YAML::Node settings = YAML::LoadFile(settingsYamlFile);
+
     nOctaves = settings["FeatureExtractor.nOctaves"].as<int>();
     scaleFactor = settings["FeatureExtractor.scaleFactor"].as<float>();
     detectTh = settings["FeatureExtractor.detectTh"].as<float>();
     maxNumFeatures = settings["FeatureExtractor.maxNumFeatures"].as<int>();
 
-    cout << endl  << "Loading Feature Extractor Settings from : " << settingsYamlFile << endl;
-    std::cout << "- nOctaves = " << nOctaves << std::endl;
-    std::cout << "- scaleFactor = " << scaleFactor << std::endl;
-    std::cout << "- detectTh = " << detectTh << std::endl;
-    std::cout << "- maxNumFeatures = " << maxNumFeatures << std::endl;
+    AF_INFO("Loading Feature Extractor Settings from : " + settingsYamlFile);
+    AF_CONFIG_BEGIN("Feature Extractor Settings");
+    AF_CONFIG_FIELD("nOctaves:           ", nOctaves);
+    AF_CONFIG_FIELD("scaleFactor:        ", scaleFactor);
+    AF_CONFIG_FIELD("detectTh:           ", detectTh);
+    AF_CONFIG_FIELD("maxNumFeatures:     ", maxNumFeatures);
+    AF_CONFIG_END();
 
     maxKeyPtSize0  = pow(scaleFactorOrb,float(nOctavesOrb - 1.0));
     maxKeyPtSigma0 = pow(scaleFactorOrb,float(nOctavesOrb - 1.0));
@@ -46,7 +49,6 @@ void AF_VSLAM::FeatureExtractor::operator()(const Image& img,
 
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    //median_tracking_time(t_duration, extractorTime, "        - Extractor Time   ", TRACKING_PROFILING);
 }
 
 void AF_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints){

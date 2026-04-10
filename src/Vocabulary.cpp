@@ -5,6 +5,7 @@
 #include "Vocabulary.h"
 #include "Converter.h"
 #include "FeatureFactory.h"
+#include "afvslam_log.hpp"
 
 AF_VSLAM::Vocabulary::Vocabulary(const string vocabularyFolder, const FeatureType featureType):
         vocabularyFolder(vocabularyFolder), featureType(featureType)
@@ -56,51 +57,57 @@ bool AF_VSLAM::Vocabulary::loadFromTextFile(){
     switch(featureType) {
         // load from text file
         case FEAT_ANYFEATNONBIN:{
-            cout << "Loading AnyFeatNonBin Vocabulary. This could take a while..." << endl;
             string vocabulary_path = vocabularyFolder + "/AnyFeatNonBin_DBoW2_voc.txt";
+            AF_INFO("Loading AnyFeatNonBin Vocabulary from: " + vocabulary_path);
+            AF_INFO("This could take a while ...");
             return anyFeatNonBinVocabulary->loadFromTextFile(vocabulary_path);
         }
         case FEAT_ANYFEATBIN:{
-            cout << "Loading AnyFeatBin Vocabulary. This could take a while..." << endl;
             string vocabulary_path = vocabularyFolder + "/AnyFeatBin_DBoW2_voc.txt";
+            AF_INFO("Loading AnyFeatBin Vocabulary from: " + vocabulary_path);
+            AF_INFO("This could take a while ...");
             return anyFeatBinVocabulary->loadFromTextFile(vocabulary_path);
         }
         case FEAT_R2D2:{
-            cout << "Loading R2d2 Vocabulary. This could take a while..." << endl;
             string vocabulary_path = vocabularyFolder + "/R2d2_DBoW2_voc.txt";
+            AF_INFO("Loading R2d2 Vocabulary from: " + vocabulary_path);
+            AF_INFO("This could take a while ...");
             return r2d2Vocabulary->loadFromTextFile(vocabulary_path);
         }
         case FEAT_SIFT128:{
-            cout << "Loading Sift128 Vocabulary. This could take a while..." << endl;
             string vocabulary_path = vocabularyFolder + "/Sift128_DBoW2_voc.txt";
+            AF_INFO("Loading Sift128 Vocabulary from: " + vocabulary_path);
+            AF_INFO("This could take a while ...");
             return sift128Vocabulary->loadFromTextFile(vocabulary_path);
         }
         case FEAT_KAZE64:{
-            cout << "Loading Kaze64 Vocabulary. This could take a while..." << endl;
             string vocabulary_path = vocabularyFolder + "/Kaze64_DBoW2_voc.txt";
+            AF_INFO("Loading Kaze64 Vocabulary from: " + vocabulary_path);
+            AF_INFO("This could take a while ...");
             return kaze64Vocabulary->loadFromTextFile(vocabulary_path);
         }
         case FEAT_SURF64:{
-            cout << "Loading Surf64 Vocabulary. This could take a while..." << endl;
             string vocabulary_path = vocabularyFolder + "/Surf64_DBoW2_voc.txt";
+            AF_INFO("Loading Surf64 Vocabulary from: " + vocabulary_path);
+            AF_INFO("This could take a while ...");
             return surf64Vocabulary->loadFromTextFile(vocabulary_path);
         }
         case FEAT_BRISK:{
             string vocabulary_path = vocabularyFolder + "/Brisk_DBoW2_voc.txt";
-            cout << "Loading Brisk Vocabulary from: " + vocabulary_path << endl;
-            cout << "This could take a while ..." << endl;
+            AF_INFO("Loading Brisk Vocabulary from: " + vocabulary_path);
+            AF_INFO("This could take a while ...");
             return briskVocabulary->loadFromTextFile(vocabulary_path);
         }
         case FEAT_AKAZE61:{
             string vocabulary_path = vocabularyFolder + "/Akaze61_DBoW2_voc.txt";
-            cout << "Loading Akaze61 Vocabulary from: " + vocabulary_path << endl;
-            cout << "This could take a while ..." << endl;
+            AF_INFO("Loading Akaze61 Vocabulary from: " + vocabulary_path);
+            AF_INFO("This could take a while ...");
             return akaze61Vocabulary->loadFromTextFile(vocabulary_path);
         }
         case FEAT_ORB:{
             string vocabulary_path = vocabularyFolder + "/ORBvoc.txt";
-            cout << "Loading Orb Vocabulary from: " + vocabulary_path << endl;
-            cout << "This could take a while ..." << endl;
+            AF_INFO("Loading Orb Vocabulary from: " + vocabulary_path);
+            AF_INFO("This could take a while ...");
             return orbVocabulary->loadFromTextFile(vocabulary_path);
         }
     }

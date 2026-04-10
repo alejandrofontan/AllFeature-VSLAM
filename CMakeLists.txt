@@ -20,7 +20,7 @@ set(SRCS_ALLFEATURE
         src/Tracking.cc
         src/LocalMapping.cc
         src/LoopClosing.cc
-        src/FeatureMatcher.cc
+        src/FeatureMatcher.cpp
         src/FrameDrawer.cc
         src/Converter.cc
         src/MapPoint.cc
@@ -34,7 +34,6 @@ set(SRCS_ALLFEATURE
         src/Sim3Solver.cc
         src/Initializer.cc
         src/Viewer.cc
-        src/MathFunctions.cpp
         src/Observation.cpp
         src/FeatureExtractor.cpp
         src/Utils.cpp

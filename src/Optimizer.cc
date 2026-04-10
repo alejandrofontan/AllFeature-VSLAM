@@ -68,7 +68,6 @@ void Optimizer::GlobalBundleAdjustemnt(shared_ptr<Map> pMap, int nIterations, bo
 void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt> &vpMP,
                                  int nIterations, bool* pbStopFlag, const unsigned long nLoopKF, const bool bRobust)
 {
-    std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
     vector<bool> vbNotIncludedMP;
     vbNotIncludedMP.resize(vpMP.size());
 
@@ -207,10 +206,6 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
     // Optimize!
     optimizer.initializeOptimization();
     optimizer.optimize(nIterations);
-
-    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
-    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    std::cout << std::fixed << std::setprecision(2) << "Optimization time: " << t_duration * 1000 << " s" << std::endl;
 
     // Recover optimized data
     //Keyframes
