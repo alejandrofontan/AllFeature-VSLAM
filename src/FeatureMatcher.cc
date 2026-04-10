@@ -553,120 +553,79 @@ map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_
     return matched_pairs;
 }
 
-// SearchByProjection 2
-// Compute Sim3
-int FeatureMatcher::SearchByProjection(Keyframe pKF, const mat4f& Scw, const vector<Pt> &vpPoints, vector<Pt> &vpMatched,
-    const float& radiusTh, const FeatureType& featType)
+/// @brief Projects candidate map points into @p keyframe using the Sim3 @p Scw and validates
+///        each projection against cached descriptor matches.
+///        Accepted matches are written into @p pts_matched at the matched keypoint index.
+/// @param keyframe      Target keyframe into which map points are projected.
+/// @param Scw           Sim3 transform from world to camera (scale × rotation + translation).
+/// @param pts           Candidate map points to project and validate.
+/// @param pts_matched   Output vector (indexed by keypoint); filled with accepted map points.
+/// @param pt_to_keyframe_id  Maps each map-point ID to the keyframe it was originally observed in.
+/// @return Number of new map point assignments written into @p pts_matched.
+/// @note Used in: LoopClosing::ComputeSim3
+int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyframe, const mat4f& Scw,
+    const vector<Pt>& pts, vector<Pt>& pts_matched,
+    const map<PtId, Keyframe>& pt_to_keyframe_id)
 {
+    const float fx = keyframe->fx;
+    const float fy = keyframe->fy;
+    const float cx = keyframe->cx;
+    const float cy = keyframe->cy;
 
-    // Get Calibration Parameters for later projection
-    const float &fx = pKF->fx;
-    const float &fy = pKF->fy;
-    const float &cx = pKF->cx;
-    const float &cy = pKF->cy;
+    // Decompose Sim3 into rotation and translation
+    const mat3f sRcw = Scw.block<3,3>(0,0);
+    const float  scw  = sqrt(sRcw.row(0).dot(sRcw.row(0)));
+    const mat3f Rcw  = sRcw / scw;
+    const vec3f tcw  = Scw.block<3,1>(0,3);
 
-    // Decompose Scw
-    mat3f sRcw = Scw.block<3,3>(0,0);
-    const float scw = sqrt(sRcw.row(0).dot(sRcw.row(0)));
-    mat3f Rcw = sRcw / scw;
-    vec3f tcw = Scw.block<3,1>(0,3);
-    vec3f Ow = -Rcw.transpose() * tcw;
+    // Build the set of already-matched map points to skip
+    unordered_set<Pt> pts_already_found(pts_matched.begin(), pts_matched.end());
+    pts_already_found.erase(nullptr);
 
-    // Set of MapPoints already found in the KeyFrame
-    set<Pt> spAlreadyFound(vpMatched.begin(), vpMatched.end());
-    spAlreadyFound.erase(static_cast<Pt>(NULL));
+    int num_matches = 0;
 
-    int nmatches=0;
-
-    // For each Candidate MapPoint Project and Match
-    for(int iMP=0, iendMP=vpPoints.size(); iMP<iendMP; iMP++)
-    {
-        Pt pMP = vpPoints[iMP];
-
-        // Discard Bad MapPoints and already found
-        if(pMP->is_bad() || spAlreadyFound.count(pMP))
+    for (const Pt& pt : pts) {
+        if (pt->is_bad() || pts_already_found.count(pt))
             continue;
 
-        // Get 3D Coords.
-        vec3f p3Dw = pMP->get_world_pos();
-
-        // Transform into Camera Coords.
-        vec3f p3Dc = Rcw * p3Dw + tcw;
-
-        // Depth must be positive
-        if(p3Dc(2) < 0.0f)
+        // Look up cached match index for this map point
+        const Keyframe& ref_kf = pt_to_keyframe_id.at(pt->ptId);
+        const auto cache_it = keyframe->cache_matched_pairs.find(ref_kf->frame_id);
+        if (cache_it == keyframe->cache_matched_pairs.end())
             continue;
 
-        // Project into Image
-        const float invz = 1.0f / p3Dc(2);
-        const float x = p3Dc(0) * invz;
-        const float y = p3Dc(1) * invz;
-
-        const float u = fx*x+cx;
-        const float v = fy*y+cy;
-
-        // Point must be inside the image
-        if(!pKF->is_in_image(u,v))
-            continue;
-
-        // Depth must be inside the scale invariance region of the point
-        const float maxDistance = pMP->get_max_distance_invariance();
-        const float minDistance = pMP->get_min_distance_invariance();
-        vec3f PO = p3Dw - Ow;
-        const float dist3D = PO.norm();
-
-        if(dist3D < minDistance || dist3D > maxDistance)
-            continue;
-
-        // Viewing angle must be less than 60 deg
-        vec3f Pn = pMP->get_normal();
-
-        if(PO.dot(Pn) < 0.5f * dist3D)
-            continue;
-
-
-        // Search in a radius
-        float predictedSize = pMP->PredictSize(dist3D);
-        const float radius = radiusScale * radiusTh * predictedSize;
-        const vector<size_t> vIndices = pKF->get_features_in_area(u,v,radius, featType);
-
-        if(vIndices.empty())
-            continue;
-
-        // Match to the most similar keypoint in the radius
-        const cv::Mat refDescriptor = pMP->get_descriptor();
-        Descriptor_Distance_Type bestDist{highest_possible_distance};
+        const int ref_idx = pt->GetIndexInKeyFrame(ref_kf);
         int bestIdx{-1};
-
-        for(vector<size_t>::const_iterator vit=vIndices.begin(), vend=vIndices.end(); vit!=vend; vit++)
-        {
-            const size_t idx = *vit;
-            if(vpMatched[idx])
-                continue;
-
-            //const float keyPtSize = pKF->GetKeyPtSize(KeypointIndex (idx), featType);
-            //if((keyPtSize < predictedSize / pKF->sizeTolerance) || (keyPtSize > predictedSize * pKF->sizeTolerance))
-            //    continue;
-
-            const cv::Mat &descriptor = pKF->descriptors.at(featType).row(idx);
-            const Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
-
-            if(descDist < bestDist)
-            {
-                bestDist = descDist;
-                bestIdx = idx;
+        for (const auto& m : cache_it->second) {
+            if (m.trainIdx == ref_idx) {
+                bestIdx = m.queryIdx;
+                break;
             }
         }
+        if (bestIdx == -1)
+            continue;
 
-        if(bestDist <= TH_LOW[featType])
-        {
-            vpMatched[bestIdx]=pMP;
-            nmatches++;
+        // Project map point into the keyframe
+        const vec3f p3Dc = Rcw * pt->get_world_pos() + tcw;
+        if (p3Dc(2) < 0.0f)
+            continue;
+
+        const float invz = 1.0f / p3Dc(2);
+        const float u = fx * p3Dc(0) * invz + cx;
+        const float v = fy * p3Dc(1) * invz + cy;
+
+        if (!keyframe->is_in_image(u, v))
+            continue;
+
+        // Accept match only if bestIdx falls within the projected search radius
+        const vector<size_t> area_indices = keyframe->get_features_in_area(u, v, radiusTh_factor, pt->featureType);
+        if (std::find(area_indices.begin(), area_indices.end(), static_cast<size_t>(bestIdx)) != area_indices.end()) {
+            pts_matched[bestIdx] = pt;
+            num_matches++;
         }
-
     }
 
-    return nmatches;
+    return num_matches;
 }
 
 // Fuse 2

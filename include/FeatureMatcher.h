@@ -128,6 +128,14 @@ public:
     const float chi2_perc = 5.991f;
     int fuse_map_points_to_keyframe(Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type);
 
+    /// Projects candidate map points into a keyframe using a Sim3 and validates projections
+    /// against cached matches. Writes accepted matches into @p pts_matched.
+    /// @return Number of new map point assignments. Used in: LoopClosing::ComputeSim3
+    const float radiusTh_factor = 12.0f;
+    int search_by_projection_for_compute_sim3(const Keyframe& keyframe, const mat4f& Scw,
+        const vector<Pt>& pts, vector<Pt>& pts_matched,
+        const map<PtId, Keyframe>& pt_to_keyframe_id);
+
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -144,10 +152,6 @@ public:
     // Project MapPoints seen in KeyFrame into the Frame and search matches.
     // Used in relocalisation (Tracking)
     int SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const std::set<Pt> &sAlreadyFound, const float& radiusTh, const bool& useHighMatchingThreshold, const FeatureType& featureType);
-
-    // Project MapPoints using a Similarity Transformation and search matches.
-    // Used in loop detection (Loop Closing)
-    int SearchByProjection(Keyframe pKF, const mat4f& Scw, const std::vector<Pt> &vpPoints, std::vector<Pt> &vpMatched, const float& radiusTh, const FeatureType& featureType);
 
     // Project MapPoints into KeyFrame using a given Sim3 and search for duplicated MapPoints.
     int Fuse(Keyframe pKF, const mat4f& Scw, const std::vector<Pt> &vpPoints, const float& radiusTh, vector<Pt> &vpReplacePoint, const FeatureType& featureType);

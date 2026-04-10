@@ -384,9 +384,12 @@ bool LoopClosing::ComputeSim3()
     vector<Keyframe> vpLoopConnectedKFs = mpMatchedKF->GetVectorCovisibleKeyFrames();
     vpLoopConnectedKFs.push_back(mpMatchedKF);
     mvpLoopMapPoints.clear();
+    map<PtId, Keyframe> pt_to_keyframe_id;
     for(vector<Keyframe>::iterator vit=vpLoopConnectedKFs.begin(); vit!=vpLoopConnectedKFs.end(); vit++)
     {
         Keyframe pKF = *vit;
+        map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs = matcher->match_keyframes(mpCurrentKF, pKF, feat_types);
+
         vector<Pt> vpMapPoints = pKF->get_map_point_matches(featureType);
         for(size_t i=0, iend=vpMapPoints.size(); i<iend; i++)
         {
@@ -397,13 +400,15 @@ bool LoopClosing::ComputeSim3()
                 {
                     mvpLoopMapPoints.push_back(pMP);
                     pMP->mnLoopPointForKF=mpCurrentKF->keyId;
+                    pt_to_keyframe_id[pMP->ptId] = pKF;
                 }
             }
         }
     }
 
     // Find more matches projecting with the computed Sim3
-    matcher->SearchByProjection(mpCurrentKF, mScw, mvpLoopMapPoints, mvpCurrentMatchedPoints,10.0f, featureType);
+    matcher->search_by_projection_for_compute_sim3(mpCurrentKF, mScw,
+        mvpLoopMapPoints, mvpCurrentMatchedPoints, pt_to_keyframe_id);
 
     // If enough matches accept Loop
     int nTotalMatches = 0;
