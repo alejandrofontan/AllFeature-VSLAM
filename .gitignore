@@ -8,4 +8,6 @@ Vocabulary/
 cmake-build-release/
 bin/
 share/
-allfeature_vocabulary/
+allfeature_vocabulary/# pixi environments
+.pixi/*
+!.pixi/config.toml

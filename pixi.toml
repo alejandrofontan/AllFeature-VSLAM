@@ -1,0 +1,129 @@
+[workspace]
+authors = ["alejandrofontan <fontanvillacampa@gmail.com>"]
+channels = ["https://prefix.dev/conda-forge", "fontan", "https://repo.prefix.dev/spqr-tests"]
+
+name = "AllFeature-VSLAM-DEV"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+git-clone = "git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git --recursive"
+build = { cmd = "./build.sh" }
+execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
+stream = { cmd = "./bin/vslamlab_allfeature_mono_stream" }
+
+[system-requirements]
+cuda = "12.0"
+
+[dependencies]
+python = "3.11.*"
+pip = "*"
+onnx = "*"
+onnxruntime = { version = "*", build = "*cuda*" }
+onnxruntime-cpp = { version = "*", build = "*cuda*" }
+
+# CUDA Build Tools
+cuda-compiler = "*"
+cuda-version = "12.6.*"
+cuda-cudart-dev = "*"
+cuda-crt = "*"
+libcusparse-dev = "*"
+cuda-driver-dev = "*"
+cuda-nvcc = "*"
+cuda-nvrtc-dev = "*"
+cuda-nvtx = "*"
+cuda-nvtx-dev = "*"
+cuda-nvml-dev = "*"
+cuda-profiler-api = "*"
+
+# CUDA Libraries
+cudnn = "*"
+libcublas-dev = "*"
+libcudss-dev = "*"
+libcufile-dev = "*"
+libcufft-dev = "*"
+libcurand-dev = "*"
+libcusolver-dev = "*"
+cusparselt = "*"
+libnvjitlink = "*"
+
+# Torch libraries
+pytorch-gpu = "*"
+torchvision = "*"
+torchcodec = "*"
+
+# Core
+pre-commit = "*"
+trimesh = "*"
+einops = "*"
+# huggingface_hub = "*"
+imageio = "*"
+numpy = "<2"
+# opencv = "*"
+xformers = "*"
+open3d = "*"
+
+# API / CLI
+fastapi = "*"
+uvicorn = "*"
+requests = "*"
+typer = "*"
+
+# Config / IO
+pillow = "*"
+omegaconf = "*"
+safetensors = "*"
+plyfile = "*"
+
+# 3D / geometry / eval / video
+evo = "*"
+e3nn = "*"
+moviepy = "*"
+pycolmap = "*"
+addict = "*"
+
+cxx-compiler = "*"
+
+tensorrt-cxx = "*"
+tensorrt-cxx-builder = "*"
+tensorrt-cxx-full = "*"
+
+compilers = "*"
+ninja = "*"
+cmake = "*"
+pkg-config = "*"
+eigen  = "*"
+yaml-cpp = "*"
+opencv = "4.12.*"
+pangolin = { channel = "fontan" }
+brisk-vslamlab = { channel = "fontan" }
+akaze-vslamlab = { channel = "fontan" }
+siftgpu-vslamlab = { channel = "fontan" }
+g2o = { channel = "fontan" }
+
+huggingface_hub = "*"
+pandas = "*"
+glew = "*"
+
+# pytorch-gpu = "*"
+git-lfs = "*"
+zlib = "*"
+
+xorg-libxext = "*"
+xorg-libx11 = "*"
+xorg-libxfixes = "*"
+xorg-libxrender = "*"
+xorg-libice = "*"
+xorg-libsm = "*"
+xorg-libxdmcp = "*"
+xorg-libxau = "*"
+xorg-xorgproto = "*"
+libxkbcommon = "*"
+
+libgl-devel = "*"
+libegl-devel = "*"
+libglvnd-devel = "*"
+libopengl-devel = "*"
+
+[pypi-dependencies]
+intel-openmp = "*"
