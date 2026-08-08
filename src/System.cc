@@ -227,13 +227,13 @@ mat4f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double
     // return Tcw;
 }
 
-mat4f System::TrackMonocular(Image &im, const double &timestamp)
+mat4f System::Track(Image &im, const double &timestamp)
 {
     std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
 
-    if(mSensor!=MONOCULAR)
+    if(mSensor!=MONOCULAR && mSensor!=RGBD)
     {
-        cerr << "ERROR: you called TrackMonocular but input sensor was not set to mono." << endl;
+        cerr << "ERROR: you called Track but input sensor was not set to mono or RGBD." << endl;
         exit(-1);
     }
 

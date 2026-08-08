@@ -16,8 +16,9 @@
 std::string AF_VSLAM::FrameDrawer::exp_folder{};
 
 void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
-                std::vector<std::string> &imageFilenames, std::vector<AF_VSLAM::Seconds> &timestamps,
-                const std::string cam_name = "rgb_0");
+                std::vector<std::string> &imageFilenames, std::vector<std::string> &depthFilenames,
+                std::vector<AF_VSLAM::Seconds> &timestamps,
+                const std::string cam_name = "rgb_0", const std::string depth_cam_name = "depth_0");
 std::string paddingZeros(const std::string& number, const size_t numberOfZeros = 5);
 
 void removeSubstring(std::string& str, const std::string& substring) {
@@ -128,8 +129,9 @@ int main(int argc, char **argv)
 
     // Retrieve paths to images
     std::vector<std::string> imageFilenames{};
+    std::vector<std::string> depthFilenames{};
     std::vector<AF_VSLAM::Seconds> timestamps{};
-    LoadImages(sequence_path, rgb_csv, imageFilenames, timestamps);
+    LoadImages(sequence_path, rgb_csv, imageFilenames, depthFilenames, timestamps);
 
     size_t nImages = imageFilenames.size();
 
@@ -137,7 +139,7 @@ int main(int argc, char **argv)
 
     AF_VSLAM::System SLAM(path_to_vocabulary_folder,
                                   calibration_yaml, settings_yaml,
-                                  AF_VSLAM::System::MONOCULAR,
+                                  AF_VSLAM::System::RGBD,
                                   verbose,
                                   featureTypes,
                                   fixImageSize);
@@ -172,6 +174,13 @@ int main(int argc, char **argv)
         AF_VSLAM::Image im(imageFilenames[ni]);
         if (im.img.empty()) {
             std::cerr << "Failed to load image: " << imageFilenames[ni] << std::endl;
+            ++ni;
+            continue;
+        }
+
+        im.LoadDepth(depthFilenames[ni]);
+        if (im.depthImg.empty()) {
+            std::cerr << "Failed to load depth image: " << depthFilenames[ni] << std::endl;
             ++ni;
             continue;
         }
@@ -234,11 +243,13 @@ int main(int argc, char **argv)
 }
 
 void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
-                std::vector<std::string> &imageFilenames, std::vector<AF_VSLAM::Seconds> &timestamps,
-                const std::string cam_name)
+                std::vector<std::string> &imageFilenames, std::vector<std::string> &depthFilenames,
+                std::vector<AF_VSLAM::Seconds> &timestamps,
+                const std::string cam_name, const std::string depth_cam_name)
 {
 
     imageFilenames.clear();
+    depthFilenames.clear();
     timestamps.clear();
 
     std::ifstream in(rgb_csv);
@@ -260,6 +271,7 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
     // Required headers
     const std::string header_ts = "ts_" + cam_name + " (ns)";
     const std::string header_rgb0 = "path_" + cam_name;
+    const std::string header_depth = "path_" + depth_cam_name;
 
     // Safely get indices
     auto get_index = [&](const std::string& key) -> int {
@@ -272,6 +284,7 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
 
     int ts_idx = get_index(header_ts);
     int rgb0_idx = get_index(header_rgb0);
+    int depth_idx = get_index(header_depth);
 
     // Read and process data lines using fixed indices
     while (std::getline(in, line)) {
@@ -279,18 +292,20 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
         if (!line.empty() && line.back() == '\r') line.pop_back();
 
         std::vector<std::string> tokens = split(line, ',');
-        if (tokens.size() <= static_cast<size_t>(std::max(ts_idx, rgb0_idx))) {
+        if (tokens.size() <= static_cast<size_t>(std::max({ts_idx, rgb0_idx, depth_idx}))) {
             throw std::runtime_error("LoadImages: malformed row (too few columns) in " + rgb_csv + ": " + line);
         }
 
         // Assign variables using indices, regardless of column order
         std::string t_str = tokens[ts_idx];
         std::string rel_rgb0_path = tokens[rgb0_idx];
+        std::string rel_depth_path = tokens[depth_idx];
 
         AF_VSLAM::Seconds t = static_cast<double>(std::stoll(t_str)) * 1e-9;
 
         timestamps.push_back(t);
         imageFilenames.push_back(pathToSequence + "/" + rel_rgb0_path);
+        depthFilenames.push_back(pathToSequence + "/" + rel_depth_path);
     }
 }
 

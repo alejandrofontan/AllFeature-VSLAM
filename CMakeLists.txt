@@ -136,8 +136,11 @@ target_link_libraries(vslamlab_allfeature_mono ${PROJECT_NAME})
 add_executable(vslamlab_allfeature_mono_stream src/vslamlab_allfeature_mono_stream.cpp)
 target_link_libraries(vslamlab_allfeature_mono_stream ${PROJECT_NAME})
 
+add_executable(vslamlab_allfeature_rgbd src/vslamlab_allfeature_rgbd.cpp)
+target_link_libraries(vslamlab_allfeature_rgbd ${PROJECT_NAME})
+
 # Install targets and headers
-install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mono_stream
+install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mono_stream vslamlab_allfeature_rgbd
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib)

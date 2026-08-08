@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
         AF_VSLAM::Image im(frame);
         AF_VSLAM::Seconds tframe = idx * (1.f/kAssumedFps);
 
-        SLAM.TrackMonocular(im,tframe);
+        SLAM.Track(im,tframe);
         idx++;
 
         // cv::imshow("UDP Stream", frame);

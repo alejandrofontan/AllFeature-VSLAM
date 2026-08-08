@@ -10,6 +10,7 @@ version = "0.1.0"
 git-clone = "git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git --recursive"
 build = { cmd = "./build.sh" }
 execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
+execute-rgbd = { cmd = "./bin/vslamlab_allfeature_rgbd" }
 stream = { cmd = "./bin/vslamlab_allfeature_mono_stream" }
 
 [system-requirements]

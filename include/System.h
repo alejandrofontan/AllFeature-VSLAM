@@ -78,10 +78,10 @@ public:
     // Returns the camera pose (empty if tracking fails).
     mat4f TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double &timestamp);
 
-    // Proccess the given monocular frame
+    // Proccess the given frame
     // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
     // Returns the camera pose (empty if tracking fails).
-    mat4f TrackMonocular(Image &im, const double &timestamp);
+    mat4f Track(Image &im, const double &timestamp);
 
     // Returns true if there have been a big map change (loop closure, global BA)
     // since last call to this function
@@ -119,7 +119,7 @@ public:
     // LoadMap(const string &filename);
 
     // Information from most recent processed frame
-    // You can call this right after TrackMonocular (or stereo or RGBD)
+    // You can call this right after Track (or stereo or RGBD)
     int GetTrackingState();
     std::map<FeatureType,std::vector<Pt>> GetTrackedMapPoints();
     std::map<FeatureType, std::vector<cv::KeyPoint>> GetTrackedKeyPointsUn();
