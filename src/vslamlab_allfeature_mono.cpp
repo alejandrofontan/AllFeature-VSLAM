@@ -16,8 +16,9 @@
 std::string AF_VSLAM::FrameDrawer::exp_folder{};
 
 void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
-                std::vector<std::string> &imageFilenames, std::vector<AF_VSLAM::Seconds> &timestamps,
-                const std::string cam_name = "rgb_0");
+                std::vector<std::string> &imageFilenames, std::vector<std::string> &maskFilenames,
+                std::vector<AF_VSLAM::Seconds> &timestamps,
+                const std::string cam_name = "rgb_0", const std::string mask_cam_name = "mask_0");
 std::string paddingZeros(const std::string& number, const size_t numberOfZeros = 5);
 
 void removeSubstring(std::string& str, const std::string& substring) {
@@ -128,8 +129,9 @@ int main(int argc, char **argv)
 
     // Retrieve paths to images
     std::vector<std::string> imageFilenames{};
+    std::vector<std::string> maskFilenames{};
     std::vector<AF_VSLAM::Seconds> timestamps{};
-    LoadImages(sequence_path, rgb_csv, imageFilenames, timestamps);
+    LoadImages(sequence_path, rgb_csv, imageFilenames, maskFilenames, timestamps);
 
     size_t nImages = imageFilenames.size();
 
@@ -176,7 +178,10 @@ int main(int argc, char **argv)
             continue;
         }
 
-        //im.LoadMask(imageFilenames[ni]);
+        if (!maskFilenames.empty()) {
+            im.LoadMask(maskFilenames[ni]);
+        }
+
         AF_VSLAM::Seconds tframe = timestamps[ni];
 
         // Pass the image to the SLAM system
@@ -234,11 +239,13 @@ int main(int argc, char **argv)
 }
 
 void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
-                std::vector<std::string> &imageFilenames, std::vector<AF_VSLAM::Seconds> &timestamps,
-                const std::string cam_name)
+                std::vector<std::string> &imageFilenames, std::vector<std::string> &maskFilenames,
+                std::vector<AF_VSLAM::Seconds> &timestamps,
+                const std::string cam_name, const std::string mask_cam_name)
 {
 
     imageFilenames.clear();
+    maskFilenames.clear();
     timestamps.clear();
 
     std::ifstream in(rgb_csv);
@@ -260,6 +267,7 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
     // Required headers
     const std::string header_ts = "ts_" + cam_name + " (ns)";
     const std::string header_rgb0 = "path_" + cam_name;
+    const std::string header_mask = "path_" + mask_cam_name;
 
     // Safely get indices
     auto get_index = [&](const std::string& key) -> int {
@@ -269,9 +277,14 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
         }
         return it->second;
     };
+    auto get_index_optional = [&](const std::string& key) -> int {
+        auto it = col_map.find(key);
+        return (it == col_map.end()) ? -1 : it->second;
+    };
 
     int ts_idx = get_index(header_ts);
     int rgb0_idx = get_index(header_rgb0);
+    int mask_idx = get_index_optional(header_mask);
 
     // Read and process data lines using fixed indices
     while (std::getline(in, line)) {
@@ -279,7 +292,9 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
         if (!line.empty() && line.back() == '\r') line.pop_back();
 
         std::vector<std::string> tokens = split(line, ',');
-        if (tokens.size() <= static_cast<size_t>(std::max(ts_idx, rgb0_idx))) {
+        int max_idx = std::max(ts_idx, rgb0_idx);
+        if (mask_idx >= 0) max_idx = std::max(max_idx, mask_idx);
+        if (tokens.size() <= static_cast<size_t>(max_idx)) {
             throw std::runtime_error("LoadImages: malformed row (too few columns) in " + rgb_csv + ": " + line);
         }
 
@@ -291,6 +306,9 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
 
         timestamps.push_back(t);
         imageFilenames.push_back(pathToSequence + "/" + rel_rgb0_path);
+        if (mask_idx >= 0) {
+            maskFilenames.push_back(pathToSequence + "/" + tokens[mask_idx]);
+        }
     }
 }
 
