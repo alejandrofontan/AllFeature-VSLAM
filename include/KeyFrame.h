@@ -193,6 +193,7 @@ public:
     const std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
     const std::map<FeatureType, std::vector<float>> mvuRight; // negative value for monocular points
     const std::map<FeatureType, std::vector<float>> mvDepth; // negative value for monocular points
+    const std::map<FeatureType, std::vector<float>> invDepth; // inverse depth; 0 where no valid depth
     std::map<FeatureType, cv::Mat> descriptors;
 
     //BoW

@@ -53,7 +53,7 @@ Frame::Frame(const Frame &frame)
      mTimeStamp(frame.mTimeStamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()),
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
      mvKeysRight(frame.mvKeysRight), keypoints(frame.keypoints),  mvuRight(frame.mvuRight),
-     mvDepth(frame.mvDepth), mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec),
+     mvDepth(frame.mvDepth), invDepth(frame.invDepth), mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec),
      pts(frame.pts), mvbOutlier(frame.mvbOutlier), mnId(frame.mnId), refKeyframe(frame.refKeyframe),
      sizeTolerance(frame.sizeTolerance),invSizeTolerance(frame.invSizeTolerance),
      keyPtsSigma2(frame.keyPtsSigma2),keyPtsInf(frame.keyPtsInf),keyPtsSize(frame.keyPtsSize),

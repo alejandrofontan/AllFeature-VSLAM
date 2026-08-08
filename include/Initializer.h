@@ -79,14 +79,26 @@ private:
 
     static void DecomposeE(const mat3f &E, mat3f &R1, mat3f &R2, vec3f &t);
 
+    // True if Frame 1's own depth-backprojected points look close to planar (or if there
+    // isn't enough depth coverage to judge). Scale-free, model-independent: no candidate
+    // (R,t), no Frame 2.
+    bool IsSceneNearPlanar() const;
+
+    // True if a winning (R,t) candidate's triangulated depths are consistent (up to one
+    // global scale factor) with Frame 1's sensor depth, or if there isn't enough overlap
+    // between triangulated and depth-covered points to judge.
+    bool IsDepthConsistent(const vector<vec3f> &pts3D_, const vector<bool> &isTriangulated_) const;
+
 
     FeatureType featureType;
 
     // Keypoints from Reference Frame (Frame 1)
     vector<cv::KeyPoint> keypoints1;
+    vector<float> invDepth1; // inverse depth aligned with keypoints1; 0 where no valid depth
 
     // Keypoints from Current Frame (Frame 2)
     vector<cv::KeyPoint> keypoints2;
+    vector<float> invDepth2; // inverse depth aligned with keypoints2; 0 where no valid depth
 
     // Current Matches from Reference to Current
     vector<Match> matches12;
@@ -113,6 +125,12 @@ private:
     const float minRH{0.5};
     const float minParallax{1.0f};
     const int minTriangulated{50};
+    const int minDepthSamplesPlanarity{20};
+    const float maxPlanarityRatio{0.15f};
+
+    // Depth consistency (ReconstructF / ReconstructH)
+    const int minDepthSamplesConsistency{20};
+    const float maxDepthConsistencyMAD{0.3f}; // log-scale MAD; ~30% relative depth spread
 
     // ReconstructF
     const float percMaxGood{0.7f};

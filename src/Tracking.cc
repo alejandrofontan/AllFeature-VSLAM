@@ -16,6 +16,7 @@
 #include "PnPsolver.h"
 #include "Utils.h"
 
+#include <algorithm>
 #include <iostream>
 
 #include <mutex>
@@ -449,15 +450,44 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
 
     Optimizer::GlobalBundleAdjustemnt(map,numItGBA);
 
-    // Set median depth to 1
+    // Set the initial map's scale: prefer a depth-verified scale over the arbitrary
+    // monocular "median depth = 1" convention, when enough points have valid sensor depth.
     float medianDepth = pKFini->ComputeSceneMedianDepth(2);
-    float invMedianDepth = 1.0f/medianDepth;
 
     if(medianDepth<0 || pKFcur->TrackedMapPoints(1) < keyframeTrackedMapPoints)
     {
         cout << "Wrong initialization, reseting..." << endl;
         Reset();
         return;
+    }
+
+    vector<float> depthRatios;
+    for (const auto& ft : featureTypes) {
+        const auto& invDepthKF = pKFini->invDepth.at(ft);
+        vector<Pt> vpAllMapPoints = pKFini->get_map_point_matches(ft);
+        for(size_t iMP=0; iMP<vpAllMapPoints.size(); iMP++)
+        {
+            if(!vpAllMapPoints[iMP])
+                continue;
+            float sensorInvDepth = invDepthKF[iMP];
+            if(sensorInvDepth <= 0.0f)
+                continue;
+            float triangulatedDepth = vpAllMapPoints[iMP]->get_world_pos()(2);
+            if(triangulatedDepth <= 0.0f)
+                continue;
+            depthRatios.push_back((1.0f / sensorInvDepth) / triangulatedDepth);
+        }
+    }
+
+    float invMedianDepth;
+    if((int)depthRatios.size() >= minDepthSamples_createInitialMap)
+    {
+        sort(depthRatios.begin(), depthRatios.end());
+        invMedianDepth = depthRatios[depthRatios.size() / 2];
+    }
+    else
+    {
+        invMedianDepth = 1.0f / medianDepth;
     }
 
     // Scale initial baseline

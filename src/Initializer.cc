@@ -35,8 +35,12 @@ Initializer::Initializer(const Frame &ReferenceFrame, float sigma_, int iteratio
 
     //keypoints1 = ReferenceFrame.keypoints.at(featureType);
     keypoints1.clear();
-    for (const auto [ft, keypoints]: ReferenceFrame.keypoints)
+    invDepth1.clear();
+    for (const auto& [ft, keypoints]: ReferenceFrame.keypoints) {
         keypoints1.insert(keypoints1.end(), keypoints.begin(), keypoints.end());
+        const auto& d = ReferenceFrame.invDepth.at(ft);
+        invDepth1.insert(invDepth1.end(), d.begin(), d.end());
+    }
 
     sigma = sigma_;
     sigma2 = sigma_ * sigma_;
@@ -52,8 +56,12 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &match
     // Reference Frame: 1, Current Frame: 2
     //keypoints2 = CurrentFrame.keypoints.at(featureType);
     keypoints2.clear();
-    for (const auto [ft, keypoints]: CurrentFrame.keypoints)
+    invDepth2.clear();
+    for (const auto& [ft, keypoints]: CurrentFrame.keypoints) {
         keypoints2.insert(keypoints2.end(), keypoints.begin(), keypoints.end());
+        const auto& d = CurrentFrame.invDepth.at(ft);
+        invDepth2.insert(invDepth2.end(), d.begin(), d.end());
+    }
 
     matches12.clear();
     matches12.reserve(keypoints2.size());
@@ -113,6 +121,11 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &match
     // Compute ratio of scores
     float RH = SH / (SH + SF);
 
+    // Depth-planarity pre-filter: if Frame 1's own depth says the scene is clearly not
+    // planar, an H-preferring RH is likely the classic monocular H/F ambiguity -> force F.
+    if(RH > minRH && !IsSceneNearPlanar())
+        return ReconstructF(matchesInliersF,F,K,R21,t21,pts3D,isTriangulated,minParallax,minTriangulated);
+
     // Try to reconstruct from homography or fundamental depending on the ratio (0.40-0.45)
     //std::cout << "Initializer: score H = " << SH << ", score F = " << SF << ", RH = " << RH << std::endl;
     if(RH > minRH)
@@ -121,6 +134,87 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &match
     else //if(pF_HF>0.6)
         return ReconstructF(matchesInliersF,F,K,R21,t21,pts3D,isTriangulated,minParallax,minTriangulated);
 
+}
+
+bool Initializer::IsSceneNearPlanar() const
+{
+    // Back-project every Frame 1 keypoint with valid sensor depth into that frame's own
+    // camera coordinates. Scale-free, model-independent: doesn't involve Frame 2 or any
+    // RANSAC candidate at all.
+    const float invfx = 1.0f / K(0,0);
+    const float invfy = 1.0f / K(1,1);
+    const float cx = K(0,2);
+    const float cy = K(1,2);
+
+    vector<vec3f> pts;
+    pts.reserve(keypoints1.size());
+    for(size_t i = 0; i < keypoints1.size(); i++)
+    {
+        if(invDepth1[i] <= 0.0f)
+            continue;
+        const float depth = 1.0f / invDepth1[i];
+        pts.emplace_back((keypoints1[i].pt.x - cx) * invfx * depth,
+                          (keypoints1[i].pt.y - cy) * invfy * depth,
+                          depth);
+    }
+
+    if((int)pts.size() < minDepthSamplesPlanarity)
+        return true; // not enough depth coverage to judge -> defer to the RANSAC-based RH decision
+
+    vec3f mean = vec3f::Zero();
+    for(const auto& p : pts) mean += p;
+    mean /= static_cast<float>(pts.size());
+
+    Eigen::MatrixXf centered(static_cast<int>(pts.size()), 3);
+    for(size_t i = 0; i < pts.size(); i++)
+        centered.row(static_cast<int>(i)) = (pts[i] - mean).transpose();
+
+    Eigen::JacobiSVD<Eigen::MatrixXf> svd(centered, Eigen::ComputeThinV);
+    const vec3f s = svd.singularValues(); // descending: spread along 3 principal axes
+
+    if(s(0) <= 0.0f)
+        return true;
+
+    // Ratio of out-of-plane spread to in-plane spread. Near 0 -> points lie close to a
+    // plane; near 1 -> genuinely 3D structure.
+    return (s(2) / s(0)) < maxPlanarityRatio;
+}
+
+bool Initializer::IsDepthConsistent(const vector<vec3f> &pts3D_, const vector<bool> &isTriangulated_) const
+{
+    // t is unit-normalized, so no single triangulated depth is meaningful on its own -- but
+    // the *relative* depth structure across points is scale-free and comparable to sensor
+    // depth's own relative structure (same idea as Step 2, used here as a consistency check
+    // instead of a scale estimate).
+    vector<float> logRatios;
+    logRatios.reserve(pts3D_.size());
+    for(size_t i = 0; i < pts3D_.size(); i++)
+    {
+        if(!isTriangulated_[i])
+            continue;
+        if(invDepth1[i] <= 0.0f)
+            continue;
+        const float triangulatedDepth = pts3D_[i](2);
+        if(triangulatedDepth <= 0.0f)
+            continue;
+        const float sensorDepth = 1.0f / invDepth1[i];
+        logRatios.push_back(log(triangulatedDepth / sensorDepth));
+    }
+
+    if((int)logRatios.size() < minDepthSamplesConsistency)
+        return true; // not enough overlap between triangulated & depth-covered points -> don't reject
+
+    sort(logRatios.begin(), logRatios.end());
+    const float median = logRatios[logRatios.size() / 2];
+
+    vector<float> absDev;
+    absDev.reserve(logRatios.size());
+    for(float lr : logRatios)
+        absDev.push_back(fabs(lr - median));
+    sort(absDev.begin(), absDev.end());
+    const float mad = absDev[absDev.size() / 2];
+
+    return mad < maxDepthConsistencyMAD;
 }
 
 
@@ -514,7 +608,7 @@ bool Initializer::ReconstructF(const vector<bool> &inliers,
     // If best reconstruction has enough parallax initialize
     if(maxGood == nGood1)
     {
-        if(parallax1 > minParallax_)
+        if(parallax1 > minParallax_ && IsDepthConsistent(pts3D_1, isTriangulated_1))
         {
             pts3D = pts3D_1;
             isTriangulated = isTriangulated_1;
@@ -524,7 +618,7 @@ bool Initializer::ReconstructF(const vector<bool> &inliers,
         }
     }else if(maxGood==nGood2)
     {
-        if(parallax2 > minParallax_)
+        if(parallax2 > minParallax_ && IsDepthConsistent(pts3D_2, isTriangulated_2))
         {
             pts3D = pts3D_2;
             isTriangulated = isTriangulated_2;
@@ -534,7 +628,7 @@ bool Initializer::ReconstructF(const vector<bool> &inliers,
         }
     }else if(maxGood == nGood3)
     {
-        if(parallax3 > minParallax_)
+        if(parallax3 > minParallax_ && IsDepthConsistent(pts3D_3, isTriangulated_3))
         {
             pts3D = pts3D_3;
             isTriangulated = isTriangulated_3;
@@ -544,7 +638,7 @@ bool Initializer::ReconstructF(const vector<bool> &inliers,
         }
     }else if(maxGood == nGood4)
     {
-        if(parallax4 > minParallax_)
+        if(parallax4 > minParallax_ && IsDepthConsistent(pts3D_4, isTriangulated_4))
         {
             pts3D = pts3D_4;
             isTriangulated = isTriangulated_4;
@@ -700,7 +794,8 @@ bool Initializer::ReconstructH(const vector<bool> &inliers,
     if(float(secondBestGood) < percSecondBestGood * float(bestGood)
         && bestParallax >= minParallax_
         && float(bestGood) > float(minTriangulated_)
-        && float(bestGood) > percBestGood * float(N))
+        && float(bestGood) > percBestGood * float(N)
+        && IsDepthConsistent(bestP3D, bestTriangulated))
     {
         R21 = vR[bestSolutionIdx];
         t21 = vt[bestSolutionIdx];

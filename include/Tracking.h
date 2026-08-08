@@ -280,6 +280,7 @@ protected:
 
     // CreateInitialMapMonocular()
     const int keyframeTrackedMapPoints{100};
+    const int minDepthSamples_createInitialMap{10};
 
     // TrackReferenceKeyFrame()
     const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH{15};
