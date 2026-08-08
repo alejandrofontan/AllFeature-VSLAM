@@ -41,6 +41,19 @@ void AF_VSLAM::Image::LoadDepth(const std::string &depthPath, const float& depth
         return;
     }
 
+    // A raw value sitting exactly at the format's max representable value is a sensor
+    // saturation/out-of-range sentinel, not a real depth reading -- map it to 0, matching
+    // the same "0 = invalid" convention already relied on downstream (Frame::GetDepth).
+    double maxRawValue = -1.0;
+    switch (depthImg.type()) {
+        case CV_8U:  maxRawValue = 255.0;   break;
+        case CV_16U: maxRawValue = 65535.0; break;
+        case CV_16S: maxRawValue = 32767.0; break;
+    }
+    if (maxRawValue > 0.0) {
+        depthImg.setTo(0, depthImg == maxRawValue);
+    }
+
     // Convert to metric CV_32F. Guard against a near-zero factor (missing/invalid
     // calibration) blowing up to a huge scale — treat it as "already metric" instead.
     const float scale = (std::fabs(depthFactor) < 1e-5f) ? 1.0f : (1.0f / depthFactor);
