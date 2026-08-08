@@ -105,7 +105,7 @@ int main(int argc, char **argv)
         }
     }
 
-    // AnyFeature-VSLAM inputs
+    // AllFeature-VSLAM inputs
     YAML::Node settings;
     try {
         settings = YAML::LoadFile(settings_yaml);

@@ -66,8 +66,8 @@ public:
 
     // Constructor for mono cameras.
     Frame(const Image & img, const double &timeStamp,
-          std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
-          shared_ptr<Vocabulary> vocabulary, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth);
+          const std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
+          shared_ptr<Vocabulary> vocabulary, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth);
 
     // Extract ORB on the image. 0 for left image and 1 for right image.
     void ExtractFeatures(int flag, const Image & img);
@@ -174,6 +174,10 @@ public:
     std::map<FeatureType, std::vector<float>> mvuRight;
     std::map<FeatureType, std::vector<float>> mvDepth;
 
+    // Inverse depth (1/depth) per keypoint, from the RGB-D sensor's depth image.
+    // 0 where no valid depth is available (monocular, or a missing/invalid depth pixel).
+    std::map<FeatureType, std::vector<float>> invDepth;
+
     // Bag of Words Vector structures.
     DBoW2::BowVector mBowVec;
     DBoW2::FeatureVector mFeatVec;
@@ -227,6 +231,10 @@ private:
     // Only for the RGB-D case. Stereo must be already rectified!
     // (called in the constructor).
     void UndistortKeyPoints();
+
+    // Populate invDepth by sampling img.depthImg at each keypoint's (distorted) pixel
+    // coordinates, matching how the depth image itself is indexed (called in the constructor).
+    void GetDepth(const Image& img);
 
     // Computes image bounds for the undistorted image (called in the constructor).
     void ComputeImageBounds(const cv::Mat &imLeft);

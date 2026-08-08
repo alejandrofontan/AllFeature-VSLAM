@@ -76,32 +76,33 @@ Frame::Frame(const Frame &frame)
 }
 
 Frame::Frame(const Image & img, const double &timeStamp,
-             std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
-             shared_ptr<Vocabulary> vocabulary, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth)
+             const std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
+             shared_ptr<Vocabulary> vocabulary, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth)
     :vocabulary(vocabulary),
     featureExtractorLeft(extractor), featureExtractorRight(),
-    mTimeStamp(timeStamp), mK(K.clone()),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
+    mTimeStamp(timeStamp), mK(K.clone()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
 {
     // Frame ID
     mnId = nNextId++;
     w = img.img.cols;
     h = img.img.rows;
 
-    // Scale Level Info
+    // Scale Level Info (assumes every feature type shares the same pyramid scale factor)
     sizeTolerance = featureExtractorLeft.begin()->second->GetScaleFactor();
     invSizeTolerance = 1.0f / sizeTolerance;
 
     // Feature extraction
-    ExtractFeatures(0,img);
+    ExtractFeatures(0, img);
     if(Ntotal == 0)
         return;
 
     UndistortKeyPoints();
+    GetDepth(img);
 
     // Set no stereo information
     for(auto& [ft, N_] : N){
-        mvuRight[ft] = vector<float>(N_,-1);
-        mvDepth[ft] = vector<float>(N_,-1);
+        mvuRight[ft] = vector<float>(N_, -1);
+        mvDepth[ft] = vector<float>(N_, -1);
         pts[ft] = vector<Pt>(N_, static_cast<Pt>(nullptr));
         mvbOutlier[ft] = vector<bool>(N_, false);
     }
@@ -111,20 +112,20 @@ Frame::Frame(const Image & img, const double &timeStamp,
     {
         ComputeImageBounds(img.grayImg);
 
-        mfGridElementWidthInv=static_cast<float>(FRAME_GRID_COLS)/static_cast<float>(mnMaxX-mnMinX);
-        mfGridElementHeightInv=static_cast<float>(FRAME_GRID_ROWS)/static_cast<float>(mnMaxY-mnMinY);
+        mfGridElementWidthInv = static_cast<float>(FRAME_GRID_COLS) / static_cast<float>(mnMaxX - mnMinX);
+        mfGridElementHeightInv = static_cast<float>(FRAME_GRID_ROWS) / static_cast<float>(mnMaxY - mnMinY);
 
         fx = K.at<float>(0,0);
         fy = K.at<float>(1,1);
         cx = K.at<float>(0,2);
         cy = K.at<float>(1,2);
-        invfx = 1.0f/fx;
-        invfy = 1.0f/fy;
+        invfx = 1.0f / fx;
+        invfy = 1.0f / fy;
 
-        mbInitialComputations=false;
+        mbInitialComputations = false;
     }
 
-    mb = mbf/fx;
+    mb = mbf / fx;
     AssignFeaturesToGrid();
 }
 
@@ -377,6 +378,45 @@ void Frame::UndistortKeyPoints()
             kp.pt.x=mat.at<float>(i,0);
             kp.pt.y=mat.at<float>(i,1);
             keypoints[ft][i]=kp;
+        }
+    }
+}
+
+void Frame::GetDepth(const Image& img)
+{
+    for(auto& [ft, N_] : N)
+    {
+        invDepth[ft] = vector<float>(N_, 0.0f);
+
+        if(img.depthImg.empty())
+            continue;
+
+        const vector<cv::KeyPoint>& kps = mvKeys.at(ft);
+        for(int i = 0; i < N_; i++)
+        {
+            // Sample at the keypoint's distorted pixel coordinates: the depth image
+            // is indexed the same way as the original (pre-undistortion) RGB image.
+            const int u = cvRound(kps[i].pt.x);
+            const int v = cvRound(kps[i].pt.y);
+
+            if(u < 0 || v < 0 || u >= img.depthImg.cols || v >= img.depthImg.rows)
+                continue;
+
+            float depth;
+            switch(img.depthImg.type())
+            {
+                case CV_16U:
+                    depth = static_cast<float>(img.depthImg.at<uint16_t>(v, u));
+                    break;
+                case CV_32F:
+                    depth = img.depthImg.at<float>(v, u);
+                    break;
+                default:
+                    throw std::runtime_error("Frame::GetDepth: unsupported depthImg type: " + std::to_string(img.depthImg.type()));
+            }
+
+            if(depth > 0.0f)
+                invDepth[ft][i] = 1.0f / depth;
         }
     }
 }

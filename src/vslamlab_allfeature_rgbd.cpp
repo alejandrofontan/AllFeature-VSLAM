@@ -106,7 +106,7 @@ int main(int argc, char **argv)
         }
     }
 
-    // AnyFeature-VSLAM inputs
+    // AllFeature-VSLAM inputs
     YAML::Node settings;
     try {
         settings = YAML::LoadFile(settings_yaml);
@@ -117,6 +117,27 @@ int main(int argc, char **argv)
     const std::vector<std::string> features = settings["features"].as<std::vector<std::string>>();
     bool debug = settings["debug"].as<bool>();
     AF_CONFIG_FIELD("Debug mode: ", debug);
+
+    // Depth scale factor: metric_depth = raw_depth_pixel / depth_factor. Read from the
+    // calibration.yaml camera entry matching settings_yaml's cam_mono (defaults to 1, i.e.
+    // "already metric", if the calibration doesn't declare one).
+    float depth_factor = 1.0f;
+    try {
+        YAML::Node calibration = YAML::LoadFile(calibration_yaml);
+        const std::string cam_name = settings["cam_mono"].as<std::string>();
+        for (const auto& cam : calibration["cameras"]) {
+            if (cam["cam_name"].as<std::string>() == cam_name) {
+                if (cam["depth_factor"]) {
+                    depth_factor = cam["depth_factor"].as<float>();
+                }
+                break;
+            }
+        }
+    } catch (const YAML::Exception& e) {
+        std::cerr << "Failed to load calibration_yaml: '" << calibration_yaml << "': " << e.what() << std::endl;
+        return 1;
+    }
+    AF_CONFIG_FIELD("Depth factor: ", depth_factor);
 
     AF_VSLAM::FrameDrawer::exp_folder = exp_folder;
 
@@ -180,7 +201,7 @@ int main(int argc, char **argv)
             continue;
         }
 
-        im.LoadDepth(depthFilenames[ni]);
+        im.LoadDepth(depthFilenames[ni], depth_factor);
         if (im.depthImg.empty()) {
             std::cerr << "Failed to load depth image: '" << depthFilenames[ni] << "'" << std::endl;
             ++ni;

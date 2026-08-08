@@ -25,7 +25,10 @@ namespace AF_VSLAM {
         std::string maskFile{};
 
         void LoadMask(const std::string& maskPath);
-        void LoadDepth(const std::string& depthPath);
+        // depthFactor converts raw depth-image units to meters: metric_depth = raw_value / depthFactor
+        // (e.g. 5000 for TUM/ETH-style datasets storing depth at 1/5000 m resolution). Defaults to 1
+        // (no scaling, i.e. the depth image is assumed to already be metric).
+        void LoadDepth(const std::string& depthPath, const float& depthFactor = 1.0f);
         void GetGrayImage(const bool& rgb);
         void FixImageSize(const int& new_width, const int& new_height);
     };

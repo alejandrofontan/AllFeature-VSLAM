@@ -4,6 +4,7 @@
 
 #include "Image.h"
 
+#include <cmath>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <iostream>
@@ -32,11 +33,19 @@ void AF_VSLAM::Image::LoadMask(const std::string &maskPath) {
     }
 }
 
-void AF_VSLAM::Image::LoadDepth(const std::string &depthPath) {
+void AF_VSLAM::Image::LoadDepth(const std::string &depthPath, const float& depthFactor) {
     depthFile = depthPath;
     depthImg = cv::imread(depthFile, cv::IMREAD_UNCHANGED);
     if (depthImg.empty()) {
         std::cerr << "Failed to load depth image: " << depthFile << std::endl;
+        return;
+    }
+
+    // Convert to metric CV_32F. Guard against a near-zero factor (missing/invalid
+    // calibration) blowing up to a huge scale — treat it as "already metric" instead.
+    const float scale = (std::fabs(depthFactor) < 1e-5f) ? 1.0f : (1.0f / depthFactor);
+    if (scale != 1.0f || depthImg.type() != CV_32F) {
+        depthImg.convertTo(depthImg, CV_32F, scale);
     }
 }
 
