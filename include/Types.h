@@ -8,6 +8,10 @@
 #include <Eigen/Dense>
 #include <iostream>
 
+namespace AF_VSLAM {
+    using Seconds = double;
+}
+
 enum FeatureType {
     FEAT_SUPERPOINT256 = 7,
     FEAT_ALIKED128 = 6,

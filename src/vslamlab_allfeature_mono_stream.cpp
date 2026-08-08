@@ -2,108 +2,55 @@
 #include <iostream>
 #include<FeatureFactory.h>
 #include <yaml-cpp/yaml.h>
-#include<iostream>
 #include<algorithm>
 #include<fstream>
 #include<chrono>
 #include<opencv2/core/core.hpp>
-#include "sys/sysinfo.h"
 
 #include<System.h>
 #include<FrameDrawer.h>
 
-using namespace std;
-namespace AF_VSLAM{
-    using Seconds = double;
+static bool hasPrefix(const std::string& str, const std::string& prefix) {
+    return str.rfind(prefix, 0) == 0;
 }
 
-static bool isMostlyFlatOrClipped(const cv::Mat& bgrOrGray) {
-    cv::Mat gray;
-    if (bgrOrGray.channels() == 3) cv::cvtColor(bgrOrGray, gray, cv::COLOR_BGR2GRAY);
-    else gray = bgrOrGray;
+static constexpr float kAssumedFps = 30.f;
+static constexpr int kWaitKeyMs = 30;
 
-    // Downsample for speed
-    cv::Mat small;
-    cv::resize(gray, small, cv::Size(), 0.25, 0.25, cv::INTER_AREA);
+int main(int argc, char** argv) {
 
-    // Count near-black and near-white pixels
-    const int N = small.rows * small.cols;
-    int nearBlack = 0, nearWhite = 0;
-    for (int r = 0; r < small.rows; ++r) {
-        const uchar* p = small.ptr<uchar>(r);
-        for (int c = 0; c < small.cols; ++c) {
-            uchar v = p[c];
-            nearBlack += (v <= 2);
-            nearWhite += (v >= 253);
-        }
-    }
-
-    double fracBlack = (double)nearBlack / N;
-    double fracWhite = (double)nearWhite / N;
-
-    // Tune thresholds to your stream
-    return (fracBlack > 0.98) || (fracWhite > 0.98);
-}
-
-static bool isTooBlurryOrTextureless(const cv::Mat& bgrOrGray) {
-    cv::Mat gray;
-    if (bgrOrGray.channels() == 3) cv::cvtColor(bgrOrGray, gray, cv::COLOR_BGR2GRAY);
-    else gray = bgrOrGray;
-
-    cv::Mat small;
-    cv::resize(gray, small, cv::Size(), 0.5, 0.5, cv::INTER_AREA);
-
-    cv::Mat lap;
-    cv::Laplacian(small, lap, CV_64F);
-
-    cv::Scalar mean, stddev;
-    cv::meanStdDev(lap, mean, stddev);
-    double var = stddev[0] * stddev[0];
-
-    // Tune: higher threshold = stricter. Start around 30–100 depending on resolution.
-    return var < 50.0;
-}
-
-static bool isFrozenFrame(const cv::Mat& current, const cv::Mat& prevGood) {
-    if (prevGood.empty()) return false;
-
-    cv::Mat g1, g2;
-    if (current.channels() == 3) cv::cvtColor(current, g1, cv::COLOR_BGR2GRAY);
-    else g1 = current;
-    if (prevGood.channels() == 3) cv::cvtColor(prevGood, g2, cv::COLOR_BGR2GRAY);
-    else g2 = prevGood;
-
-    cv::Mat s1, s2;
-    cv::resize(g1, s1, cv::Size(160, 120));
-    cv::resize(g2, s2, cv::Size(160, 120));
-
-    cv::Mat diff;
-    cv::absdiff(s1, s2, diff);
-
-    double meanDiff = cv::mean(diff)[0];
-    // Tune: if your scene is static, make this lower. Start ~0.5–2.0
-    return meanDiff < 1.0;
-}
-
-int main() {
-
-    // ALLFEATURE_VSLAM inputs
+    // ALLFEATURE_VSLAM inputs (defaults are for local testing; override via CLI: key:value)
     std::string calibration_yaml{"/home/alejandro/Desktop/calibration.yaml"};
     std::string settings_yaml{"/home/alejandro/VSLAM-LAB/Baselines/AllFeature-VSLAM-DEV/vslamlab_allfeature-dev_settings.yaml"};
-    bool verbose{true};
-
     std::string path_to_vocabulary_folder("/home/alejandro/VSLAM-LAB/Baselines/AllFeature-VSLAM-DEV/allfeature_vocabulary");
+    std::string stream_url{"rtmp://10.68.61.71:1935/live/stream"};
+    bool verbose{true};
     bool fixImageSize = false;
-    YAML::Node settings = YAML::LoadFile(settings_yaml);
-    const vector<std::string> features = settings["features"].as<vector<std::string>>();
-    bool debug = (bool)settings["debug"].as<bool>();
-    std::cout << "[vslamlab_anyfeature_mono.cpp] Debug mode = " << debug << std::endl;
 
-    vector<FeatureType> featureTypes{};
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (hasPrefix(arg, "calibration_yaml:")) { calibration_yaml = arg.substr(std::string("calibration_yaml:").size()); continue; }
+        if (hasPrefix(arg, "settings_yaml:")) { settings_yaml = arg.substr(std::string("settings_yaml:").size()); continue; }
+        if (hasPrefix(arg, "vocabulary_folder:")) { path_to_vocabulary_folder = arg.substr(std::string("vocabulary_folder:").size()); continue; }
+        if (hasPrefix(arg, "stream_url:")) { stream_url = arg.substr(std::string("stream_url:").size()); continue; }
+    }
+
+    YAML::Node settings;
+    try {
+        settings = YAML::LoadFile(settings_yaml);
+    } catch (const YAML::Exception& e) {
+        std::cerr << "Failed to load settings_yaml '" << settings_yaml << "': " << e.what() << std::endl;
+        return 1;
+    }
+    const std::vector<std::string> features = settings["features"].as<std::vector<std::string>>();
+    bool debug = (bool)settings["debug"].as<bool>();
+    std::cout << "[vslamlab_allfeature_mono_stream.cpp] Debug mode = " << debug << std::endl;
+
+    std::vector<FeatureType> featureTypes{};
     for(const auto& feat : features) {
         auto featureType = get_feature_type(feat);
         featureTypes.push_back(featureType);
-        std::cout << "[vslamlab_anyfeature_mono.cpp] Loaded feature from settings YAML: " << feat << std::endl;
+        std::cout << "[vslamlab_allfeature_mono_stream.cpp] Loaded feature from settings YAML: " << feat << std::endl;
     }
 
     // Setting AllFeature-VSLAM
@@ -114,11 +61,8 @@ int main() {
                                   featureTypes,
                                   fixImageSize);
 
-    // If OpenCV was built with FFmpeg, this usually works:
-    //std::string url = "udp://127.0.0.1:5000";
-    const std::string url = "rtmp://10.68.61.71:1935/live/stream";
-
     // Some builds prefer explicitly selecting FFmpeg backend:
+    const std::string& url = stream_url;
     cv::VideoCapture cap(url, cv::CAP_FFMPEG);
 
     if (!cap.isOpened()) {
@@ -126,73 +70,23 @@ int main() {
         return 1;
     }
 
-    //cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
-
-    // cv::Mat frame;//, lastGood;
-    // int idx{0};
-    // while (true) {
-
-    //     // Block until at least one frame is available
-    //     if (!cap.grab()) {
-    //         cv::waitKey(30);
-    //         continue;
-    //     }
-
-    //     // Drain any extra queued frames; keep the newest
-    //     int drained = 0;
-    //     while (cap.grab()) {               // grabs next if already available
-    //         drained++;
-    //         // stop draining after some limit to avoid infinite loop if stream is extremely fast
-    //         if (drained > 5) break;
-    //     }
-
-    //     cap.retrieve(frame);
-    //     if (frame.empty()) continue;
-
-    //     // if(isMostlyFlatOrClipped(frame)) {
-    //     //     std::cout << "Skipping frame due to mostly flat or clipped image." << std::endl;
-    //     //     continue;
-    //     // }
-    //     // if (isTooBlurryOrTextureless(frame)) {
-    //     //     std::cout << "Skipping frame due to blur or lack of texture." << std::endl;
-    //     //     continue;
-    //     // }
-
-    //     // if (isFrozenFrame(frame, lastGood)) {
-    //     //     std::cout << "Skipping frame due to frozen frame detected." << std::endl;
-    //     //     continue;
-    //     // }
-
-    //     //lastGood = frame.clone();
-
-    //     cv::imshow("UDP Stream", frame);
-
-    //     // AF_VSLAM::Image im(frame);
-    //     // AF_VSLAM::Seconds tframe = idx * (1.0/30.0); // or use a real timestamp
-    //     // SLAM.TrackMonocular(im, tframe);
-    //     idx++;
-
-    //     int key = cv::waitKey(30);
-    //     if (key == 'q' || key == 27) break;
-    // }
-
     cv::Mat frame;
     int idx{0};
     while (true) {
         if (!cap.read(frame) || frame.empty()) {
             // stream might not have started yet; avoid busy spin
-            cv::waitKey(30);
+            cv::waitKey(kWaitKeyMs);
             continue;
         }
 
         AF_VSLAM::Image im(frame);
-        AF_VSLAM::Seconds tframe = idx * (1.f/30.f);
+        AF_VSLAM::Seconds tframe = idx * (1.f/kAssumedFps);
 
         SLAM.TrackMonocular(im,tframe);
         idx++;
 
         // cv::imshow("UDP Stream", frame);
-        int key = cv::waitKey(30);
+        int key = cv::waitKey(kWaitKeyMs);
         if (key == 'q' || key == 27) { // q or ESC
             break;
         }

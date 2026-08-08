@@ -1,0 +1,54 @@
+# TODO
+
+## Cleanup Suggestions: CLI entry points
+
+Findings from a review of `src/vslamlab_allfeature_mono.cpp` and `src/vslamlab_allfeature_mono_stream.cpp`. Update the **State** column (`TO DO` / `SOLVED`) and fill in **Solution Applied** as items get addressed.
+
+### Likely bugs / correctness
+
+| File | Location | Issue | State | Solution Applied |
+|---|---|---|---|---|
+| mono | `L110`, `L114` | Defaults reference the old project name: `"vslamlab_anyfeature-dev_settings.yaml"` and `"anyfeature_vocabulary"`. Actual files/folders are `vslamlab_allfeature-dev_settings.yaml` and `allfeature_vocabulary`. Silent fallback to a nonexistent file if the caller omits these args. | SOLVED | Updated the two default initializers to `"vslamlab_allfeature-dev_settings.yaml"` and `"allfeature_vocabulary"`. |
+| mono | `L336-338` | `get_index` uses `col_map[key]`; `std::map::operator[]` inserts a default (`0`) for a missing key instead of signaling "not found." A CSV missing the `ts_<cam>`/`path_<cam>` column silently resolves to column 0. | SOLVED | `get_index` now does `col_map.find(key)` and throws `std::runtime_error` naming the missing column and CSV path instead of defaulting to `0`. |
+| mono | `L340-341`, `L351-352` | No validation that `ts_idx`/`rgb0_idx` are valid, and no per-row bounds check on `tokens[idx]` — a short/malformed CSV row throws an unhandled `std::out_of_range` rather than a clear error. | SOLVED | `ts_idx`/`rgb0_idx` validity now comes from `get_index`'s exception (see row above); added an explicit per-row `tokens.size()` check in the parse loop that throws `std::runtime_error` with the offending line instead of an unhandled `std::out_of_range`. |
+| mono | `L318` | No check that `std::ifstream in(rgb_csv)` actually opened; a bad path silently produces `nImages == 0` and the program "succeeds" having done nothing. | SOLVED | Added an `in.is_open()` check right after opening the stream that throws `std::runtime_error` naming the path. |
+| mono | `L363` | `numberOfZeros - number.size()`: both `size_t`; if `number.size() > numberOfZeros` this underflows into a huge loop instead of failing gracefully. | SOLVED | Added an early `number.size() >= numberOfZeros` guard that returns `number` unpadded; rewrote the padding itself as `std::string(n, '0')` instead of a manual loop. |
+| mono | `L120` | Loop starts at `argv[0]` (executable path) instead of `argv[1]`; harmless today but only by luck, since `arg.find(...)` is a substring search rather than a prefix check. | SOLVED | Changed loop init from `i = 0` to `i = 1` to skip the executable path. |
+| mono | `L122` etc. | Argument matching uses `arg.find(prefix) != npos` (substring anywhere) rather than a prefix check (`rfind(prefix, 0) == 0`). A value containing another key's prefix would misparse. | SOLVED | Added a `hasPrefix(str, prefix)` helper (`str.rfind(prefix, 0) == 0`) and switched all 8 `arg.find(...) != npos` checks to `hasPrefix(arg, ...)`. |
+| mono | `L281` | `for(int ni = 0; ni < nImages; ni++)` compares signed `int` against `size_t nImages` (signed/unsigned mismatch). | SOLVED | Changed loop variable `ni` from `int` to `size_t`. |
+| mono | `L175` | `(bool)settings["debug"].as<bool>()` — redundant cast, `.as<bool>()` already returns `bool`. | SOLVED | Dropped the redundant `(bool)` cast. |
+| mono | `L173` | `YAML::LoadFile(settings_yaml)` is unguarded; a missing/malformed YAML throws an uncaught exception instead of a clear diagnostic. | SOLVED | Wrapped the load in `try/catch (const YAML::Exception&)`, printing the settings path and `e.what()` to `stderr` and returning `1` instead of crashing with an unhandled exception. |
+| mono | `L236` | No check that `AF_VSLAM::Image im(imageFilenames[ni])` actually loaded successfully before tracking it. | SOLVED | `Image`'s string constructor uses `cv::imread`, which returns an empty `cv::Mat` (no throw) on failure. Added an `im.img.empty()` check that logs to `stderr` and skips the frame (advancing `ni`) instead of feeding an empty image to `TrackMonocular`. |
+| stream | `L91-92, L95, L119` | Hardcoded, developer-machine-specific absolute paths (`/home/alejandro/Desktop/calibration.yaml`, `/home/alejandro/VSLAM-LAB/...`) and a hardcoded RTMP URL/IP (`10.68.61.71`). Can't run on another machine as-is; should take these as CLI args like the mono version. | SOLVED | Added `argc`/`argv` `key:value` parsing (`calibration_yaml:`, `settings_yaml:`, `vocabulary_folder:`, `stream_url:`) mirroring the mono executable's convention; the old hardcoded values are now just the defaults used when a flag is omitted. |
+| stream | `L97` | Same unguarded `YAML::LoadFile` issue as mono `L173`. | SOLVED | Same fix as mono: wrapped in `try/catch (const YAML::Exception&)`, prints the path and `e.what()` to `stderr`, returns `1`. |
+| stream | `L100`, `L106` | Log messages say `[vslamlab_anyfeature_mono.cpp]` — wrong/stale filename (copy-paste from the pre-rename Any→AllFeature version). | SOLVED | Replaced both occurrences with `[vslamlab_allfeature_mono_stream.cpp]`. |
+| stream | `main()` | Takes no `argc`/`argv` at all — no way to override calibration/settings/vocabulary paths, inconsistent with the mono executable's `key:value` CLI convention. | SOLVED | Same change as the row above: `main(int argc, char** argv)` now parses `key:value` args via a local `hasPrefix` helper. |
+
+### Dead code
+
+| File | Location | Issue | State | Solution Applied |
+|---|---|---|---|---|
+| mono | `L221`, `223-224`, `231`, `258`, `290` | Five commented-out lines (`for(size_t ni...`, `std::cout << "Processing image..."`, `printf(...)`, `allowance.fetch_sub`, `usleep((1.0 * 1e6))`, duplicate `resultsPath_expId` declaration comment) — remove. | SOLVED | Removed all five dead commented-out lines. |
+| stream | `L20-46`, `L48-65`, `L67-86` | `isMostlyFlatOrClipped`, `isTooBlurryOrTextureless`, `isFrozenFrame` — all defined but never called from live code (only referenced inside the commented-out block below). Either wire them in or delete them. | SOLVED | Deleted all three unused functions. |
+| stream | `L131-177` | ~47 lines of commented-out earlier implementation (`cap.grab()`/drain loop version). Remove; recoverable from git history if needed. | SOLVED | Deleted the whole commented-out block, plus the adjacent `//cap.set(cv::CAP_PROP_BUFFERSIZE, 1);` dead line right above it. Recoverable from git history if ever needed. |
+
+### Duplication / structure
+
+| File(s) | Location | Issue | State | Solution Applied |
+|---|---|---|---|---|
+| mono + stream | mono `L15-17`, stream `L16-18` | `namespace AF_VSLAM{ using Seconds = double; }` copy-pasted identically in both files. Belongs in a shared header (`Types.h` or similar) instead of being redefined per translation unit. | SOLVED | Moved the typedef into `include/Types.h`. Both files already pull it in transitively via `FeatureFactory.h` → `Feature_orb32.h` → `Feature.h` → `Types.h`, so the local duplicate definitions were simply deleted. |
+| mono | `L28-83` | `TerminalRawMode` + `stdin_has_data` + `startKeyAllowanceThread` (~55 lines) is a self-contained debug-stepping utility bundled into the entry-point file. Worth extracting to its own header (e.g. `DebugKeyStepper.h`). | SOLVED | Extracted the three into new `include/DebugKeyStepper.h`, header-only (all `inline`). `mono.cpp` now just `#include "DebugKeyStepper.h"`. |
+| mono | `L297-308` | `split()` is a generic CSV-line splitter defined after `main()` and only used by `LoadImages` — candidate for a shared string-utils header. | SOLVED | Moved to new `include/StringUtils.h` (header-only, `inline`); `mono.cpp` now `#include`s it instead of defining it locally. |
+| mono + stream | — | The two executables have diverged in argument-handling philosophy (mono parses `key:value` CLI args; stream hardcodes everything) — worth deciding on one convention. | SOLVED | Resolved as part of the stream CLI-args change (bugs table, `stream`/`L91-92, L95, L119` row): both executables now parse the same `key:value` convention (`hasPrefix`-based). Not unified into one shared parser — that's a further step, not required to close this item. |
+
+### Style / minor
+
+| File | Location | Issue | State | Solution Applied |
+|---|---|---|---|---|
+| stream | `L2`, `L5` | Both `#include <iostream>` — duplicate include. | SOLVED | Removed the second, duplicate `#include <iostream>`. |
+| mono + stream | — | Both files include `"sys/sysinfo.h"` but neither appears to use anything from it — candidate for removal (double-check against `System.h`/`afvslam_log.hpp` transitively before dropping). | SOLVED | Confirmed no reference to `sysinfo`/`struct sysinfo`/`meminfo` in either file; removed the include from both. |
+| mono | `L14` | `using namespace std;` at file scope — fine for a `.cpp`, but the stream file avoids it and fully qualifies (`std::string`, `std::vector`) instead, so the two files have inconsistent style. | SOLVED | On closer look, `stream.cpp` also had `using namespace std;` (mixed with partial qualification), so the premise was slightly off — both files were inconsistent internally, not just relative to each other. Removed the using-directive from **both** files and fully qualified all remaining bare `string`/`vector`/`cout`/`endl`/`sort` uses, giving both a single consistent, fully-qualified style. |
+| mono | `L8-12` | Inconsistent include spacing: `#include<System.h>` vs `#include <yaml-cpp/yaml.h>`. | SOLVED | Normalized all angle-bracket includes in the file to `#include <Header.h>` with a space. |
+| mono | `L188`, `L193` | Both say `// Retrieve paths to images`, but `L193` is actually computing `nImages`, not retrieving paths — stale/misleading comment. | SOLVED | Removed the second, misleading duplicate comment; the first one above `LoadImages(...)` already describes the intent. |
+| stream | `L189`, `L195` | Magic numbers `1.f/30.f` (assumed 30fps) and `waitKey(30)` repeated without a named constant. | SOLVED | Added `static constexpr float kAssumedFps = 30.f;` and `static constexpr int kWaitKeyMs = 30;`; replaced both `waitKey(30)` call sites and the `1.f/30.f` frame-time computation with the named constants. |
+| mono | `L26`, `L178` | Global mutable state: `AF_VSLAM::FrameDrawer::exp_folder` is a static string set from `main()` rather than passed explicitly — implicit dependency easy to miss when reading `FrameDrawer` in isolation. | TO DO | Investigated: `exp_folder` is declared `static` on `FrameDrawer` (`include/FrameDrawer.h`) and only read inside a fully commented-out block in `src/FrameDrawer.cc` (L138-149) — so today it's dead at runtime, not just globally mutable. A real fix means changing `FrameDrawer`'s constructor/API and every call site across the core library (`System.cc`/`Tracking.cc`), which is out of scope for a CLI-entry-point cleanup pass. Left as-is; flagging as an accepted limitation rather than a silent drop. |

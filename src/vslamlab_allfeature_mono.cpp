@@ -1,92 +1,23 @@
-#include<iostream>
-#include<algorithm>
-#include<fstream>
-#include<chrono>
-#include<opencv2/core/core.hpp>
-#include "sys/sysinfo.h"
+#include <iostream>
+#include <algorithm>
+#include <fstream>
+#include <chrono>
+#include <opencv2/core/core.hpp>
 
-#include<System.h>
-#include<FeatureFactory.h>
+#include <System.h>
+#include <FeatureFactory.h>
 #include <yaml-cpp/yaml.h>
-#include<FrameDrawer.h>
+#include <FrameDrawer.h>
 #include "afvslam_log.hpp"
 
-using namespace std;
-namespace AF_VSLAM{
-    using Seconds = double;
-}
+#include "DebugKeyStepper.h"
+#include "StringUtils.h"
 
-#include <atomic>
-#include <thread>
-#include <termios.h>
-#include <unistd.h>
-#include <sys/select.h>
-#include <cstdio>
+std::string AF_VSLAM::FrameDrawer::exp_folder{};
 
-string AF_VSLAM::FrameDrawer::exp_folder{};
-
-// RAII: put terminal in raw-ish mode so we can read single key presses
-struct TerminalRawMode {
-    termios oldt{};
-    bool active{false};
-
-    TerminalRawMode() {
-        if (tcgetattr(STDIN_FILENO, &oldt) == 0) {
-            termios newt = oldt;
-            newt.c_lflag &= ~(ICANON | ECHO); // no line buffering, no echo
-            newt.c_cc[VMIN]  = 0;
-            newt.c_cc[VTIME] = 0;
-            if (tcsetattr(STDIN_FILENO, TCSANOW, &newt) == 0) {
-                active = true;
-            }
-        }
-    }
-
-    ~TerminalRawMode() {
-        if (active) tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-    }
-};
-
-static bool stdin_has_data() {
-    fd_set set;
-    FD_ZERO(&set);
-    FD_SET(STDIN_FILENO, &set);
-    timeval tv{0, 0}; // no wait
-    int rv = select(STDIN_FILENO + 1, &set, nullptr, nullptr, &tv);
-    return (rv > 0) && FD_ISSET(STDIN_FILENO, &set);
-}
-
-// Starts a thread that increments `allowance` each time any key is pressed.
-// If 'q' is pressed, sets `quit=true`.
-inline std::thread startKeyAllowanceThread(std::atomic<int>& allowance,
-                                          std::atomic<bool>& quit)
-{
-    return std::thread([&]() {
-        TerminalRawMode raw; // applies to this process; RAII restores on exit
-        while (!quit.load(std::memory_order_relaxed)) {
-            if (stdin_has_data()) {
-                unsigned char c = 0;
-                ssize_t n = ::read(STDIN_FILENO, &c, 1);
-                if (n == 1) {
-                    if (c == 'q' || c == 'Q') {
-                        quit.store(true, std::memory_order_relaxed);
-                        break;
-                    }
-                    // Any other key press allows one image to pass
-                    allowance.fetch_add(1, std::memory_order_relaxed);
-                }
-            } else {
-                usleep(1000); // 1 ms, avoid busy spinning
-            }
-        }
-    });
-}
-
-
-
-void LoadImages(const string &pathToSequence, const string &rgb_csv,
-                vector<string> &imageFilenames, vector<AF_VSLAM::Seconds> &timestamps,
-                const string cam_name = "rgb_0");
+void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
+                std::vector<std::string> &imageFilenames, std::vector<AF_VSLAM::Seconds> &timestamps,
+                const std::string cam_name = "rgb_0");
 std::string paddingZeros(const std::string& number, const size_t numberOfZeros = 5);
 
 void removeSubstring(std::string& str, const std::string& substring) {
@@ -96,72 +27,76 @@ void removeSubstring(std::string& str, const std::string& substring) {
     }
 }
 
+bool hasPrefix(const std::string& str, const std::string& prefix) {
+    return str.rfind(prefix, 0) == 0;
+}
+
 
 int main(int argc, char **argv)
 {
     af_print_banner();
 
     // AF_VSLAM inputs
-    string sequence_path;
-    string calibration_yaml;
-    string rgb_csv;
-    string exp_folder;
-    string exp_id{"0"};
-    string settings_yaml{"vslamlab_anyfeature-dev_settings.yaml"};
+    std::string sequence_path;
+    std::string calibration_yaml;
+    std::string rgb_csv;
+    std::string exp_folder;
+    std::string exp_id{"0"};
+    std::string settings_yaml{"vslamlab_allfeature-dev_settings.yaml"};
     bool verbose{true};
 
-    string feature{"orb32"};
-    string path_to_vocabulary_folder("anyfeature_vocabulary");
+    std::string feature{"orb32"};
+    std::string path_to_vocabulary_folder("allfeature_vocabulary");
     bool fixImageSize = true;
 
-    cout << endl;
+    std::cout << std::endl;
 
     AF_CONFIG_BEGIN("Arguments:");
-    for (int i = 0; i < argc; ++i) {
+    for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg.find("sequence_path:") != std::string::npos) {
+        if (hasPrefix(arg, "sequence_path:")) {
             removeSubstring(arg, "sequence_path:");
             sequence_path =  arg;
             AF_CONFIG_FIELD("Path to sequence: ", sequence_path);
             continue;
         }
-        if (arg.find("calibration_yaml:") != std::string::npos) {
+        if (hasPrefix(arg, "calibration_yaml:")) {
             removeSubstring(arg, "calibration_yaml:");
             calibration_yaml =  arg;
             AF_CONFIG_FIELD("Path to calibration.yaml: ", calibration_yaml);
             continue;
         }
-        if (arg.find("rgb_csv:") != std::string::npos) {
+        if (hasPrefix(arg, "rgb_csv:")) {
             removeSubstring(arg, "rgb_csv:");
             rgb_csv =  arg;
             AF_CONFIG_FIELD("Path to rgb_csv: ", rgb_csv);
             continue;
         }
-        if (arg.find("exp_folder:") != std::string::npos) {
+        if (hasPrefix(arg, "exp_folder:")) {
             removeSubstring(arg, "exp_folder:");
             exp_folder =  arg;
             AF_CONFIG_FIELD("Path to exp_folder: ", exp_folder);
             continue;
         }
-        if (arg.find("exp_id:") != std::string::npos) {
+        if (hasPrefix(arg, "exp_id:")) {
             removeSubstring(arg, "exp_id:");
             exp_id =  arg;
             AF_CONFIG_FIELD("Experiment id: ", exp_id);
             continue;
         }
-        if (arg.find("settings_yaml:") != std::string::npos) {
+        if (hasPrefix(arg, "settings_yaml:")) {
             removeSubstring(arg, "settings_yaml:");
             settings_yaml =  arg;
             AF_CONFIG_FIELD("Path to settings_yaml: ", settings_yaml);
             continue;
         }
-        if (arg.find("verbose:") != std::string::npos) {
+        if (hasPrefix(arg, "verbose:")) {
             removeSubstring(arg, "verbose:");
             verbose = bool(std::stoi(arg));
             AF_CONFIG_FIELD("Verbose mode: ", verbose);
             continue;
         }
-        if (arg.find("vocabulary_folder:") != std::string::npos) {
+        if (hasPrefix(arg, "vocabulary_folder:")) {
             removeSubstring(arg, "vocabulary_folder:");
             path_to_vocabulary_folder = arg;
             AF_CONFIG_FIELD("Path to vocabulary folder: ", path_to_vocabulary_folder);
@@ -170,14 +105,20 @@ int main(int argc, char **argv)
     }
 
     // AnyFeature-VSLAM inputs
-    YAML::Node settings = YAML::LoadFile(settings_yaml);
-    const vector<std::string> features = settings["features"].as<vector<std::string>>();
-    bool debug = (bool)settings["debug"].as<bool>();
+    YAML::Node settings;
+    try {
+        settings = YAML::LoadFile(settings_yaml);
+    } catch (const YAML::Exception& e) {
+        std::cerr << "Failed to load settings_yaml '" << settings_yaml << "': " << e.what() << std::endl;
+        return 1;
+    }
+    const std::vector<std::string> features = settings["features"].as<std::vector<std::string>>();
+    bool debug = settings["debug"].as<bool>();
     AF_CONFIG_FIELD("Debug mode: ", debug);
 
     AF_VSLAM::FrameDrawer::exp_folder = exp_folder;
 
-    vector<FeatureType> featureTypes{};
+    std::vector<FeatureType> featureTypes{};
     for(const auto& feat : features) {
         auto featureType = get_feature_type(feat);
         featureTypes.push_back(featureType);
@@ -186,11 +127,10 @@ int main(int argc, char **argv)
     AF_CONFIG_END();
 
     // Retrieve paths to images
-    vector<string> imageFilenames{};
-    vector<AF_VSLAM::Seconds> timestamps{};
+    std::vector<std::string> imageFilenames{};
+    std::vector<AF_VSLAM::Seconds> timestamps{};
     LoadImages(sequence_path, rgb_csv, imageFilenames, timestamps);
 
-    // Retrieve paths to images
     size_t nImages = imageFilenames.size();
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
@@ -203,10 +143,10 @@ int main(int argc, char **argv)
                                   fixImageSize);
 
     // Vector for tracking time statistics
-    vector<AF_VSLAM::Seconds> vTimesTrack;
+    std::vector<AF_VSLAM::Seconds> vTimesTrack;
     vTimesTrack.resize(nImages);
 
-    cout << endl << "-------------------------------" << endl;
+    std::cout << std::endl << "-------------------------------" << std::endl;
     AF_INFO("Start processing sequence ...");
     AF_INFO("Images in the sequence: " << nImages);
 
@@ -218,22 +158,23 @@ int main(int argc, char **argv)
         keyThread = startKeyAllowanceThread(allowance, quit);
     }
 
-    // for(size_t ni = 0; ni < nImages; ni++){
     for (size_t ni = 0; ni < nImages; /* ni++ happens when a frame passes */) {
-        //std::cout << "Processing image " << ni << " / " << nImages << "\r";
-        //printf("frame %zu\n", ni);
         // Wait until we have at least 1 "allowed" frame, or quit
         if (debug){
             while (!quit.load(std::memory_order_relaxed) && allowance.load(std::memory_order_relaxed) == 0){
                 usleep(1000); // 1 ms
             }
             if (quit.load(std::memory_order_relaxed)) break;
-            //allowance.fetch_sub(1, std::memory_order_relaxed);
             allowance.store(0, std::memory_order_relaxed);
         }
 
         // Read image from file
         AF_VSLAM::Image im(imageFilenames[ni]);
+        if (im.img.empty()) {
+            std::cerr << "Failed to load image: " << imageFilenames[ni] << std::endl;
+            ++ni;
+            continue;
+        }
 
         //im.LoadMask(imageFilenames[ni]);
         AF_VSLAM::Seconds tframe = timestamps[ni];
@@ -255,7 +196,6 @@ int main(int argc, char **argv)
 
         if(ttrack < T)
             usleep(1.0 * (T-ttrack)  * 1e6);
-        //usleep((1.0 * 1e6));
 
         // Advance to next image only after processing this one
         ++ni;
@@ -266,7 +206,7 @@ int main(int argc, char **argv)
         if (keyThread.joinable()) keyThread.join();
     }
 
-    string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
+    std::string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
     SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory_beforeGBA.csv");
 
     // Perform Global Bundle Adjustment
@@ -276,46 +216,35 @@ int main(int argc, char **argv)
     SLAM.Shutdown();
 
     // Tracking time statistics
-    sort(vTimesTrack.begin(),vTimesTrack.end());
+    std::sort(vTimesTrack.begin(),vTimesTrack.end());
     AF_VSLAM::Seconds totaltime = 0.0;
-    for(int ni = 0; ni < nImages; ni++)
+    for(size_t ni = 0; ni < nImages; ni++)
     {
         totaltime+=vTimesTrack[ni];
     }
-    cout << "-------" << endl << endl;
-    cout << "median tracking time: " << vTimesTrack[nImages/2] << endl;
-    cout << "mean tracking time: " << totaltime/nImages << endl;
+    std::cout << "-------" << std::endl << std::endl;
+    std::cout << "median tracking time: " << vTimesTrack[nImages/2] << std::endl;
+    std::cout << "mean tracking time: " << totaltime/nImages << std::endl;
 
     // Save camera trajectory
-    //string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
     SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
     SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply", imageFilenames);
 
     return 0;
 }
 
-std::vector<std::string> split(const std::string& s, char delimiter) {
-    std::vector<std::string> tokens;
-    std::string token;
-    std::istringstream tokenStream(s);
-    while (std::getline(tokenStream, token, delimiter)) {
-        // Simple trim for leading/trailing whitespace, often needed in real-world CSVs
-        token.erase(0, token.find_first_not_of(" \t\n\r"));
-        token.erase(token.find_last_not_of(" \t\n\r") + 1);
-        tokens.push_back(token);
-    }
-    return tokens;
-}
-
-void LoadImages(const string &pathToSequence, const string &rgb_csv,
-                vector<string> &imageFilenames, vector<AF_VSLAM::Seconds> &timestamps,
-                const string cam_name)
+void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
+                std::vector<std::string> &imageFilenames, std::vector<AF_VSLAM::Seconds> &timestamps,
+                const std::string cam_name)
 {
 
     imageFilenames.clear();
     timestamps.clear();
 
     std::ifstream in(rgb_csv);
+    if (!in.is_open()) {
+        throw std::runtime_error("LoadImages: failed to open rgb_csv file: " + rgb_csv);
+    }
     std::string line;
 
     // Read and map the header row to find indices
@@ -334,7 +263,11 @@ void LoadImages(const string &pathToSequence, const string &rgb_csv,
 
     // Safely get indices
     auto get_index = [&](const std::string& key) -> int {
-        return col_map[key];
+        auto it = col_map.find(key);
+        if (it == col_map.end()) {
+            throw std::runtime_error("LoadImages: required column '" + key + "' not found in " + rgb_csv);
+        }
+        return it->second;
     };
 
     int ts_idx = get_index(header_ts);
@@ -346,6 +279,9 @@ void LoadImages(const string &pathToSequence, const string &rgb_csv,
         if (!line.empty() && line.back() == '\r') line.pop_back();
 
         std::vector<std::string> tokens = split(line, ',');
+        if (tokens.size() <= static_cast<size_t>(std::max(ts_idx, rgb0_idx))) {
+            throw std::runtime_error("LoadImages: malformed row (too few columns) in " + rgb_csv + ": " + line);
+        }
 
         // Assign variables using indices, regardless of column order
         std::string t_str = tokens[ts_idx];
@@ -359,8 +295,7 @@ void LoadImages(const string &pathToSequence, const string &rgb_csv,
 }
 
 std::string paddingZeros(const std::string& number, const size_t numberOfZeros){
-    std::string zeros{};
-    for(size_t iZero{}; iZero < numberOfZeros - number.size(); ++iZero)
-        zeros += "0";
-    return (zeros + number);
+    if (number.size() >= numberOfZeros)
+        return number;
+    return std::string(numberOfZeros - number.size(), '0') + number;
 }

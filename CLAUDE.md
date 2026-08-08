@@ -132,3 +132,4 @@ Per-feature settings YAML files are in `settings/`.
 
 - License: GPLv3 (inherited from ORB-SLAM2)
 - `bin/`, `lib/`, `build/`, and `allfeature_vocabulary/` are all build/runtime artifacts, not source — never assume content there is checked in
+- See `TODO.md` for tracked cleanup items (bugs, dead code, duplication) found in the CLI entry points
