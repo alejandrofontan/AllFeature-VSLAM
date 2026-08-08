@@ -61,6 +61,9 @@ void AF_VSLAM::FeatureExtractor_superpoint256::detectAndCompute(
             descriptors_.at<float>(i, d) = (float)features(2 + d, i);
     }
 
+    // Discard keypoints outside the mask (if one was loaded for this frame)
+    FilterKeypointsByMask(keypoints_, descriptors_, img.mask);
+
     keypoints = keypoints_;
     descriptors.create((int)keypoints.size(), 256, CV_32F);
     for (int i = 0; i < (int)keypoints.size(); ++i)

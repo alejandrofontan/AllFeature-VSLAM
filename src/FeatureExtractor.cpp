@@ -322,6 +322,33 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::DistributeOctTree(std::vec
     return vResultKeys;
 }
 
+void AF_VSLAM::FeatureExtractor::FilterKeypointsByMask(std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors, const cv::Mat& mask) const
+{
+    if (mask.empty()) return; // no mask loaded for this frame/dataset -> keep everything
+
+    std::vector<cv::KeyPoint> kept;
+    std::vector<int> keptRows;
+    kept.reserve(keypoints.size());
+    keptRows.reserve(keypoints.size());
+    for (size_t i = 0; i < keypoints.size(); ++i) {
+        int x = cvRound(keypoints[i].pt.x), y = cvRound(keypoints[i].pt.y);
+        if (x < 0 || y < 0 || x >= mask.cols || y >= mask.rows) continue;
+        if (mask.at<uchar>(y, x) == 1) {
+            cv::KeyPoint kp = keypoints[i];
+            kp.class_id = static_cast<int>(kept.size()); // reindex to match the compacted descriptors row order
+            kept.push_back(kp);
+            keptRows.push_back((int)i);
+        }
+    }
+
+    cv::Mat keptDesc(static_cast<int>(keptRows.size()), descriptors.cols, descriptors.type());
+    for (size_t i = 0; i < keptRows.size(); ++i)
+        descriptors.row(keptRows[i]).copyTo(keptDesc.row(static_cast<int>(i)));
+
+    keypoints.swap(kept);
+    descriptors = keptDesc;
+}
+
 void AF_VSLAM::ExtractorNode::DivideNode(ExtractorNode &n1, ExtractorNode &n2, ExtractorNode &n3, ExtractorNode &n4)
 {
     const int halfX = ceil(static_cast<float>(UR.x-UL.x)/2);

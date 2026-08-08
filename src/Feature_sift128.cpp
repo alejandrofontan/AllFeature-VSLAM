@@ -74,6 +74,10 @@ void AF_VSLAM::FeatureExtractor_sift128::detectAndCompute(const Image& img, std:
 
     detectKeypoints(keypoints, img, settings->detectTh, settings->nOctaves);
     computeDescriptors(descriptors, img);
+
+    // Discard keypoints outside the mask (if one was loaded for this frame)
+    FilterKeypointsByMask(keypoints, descriptors, img.mask);
+
     // Normalize octave and size
     for (int i = 0; i < (int)keypoints.size(); ++i){
         keypoints[i].size = 1.0;

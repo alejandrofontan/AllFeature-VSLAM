@@ -113,6 +113,9 @@ void AF_VSLAM::FeatureExtractor_orb32::detectAndCompute(const Image& img, std::v
         }
         _keypoints.insert(_keypoints.end(), keypoints.begin(), keypoints.end());
     }
+
+    // Discard keypoints outside the mask (if one was loaded for this frame)
+    FilterKeypointsByMask(_keypoints, _descriptors, img.mask);
 }
 
 int AF_VSLAM::FeatureExtractor_orb32::GetKeypointOctave(const cv::KeyPoint& keypoint) const{

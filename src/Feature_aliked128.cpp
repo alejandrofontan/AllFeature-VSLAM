@@ -82,6 +82,9 @@ void AF_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image& img, st
     const auto& desc_t = feats0.at("descriptors");
     descriptors_ = tensorDescToMatCopy(desc_t);
 
+    // Discard keypoints outside the mask (if one was loaded for this frame)
+    FilterKeypointsByMask(keypoints_, descriptors_, img.mask);
+
     // Retain only if not too many keypoints
     if (keypoints_.size() < settings->OVERSIZE_KEYPOINT_FACTOR * settings->maxNumFeatures){
         keypoints = keypoints_;

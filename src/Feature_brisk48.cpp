@@ -23,6 +23,9 @@ void AF_VSLAM::FeatureExtractor_brisk48::detectAndCompute(const Image& img, std:
         keypoints_[i].octave = 0;
     }
 
+    // Discard keypoints outside the mask (if one was loaded for this frame)
+    FilterKeypointsByMask(keypoints_, descriptors_, img.mask);
+
     // Retain only if not too many keypoints
     if (keypoints_.size() < settings->OVERSIZE_KEYPOINT_FACTOR * settings->maxNumFeatures){
         keypoints = keypoints_;

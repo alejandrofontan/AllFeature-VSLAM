@@ -99,6 +99,7 @@ namespace AF_VSLAM {
         virtual void detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){};
         std::vector<cv::KeyPoint> DistributeOctTree(std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
             const int &maxX, const int &minY, const int &maxY, const int &N, const int &level);
+        void FilterKeypointsByMask(std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors, const cv::Mat& mask) const;
     };
 }
 #endif //AF_VSLAM_FEATUREEXTRACTOR_H
