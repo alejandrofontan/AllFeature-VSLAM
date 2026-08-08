@@ -110,7 +110,7 @@ int main(int argc, char **argv)
     try {
         settings = YAML::LoadFile(settings_yaml);
     } catch (const YAML::Exception& e) {
-        std::cerr << "Failed to load settings_yaml '" << settings_yaml << "': " << e.what() << std::endl;
+        std::cerr << "Failed to load settings_yaml: '" << settings_yaml << "': " << e.what() << std::endl;
         return 1;
     }
     const std::vector<std::string> features = settings["features"].as<std::vector<std::string>>();
@@ -173,7 +173,7 @@ int main(int argc, char **argv)
         // Read image from file
         AF_VSLAM::Image im(imageFilenames[ni]);
         if (im.img.empty()) {
-            std::cerr << "Failed to load image: " << imageFilenames[ni] << std::endl;
+            std::cerr << "Failed to load image: '" << imageFilenames[ni] << "'" << std::endl;
             ++ni;
             continue;
         }
