@@ -323,6 +323,8 @@ void LocalMapping::CreateNewMapPoints()
     //////////////////////////////////////////////////////////////////////////////////////////////
     // Search matches with epipolar restriction and triangulate
     std::map<FeatureType, int> newMapPoints;
+    int nFromSensor{0};
+    int nFromTriangulation{0};
     int j{0};
     std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
     for(size_t i{0}; i < vpNeighKFs.size(); i++)
@@ -386,10 +388,39 @@ void LocalMapping::CreateNewMapPoints()
                 float cosParallaxStereo = cosParallaxRays+1;
 
                 vec3f x3D;
+                bool fromSensorDepth = false;
                 const float sinThr = std::sqrt(1.0f - CREATE_NEW_MAP_POINTS_MIN_COS * CREATE_NEW_MAP_POINTS_MIN_COS);
+                const float invDepth1 = mpCurrentKeyFrame->invDepth.at(featureType)[idx1];
+                const float invDepth2 = pKF2->invDepth.at(featureType)[idx2];
+                const bool haveDepth1 = invDepth1 > 0.0f;
+                const bool haveDepth2 = invDepth2 > 0.0f;
                 //if(true)
                 //if(cosParallaxRays > 0 && (sinParallaxRays > sinThr))
-                if(cosParallaxRays > 0 && (cosParallaxRays < CREATE_NEW_MAP_POINTS_MIN_COS))
+                if(haveDepth1 && haveDepth2)
+                {
+                    // Two independent sensor depth readings of the same point: back-project
+                    // each from its own keyframe and average. The reprojection-error checks
+                    // below now validate agreement between them in both views.
+                    vec3f x3D_1 = Rwc1 * (xn1 * (1.0f / invDepth1)) + twc1;
+                    vec3f x3D_2 = Rwc2 * (xn2 * (1.0f / invDepth2)) + twc2;
+                    x3D = 0.5f * (x3D_1 + x3D_2);
+                    fromSensorDepth = true;
+                }
+                else if(haveDepth1)
+                {
+                    // Back-project from KF1's own measured depth: no second-view triangulation,
+                    // no parallax requirement. The reprojection-error check against KF2 below
+                    // still cross-validates it.
+                    x3D = Rwc1 * (xn1 * (1.0f / invDepth1)) + twc1;
+                    fromSensorDepth = true;
+                }
+                else if(haveDepth2)
+                {
+                    // Symmetric case: back-project from KF2's depth, cross-validated against KF1.
+                    x3D = Rwc2 * (xn2 * (1.0f / invDepth2)) + twc2;
+                    fromSensorDepth = true;
+                }
+                else if(cosParallaxRays > 0 && (cosParallaxRays < CREATE_NEW_MAP_POINTS_MIN_COS))
                 {
                     Eigen::Matrix<float, 4, 4> A;
                         A.row(0) = xn1(0) * Tcw1.row(2) - Tcw1.row(0);
@@ -411,7 +442,7 @@ void LocalMapping::CreateNewMapPoints()
                     x3D = x_h.head<3>() / w;
                 }
                 else
-                    continue; //No stereo and very low parallax
+                    continue; //No depth, and no stereo / very low parallax
 
                 //Check triangulation in front of cameras
                 float z1 = Rcw1.row(2).dot(x3D) + tcw1(2);
@@ -461,6 +492,10 @@ void LocalMapping::CreateNewMapPoints()
 
                 // Triangulation is succesfull
                 newMapPoints[featureType]++;
+                if(fromSensorDepth)
+                    nFromSensor++;
+                else
+                    nFromTriangulation++;
                 Pt pMP = mpCurrentKeyFrame->CreateMonocularMapPoint(x3D, KeypointIndex(idx1),
                                                                     pKF2,  KeypointIndex(idx2),
                                                                     featureType);
@@ -468,6 +503,9 @@ void LocalMapping::CreateNewMapPoints()
             }
         }
     }
+
+    cout << "[LocalMapping::CreateNewMapPoints] New map points: " << (nFromSensor + nFromTriangulation)
+         << " (sensor: " << nFromSensor << ", triangulation: " << nFromTriangulation << ")" << endl;
 }
 
 void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
