@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "WebFetch",
+      "WebSearch",
+      "Write(**)",
+      "Edit(**)",
+      "Bash(*)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Bash(git push)",
+      "Bash(git reset --hard *)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore *)",
+      "Bash(git clean -f *)",
+      "Bash(git branch -D *)",
+      "Bash(git config *)",
+      "Bash(git * --no-verify*)",
+      "Bash(git * --no-gpg-sign*)",
+      "Read(//home/alejandro/.ssh/**)",
+      "Read(//home/alejandro/.aws/**)",
+      "Read(//home/alejandro/.config/gh/**)"
+    ]
+  }
+}
