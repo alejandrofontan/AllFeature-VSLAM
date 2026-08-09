@@ -7,3 +7,6 @@
 [submodule "Thirdparty/SuperPoint-LightGlue-TensorRT"]
 	path = Thirdparty/SuperPoint-LightGlue-TensorRT
 	url = https://github.com/VSLAM-LAB/SuperPoint-LightGlue-TensorRT.git
+[submodule "Thirdparty/g2o"]
+	path = Thirdparty/g2o
+	url = https://github.com/alejandrofontan/g2o.git
