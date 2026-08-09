@@ -81,12 +81,14 @@ set(SUPERPOINT_LIGHTGLUE_DIR "${PROJECT_SOURCE_DIR}/Thirdparty/SuperPoint-LightG
 set(SUPERPOINT_LIGHTGLUE_BUILD_EXECUTABLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(${SUPERPOINT_LIGHTGLUE_DIR} ${CMAKE_BINARY_DIR}/superpoint_lightglue)
 
+# ---- g2o ----
+add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/g2o ${CMAKE_BINARY_DIR}/g2o)
+
 # Dependencies
 find_package(OpenCV REQUIRED )
 find_package(Eigen3  REQUIRED NO_MODULE)
 find_package(Pangolin REQUIRED)
 find_package(yaml-cpp REQUIRED)
-find_package(g2o REQUIRED)
 find_package(Python REQUIRED COMPONENTS Interpreter)
 find_package(brisk REQUIRED)
 find_package(akaze REQUIRED)
@@ -117,7 +119,7 @@ target_link_libraries(${PROJECT_NAME}
         ${OpenCV_LIBRARIES}
         Eigen3::Eigen
         ${YAML_CPP_LIBRARIES}
-        ${g2o_LIBRARIES}
+        g2o
         ${DBoW2_LIBRARIES}
         ${brisk_LIBRARIES}
         ${akaze_LIBRARIES}

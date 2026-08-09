@@ -46,6 +46,8 @@ System::System(const string &vocabularyFolder,
         exit(-1);
     }
 
+    Optimizer::LoadParameters(fsSettings);
+
     DUtils::Random::SeedRandOnce(0);
 
     //Load ORB Vocabulary

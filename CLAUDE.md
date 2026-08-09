@@ -150,6 +150,156 @@ Ranked by expected impact on tracking accuracy/robustness (highest first):
 | 10 | `Optimizer.cc`/`Optimizer.h` — currently only monocular reprojection edges are used in `PoseOptimization`/`LocalBundleAdjustment`/`BundleAdjustment`/`GlobalBundleAdjustemnt`; no stereo/RGBD g2o edge type exists. **Confirmed cheaper than initially estimated**: `g2o::EdgeStereoSE3ProjectXYZ`/`EdgeStereoSE3ProjectXYZOnlyPose` are standard types that ship with g2o itself (already a project dependency) — no custom edge to write, only wiring | A per-observation depth-residual term (as in stock ORB-SLAM2 RGBD) that pulls optimized 3D points toward their measured depth during BA, not just their reprojected pixel position | Refines convergence speed/accuracy, especially for points seen from few keyframes — a refinement on top of rows 1–3's initial depth-seeded positions, not a new capability on its own | Wire the existing g2o stereo edge types into all four optimization entry points, selecting per-observation exactly like the reference's `PoseOptimization`: `if(mvuRight[i]<0) { monocular 2-D edge } else { stereo/RGBD 3-D edge, e->bf = mbf }` — confirmed this is genuinely per-keypoint in stock ORB-SLAM2, not per-sequence, so a keypoint with invalid depth silently still gets the monocular edge even in RGB-D mode | Standard, well-understood technique (exactly what stock ORB-SLAM2 RGBD does); no new edge type to implement, just wiring; the per-observation dispatch *is* the fallback-safety principle from this section's intro, already proven at the finest possible granularity in the reference codebase | Lowest impact-per-effort item here given rows 1–3 already inject strong depth priors; touches the most performance-sensitive code path (BA runs continuously) |
 | 11 | `Viewer.cc`/`MapDrawer.cc`, `System::SavePointCloudVSLAMLAB` (`src/System.cc`) | Export/visualize a dense or semi-dense point cloud from depth, not just the sparse feature-based map | Diagnostic/downstream-application value (mapping, robotics) — no effect on tracking accuracy or robustness | Mostly plumbing: sample `im.depthImg` per saved frame, transform to world frame with the already-tracked pose; independent of the rest of this list | Low risk, easy to gate behind a flag, doesn't touch tracking/mapping internals at all | Lowest priority — cosmetic/diagnostic only, no accuracy or robustness benefit; larger output files |
 
+**Row 10 status update (post-review, see the Optimizer section below):** substantially implemented — `PoseOptimization`/`BundleAdjustment`/`LocalBundleAdjustment` all now dispatch per-observation across mono/stereo/RGBD edges. One correction to row 10's original premise: the RGB-D depth channel is **not** wired through the stock g2o stereo edge (`EdgeStereoSE3ProjectXYZ`, disparity-based, needs `bf`). It uses two **new custom edges**, `g2o::EdgeRGBDSE3ProjectXYZ`/`EdgeRGBDSE3ProjectXYZOnlyPose` (inverse-depth residual, no `bf`), vendored into a local, untracked `Thirdparty/g2o/` copy — see finding **P1** below, since this changes the risk profile row 10 originally assumed ("no custom edge to write, only wiring").
+
+---
+
+## Optimizer.cc / Optimizer.h Review (2026-08-09)
+
+Findings from a read-through of `src/Optimizer.cc` + `include/Optimizer.h`, cross-checked against `Frame.h`/`Frame.cc`, `KeyFrame.h`/`KeyFrame.cc`, `Tracking.cc`, `System.cc`, `CMakeLists.txt`, and the vendored `Thirdparty/g2o` edge types. No code was changed for this pass — this is a TODO list to work through deliberately, in roughly priority order within each group. `invDepth`-based RGB-D edges referenced below are already live (see rows 210-243, 424-440, 660-678 of `Optimizer.cc`), i.e. table row 10 above is further along than it looked before this review.
+
+### P — Process / build risk (found while tracing the g2o edge types)
+
+| # | Where | What | Why it matters | Recommendation |
+|---|---|---|---|---|
+| P1 | `CMakeLists.txt` (`git diff` shows `find_package(g2o REQUIRED)` replaced by `add_subdirectory(Thirdparty/g2o ...)`); `Thirdparty/g2o/` is untracked (`git status`: `?? Thirdparty/g2o/`), not in `.gitmodules`, not in `.gitignore` | The parent repo's `CLAUDE.md` lists `g2o` as a fontan-channel **pixi package** dependency (`find_package(g2o)`). That's been switched for a locally vendored, hand-patched g2o source tree so it can host two new edge types (`EdgeRGBDSE3ProjectXYZ`, `EdgeRGBDSE3ProjectXYZOnlyPose`, in `Thirdparty/g2o/g2o/types/types_six_dof_expmap.{h,cpp}`) that don't exist upstream | This is real, working, uncommitted code sitting outside git's tracking entirely. A fresh clone, a `pixi run install-baseline`, or anyone else's checkout gets none of it — and there's nothing to signal that a hard dependency swap happened, since `find_package(g2o)` failing silently falls back to whatever g2o the pixi env still provides (link errors on the new symbols, not "g2o missing") | Turn `Thirdparty/g2o` into a proper submodule (mirroring `Thirdparty/DBoW2`'s `alejandrofontan/DBoW2` fork pattern — fork g2o, add the two edge types there, point `.gitmodules` at the fork) before this depth work is considered done. Until then, treat every `EdgeRGBDSE3ProjectXYZ*` reference in `Optimizer.cc` as depending on uncommitted local state |
+
+### B — Correctness bugs / risks
+
+| # | Where | What | Why it matters | Recommendation |
+|---|---|---|---|---|
+| B1 | `Optimizer.h:46-49`, `Optimizer.cc:46-49` — `chi2_2dof`/`chi2_3dof`/`thHuber_2dof`/`thHuber_3dof` declared `static float` (mutable, not `const`) and `thHuber_*` computed **once** as `sqrtf(chi2_*)` at static-init time | These four are independent static storage, not a derived accessor — if anything ever reassigns `chi2_2dof` after startup (which is exactly what the `OptimizerParameters` loader proposed below would do), `thHuber_2dof` goes stale and silently desyncs from it (Huber delta no longer `sqrt(chi2)`) | Directly relevant to the `OptimizerParameters` design below: compute `thHuber_*` **inside** the loader right after reading `chi2_*`, never store them as independently-settable YAML keys |
+| B2 | `Optimizer.cc:479-493`, `PoseOptimization`'s 4-pass loop: `if(optimizer.edges().size()<10) break;` | `optimizer.edges()` returns every edge ever added to the graph, regardless of `setLevel(1)` (outlier) status — outlier edges are never `removeEdge`'d, only disabled. So this count is identical across all 4 iterations; it can only ever fire on the very first check (already implied by the earlier `nInitialCorrespondences<3` guard) or never. Inherited near-verbatim from stock ORB-SLAM2, so not newly introduced, but it's dead/misleading logic worth either removing or replacing with an actual per-iteration inlier count (`nInitialCorrespondences - nBad`) | Low risk, cosmetic-but-confusing; worth a one-line fix (`if(nInitialCorrespondences - nBad < 10) break;`) next time this function is touched, not urgent on its own |
+| B3 | `Optimizer.cc:161,383,578` — `constexpr double invDepthInfo = 20000.0;` duplicated verbatim (value + comment) in `BundleAdjustment`, `PoseOptimization`, `LocalBundleAdjustment` | Unlike the x/y information (`GetKeyPt2DInf`/`GetKeyPt3DInf`, scale-aware per keypoint), the RGB-D depth channel's information is one hardcoded global constant, already self-flagged in the existing comment as "a starting guess, not yet validated against real sequences (see issue #3)". Three copies means a future re-tune has to touch three call sites in lockstep or drift apart | This is the headline motivating case for the `OptimizerParameters` struct below — one source of truth instead of three `constexpr` copies |
+| B4 | `Optimizer.cc:882-982`, `OptimizeEssentialGraph`'s "Set normal edges" loop iterates `vpKFs` with **no** `if(pKF->is_bad()) continue;` (contrast with the "Set KeyFrame vertices" loop just above it, which does skip bad KFs and thus never populates their `vScw[nIDi]` entry — left at whatever `g2o::Sim3`'s default constructor gives, i.e. identity) | If a bad keyframe reaches this loop still holding a live `GetParent()`/covisibility link, `Swi = vScw[nIDi].inverse()` for it resolves to an uninitialized identity Sim3 instead of a real pose, silently injecting a wrong constraint. This mirrors stock ORB-SLAM2's structure closely enough that it may be relying on an invariant elsewhere (e.g. `KeyFrameCulling` always clearing parent/child/covisibility links before marking a KF bad, under `mMutexMapUpdate`) that I did not fully trace end-to-end | Flagging as **audit, not confirmed live bug** — worth 30 minutes tracing `KeyFrame::SetBadFlag` to confirm the invariant holds before deciding whether a defensive `is_bad()` skip is needed here |
+
+### C — Cleanup / duplication
+
+| # | Where | What | Recommendation |
+|---|---|---|---|
+| C1 | `Optimizer.cc:35-41` | `<random>`, `<fstream>`, `<iomanip>`, `<iostream>` are `#include`d but nothing in the file uses `mt19937`/`uniform_*`, `ofstream`/`ifstream`, `setprecision`/`setw`, or `cout`/`cerr` | Delete the four unused includes |
+| C2 | Same as B3 | `invDepthInfo` triplicated | Fold into `OptimizerParameters` (see below) |
+| C3 | `Optimizer.cc:612-637` (`LocalBundleAdjustment`) vs. `Optimizer.cc:393-404` (`PoseOptimization`) | `LocalBundleAdjustment` keeps 9 flat parallel vectors (`vpEdgesMono`/`vpEdgeKFMono`/`vpMapPointEdgeMono`, ×3 for stereo, ×3 for RGBD) where `PoseOptimization` already uses `std::map<FeatureType, vector<...>>`-keyed containers via the newer `CreateBAEdge`/`MarkBAOutliers`/`CollectBAOutliers` template helpers. The two functions now use two different container idioms for the same per-edge-type bookkeeping problem | Not urgent, but if `LocalBundleAdjustment` is touched again, consider a small `struct Observation{EdgeT* edge; Keyframe kf; Pt mp;}` per category to cut 9 vectors to 3 and match the tidier pattern already established elsewhere in this file |
+
+### M — Memory / speed
+
+| # | Where | What | Recommendation |
+|---|---|---|---|
+| M1 | `Optimizer.cc:610` — `const int nExpectedSize = (lLocalKeyFrames.size()+lFixedCameras.size())*llocalPts.size();` then reserved for all 9 vectors in C3 | This is the KF×point upper bound, not the actual edge count (most local points aren't seen by most local/fixed KFs) — inherited from stock ORB-SLAM2, but the multi-feature architecture here means `llocalPts` can span up to 8 feature types at once, making local maps (and this over-reservation) proportionally larger than plain ORB-SLAM2's | Low priority — only worth revisiting if `LocalBundleAdjustment` shows up in a memory profile on a large multi-feature map |
+| M2 | `Optimizer.cc:393-404`, `PoseOptimization`'s six `std::map<FeatureType, vector<...>>` containers, indexed via `.at(ft)` inside the per-keypoint hot loop (lines 408-465) | `PoseOptimization` runs once per tracked frame — it's on the real-time critical path. Map (`.at()`) lookups per keypoint, inside a loop already iterating every keypoint of every feature type, cost more than plain vector indexing would | Minor; each `for (auto& [ft, pts] : pFrame->pts)` outer iteration could resolve `vpEdgesMono.at(ft)`/`vnIndexEdgeMono.at(ft)`/etc. **once** into local references before the inner `for(int i...)` loop, instead of re-doing the `.at(ft)` lookup on every `push_back` |
+| M3 | `new EdgeT()`/`new g2o::RobustKernelHuber` per observation throughout | One heap allocation per edge/kernel is inherent to g2o's ownership model (`SparseOptimizer` frees vertices/edges in its destructor) — not a leak, not realistically avoidable without changing g2o itself. Documenting so it isn't mistaken for a bug later, not proposing a change | No action |
+
+### A — Accuracy / robustness
+
+| # | Where | What | Recommendation |
+|---|---|---|---|
+| A1 | `chi2_3dof`/`thHuber_3dof` shared between stereo-disparity edges and RGB-D inverse-depth edges (`Optimizer.cc:222,458,673` use `thHuber_3dof` for RGBD same as stereo) | Statistically fine *if* both channels' information matrices are correctly calibrated into the same dimensionless Mahalanobis scale — but `invDepthInfo` (B3) is explicitly an unvalidated placeholder, so any miscalibration there skews RGB-D inlier/outlier decisions while looking identical to (already-tuned) stereo/mono thresholds in the code | Once `invDepthInfo` is calibrated against real sequences, consider splitting an independently-tunable `chi2RGBD`/`thHuberRGBD` (already scaffolded as separate `chi2RGBD[4]` array in `PoseOptimization` line 475, just currently initialized to the same value as `chi2_3dof`) |
+| A2 | Huber is the only robust kernel used anywhere in this file (`g2o::RobustKernelHuber`) | g2o also ships `RobustKernelCauchy`/`RobustKernelDCS`/`RobustKernelTukey`. Depth-sensor error (structured-light/ToF quantization, multipath, "flying pixels" at depth discontinuities) tends to be heavier-tailed than reprojection pixel noise, and Dynamic Covariance Scaling (DCS) in particular is a common choice in RGB-D SLAM/pose-graph literature for exactly this failure mode | Speculative — worth an experiment only after A1's calibration lands, not before; flagging so it isn't forgotten |
+| A3 | `include/g2o` custom edges `EdgeRGBDSE3ProjectXYZ`/`EdgeRGBDSE3ProjectXYZOnlyPose` (`Thirdparty/g2o/g2o/types/types_six_dof_expmap.{h,cpp}`) | Hand-verified their `linearizeOplus()` against the analytic chain rule for `error = obs - (u, v, 1/z)` during this review — the derivation is consistent with the existing (field-tested) `EdgeStereoSE3ProjectXYZ` pattern, so no math bug found. But unlike upstream g2o types, these are brand new and have **no automated regression test** (e.g. finite-difference Jacobian check) — and per P1 they aren't even committed yet | Recommend a small standalone unit test that perturbs pose/point by ε and compares against `_jacobianOplusXi`/`_jacobianOplusXj` before this ships, since these edges sit on the critical path for every RGB-D BA/pose-optimization call |
+
+### `OptimizerParameters` — proposed static struct
+
+Goal: replace the 9 scattered `static` tunables in `Optimizer.h` (5 "Heuristics", 8 "Constants" — 4 of the "Heuristics" have the `thHuber`-desync footgun in B1) plus the 3 duplicated `invDepthInfo` locals (B3) with **one** static, YAML-loadable struct, mirroring how `Tracking`/`FeatureExtractorSettings` already load their settings from `strSettingsFile` via `cv::FileStorage` (see `Tracking::ChangeCalibration`, `src/Tracking.cc:1141-1172`, which reads flat `fSettings["Camera.bf"]`-style keys — the same style `vslamlab_allfeature-dev_settings.yaml` already uses for `Camera.bf`/`ThDepth`/`DepthMapFactor`).
+
+**Struct sketch** (in `include/Optimizer.h`, inside `class Optimizer` or alongside it in `namespace AF_VSLAM`):
+
+```cpp
+struct OptimizerParameters
+{
+    // Robust-kernel / outlier thresholds (thHuber_* are DERIVED, not settable directly — see B1)
+    float chi2_2dof{5.991f};
+    float chi2_3dof{7.815f};
+    float chi2_3dof_rgbd{7.815f};   // new: split from chi2_3dof per A1, same default until calibrated
+    float thHuber_2dof{sqrtf(chi2_2dof)};
+    float thHuber_3dof{sqrtf(chi2_3dof)};
+    float thHuber_3dof_rgbd{sqrtf(chi2_3dof_rgbd)};
+
+    // RGB-D depth-channel information (replaces the 3x-duplicated invDepthInfo constant, B3/C2)
+    double invDepthInfo{20000.0};
+
+    // PoseOptimization()
+    int numItPoseOpt{10};
+
+    // OptimizeEssentialGraph()
+    double userLambdaInit{1e-16};
+    int minFeat{100};
+    int numItEssGraphOpt{20};
+
+    // OptimizeSim3()
+    int numItSim3Opt{5};
+    int nMoreItHigh{10};
+    int nMoreItLow{5};
+    int minNCorrespondences{10};
+};
+```
+
+**Loading, in `class Optimizer`:**
+
+```cpp
+static OptimizerParameters params;
+static void LoadParameters(const cv::FileStorage& fSettings);
+```
+
+`LoadParameters` reads each key defensively (only overwrite the compiled-in default `if(!fSettings["Optimizer.XYZ"].empty())`), so existing settings YAMLs without an `Optimizer.*` block — including today's `vslamlab_allfeature-dev_settings.yaml`, which has none — keep working unchanged. It recomputes `thHuber_*` from `chi2_*` at the end of the function, closing B1. Proposed key names, flat-style to match the existing `Camera.bf`/`ThDepth` convention: `Optimizer.Chi2Mono`, `Optimizer.Chi2Stereo`, `Optimizer.Chi2RGBD`, `Optimizer.InvDepthInfo`, `Optimizer.PoseOptIterations`, `Optimizer.EssGraphLambdaInit`, `Optimizer.EssGraphMinFeat`, `Optimizer.EssGraphIterations`, `Optimizer.Sim3Iterations`, `Optimizer.Sim3MoreIterationsHigh`, `Optimizer.Sim3MoreIterationsLow`, `Optimizer.Sim3MinCorrespondences`.
+
+**Call site:** `System::System()` (`src/System.cc`), right after the existing `fsSettings.isOpened()` check (line 47) and before `tracker = make_shared<Tracking>(...)` (line 84) — `Optimizer::LoadParameters(fsSettings);`. This guarantees every thread spawned later in the same constructor (`LocalMapping`, `LoopClosing`, both of which call into `Optimizer::LocalBundleAdjustment`/`OptimizeEssentialGraph`/`OptimizeSim3`) observes fully-populated params before doing any work, since none of those threads start running until the constructor's `make_shared<thread>(...)` calls near the end.
+
+**Migration:** every bare reference in `Optimizer.cc` (`chi2_2dof`, `thHuber_3dof`, `minFeat`, `userLambdaInit`, ... — roughly 20 call sites) becomes `params.chi2_2dof`, `params.thHuber_3dof`, etc. Mechanical but should land as one focused pass/PR rather than mixed into unrelated changes.
+
+**Benefits:** one source of truth instead of 9 scattered statics + 3 duplicated locals; fixes the `thHuber` staleness footgun (B1) as a side effect; makes future re-tuning (the `invDepthInfo` autotuner already mentioned in the existing "issue #3" code comments) a YAML edit instead of a recompile; documents every optimizer magic number in one place.
+
+**Drawbacks/risks:** touches ~20 call sites across a file that's on every hot path (tracking, local mapping, loop closing) — needs careful review/testing, not a drive-by edit; turns former `constexpr`/`const` values into runtime-mutable state (negligible perf cost, since these are read once per BA/pose-opt call, not per inner-solver iteration); must stay backward-compatible for every other settings YAML in the repo (baselines/datasets that don't know about `Optimizer.*` keys yet) — silent-default-on-missing-key is a hard requirement, not a nice-to-have.
+
+---
+
+## Build-Time Memory/Swap Investigation (2026-08-09)
+
+User-reported symptom: system memory/swap fills up while compiling (`bash build.sh -fv` via `pixi run build -fv`), which reads like "a memory leak" even though nothing is running yet — it's the *build* consuming the memory, not the SLAM program. Investigated read-only: no builds were run, no files changed. Inputs used: the user's build log (`/home/alejandro/VSLAM-LAB/test.txt`, a full `-fv` run that did complete, 82/82 ninja steps), every `CMakeLists.txt` in this repo and its three git-submodule Thirdparty trees, the existing (already-built) `build/` directories' `compile_commands.json` and `CMakeCache.txt`, a dry `ninja -t commands`/`ninja -t targets` query (prints commands without executing them), and direct binary inspection (`ar`/`readelf`) of an already-built static library.
+
+**Machine facts** (`free -h`, `nproc`, `/proc/swaps` at investigation time): 28 cores, 31 GiB RAM, 8 GiB swap. Baseline (before any build) already showed ~18 GiB "used", leaving only ~9.3 GiB free / ~12 GiB "available" — the build doesn't need to be enormous in absolute terms to spill into swap, it just needs to exceed that headroom.
+
+### Primary finding (high confidence): unthrottled LTO in the vendored `Light_Glue_CPP` submodule, consumed by a non-LTO final link
+
+`Thirdparty/Light_Glue_CPP/CMakeLists.txt:13-18` turns on whole-program optimization for any Release build:
+```cmake
+include(CheckIPOSupported)
+check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
+if(IPO_SUPPORTED AND CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+endif()
+```
+`git log -p` on this file (submodule history) shows this as generic CMake-template boilerplate (commit messages like "CMakeLists.txt for better debugging", "reorganize code") — nothing suggests it was added and measured as a deliberate performance win, which matters for how safe it is to change.
+
+Confirmed via `compile_commands.json` that the real compile line for e.g. `ALIKED.cpp` includes `-flto=auto -fno-fat-lto-objects -fPIC -O3 -march=native -mtune=native -ffast-math`. Confirmed via `ar`/`readelf` on the already-built `Thirdparty/Light_Glue_CPP/build/lib/release/libLightGlue_lib.a` (52 MB — individual `.o` members are 4-5.8 MB each, versus the sub-MB size a normal compiled `.o` this size would be) that its object files are **slim LTO objects**: dozens of `.gnu.lto_*` ELF sections, no fallback native machine code (`-fno-fat-lto-objects` means there's nothing else in there).
+
+This static library is linked into `libAllFeature-VSLAM.so` (`CMakeLists.txt:128`, `target_link_libraries(${PROJECT_NAME} ... LightGlue::lib ...)`). Confirmed via `ninja -t commands libAllFeature-VSLAM.so` that this specific link command contains **zero** `-flto` flags of its own. That combination — slim-LTO objects pulled into a link that doesn't request LTO itself — is exactly the scenario where GCC's linker plugin (`liblto_plugin.so`, auto-loaded by `collect2`/`ld` whenever it detects `.gnu.lto_*` sections in *any* input, including ones buried inside a static archive) transparently fires up `lto1`/`lto-wrapper` to do real codegen for those objects, *regardless of the invoking command line*.
+
+Why that spikes memory specifically here: GCC's LTO backend (LTRANS) parallelism defaults to the machine's detected hardware-thread count (`nproc` → 28) when not explicitly capped, and — critically — **Ninja has no GNU Make jobserver support** (confirmed: `ninja --version` → 1.10.1, jobserver protocol was never implemented in Ninja). GCC's `lto-wrapper` tries to cooperate with an enclosing job pool via that jobserver protocol; under Ninja there's nothing to cooperate with, so it falls back to spawning up to `nproc` parallel `lto1`/codegen workers **on its own**, completely ignoring `build.sh`'s explicit `cmake --build ... --parallel 8` cap. Each such worker re-runs expensive `-O3 -march=native -ffast-math` codegen on its partition of the combined whole-program IR from a Torch/CUDA-heavy static library (libtorch headers are themselves notorious for multi-GB single-TU compile memory). Up to 28 such processes competing for RAM, on a machine that already had ~18 GiB "used" before the build started, is a very plausible mechanism for the reported swap-filling — and it happens inside **one** ninja step (`[78/82] Linking CXX shared library libAllFeature-VSLAM.so`), so `--parallel 8` never had a chance to constrain it in the first place.
+
+I did not instrument an actual build run to capture live RSS numbers (per standing instruction not to run builds myself) — this is a strong, evidence-backed hypothesis built entirely from static inspection, not a directly observed measurement. If you want to confirm it empirically before applying a fix, the cheapest check is watching `free -s 1` or `ps --sort=-rss` in another terminal specifically during the `[78/82] Linking CXX shared library libAllFeature-VSLAM.so` step (or counting `lto1`-named processes with `pgrep -fc lto1` at that moment).
+
+### Other candidate causes considered and downgraded
+
+| Cause | Evidence checked | Verdict |
+|---|---|---|
+| LTO/IPO enabled elsewhere (main project, vendored `g2o`, `SuperPoint-LightGlue-TensorRT`, `DBoW2`) | Grepped every `CMakeLists.txt` in the repo for `INTERPROCEDURAL_OPTIMIZATION`/`check_ipo_supported`/`-flto` | Not found anywhere else — confirmed isolated to `Light_Glue_CPP` |
+| `-march=native`+`-O3` template-heavy compiles (Eigen/g2o) under 8-way parallelism | Main `CMakeLists.txt:16` and vendored `Thirdparty/g2o/CMakeLists.txt:16-17` both use `-O3 -march=native` (no LTO) | Real but minor contributor at most — this is a well-known but comparatively modest per-TU memory multiplier (~1.5-2x), not the order-of-magnitude LTO's cross-file WPA pass can cause; `--parallel 8` is an explicit, sane cap for this class of cost |
+| CUDA device-code linking (`nvlink`) for `SuperPoint-LightGlue-TensorRT` (`CUDA_SEPARABLE_COMPILATION ON`, `CUDA_RESOLVE_DEVICE_SYMBOLS ON` also set in `Light_Glue_CPP/CMakeLists.txt:187-188`) | Present, but this is inference-only TensorRT/CUDA code, not the much heavier libtorch autodiff-capable headers; the build log shows its link steps (`[59/82]`, `[60/82]`) without incident | Lower probability secondary contributor; worth remembering if the LTO fix alone doesn't fully resolve the symptom |
+| Build log itself showing a crash/OOM kill | Searched `test.txt` for `killed`/`oom`/`bad_alloc`/`internal compiler error`/etc. | None found — this specific captured run completed successfully (82/82). The reported "memory leak" is a resource-pressure/slowdown symptom (swap thrashing), not a hard crash, so it wouldn't necessarily appear as an error in the log at all |
+| Ambient system load (browser/IDE already using ~18 GiB before the build starts) | `free -h` baseline captured during this investigation | Real compounding factor, not a code bug — worth mentioning as practical advice (close memory-heavy apps before a full `-f` rebuild) regardless of the LTO fix |
+
+### Fix options, ranked
+
+| # | Fix | Where | Risk | Notes |
+|---|---|---|---|---|
+| 1 | Add `-ffat-lto-objects` alongside the existing IPO setting in `Light_Glue_CPP/CMakeLists.txt` (or override via `target_compile_options`) | `Thirdparty/Light_Glue_CPP/CMakeLists.txt` | Low | Keeps LTO's benefit for anything that explicitly opts into `-flto` itself (nothing currently does at the top level), but embeds regular machine code alongside the IR so a non-LTO consumer (today's `libAllFeature-VSLAM.so` link) uses the plain fallback code and never invokes `lto1` at all. Most targeted fix — addresses exactly the mechanism found, without touching anyone's optimization flags |
+| 2 | Cap LTRANS parallelism explicitly, e.g. `-flto=4` instead of the default `-flto=auto`, on whatever compiles these objects | `Thirdparty/Light_Glue_CPP/CMakeLists.txt` (RELEASE_FLAGS section) | Low-Medium | Preserves true whole-program optimization but caps worker count to something the machine can actually afford concurrently with everything else; needs care since CMake's `CMAKE_INTERPROCEDURAL_OPTIMIZATION` property doesn't expose a job-count knob directly — would need a manual `-flto=N` compile option instead of (or carefully combined with) the CMake IPO property |
+| 3 | Turn LTO off entirely for `Light_Glue_CPP` (`set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)` or delete lines 13-18) | `Thirdparty/Light_Glue_CPP/CMakeLists.txt` | Low, *if* it's genuinely unvalidated boilerplate as the submodule's commit history suggests | Simplest possible fix; the downside is only real if someone deliberately measured and relied on LTO's runtime speedup for LightGlue inference, which nothing in the history suggests — worth a quick sanity check (a before/after inference-time comparison) rather than assuming, since this is third-party vendored code not authored in this session |
+| 4 | Reduce `build.sh`'s `--parallel 8` further, or add a Ninja link pool (`CMAKE_JOB_POOL_LINK`) capping concurrent *ninja-scheduled* link steps | `build.sh` / `CMakeLists.txt` | Low effort, low payoff | Does not address the actual mechanism (the blowup happens *inside* one link step's internal LTO fork, not from too many concurrent ninja-scheduled jobs) — a defensive/secondary measure at best, not a fix on its own |
+| 5 | Increase swap size | System-level, outside any repo | Trivial | Pure stopgap — turns a possible crash into guaranteed severe slowdown instead of fixing the cause; the thrashing itself is what reads as "a leak," so this doesn't really resolve the complaint, just makes it survivable |
+
+Recommended order if you want to act on this: try **#1** first (lowest risk, most directly targeted at the confirmed mechanism), verify a subsequent `-fv` rebuild no longer shows the swap spike, and only reach for **#2**/**#3** if #1 turns out insufficient or if you'd rather not carry any LTO risk at all in vendored code nobody here has validated the benefit of.
+
 ---
 
 ## Notes

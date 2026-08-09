@@ -100,7 +100,6 @@ pangolin = { channel = "fontan" }
 brisk-vslamlab = { channel = "fontan" }
 akaze-vslamlab = { channel = "fontan" }
 siftgpu-vslamlab = { channel = "fontan" }
-g2o = { channel = "fontan" }
 
 huggingface_hub = "*"
 pandas = "*"

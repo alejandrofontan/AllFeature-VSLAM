@@ -33,6 +33,37 @@ namespace AF_VSLAM
 
 class LoopClosing;
 
+struct OptimizerParameters
+{
+    // Chi-square outlier thresholds (95% for 2/3-DoF residuals)
+    float chi2_2dof{5.991f};
+    float chi2_3dof{7.815f};
+    float chi2_3dof_rgbd{7.815f};        // split from chi2_3dof so RGB-D can be tuned independently
+
+    // Huber deltas -- DERIVED from chi2_* by LoadParameters(), never set independently
+    // (previously separate statics that could silently desync if chi2_* ever changed after startup)
+    float thHuber_2dof{2.4477f};
+    float thHuber_3dof{2.7955f};
+    float thHuber_3dof_rgbd{2.7955f};
+
+    // RGB-D depth-channel measurement information (1/variance) for the inverse-depth residual
+    double invDepthInfo{20000.0};
+
+    // PoseOptimization()
+    int numItPoseOpt{10};
+
+    // OptimizeEssentialGraph()
+    double userLambdaInit{1e-16};
+    int minFeat{100};
+    int numItEssGraphOpt{20};
+
+    // OptimizeSim3()
+    int numItSim3Opt{5};
+    int nMoreItHigh{10};
+    int nMoreItLow{5};
+    int minNCorrespondences{10};
+};
+
 class Optimizer
 {
 public:
@@ -55,27 +86,9 @@ public:
     static int OptimizeSim3(Keyframe pKF1, Keyframe pKF2, std::vector<Pt> &vpMatches1,
                             g2o::Sim3 &g2oS12, const float th2, const bool bFixScale, const FeatureType& featureType);
 
-    // Heuristics
-    static float chi2_2dof;
-    static float chi2_3dof;
-    static float thHuber_2dof;
-    static float thHuber_3dof;
-
-    // Constants
-
-    // PoseOptimization()
-    static const int numItPoseOpt;
-
-    // OptimizeEssentialGraph()
-    static const double userLambdaInit;
-    static const int minFeat;
-    static const int numItEssGraphOpt;
-
-    // OptimizeSim3()
-    static const int numItSim3Opt;
-    static const int nMoreItHigh;
-    static const int nMoreItLow;
-    static const int minNCorrespondences;
+    // Tunable parameters, loaded from the settings YAML at System startup
+    static OptimizerParameters params;
+    static void LoadParameters(const cv::FileStorage &fSettings);
 
 };
 
