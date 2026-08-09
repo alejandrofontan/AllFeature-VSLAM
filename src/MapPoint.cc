@@ -32,8 +32,8 @@ mutex MapPoint::mGlobalMutex;
 MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType):
     mnFirstKFid(pRefKF->keyId), mnFirstFrame(pRefKF->frame_id), nObs(0),
     idLastFrameSeen(0), mnBALocalForKF(0), mnFuseCandidateForKF(0), mnLoopPointForKF(0), mnCorrectedByKF(0),
-    mnCorrectedReference(0), mnBAGlobalForKF(0), mpRefKF(pRefKF), mnVisible(1), mnFound(1), mbBad(false),
-    mpReplaced(static_cast<Pt>(NULL)), minDistance(0), maxDistance(0), mpMap(pMap), featureType(featureType)
+    mnCorrectedReference(0), mnBAGlobalForKF(0), featureType(featureType), minDistance(0), maxDistance(0),
+    mpRefKF(pRefKF), mnVisible(1), mnFound(1), mbBad(false), mpReplaced(static_cast<Pt>(NULL)), mpMap(pMap)
 {
 
     XYZ = XYZ_;
@@ -51,8 +51,9 @@ MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, con
 MapPoint::MapPoint(const vec3f &XYZ_, shared_ptr<Map> pMap, Frame* pFrame, const int &idxF, const FeatureType& featureType):
     mnFirstKFid(-1), mnFirstFrame(pFrame->mnId), nObs(0), idLastFrameSeen(0),
     mnBALocalForKF(0), mnFuseCandidateForKF(0),mnLoopPointForKF(0), mnCorrectedByKF(0),
-    mnCorrectedReference(0), mnBAGlobalForKF(0), mpRefKF(static_cast<Keyframe>(NULL)), mnVisible(1),
-    mnFound(1), mbBad(false), mpReplaced(NULL), mpMap(pMap), featureType(featureType)
+    mnCorrectedReference(0), mnBAGlobalForKF(0), featureType(featureType),
+    mpRefKF(static_cast<Keyframe>(NULL)), mnVisible(1),
+    mnFound(1), mbBad(false), mpReplaced(NULL), mpMap(pMap)
 {
 
     XYZ = XYZ_;
@@ -300,24 +301,13 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
         }
     }
 
-    int latestIndex{0};
-    int index{int(projKeyframes[0]->frame_id)};
-    for (size_t i = 0; i < projKeyframes.size(); i++)
-    {
-        if(projKeyframes[i]->frame_id > index)
-        {
-            index = int(projKeyframes[i]->frame_id);
-            latestIndex = static_cast<int>(i);
-        }
-    }
-
     if(descriptors.empty())
         return thisPt();
 
     // Compute distances between them
     const size_t N = descriptors.size();
 
-    Descriptor_Distance_Type Distances[N][N];
+    std::vector<std::vector<Descriptor_Distance_Type>> Distances(N, std::vector<Descriptor_Distance_Type>(N));
     for(size_t i = 0;i < N; i++)
     {
         Distances[i][i] = Descriptor_Distance_Type(0.0);
@@ -334,7 +324,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
     int BestIdx{0};
     for(size_t i = 0;i < N; i++)
     {
-        vector<Descriptor_Distance_Type> vDists(Distances[i],Distances[i]+N);
+        vector<Descriptor_Distance_Type> vDists(Distances[i]);
         sort(vDists.begin(),vDists.end());
         Descriptor_Distance_Type median = vDists[0.5*(N-1)];
 
@@ -345,9 +335,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
         }
     }
 
-    //BestIdx = latestIndex; // Prefer the latest one
     {
-
         unique_lock<mutex> lock(mMutexFeatures);
         mDescriptor = descriptors[BestIdx].clone();
         refIndex = projIndexes[BestIdx];

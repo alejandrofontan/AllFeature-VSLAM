@@ -90,13 +90,13 @@ namespace AF_VSLAM {
                           const std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints,
                           const Image& img, const CovarianceMethod& method);
 
-        virtual void setupImage(const Image& img){};
+        virtual void setupImage(const Image&){};
 
     protected:
-        [[nodiscard]] virtual int GetKeypointOctave(const cv::KeyPoint& keypoint) const{};
-        [[nodiscard]] virtual float GetKeypointSize(const cv::KeyPoint& keypoint) const{};
+        [[nodiscard]] virtual int GetKeypointOctave(const cv::KeyPoint& keypoint) const = 0;
+        [[nodiscard]] virtual float GetKeypointSize(const cv::KeyPoint& keypoint) const = 0;
 
-        virtual void detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){};
+        virtual void detectAndCompute(const Image&, std::vector<cv::KeyPoint>&, cv::Mat&){};
         std::vector<cv::KeyPoint> DistributeOctTree(std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
             const int &maxX, const int &minY, const int &maxY, const int &N, const int &level);
         void FilterKeypointsByMask(std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors, const cv::Mat& mask) const;

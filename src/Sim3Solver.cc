@@ -36,7 +36,7 @@ namespace AF_VSLAM
 
 
 Sim3Solver::Sim3Solver(Keyframe pKF1, Keyframe pKF2, const vector<Pt> &vpMatched12, const FeatureType& featureType, const bool bFixScale):
-    mnIterations(0), mnBestInliers(0), mbFixScale(bFixScale), featureType(featureType)
+    featureType(featureType), mnIterations(0), mnBestInliers(0), mbFixScale(bFixScale)
 {
     mpKF1 = pKF1;
     mpKF2 = pKF2;
@@ -251,9 +251,9 @@ void Sim3Solver::ComputeSim3(mat3f &P1, mat3f &P2)
     Nmatrix(2,2) = -M(0,0) + M(1,1) - M(2,2);
     Nmatrix(2,3) = M(1,2) + M(2,1);
 
-    Nmatrix(0,3) = Nmatrix(3,0);
-    Nmatrix(1,3) = Nmatrix(3,1);
-    Nmatrix(2,3) = Nmatrix(3,2);
+    Nmatrix(3,0) = Nmatrix(0,3);
+    Nmatrix(3,1) = Nmatrix(1,3);
+    Nmatrix(3,2) = Nmatrix(2,3);
     Nmatrix(3,3) = -M(0,0) - M(1,1) + M(2,2);
 
     // Step 4: Eigenvector of the highest eigenvalue

@@ -36,9 +36,9 @@ Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
                    const int sensor,
                    const vector<FeatureType>& featureTypes,
                    const bool& fixImageSize):
-    mState(NO_IMAGES_YET), mSensor(sensor), mbVO(false), vocabulary(vocabulary),
+    mState(NO_IMAGES_YET), mSensor(sensor), featureTypes(featureTypes), mbVO(false), vocabulary(vocabulary),
     keyFrameDB(pKFDB), mpInitializer(static_cast<Initializer*>(nullptr)), mpSystem(pSys), viewer(static_cast<shared_ptr<Viewer>>(nullptr)),
-    frameDrawer(frameDrawer), mapDrawer(mapDrawer), map(map), lastRelocFrameId(0), featureTypes(featureTypes), fixImageSize(fixImageSize)
+    frameDrawer(frameDrawer), mapDrawer(mapDrawer), map(map), lastRelocFrameId(0), fixImageSize(fixImageSize)
 {
     // Load camera parameters from settings yaml file
     Tracking::loadCameraParameters(strCalibrationPath, strSettingPath);
@@ -262,7 +262,7 @@ void Tracking::Track()
         // Reset if the camera get lost soon after initialization
         if(mState==LOST)
         {
-            if(map->KeyFramesInMap() <= minKeyframesInMap)
+            if(map->KeyFramesInMap() <= static_cast<size_t>(minKeyframesInMap))
             {
                 cout << "Track lost soon after initialisation, reseting..." << endl;
                 mpSystem->Reset();
@@ -314,7 +314,7 @@ void Tracking::MonocularInitialization(const FeatureType& featureType)
     if(!mpInitializer)
     {
         // Set Reference Frame
-        if(currentFrame.mvKeys[featureType].size() > minKeypointsMonocular)
+        if(currentFrame.mvKeys[featureType].size() > static_cast<size_t>(minKeypointsMonocular))
         {
             mInitialFrame = Frame(currentFrame);
             lastFrame = Frame(currentFrame);
@@ -643,7 +643,7 @@ bool Tracking::TrackLocalMap()
 
     // Update MapPoints Statistics
     for (auto& [ft, pts] : currentFrame.pts) {
-        for(int i = 0; i < pts.size(); i++)
+        for(size_t i = 0; i < pts.size(); i++)
         {
             if(currentFrame.pts.at(ft)[i])
             {
@@ -787,16 +787,7 @@ bool Tracking::TrackLocalMap()
         }
 
         if(nToMatch > 0){
-            float radiusTh = radiusTh_low_slp;
-            if(mSensor == System::RGBD)
-                radiusTh = radiusTh_medium_slp;
-
-            // If the camera has been relocalised recently, perform a coarser search
-            if(currentFrame.mnId < lastRelocFrameId + idSum)
-                radiusTh = radiusTh_high_slp;
-
-            matcher->match_map_points_to_frame(currentFrame, localPts);//, radiusTh);
-
+            matcher->match_map_points_to_frame(currentFrame, localPts);
         }
     }
 

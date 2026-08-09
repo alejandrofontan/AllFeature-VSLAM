@@ -263,9 +263,6 @@ protected:
     const float radiusTh_high_trackMotModel{15.0f};
     const float radiusTh_low_trackMotModel{7.0f};
     const float radiusTh_scale_trackMotModel{2.0f};
-    const float radiusTh_high_slp{5.0f};
-    const float radiusTh_medium_slp{3.0f};
-    const float radiusTh_low_slp{1.0f};
     const float radiusTh_high_reloc{10.0f};
     const float radiusTh_low_reloc{3.0f};
 

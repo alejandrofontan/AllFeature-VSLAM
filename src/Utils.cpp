@@ -60,6 +60,8 @@ std::string AF_VSLAM::matType(const int& matTypeIndex){
             return "CV_32F";
         case 6:
             return "CV_64F ";
+        default:
+            return "UNKNOWN";
     }
 }
 
