@@ -14,6 +14,15 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 
 # Compiler flags
 add_compile_options(-Wall -Wextra -Wpedantic -O3 -march=native)
+# -Wno-overloaded-virtual: this project's own translation units transitively include vendored
+# DBoW2 headers (FOrb.h, FBrief.h, ...) whose FXxx classes intentionally hide the private, never
+# dynamically-dispatched FClass::meanValue with their own differently-typed static meanValue --
+# see the matching note in Thirdparty/DBoW2/CMakeLists.txt for the full rationale. Scoped to CXX
+# only (via generator expression) since this directory's compile options are inherited by
+# add_subdirectory()'d targets that include plain C sources (e.g. vendored g2o's os_specific.c),
+# and -Woverloaded-virtual is a C++-only concept -- passing it unconditionally produced its own
+# "valid for C++/ObjC++ but not for C" warning from the C frontend.
+add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-overloaded-virtual>)
 
 set(SRCS_ALLFEATURE
         src/System.cc
@@ -93,7 +102,15 @@ find_package(Python REQUIRED COMPONENTS Interpreter)
 find_package(brisk REQUIRED)
 find_package(akaze REQUIRED)
 find_package(SiftGPU CONFIG REQUIRED)
+# find_package(LightGlue) transitively re-triggers libtorch's own Caffe2Config.cmake (via
+# LightGlueConfig.cmake's find_dependency(Torch)), which mis-calls
+# find_package_handle_standard_args() with a package-name mismatch (nvtx3 vs Caffe2) -- a dev/
+# author warning from Torch's installed CMake config, not from any CMakeLists.txt in this
+# project. Scoped around just this call (not a global -Wno-dev) so any real future dev warning
+# of our own still surfaces.
+set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS ON)
 find_package(LightGlue REQUIRED HINTS "${PROJECT_SOURCE_DIR}/Thirdparty/Light_Glue_CPP/build")
+unset(CMAKE_SUPPRESS_DEVELOPER_WARNINGS)
 
 find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
