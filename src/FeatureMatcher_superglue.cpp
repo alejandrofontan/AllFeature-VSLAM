@@ -13,7 +13,7 @@
 std::vector<cv::DMatch> AF_VSLAM::FeatureMatcher::matcherLightglueSuperpoint(
     const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
     const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
-    float min_score)
+    float)
 {
 
     // Build 258-row feature matrices: rows 0-1 = x/y, rows 2-257 = descriptor

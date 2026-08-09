@@ -85,7 +85,7 @@ public:
     // Matches two keyframes across all feature types to find candidate pairs for triangulation.
     // Reuses cached matches if available; otherwise runs parallel descriptor matching + LMEDS filtering.
     // Used in: LocalMapping::CreateNewMapPoints
-    const int min_match_keyframes = 10;
+    const size_t min_match_keyframes = 10;
     map<FeatureType, vector<pair<size_t,size_t>>> match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
                                 const vector<FeatureType>& feat_types);
     void match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,

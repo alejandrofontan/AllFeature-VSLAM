@@ -40,15 +40,10 @@ void AF_VSLAM::FeatureExtractor::operator()(const Image& img,
                                              std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors,
                                              std::vector<mat2f>& keyPtsSigma2, std::vector<mat2f>& keyPtsInf, std::vector<float>& keyPtsSize)
 {
-    std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
-
     setupImage(img);
     detectAndCompute(img, keypoints, descriptors);
     computeSize(keyPtsSize,keypoints);
     computeSigma(keyPtsSigma2, keyPtsInf,keyPtsSize,keypoints,img,CovarianceMethod::SIZE);
-
-    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
-    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
 }
 
 void AF_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints){
@@ -66,28 +61,26 @@ void AF_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsSize, con
 
 void AF_VSLAM::FeatureExtractor::computeSigma(std::vector<mat2f>& keyPtsSigma2, std::vector<mat2f>& keyPtsInf,
                                                       const std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints,
-                                                      const Image& img, const CovarianceMethod& method){
+                                                      const Image&, const CovarianceMethod& method){
     keyPtsSigma2.clear();
     keyPtsInf.clear();
     keyPtsSigma2.reserve(keypoints.size());
     keyPtsInf.reserve(keypoints.size());
     switch (method) {
         case NONE:{
-            for(const auto& keypoint: keypoints){
+            for(size_t i = 0; i < keypoints.size(); i++){
                 keyPtsSigma2.emplace_back(mat2f::Identity());
                 keyPtsInf.emplace_back(mat2f::Identity());
             }
             return;
         }
         case SIZE:{
-            int iKeyPt{0};
-            for(const auto& keypoint: keypoints){
+            for(size_t iKeyPt = 0; iKeyPt < keypoints.size(); iKeyPt++){
                 float keypointSigma = keyPtsSize[iKeyPt];
                 float keypointSigma2 = keypointSigma * keypointSigma;
                 float keypointInf = 1.0f/(keypointSigma2);
                 keyPtsSigma2.emplace_back(keypointSigma2 * mat2f::Identity());
                 keyPtsInf.emplace_back(keypointInf * mat2f::Identity());
-                iKeyPt++;
             }
             return;
         }
@@ -95,7 +88,7 @@ void AF_VSLAM::FeatureExtractor::computeSigma(std::vector<mat2f>& keyPtsSigma2, 
 }
 
 std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::DistributeOctTree(std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
-                                       const int &maxX, const int &minY, const int &maxY, const int &N, const int &level)
+                                       const int &maxX, const int &minY, const int &maxY, const int &N, const int &)
 {
     // Compute how many initial nodes
     const int nIni = round(static_cast<float>(maxX-minX)/(maxY-minY));

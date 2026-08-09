@@ -70,11 +70,11 @@ void AF_VSLAM::FeatureExtractor_superpoint256::detectAndCompute(
         descriptors_.row(keypoints[i].class_id).copyTo(descriptors.row(i));
 }
 
-int AF_VSLAM::FeatureExtractor_superpoint256::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
+int AF_VSLAM::FeatureExtractor_superpoint256::GetKeypointOctave(const cv::KeyPoint&) const{
     return 0;
 }
 
-float AF_VSLAM::FeatureExtractor_superpoint256::GetKeypointSize(const cv::KeyPoint& keypoint) const{
+float AF_VSLAM::FeatureExtractor_superpoint256::GetKeypointSize(const cv::KeyPoint&) const{
     return 1.0f;
 }
 

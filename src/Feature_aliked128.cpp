@@ -100,11 +100,11 @@ void AF_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image& img, st
 
 }
 
-int AF_VSLAM::FeatureExtractor_aliked128::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
+int AF_VSLAM::FeatureExtractor_aliked128::GetKeypointOctave(const cv::KeyPoint&) const{
     return 0;
 }
 
-float AF_VSLAM::FeatureExtractor_aliked128::GetKeypointSize(const cv::KeyPoint& keypoint) const{
+float AF_VSLAM::FeatureExtractor_aliked128::GetKeypointSize(const cv::KeyPoint&) const{
     return 1.0f;
 }
 

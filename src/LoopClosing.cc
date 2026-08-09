@@ -42,9 +42,9 @@ LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<KeyFrameDatabase>pDB, s
     const bool bFixScale,
     const FeatureType& featureType, const std::vector<FeatureType>& feat_types,
     int image_width, int image_height):
-    mbResetRequested(false), mbFinishRequested(false), mbFinished(true), mpMap(pMap),
+    mbResetRequested(false), mbFinishRequested(false), mbFinished(true), featureType(featureType), feat_types(feat_types), mpMap(pMap),
     mpKeyFrameDB(pDB), vocabulary(vocabulary), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
-    mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), featureType(featureType), feat_types(feat_types), mnFullBAIdx(0),
+    mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), mnFullBAIdx(0),
     image_width(image_width), image_height(image_height)
 {
     mnCovisibilityConsistencyTh = 3;

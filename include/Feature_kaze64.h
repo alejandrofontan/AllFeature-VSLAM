@@ -11,8 +11,8 @@ namespace AF_VSLAM {
     class Kaze64 : public Feature {
     public:
         const std::string& getFeatureName()    const override { return s_featureName; }
-        const FeatureType  getType()           const override { return FEAT_KAZE64; }
-        const MatcherType getMatcherType()     const override { return BF_L2; }
+        FeatureType  getType()           const override { return FEAT_KAZE64; }
+        MatcherType getMatcherType()     const override { return BF_L2; }
         const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
         const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
         float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override { return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2); };

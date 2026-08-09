@@ -84,7 +84,7 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &match
     allIndices.reserve(N);
     vector<size_t> availableIndices;
 
-    for(int i{0}; i < N; i++)
+    for(size_t i{0}; i < N; i++)
         allIndices.push_back(i);
 
     // Generate sets of 8 points for each RANSAC iteration
@@ -324,7 +324,7 @@ mat3f Initializer::ComputeH21(const vector<vec2f> &P1, const vector<vec2f> &P2)
 
     Eigen::MatrixXf A(2 * N, 9);
 
-    for(int i{0}; i < N; i++)
+    for(size_t i{0}; i < N; i++)
     {
         const float u1 = P1[i](0);
         const float v1 = P1[i](1);
@@ -366,7 +366,7 @@ mat3f Initializer::ComputeF21(const vector<vec2f> &P1,const vector<vec2f> &P2)
 
     Eigen::MatrixXf A(N, 9);
 
-    for(int i{0}; i < N; i++)
+    for(size_t i{0}; i < N; i++)
     {
         const float u1 = P1[i](0);
         const float v1 = P1[i](1);
@@ -425,7 +425,7 @@ float Initializer::CheckHomography(const mat3f &H21, const mat3f &H12, vector<bo
 
     const float invSigmaSquare = 1.f/(sigma_ * sigma_);
 
-    for(int i{0}; i < N; i++)
+    for(size_t i{0}; i < N; i++)
     {
         bool bIn = true;
 
@@ -497,7 +497,7 @@ float Initializer::CheckFundamental(const mat3f &F21, vector<bool> &matchesInlie
     float score = 0.f;
     const float invSigmaSquare = 1.f / (sigma_ * sigma_);
 
-    for(int i{0}; i < N; i++)
+    for(size_t i{0}; i < N; i++)
     {
         bool bIn = true;
 
@@ -836,7 +836,7 @@ void Initializer::Normalize(const vector<cv::KeyPoint> &keypoints, vector<vec2f>
     normalizedPoints.resize(N);
 
     float meanX{0.f}, meanY{0.f};
-    for(int i{0}; i < N; i++)
+    for(size_t i{0}; i < N; i++)
     {
         meanX += keypoints[i].pt.x;
         meanY += keypoints[i].pt.y;
@@ -845,7 +845,7 @@ void Initializer::Normalize(const vector<cv::KeyPoint> &keypoints, vector<vec2f>
     meanY = meanY / float(N);
 
     float meanDevX{0.f}, meanDevY{0.f};
-    for(int i{0}; i < N; i++)
+    for(size_t i{0}; i < N; i++)
     {
         normalizedPoints[i](0) = keypoints[i].pt.x - meanX;
         normalizedPoints[i](1) = keypoints[i].pt.y - meanY;
@@ -859,7 +859,7 @@ void Initializer::Normalize(const vector<cv::KeyPoint> &keypoints, vector<vec2f>
     const float sX{1.f / meanDevX};
     const float sY{1.f / meanDevY};
 
-    for(int i{0}; i < N; i++)
+    for(size_t i{0}; i < N; i++)
     {
         normalizedPoints[i](0) *= sX;
         normalizedPoints[i](1) *= sY;

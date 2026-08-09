@@ -17,8 +17,8 @@ namespace AF_VSLAM {
     class Superpoint256 : public Feature {
     public:
         const std::string& getFeatureName()    const override { return s_featureName; }
-        const FeatureType  getType()           const override { return FEAT_SUPERPOINT256; }
-        const MatcherType getMatcherType()     const override { return LIGHTGLUE_SUPERPOINT; }
+        FeatureType  getType()           const override { return FEAT_SUPERPOINT256; }
+        MatcherType getMatcherType()     const override { return LIGHTGLUE_SUPERPOINT; }
         const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
         const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
         float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override{ return (Descriptor_Distance_Type) cv::norm(a, b, cv::NORM_L2); };

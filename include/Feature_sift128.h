@@ -12,8 +12,8 @@ namespace AF_VSLAM {
     class Sift128 : public Feature {
     public:
         const std::string& getFeatureName()    const override { return s_featureName; }
-        const FeatureType  getType()           const override { return FEAT_SIFT128; }
-        const MatcherType getMatcherType()     const override { return LIGHTGLUE_SIFT; }
+        FeatureType  getType()           const override { return FEAT_SIFT128; }
+        MatcherType getMatcherType()     const override { return LIGHTGLUE_SIFT; }
         const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
         const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
         float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override { return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2); };

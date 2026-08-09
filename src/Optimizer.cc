@@ -515,7 +515,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     return nInitialCorrespondences-nBad;
 }
 
-void Optimizer::LocalBundleAdjustment(Keyframe pKF, bool* pbStopFlag, shared_ptr<Map> pMap)
+void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbStopFlag, shared_ptr<Map> pMap)
 {
 
     // Local KeyFrames: First Breath Search from Current Keyframe

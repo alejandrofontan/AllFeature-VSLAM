@@ -49,15 +49,15 @@ Frame::Frame()
 
 //Copy Constructor
 Frame::Frame(const Frame &frame)
-    :vocabulary(frame.vocabulary), featureExtractorLeft(frame.featureExtractorLeft), featureExtractorRight(frame.featureExtractorRight),
-     mTimeStamp(frame.mTimeStamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()),
+    :featureTypes(frame.featureTypes), vocabulary(frame.vocabulary), featureExtractorLeft(frame.featureExtractorLeft), featureExtractorRight(frame.featureExtractorRight),
+     mTimeStamp(frame.mTimeStamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()), w(frame.w), h(frame.h),
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
      mvKeysRight(frame.mvKeysRight), keypoints(frame.keypoints),  mvuRight(frame.mvuRight),
      mvDepth(frame.mvDepth), invDepth(frame.invDepth), mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec),
      pts(frame.pts), mvbOutlier(frame.mvbOutlier), mnId(frame.mnId), refKeyframe(frame.refKeyframe),
      sizeTolerance(frame.sizeTolerance),invSizeTolerance(frame.invSizeTolerance),
      keyPtsSigma2(frame.keyPtsSigma2),keyPtsInf(frame.keyPtsInf),keyPtsSize(frame.keyPtsSize),
-     maxKeyPtSize(frame.maxKeyPtSize),maxKeyPtSigma(frame.maxKeyPtSigma), featureTypes(frame.featureTypes), w(frame.w), h(frame.h)
+     maxKeyPtSize(frame.maxKeyPtSize),maxKeyPtSigma(frame.maxKeyPtSigma)
 {
     for (FeatureType ft : featureTypes)
         for(int i = 0;i<FRAME_GRID_COLS;i++)
@@ -73,6 +73,18 @@ Frame::Frame(const Frame &frame)
 
     if(frame.Tcw(3,3) == 1.0f)
         SetPose(frame.Tcw);
+}
+
+// Copy assignment: destroy the current object and placement-new a fresh copy via the copy
+// constructor above, so assignment can never drift out of sync with construction's deep-copy
+// logic (see the comment on the declaration in Frame.h).
+Frame& Frame::operator=(const Frame &frame)
+{
+    if (this != &frame) {
+        this->~Frame();
+        new (this) Frame(frame);
+    }
+    return *this;
 }
 
 Frame::Frame(const Image & img, const double &timeStamp,
@@ -152,7 +164,7 @@ void Frame::AssignFeaturesToGrid()
     }
 }
 
-void Frame::ExtractFeatures(int flag, const Image& img)
+void Frame::ExtractFeatures(int, const Image& img)
 {
     featureTypes.clear();
     Ntotal = 0;
@@ -451,20 +463,20 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
     }
 }
 
-    void Frame::ComputeStereoMatches(const FeatureType& featureType_)
+    void Frame::ComputeStereoMatches(const FeatureType&)
     {
         std::cout << "This function (Frame::ComputeStereoMatches) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
         std::terminate();
     }
 
 
-    void Frame::ComputeStereoFromRGBD(const cv::Mat &imDepth)
+    void Frame::ComputeStereoFromRGBD(const cv::Mat &)
     {
         std::cout << "This function (Frame::ComputeStereoFromRGBD) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
         std::terminate();
     }
 
-    vec3f Frame::UnprojectStereo(const int &i)
+    vec3f Frame::UnprojectStereo(const int &)
     {
         std::cout << "This function (Frame::UnprojectStereo) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
         std::terminate();

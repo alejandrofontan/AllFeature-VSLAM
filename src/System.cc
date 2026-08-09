@@ -20,7 +20,7 @@ System::System(const string &vocabularyFolder,
                const bool activateVisualization,
                const vector<FeatureType>& featureTypes,
                const bool& fixImageSize):
-               mSensor(sensor), viewer(static_cast<shared_ptr<Viewer>>(nullptr)), mbReset(false), featureTypes(featureTypes)
+               featureTypes(featureTypes), mSensor(sensor), viewer(static_cast<shared_ptr<Viewer>>(nullptr)), mbReset(false)
 {
     // Output welcome message
 
@@ -122,7 +122,7 @@ System::System(const string &vocabularyFolder,
     loopCloser->SetMapDrawer(mapDrawer);
 }
 
-mat4f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp)
+mat4f System::TrackStereo(const cv::Mat &, const cv::Mat &, const double &)
 {
     std::cout << "This function (System::TrackStereo) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
     std::terminate();
@@ -176,7 +176,7 @@ mat4f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const d
     // return Tcw;
 }
 
-mat4f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double &timestamp)
+mat4f System::TrackRGBD(const cv::Mat &, const cv::Mat &, const double &)
 {
     std::cout << "This function (System::TrackRGBD) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
     std::terminate();

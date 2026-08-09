@@ -87,7 +87,7 @@ void AF_VSLAM::FeatureExtractor_sift128::detectAndCompute(const Image& img, std:
 
 void AF_VSLAM::FeatureExtractor_sift128::detectKeypoints(
         std::vector<cv::KeyPoint>& keypoints,
-        const Image& img, const float& detectTh, const int& nOctaves) const{
+        const Image& img, const float&, const int&) const{
 
     sift->RunSIFT(img.grayImg.cols, img.grayImg.rows, img.grayImg.data, GL_LUMINANCE, GL_UNSIGNED_BYTE);
     std::vector<SiftGPU::SiftKeypoint> keys(sift->GetFeatureNum());
@@ -138,11 +138,11 @@ void AF_VSLAM::FeatureExtractor_sift128::computeDescriptors(
     }
 }
 
-int AF_VSLAM::FeatureExtractor_sift128::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
+int AF_VSLAM::FeatureExtractor_sift128::GetKeypointOctave(const cv::KeyPoint&) const{
     return 0;
 }
 
-float AF_VSLAM::FeatureExtractor_sift128::GetKeypointSize(const cv::KeyPoint& keypoint) const{
+float AF_VSLAM::FeatureExtractor_sift128::GetKeypointSize(const cv::KeyPoint&) const{
     return 1.0f;
 }
 

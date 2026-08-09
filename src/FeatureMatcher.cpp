@@ -23,8 +23,8 @@ float FeatureMatcher::radiusScale{1.15f};
 FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
     const std::vector<FeatureType>& feature_types,
     std::string name, float nnratio, bool checkOri):
-    mfNNratio(nnratio), mbCheckOrientation(checkOri), image_width(image_width), image_height(image_height),
-    feature_types(feature_types), name(name)
+    name(name), mfNNratio(nnratio), mbCheckOrientation(checkOri), image_width(image_width), image_height(image_height),
+    feature_types(feature_types)
 {
     AF_INFO("Initializing FeatureMatcher: " + name);
     for(const auto& feat_type : feature_types) {
@@ -214,7 +214,7 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
         const auto& pts_ft  = frame.pts.at(ft);
         const auto& desc_ft = frame.descriptors.at(ft);
         frame_idx[ft].reserve(N);
-        for (size_t i = 0; i < N; i++) {
+        for (size_t i = 0; i < static_cast<size_t>(N); i++) {
             // Skip keypoints already assigned to an observed map point
             if (pts_ft[i] && pts_ft[i]->number_of_observations() > 0)
                 continue;

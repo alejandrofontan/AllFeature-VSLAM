@@ -45,7 +45,7 @@ Viewer::Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> fram
     std::string cam_name;
     cam_name = settings["cam_mono"].as<std::string>();
     YAML::Node cam{};
-    for (int i{0}; i < cameras.size(); ++i){
+    for (size_t i{0}; i < cameras.size(); ++i){
         if (cameras[i]["cam_name"].as<std::string>() == cam_name){
             cam = cameras[i];
             break;
@@ -125,7 +125,7 @@ void Viewer::Run()
     const float left_r = wS;
     const float left_t = 0.99f;
     const float left_b = 0.01f;
-    pangolin::View& d_menu = pangolin::CreatePanel("menu").SetBounds(left_b, left_t - hS - 0.01f, left_l, left_r);
+    pangolin::CreatePanel("menu").SetBounds(left_b, left_t - hS - 0.01f, left_l, left_r);
     pangolin::Var<bool> menuFollowCamera("menu.Follow Camera",true,true);
     pangolin::Var<bool> menuAerialCamera("menu.Aerial Camera",false,true);
 
@@ -144,9 +144,6 @@ void Viewer::Run()
 
     pangolin::OpenGlMatrix Twc_aerial;
     Twc_aerial.SetIdentity();
-
-    vec3f trajectoryCenter0{vec3f::Zero()};
-    float cameraHeight0{1.0f};
 
     cv::Mat im = frameDrawer->DrawFrame();
     pangolin::GlTexture imageTexture  = pangolin::GlTexture(int(w_pixel) ,int(h_pixel), GL_RGB,false,0,GL_RGB,GL_UNSIGNED_BYTE);

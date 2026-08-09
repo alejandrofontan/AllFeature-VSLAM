@@ -52,11 +52,11 @@ void AF_VSLAM::FeatureExtractor_akaze61::setupImage(const Image& img){
     evolution->Create_Nonlinear_Scale_Space(img_32);
 }
 
-int AF_VSLAM::FeatureExtractor_akaze61::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
+int AF_VSLAM::FeatureExtractor_akaze61::GetKeypointOctave(const cv::KeyPoint&) const{
     return 0;
 }
 
-float AF_VSLAM::FeatureExtractor_akaze61::GetKeypointSize(const cv::KeyPoint& keypoint) const{
+float AF_VSLAM::FeatureExtractor_akaze61::GetKeypointSize(const cv::KeyPoint&) const{
     return 1.0f;
 }
 

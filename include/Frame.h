@@ -54,6 +54,12 @@ public:
     // Copy constructor.
     Frame(const Frame &frame);
 
+    // Copy assignment -- delegates to the copy constructor (via destroy + placement-new) so
+    // assignment always behaves exactly like construction, instead of duplicating its deep-copy
+    // logic (mK/mDistCoef/descriptors cloning, mGrid population, conditional Tcw/pose handling)
+    // in a second implementation that could silently drift out of sync with it.
+    Frame& operator=(const Frame &frame);
+
     // Constructor for stereo cameras.
     // Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeStamp,
     //       shared_ptr<FeatureExtractor>& extractorLeft, shared_ptr<FeatureExtractor>& extractorRight,

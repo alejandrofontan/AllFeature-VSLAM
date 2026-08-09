@@ -13,8 +13,9 @@ namespace AF_VSLAM
 {
 
 LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& image_width, const int& image_height):
-    mbMonocular(bMonocular), mbResetRequested(false), mbFinishRequested(false), mbFinished(true), mpMap(pMap),
-    mbAbortBA(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), mbAcceptKeyFrames(true), featureTypes(featureTypes),
+    featureTypes(featureTypes), mpMap(pMap),
+    mbAbortBA(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), mbAcceptKeyFrames(true),
+    mbMonocular(bMonocular), mbResetRequested(false), mbFinishRequested(false), mbFinished(true),
     image_width(image_width), image_height(image_height)
 {
     matcher = std::make_shared<FeatureMatcher>(image_width, image_height, featureTypes, "LocalMapping");
@@ -385,11 +386,8 @@ void LocalMapping::CreateNewMapPoints()
                 const float cosParallaxRays = ray1.dot(ray2)/(ray1.norm() * ray2.norm());
                 //const float sinParallaxRays = ray1.cross(ray2).norm() / (ray1.norm() * ray2.norm());
 
-                float cosParallaxStereo = cosParallaxRays+1;
-
                 vec3f x3D;
                 bool fromSensorDepth = false;
-                const float sinThr = std::sqrt(1.0f - CREATE_NEW_MAP_POINTS_MIN_COS * CREATE_NEW_MAP_POINTS_MIN_COS);
                 const float invDepth1 = mpCurrentKeyFrame->invDepth.at(featureType)[idx1];
                 const float invDepth2 = pKF2->invDepth.at(featureType)[idx2];
                 const bool haveDepth1 = invDepth1 > 0.0f;
@@ -704,7 +702,6 @@ void LocalMapping::KeyFrameCulling()
                 {
                     if(!pMP->is_bad())
                     {
-                        FeatureType featType = pMP->featureType;
                         nMPs++;
                         if(pMP->number_of_observations() > thObs)
                         {
