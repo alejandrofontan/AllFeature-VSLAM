@@ -502,8 +502,41 @@ void LocalMapping::CreateNewMapPoints()
         }
     }
 
-    cout << "[LocalMapping::CreateNewMapPoints] New map points: " << (nFromSensor + nFromTriangulation)
-         << " (sensor: " << nFromSensor << ", triangulation: " << nFromTriangulation << ")" << endl;
+    //////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////
+    // Back-project close, still-unmatched keypoints straight from mpCurrentKeyFrame's own depth
+    // reading. The loop above only creates points for keypoints that found a 2D feature match
+    // against a covisible neighbor (match_keyframes_for_triangulation) -- a keypoint with a
+    // perfectly good sensor-depth reading but no such match (textureless region, repeated
+    // pattern, fast motion) was previously silently dropped, even though depth alone already
+    // places it in the map with no matching required at all. Matches the existing haveDepth1/
+    // haveDepth2 branch above: any invDepth>0 is trusted, no mThDepth range gate.
+    for(const auto& featureType : fts)
+    {
+        const auto& invDepthFt = mpCurrentKeyFrame->invDepth.at(featureType);
+        const auto& keypointsFt = mpCurrentKeyFrame->keypoints.at(featureType);
+
+        for(size_t idx = 0; idx < invDepthFt.size(); idx++)
+        {
+            if(invDepthFt[idx] <= 0.0f)
+                continue; // no valid sensor depth at this keypoint
+
+            if(mpCurrentKeyFrame->get_map_point(idx, featureType))
+                continue; // already has a map point (from tracking, or the matched-pairs loop above)
+
+            const cv::KeyPoint& kp1 = keypointsFt[idx];
+            vec3f xn1{(kp1.pt.x-cx1)*invfx1, (kp1.pt.y-cy1)*invfy1, 1.0f};
+            vec3f x3D = Rwc1 * (xn1 * (1.0f / invDepthFt[idx])) + twc1;
+
+            newMapPoints[featureType]++;
+            nFromSensor++;
+            Pt pMP = mpCurrentKeyFrame->CreateMapPoint(x3D, KeypointIndex(idx), featureType);
+            mlpRecentAddedMapPoints.push_back(pMP);
+        }
+    }
+
+    //cout << "[LocalMapping::CreateNewMapPoints] New map points: " << (nFromSensor + nFromTriangulation)
+         //<< " (sensor: " << nFromSensor << ", triangulation: " << nFromTriangulation << ")" << endl;
 }
 
 void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
