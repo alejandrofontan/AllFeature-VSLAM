@@ -39,6 +39,7 @@
 #include "System.h"
 #include"FeatureMatcher.h"
 #include "Utils.h"
+#include "TrackingLostException.h"
 
 namespace AF_VSLAM
 {
@@ -112,6 +113,10 @@ public:
     list<bool> mlbLost;
 
     void Reset();
+
+    // Reason (with statistics) reported by the most recent TrackingLostException, kept around so
+    // the "reset if lost soon after init" branch in Track() can reference why tracking was lost.
+    std::string mLastTrackingLostReason{};
 
     size_t numTrackedFrames{2};
 

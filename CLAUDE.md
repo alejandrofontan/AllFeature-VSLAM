@@ -349,6 +349,87 @@ All of these would need fixing upstream or in a proper fork — per this documen
 
 ---
 
+## Tracking-Lost Audit (2026-08-10)
+
+Read-through of `src/Tracking.cc` (cross-checked against `include/Tracking.h` for threshold defaults) to enumerate every place tracking can transition to `LOST`, ahead of a planned change to throw/catch a typed exception at each site so the system can print *why* tracking was lost plus the specific statistics that broke, before falling back to relocalization. No code was changed for this pass.
+
+**Implemented (2026-08-10, same day):** T1-T4 now throw a new `AF_VSLAM::TrackingLostException` (`include/TrackingLostException.h`, a thin `std::runtime_error` subclass kept distinct so its catch sites don't swallow unrelated errors) carrying a formatted reason + the relevant statistics, instead of a bare `return false;`. `Track()` catches it at both call sites (around `TrackReferenceKeyFrame()`/`TrackLocalMap()`), prints it via `AF_WARN`, stashes it in a new `Tracking::mLastTrackingLostReason` member, and continues exactly as before (`bOK=false` → `mState=LOST` → next frame's `Relocalization()` call is unchanged). The `N1` post-loss-reset branch (`Tracking.cc:263-271`-ish) now includes that stashed reason in its own `AF_WARN` instead of a plain `cout`. N2/N3 (init-time resets) were left untouched — different family, out of scope for this pass. Verified with a full `pixi run build` (clean compile, `ninja: no work to do` on a re-run) and a smoke-run of `bin/vslamlab_allfeature_mono` (expected usage error, no crash from the new code paths).
+
+`Relocalization()` (R1, R6) deliberately got **no** printing on *failure*, despite an earlier version of this change adding `AF_WARN` diagnostics there — removed same-day per explicit feedback: `Relocalization()` is retried once per frame for as long as tracking stays lost, so a print at R1/R6 fires every single frame and quickly scrolls the one-time, actually-useful `TrackingLostException` reason (from T1-T4) out of the visible log. The original `OK→LOST` transition reason is the signal worth keeping visible; per-frame "still couldn't relocalize" noise is not.
+
+`Relocalization()` *success* is a one-time event per loss episode though (the `while` loop breaks via `bMatch=true` as soon as one candidate crosses `nGood_high`), so it's safe to print there without the spam problem above — added an `AF_INFO` right at the `bMatch=true; break;` site (`Tracking.cc`, inside the RANSAC candidate loop), reporting `frame`, `feature`, the matched keyframe's id, and the achieved vs. required inlier count. This closes the loop with the earlier `AF_WARN`: one line when tracking is lost and why, one line when it's recovered and against which keyframe.
+
+**Follow-up fix (same day):** the success line reportedly wasn't showing up. Root cause: `afvslam_log.hpp`'s `AF_WARN`/`AF_ERROR` write to `std::cerr`, which the standard implicitly flushes after every insertion (`unitbuf`), while `AF_INFO`/`AF_DEBUG` write to `std::cout`, which is only line-buffered on an actual terminal — once VSLAM-LAB's runner redirects the baseline's stdout into a log file (`Baselines/BaselineVSLAMLAB.py:273`, `subprocess.Popen(..., stdout=log_file, ...)`), `std::cout` becomes fully buffered and the line can sit unflushed for a long time (until the buffer fills or the process exits cleanly) — meanwhile every `AF_WARN` in the same file shows up immediately, since it never depended on `std::cout`'s buffer at all. Fixed with an explicit `std::cout.flush();` right after that one `AF_INFO` call, rather than touching the shared macro (which other, more performance-sensitive `AF_DEBUG`/`AF_INFO` call sites should keep buffered).
+
+### The state transition itself
+
+There is exactly **one** place `mState` is assigned `LOST`:
+
+```cpp
+// Tracking::Track(), line 203-206
+if(bOK)
+    mState = OK;
+else
+    mState=LOST;
+```
+
+`bOK` is computed a few lines earlier from one of two mutually-exclusive calls (`Track()` line 175-184), then optionally downgraded by a third:
+
+```cpp
+if(mState==OK)
+    bOK = TrackReferenceKeyFrame();      // frame-to-frame tracking, normal case
+else
+    bOK = Relocalization(...);            // already LOST, trying to recover
+...
+if(bOK)
+    bOK = TrackLocalMap();                // further refines/can still fail
+```
+
+So every root cause of a `LOST` transition (or of *staying* `LOST`) bottoms out in one of these three functions returning `false`. Below is every such return site.
+
+### `TrackReferenceKeyFrame()` — normal frame-to-frame tracking (state was `OK`)
+
+| # | Where | How (exact trigger) | Why (what it means) | Stats available to log |
+|---|---|---|---|---|
+| T1 | `Tracking.cc:578-579` | `nmatches < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH` (default **15**) — checked right after `matcher->match_keyframe_to_frame(refKeyframe, currentFrame, ...)`, before any pose optimization | Feature matching against the reference keyframe itself failed to find enough correspondences — fast motion, large appearance/viewpoint change, textureless scene, or a feature-type mismatch between `refKeyframe` and `currentFrame` | `nmatches` (total), per-feature breakdown from `nmatches_ft` map, `refKeyframe->keyId`, `currentFrame.mnId` |
+| T2 | `Tracking.cc:620` | `return nmatchesMap >= TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW;` (default **10**) — evaluated after `Optimizer::PoseOptimization(&currentFrame)`, counting only inlier (non-outlier) matches with `number_of_observations() > 0` | Enough raw matches existed (passed T1), but the chi2-based outlier rejection inside `PoseOptimization` threw out most of them — usually means the initial pose guess (`lastFrame.Tcw`, i.e. the motion model) was a bad prior for this frame, or the matches themselves were geometrically inconsistent | `nmatchesMap` vs. `nmatches` (pre-optimization) to show the outlier-rejection ratio, `currentFrame.mnId` |
+
+### `TrackLocalMap()` — runs after either of the above two succeed
+
+| # | Where | How (exact trigger) | Why (what it means) | Stats available to log |
+|---|---|---|---|---|
+| T3 | `Tracking.cc:667-668` | `currentFrame.mnId < lastRelocFrameId + maxFrames && mnMatchesInliers < minMatches_trackLocalMap_high` (default **50**) — the *stricter* threshold, active only within `maxFrames` (≈1 second at the sequence's fps) of the last relocalization | Track was just recovered via relocalization and hasn't yet proven itself stable enough against the local map — a deliberate "don't trust a fresh reloc too quickly" guard | `mnMatchesInliers`, `currentFrame.mnId - lastRelocFrameId`, `maxFrames` |
+| T4 | `Tracking.cc:670-671` | `mnMatchesInliers < minMatches_trackLocalMap_low` (default **30**) — the general-case threshold, evaluated after `UpdateLocalMap()` + `SearchLocalPoints()` + `Optimizer::PoseOptimization(&currentFrame)` | Not enough of the *local map* (not just the reference keyframe) projects into and matches the current frame after pose refinement — broader loss of map overlap, e.g. viewpoint drifted away from all nearby keyframes, occlusion, or motion blur degrading the whole frame's features | `mnMatchesInliers` vs. thresholds, size of `localPts`, count of points that were `isInFrustum` (candidates fed to `SearchLocalPoints`) vs. actually matched |
+
+### `Relocalization()` — runs when state is already `LOST`; failure here means tracking *stays* lost
+
+`Relocalization()` doesn't cause the `OK→LOST` transition, but every reason it fails to recover is equally in scope for "why is the system lost right now" logging.
+
+| # | Where | How (exact trigger) | Why (what it means) | Stats available to log |
+|---|---|---|---|---|
+| R1 | `Tracking.cc:923-924` | `vpCandidateKFs.empty()` — `keyFrameDB->DetectRelocalizationCandidates(&currentFrame)` returned zero candidates | DBoW2 place-recognition query found no keyframe similar enough to the current frame's BoW vector — either a genuinely novel/unmapped location, or a vocabulary/descriptor mismatch for the active `featureType` | `currentFrame.mnId`, `featureType` used for `ComputeBoW` |
+| R2 | `Tracking.cc:950-954` (per-candidate, inside the `for(i<nKFs)` loop) | `nmatches_ft[featureType] < minNmatches` (default **15**) — candidate keyframe discarded before a `PnPsolver` is even built for it | This candidate KF looked similar enough for DBoW2 to surface it, but direct feature matching against it found too few correspondences | Count of candidates discarded here vs. `nKFs` total, per-candidate `nmatches_ft[featureType]` |
+| R3 | `Tracking.cc:988-992` (per-candidate, inside the RANSAC `while` loop) | `bNoMore` from `pSolver->iterate(...)` — P4P RANSAC exhausted `ransac_maxIterations` (default **3000**) without reaching `ransac_probability`/`ransac_minInliers`-consistent consensus | The 2D-3D correspondences for this candidate were too noisy/inconsistent for RANSAC to find a supported pose within its iteration budget | Iterations used, `nInliers` at time of `bNoMore`, candidate index |
+| R4 | `Tracking.cc:1015-1016` | `nGood < nGood_low` (default **10**) — after a PnP pose hypothesis passed RANSAC and `Optimizer::PoseOptimization(&currentFrame)` ran, too few inliers survived; `continue`s to the next candidate | The RANSAC pose looked plausible enough to optimize, but full pose optimization (all matched points, not just the minimal RANSAC set) rejected almost all of them as outliers | `nGood`, candidate index, `sFound.size()` before optimization |
+| R5 | `Tracking.cc:1023-1051` (two nested `SearchByProjection` escalation stages) | `nGood` lands between `nGood_low` (10) and `nGood_high` (50, default) after the first optimization — triggers a coarse (`radiusTh_high_reloc`=10.0) then, if still short, a narrow (`radiusTh_low_reloc`=3.0) `SearchByProjection` re-match + re-optimize, each requiring the running total to cross `nGood_high` to succeed | Middling confidence pose — worth spending extra matching effort before giving up on this candidate, rather than an outright failure; if both escalation stages still don't cross `nGood_high` the candidate is abandoned (falls through the `if(nGood >= nGood_high)` at line 1056 without setting `bMatch`) | `nGood` before/after each `SearchByProjection` call, `nadditional` returned by each, final `nGood` vs `nGood_high` |
+| R6 | `Tracking.cc:1065-1068` | `if(!bMatch) return false;` — terminal failure, reached once `nCandidates` drops to 0 (all candidates discarded via R2/R3, or fell through R4/R5 without ever setting `bMatch=true`) | The actual "relocalization failed, still lost" signal callers see; by this point every candidate KF the place-recognition system could offer has been tried and rejected | `nKFs` (candidates initially returned by R1), how many were discarded at each of R2/R3/R4/R5 stage, best `nGood` achieved across all candidates (not currently tracked — would need adding) |
+
+### Adjacent failure paths (not `LOST`, but same family — related "why did the system fail" moments)
+
+| # | Where | How | Why | Note |
+|---|---|---|---|---|
+| N1 | `Tracking.cc:263-271` (`Track()`, right after the `mState=LOST` assignment) | `if(mState==LOST) { if(map->KeyFramesInMap() <= minKeyframesInMap) { ...; mpSystem->Reset(); return; } }` (default `minKeyframesInMap`=**5**) | Downstream *consequence* of a `LOST` transition, not a new cause — if tracking is lost while the map is still small/fresh, the system gives up on relocalization entirely and resets rather than trying to relocalize. Currently only logs a plain `cout` line, no reason for the original loss | This is the natural place to also print the *root cause* captured from T1-T4 once those throw/carry a reason, since this branch is the last thing that runs before the frame's `LOST` state is handed back to the caller |
+| N2 | `Tracking.cc:459-462` (`CreateInitialMapMonocular`) | `medianDepth<0 \|\| pKFcur->TrackedMapPoints(1) < keyframeTrackedMapPoints` (default **100**) → `Reset()` | Not a `LOST` transition (state is still `NOT_INITIALIZED`/being set from init) — the two-view monocular initialization produced a degenerate map (bad median depth or too few well-tracked points) and the system resets rather than ever reaching `OK` | Different family (init-time, not tracking-time), but the same "silent reset with only a `cout` line" pattern as N1 — worth handling with the same mechanism if convenient |
+| N3 | `Tracking.cc:375-379` (`MonocularInitialization`) | `nmatches < minMatches_monoInit` (default **100**) → `mpInitializer = nullptr;` (silently restarts init search, no message at all) | Two-view init never found enough matches between `mInitialFrame` and `currentFrame` to attempt initialization; state stays `NOT_INITIALIZED` and it just waits for a better frame pair | Not currently logged at all, unlike N2's `cout`; lowest priority of the three since it's an expected, frequent, non-error occurrence during startup |
+
+### Summary of touch points for the planned exception-based rework
+
+- **Real "why tracking is lost" throw sites**: T1, T2 (from `TrackReferenceKeyFrame`), T3, T4 (from `TrackLocalMap`) — these are what actually flips `mState` to `LOST` at `Tracking.cc:206`.
+- **"Why relocalization couldn't recover" sites**: R1-R6 inside `Relocalization()` — R6 is the single terminal point, but the interesting statistics (which candidates failed and why) are only available earlier in the loop (R2-R5), so the exception/reason needs to be accumulated across the loop and attached at R6, not just thrown fresh at R6.
+- All four T-sites and R6 are reachable through the single `bOK` chain in `Track()` (lines 175-206), which is the natural place to catch a thrown reason and both print it and confirm the transition to relocalization on the next call.
+
+---
+
 ## Notes
 
 - License: GPLv3 (inherited from ORB-SLAM2)

@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <sstream>
 
 #include <mutex>
 
@@ -176,7 +177,16 @@ void Tracking::Track()
         {
             // Local Mapping might have changed some MapPoints tracked in last frame
             CheckReplacedInLastFrame();
-            bOK = TrackReferenceKeyFrame();
+            try
+            {
+                bOK = TrackReferenceKeyFrame();
+            }
+            catch(const TrackingLostException& e)
+            {
+                mLastTrackingLostReason = e.what();
+                AF_WARN("Tracking lost — " << mLastTrackingLostReason);
+                bOK = false;
+            }
         }
         else
         {
@@ -192,7 +202,18 @@ void Tracking::Track()
 #endif
 
         if(bOK)
-            bOK = TrackLocalMap();
+        {
+            try
+            {
+                bOK = TrackLocalMap();
+            }
+            catch(const TrackingLostException& e)
+            {
+                mLastTrackingLostReason = e.what();
+                AF_WARN("Tracking lost — " << mLastTrackingLostReason);
+                bOK = false;
+            }
+        }
 
 #ifdef PROFILING_EXHAUSTIVE
         std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
@@ -264,7 +285,9 @@ void Tracking::Track()
         {
             if(map->KeyFramesInMap() <= static_cast<size_t>(minKeyframesInMap))
             {
-                cout << "Track lost soon after initialisation, reseting..." << endl;
+                AF_WARN("Track lost soon after initialisation (" << map->KeyFramesInMap() << " <= "
+                        << minKeyframesInMap << " keyframes in map), reason: " << mLastTrackingLostReason
+                        << " — reseting...");
                 mpSystem->Reset();
                 return;
             }
@@ -576,7 +599,13 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
         return true;
 
     if(nmatches < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
-        return false;
+    {
+        std::ostringstream reason;
+        reason << "TrackReferenceKeyFrame: insufficient matches to reference keyframe (nmatches="
+               << nmatches << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH << ")"
+               << " | frame=" << currentFrame.mnId << " refKeyframe=" << refKeyframe->keyId;
+        throw TrackingLostException(reason.str());
+    }
 
 #ifdef PROFILING_EXHAUSTIVE
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
@@ -617,7 +646,16 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     pose_opt_times[int(1000 * t_duration)]++;
 #endif
 
-    return nmatchesMap >= TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW;
+    if(nmatchesMap < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW)
+    {
+        std::ostringstream reason;
+        reason << "TrackReferenceKeyFrame: insufficient inlier matches after pose optimization (nmatchesMap="
+               << nmatchesMap << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW << ")"
+               << " | frame=" << currentFrame.mnId << " rawMatches=" << nmatches;
+        throw TrackingLostException(reason.str());
+    }
+
+    return true;
 }
 
 void Tracking::UpdateLastFrame()
@@ -665,12 +703,25 @@ bool Tracking::TrackLocalMap()
     // Decide if the tracking was succesful
     // More restrictive if there was a relocalization recently
     if(currentFrame.mnId < lastRelocFrameId + maxFrames && mnMatchesInliers < minMatches_trackLocalMap_high)
-        return false;
+    {
+        std::ostringstream reason;
+        reason << "TrackLocalMap: insufficient inliers shortly after relocalization (mnMatchesInliers="
+               << mnMatchesInliers << " < " << minMatches_trackLocalMap_high << ")"
+               << " | frame=" << currentFrame.mnId
+               << " framesSinceReloc=" << (currentFrame.mnId - lastRelocFrameId) << " maxFrames=" << maxFrames;
+        throw TrackingLostException(reason.str());
+    }
 
     if(mnMatchesInliers < minMatches_trackLocalMap_low)
-        return false;
-    else
-        return true;
+    {
+        std::ostringstream reason;
+        reason << "TrackLocalMap: insufficient inliers against local map (mnMatchesInliers="
+               << mnMatchesInliers << " < " << minMatches_trackLocalMap_low << ")"
+               << " | frame=" << currentFrame.mnId << " localPts=" << localPts.size();
+        throw TrackingLostException(reason.str());
+    }
+
+    return true;
 }
 
     bool Tracking::NeedNewKeyFrame()
@@ -1055,6 +1106,14 @@ bool Tracking::Relocalization(const FeatureType& featureType)
                 // If the pose is supported by enough inliers stop ransacs and continue
                 if(nGood >= nGood_high)
                 {
+                    AF_INFO("Relocalization succeeded | frame=" << currentFrame.mnId
+                            << " feature=" << featureName(featureType)
+                            << " matchedKeyframe=" << vpCandidateKFs[i]->keyId
+                            << " inliers=" << nGood << " requiredInliers=" << nGood_high);
+                    std::cout.flush(); // AF_INFO writes to std::cout, which — unlike std::cerr's
+                                        // implicit unitbuf flush behind AF_WARN — is fully buffered
+                                        // once stdout is redirected to a file (as VSLAM-LAB's runner
+                                        // does), so without this the line can sit unflushed for a while.
                     bMatch = true;
                     break;
                 }
