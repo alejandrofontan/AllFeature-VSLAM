@@ -68,6 +68,16 @@ void Optimizer::LoadParameters(const cv::FileStorage &fSettings)
     params.thHuber_3dof_rgbd = sqrtf(params.chi2_3dof_rgbd);
 }
 
+// Per-observation information (1/variance) for the RGB-D inverse-depth residual, from
+// Frame/KeyFrame::sigma2invDepth (Frame::GetDepth's quadratic depth-noise model) instead of the
+// single global params.invDepthInfo placeholder every observation used to share. Falls back to
+// that placeholder if sigma2 is non-positive -- shouldn't happen in practice, since Frame::GetDepth
+// always sets sigma2invDepth alongside invDepth, but keeps this safe if that invariant ever breaks.
+static double RGBDInvDepthInformation(float sigma2invDepth)
+{
+    return sigma2invDepth > 0.0f ? 1.0 / sigma2invDepth : Optimizer::params.invDepthInfo;
+}
+
 // Builds and registers a binary (point + pose) g2o edge shared by the mono/stereo/RGBD
 // BundleAdjustment/LocalBundleAdjustment branches: sets both vertices, measurement,
 // information, robust kernel and camera intrinsics, then adds it to the optimizer.
@@ -225,9 +235,10 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
                 Eigen::Matrix<double,3,1> obs3D;
                 obs3D << kpUn.pt.x, kpUn.pt.y, invDepth_i;
 
+                const float sigma2invDepth_i = pKF->sigma2invDepth.at(featType)[obs.second->projIndex];
                 mat3f infMat = mat3f::Zero();
                 infMat.block<2,2>(0,0) = pKF->GetKeyPt2DInf(obs.second->projIndex, featType);
-                infMat(2,2) = static_cast<float>(params.invDepthInfo);
+                infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepth_i));
 
                 CreateBAEdge<g2o::EdgeRGBDSE3ProjectXYZ>(
                     optimizer, id, pKF->keyId, obs3D, infMat.cast<double>(), params.thHuber_3dof_rgbd, pKF, bRobust);
@@ -415,6 +426,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
         const int N_ft = pFrame->N.at(ft);
         const auto& keypointsFt = pFrame->keypoints.at(ft);
         const auto& invDepthFt = pFrame->invDepth.at(ft);
+        const auto& sigma2invDepthFt = pFrame->sigma2invDepth.at(ft);
         const auto& mvuRightFt = pFrame->mvuRight.at(ft);
         auto& edgesMonoFt = vpEdgesMono.at(ft);
         auto& idxMonoFt = vnIndexEdgeMono.at(ft);
@@ -442,7 +454,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
 
                 mat3f infMat = mat3f::Zero();
                 infMat.block<2,2>(0,0) = pFrame->GetKeyPt2DInf(i, ft);
-                infMat(2,2) = static_cast<float>(params.invDepthInfo);
+                infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepthFt[i]));
 
                 auto* e = CreatePoseOnlyEdge<g2o::EdgeRGBDSE3ProjectXYZOnlyPose>(
                     optimizer, obs3d, infMat.cast<double>(), params.thHuber_3dof_rgbd, pFrame, Xw);
@@ -659,9 +671,10 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
                     Eigen::Matrix<double,3,1> obs3D;
                     obs3D << kpUn.pt.x, kpUn.pt.y, invDepth_i;
 
+                    const float sigma2invDepth_i = pKFi->sigma2invDepth.at(featType)[obs.second->projIndex];
                     mat3f infMat = mat3f::Zero();
                     infMat.block<2,2>(0,0) = pKFi->GetKeyPt2DInf(obs.second->projIndex, featType);
-                    infMat(2,2) = static_cast<float>(params.invDepthInfo);
+                    infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepth_i));
 
                     auto* e = CreateBAEdge<g2o::EdgeRGBDSE3ProjectXYZ>(
                         optimizer, id, pKFi->keyId, obs3D, infMat.cast<double>(), params.thHuber_3dof_rgbd, pKFi);

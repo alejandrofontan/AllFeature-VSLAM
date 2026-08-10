@@ -53,7 +53,8 @@ Frame::Frame(const Frame &frame)
      mTimeStamp(frame.mTimeStamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()), w(frame.w), h(frame.h),
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
      mvKeysRight(frame.mvKeysRight), keypoints(frame.keypoints),  mvuRight(frame.mvuRight),
-     mvDepth(frame.mvDepth), invDepth(frame.invDepth), mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec),
+     mvDepth(frame.mvDepth), invDepth(frame.invDepth), sigma2invDepth(frame.sigma2invDepth),
+     mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec),
      pts(frame.pts), mvbOutlier(frame.mvbOutlier), mnId(frame.mnId), refKeyframe(frame.refKeyframe),
      sizeTolerance(frame.sizeTolerance),invSizeTolerance(frame.invSizeTolerance),
      keyPtsSigma2(frame.keyPtsSigma2),keyPtsInf(frame.keyPtsInf),keyPtsSize(frame.keyPtsSize),
@@ -399,6 +400,7 @@ void Frame::GetDepth(const Image& img)
     for(auto& [ft, N_] : N)
     {
         invDepth[ft] = vector<float>(N_, 0.0f);
+        sigma2invDepth[ft] = vector<float>(N_, 0.0f);
 
         if(img.depthImg.empty())
             continue;
@@ -428,7 +430,10 @@ void Frame::GetDepth(const Image& img)
             }
 
             if(depth > 0.0f)
+            {
                 invDepth[ft][i] = 1.0f / depth;
+                sigma2invDepth[ft][i] = depthNoiseCoeff * depthNoiseCoeff;
+            }
         }
     }
 }

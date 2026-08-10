@@ -184,6 +184,10 @@ public:
     // 0 where no valid depth is available (monocular, or a missing/invalid depth pixel).
     std::map<FeatureType, std::vector<float>> invDepth;
 
+    // Variance of invDepth, from a quadratic depth-sensor noise model (sigma_depth = k*depth^2,
+    // standard for RGB-D/ToF sensors) propagated through invDepth=1/depth. 0 wherever invDepth is 0.
+    std::map<FeatureType, std::vector<float>> sigma2invDepth;
+
     // Bag of Words Vector structures.
     DBoW2::BowVector mBowVec;
     DBoW2::FeatureVector mFeatVec;
@@ -238,9 +242,16 @@ private:
     // (called in the constructor).
     void UndistortKeyPoints();
 
-    // Populate invDepth by sampling img.depthImg at each keypoint's (distorted) pixel
-    // coordinates, matching how the depth image itself is indexed (called in the constructor).
+    // Populate invDepth (and sigma2invDepth) by sampling img.depthImg at each keypoint's (distorted)
+    // pixel coordinates, matching how the depth image itself is indexed (called in the constructor).
     void GetDepth(const Image& img);
+
+    // Quadratic depth-sensor noise coefficient k in sigma_depth(z) = k*z^2 (e.g. Khoshelham &
+    // Elberink 2012, Nguyen et al. 2012 for Kinect-style RGB-D sensors). Propagated through
+    // invDepth=1/depth, Var(invDepth) collapses to k^2 — depth-independent, the classical
+    // justification for inverse-depth parameterization. Starting estimate, not yet calibrated
+    // against real sensors/datasets (same caveat as Optimizer's invDepthInfo, see issue #3).
+    static constexpr float depthNoiseCoeff{0.0028f};
 
     // Computes image bounds for the undistorted image (called in the constructor).
     void ComputeImageBounds(const cv::Mat &imLeft);
