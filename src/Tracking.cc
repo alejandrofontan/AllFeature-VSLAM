@@ -671,6 +671,53 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     // recoverable by from-scratch PnP relocalization).
     const mat4f posePrior = (mVelocity(3,3) == 1.0f) ? mat4f(mVelocity * lastFrame.Tcw)
                                                      : lastFrame.Tcw;
+
+    // Prior-consistency gate. match_keyframe_to_frame is GLOBAL descriptor matching — unlike
+    // stock ORB-SLAM2's projection-windowed SearchByProjection, nothing bounds how far a
+    // matched map point may project from its keypoint. A depth-seeded point born from a spiky
+    // sensor-depth reading can sit meters too close, cross the camera plane within a frame or
+    // two of vehicle motion, and project 1e3-1e6 px away while its 2D descriptor match (and
+    // its F-filter check, which never sees the 3D position) stays perfectly valid. Huber's
+    // linear tail times the fx/z Jacobian explosion then lets a handful of such edges drag
+    // the whole pose (observed: frame 17166, 10 of 469 matches at 100-654000 px dragged the
+    // pose 25 deg -> every genuine match rejected -> tracking lost). Genuine matches sit
+    // within ~11 px of the motion prior (measured across collapse dumps), so a generous gate
+    // loses nothing.
+    {
+        const mat3f Rcw_prior = posePrior.block<3,3>(0,0);
+        const vec3f tcw_prior = posePrior.block<3,1>(0,3);
+        const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
+        const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
+        int nGated = 0;
+        for (auto& [ft, N_ft] : currentFrame.N)
+        {
+            const auto& kps = currentFrame.keypoints.at(ft);
+            for(int i = 0; i < N_ft; i++)
+            {
+                const Pt& pt = currentFrame.pts.at(ft)[i];
+                if(!pt)
+                    continue;
+                const vec3f Xc = Rcw_prior * pt->get_world_pos() + tcw_prior;
+                bool bad = Xc(2) < minDepthPriorGate;
+                if(!bad)
+                {
+                    const float du = fx * Xc(0) / Xc(2) + cx - kps[i].pt.x;
+                    const float dv = fy * Xc(1) / Xc(2) + cy - kps[i].pt.y;
+                    bad = (du*du + dv*dv) > reprojPriorGate * reprojPriorGate;
+                }
+                if(bad)
+                {
+                    currentFrame.pts.at(ft)[i] = static_cast<Pt>(nullptr);
+                    nGated++;
+                    nmatches--;
+                }
+            }
+        }
+        if(nGated > 0)
+            AF_INFO("TrackReferenceKeyFrame: prior-consistency gate dropped " << nGated
+                    << " matches | frame=" << currentFrame.mnId);
+    }
+
     currentFrame.SetPose(posePrior);
     Optimizer::PoseOptimization(&currentFrame);
 

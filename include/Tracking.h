@@ -301,6 +301,12 @@ protected:
     // TrackReferenceKeyFrame()
     const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH{15};
     const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW{10};
+    // Prior-consistency gate on the globally-matched map points: drop matches whose map
+    // point projects behind/at the camera or farther than this from its keypoint under the
+    // motion prior (genuine matches measure <= ~11 px there; garbage depth-seeded points
+    // measure 1e2-1e6 px — see the 2026-08-13 tracking-loss investigation in CLAUDE.md).
+    const float reprojPriorGate{80.0f};
+    const float minDepthPriorGate{0.2f};
 
     // TrackLocalMap()
     const int minMatches_trackLocalMap_high{50};
