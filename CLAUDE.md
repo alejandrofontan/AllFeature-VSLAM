@@ -486,6 +486,35 @@ Stage timing was added to `Tracking::Track` (per-frame `AF_WARN` breakdown over 
 
 One RGB-D run segfaulted (`Segmentation fault (core dumped)`) a couple of frames after an emergency-keyframe insertion; a rerun of the identical command lost tracking at a different frame instead (non-deterministic), and two gdb-supervised attempts didn't reproduce it. Working hypothesis: a race between Tracking and LocalMapping over the emergency keyframe's contents under insertion spam — plausibly moot once fixes 1-2 eliminate the spam, but not proven. If it recurs: run under gdb (`gdb -batch -ex run -ex bt --args ./bin/vslamlab_allfeature_rgbd ...` with the args from `system_output_*.txt`'s invoking command) or a TSan build.
 
+## Scattered Tracking-Loss Investigation (2026-08-13)
+
+User-reported: `pixi run vslamlab configs/exp_debug.yaml` (NSAVP `R0_FA0`, RGB-D, fastfoundationstereo depth, mask2former masks, 19103 frames) loses tracking non-deterministically at scattered frames. Diagnosed on branch `trackinglost` with repeated instrumented full-range runs (two concurrent processes per round to double the sample rate). Four distinct defects found; all fixed on this branch.
+
+### Fixed 1: `verbose:0` crashed every run on frame 1 (null-viewer profiling calls)
+
+With `verbose:0` no `Viewer` is created, yet `Tracking::GrabImageMonocular` (Tracking.cc:127) and `LocalMapping::Run` (LocalMapping.cc:83) called `viewer->set_*_time_median()` unconditionally through the null `shared_ptr`. `Viewer::mutexProfileStats` is the class's first data member (offset 0), so the inlined `unique_lock` received a null `std::mutex*` — libstdc++ throws `std::system_error` EPERM ("Operation not permitted") for that, uncaught → `terminate` on the first frame, every run. (These call sites date to April; all prior debug runs must have used `verbose:1`.) Guarded both sites like `Tracking::Reset` already does. Also fixed `build.sh`'s `dirname "LIBRARY_PATH"` (missing `$`) which made the build silently a no-op when invoked from the parent repo.
+
+### Fixed 2 (the Problem-3 segfault): wild-pointer UB in `MapPoint::EraseObservation`
+
+Run 2 died with a kernel-journal general protection fault at `libAllFeature-VSLAM.so+0x120b7e` → resolved (by rebuilding the exact commit's `.so` and `addr2line`) to `MapPoint::EraseObservation`. After erasing a point's **last** observation the code ran `mpRefKF = observations.begin()->second->projKeyframe;` on the now-**empty** map — copying a `shared_ptr` out of `end()` garbage, i.e. a refcount increment through a wild pointer: silent heap corruption on most occurrences, occasional immediate GPF. RGB-D makes this hot: the depth-seeded pass in `LocalMapping::CreateNewMapPoints` creates single-observation points by the thousand, and `KeyFrameCulling → KeyFrame::SetBadFlag` erases exactly such last observations en masse. Stock ORB-SLAM2 has the same latent code shape but rarely holds single-observation points there. Fix: only re-point `mpRefKF` when observations remain; the empty case falls through to `SetBadFlag` immediately below.
+
+### Fixed 3 (the actual scattered tracking losses): pose-optimization divergence from a constant-position seed
+
+The recurring loss signature (`TrackReferenceKeyFrame`: hundreds of raw matches → 0–5 inliers after pose optimization; relocalization succeeds **on the next frame** with >170 inliers, proving frame and map were fine) was captured with per-pass instrumentation at frame 3325: `passInliers=[0,-,-,-]`, `poseDelta trans=1.48m rot=3.5°`, rejected medians pxErr≈31–43px while inverse-depth error stayed ≈0.7σ. Mechanism: this codebase dropped ORB-SLAM2's `TrackWithMotionModel` (`mVelocity` was computed but never consumed — issue #8), so pose optimization seeded from `lastFrame.Tcw`. At 15–19 m/s that starts every pixel residual ~a full frame of motion (20–40px) large → the 2D terms begin Huber-saturated (bounded gradients) while the RGB-D inverse-depth terms (information `1/σ²≈1.3e5`) are still quadratic. Depth constrains only the z-component — it is blind to rotation/lateral translation — so pass-1 LM occasionally walks into a wrong rotation basin, ends with depth satisfied and all pixels ~30px off, and classifies **every** correspondence as an outlier → `LOST`. Non-deterministic because it needs a particular mix of match set/geometry, hence "fully scattered" losses. Two-part fix in `TrackReferenceKeyFrame`: seed with `mVelocity * lastFrame.Tcw` when valid (restores the small-initial-residual precondition the 4-pass scheme assumes), and on a collapse (<10 inliers from ≥45 raw matches) reset flags, re-seed, and re-run `PoseOptimization(pFrame, useDepthChannel=false)` once — pure 2D, the configuration the scheme was tuned for.
+
+### Observed, filed as issues (not fixed here)
+
+- **#9** post-relocalization keyframe embargo (`lastRelocFrameId + maxFrames`) starves the tracker at driving speed: reloc at 4380 → raw matches decayed 276→124 against the frozen reference KF → re-lost at 4396.
+- **#10** no recovery budget when lost: a loss at frame 2327 left the run grinding relocalization for the remaining ~17k frames.
+- **#11** `MapPointCulling` found-ratio test only applies to `featureTypes[0]`.
+- **#12** shutdown `terminate called without an active exception` (pre-existing, from the 2026-08-12 notes, now tracked).
+- **#8** motion model unused (the seeding half is now fixed on this branch; the issue remains as the umbrella for a full `TrackWithMotionModel` port).
+
+### Diagnostics kept in the code (all cheap, `AF_WARN`/`AF_INFO`)
+
+- `PoseOptimization`: on >50% rejection — per-channel breakdown (mono/stereo/rgbd), per-pass inlier counts, initial→final pose delta, rejected-edge medians (pixel error, inverse-depth error, sensor depth). The pixel-vs-depth split attributes a burst to 2D geometry vs the depth channel in one line.
+- `Tracking::Track`: 100-frame heartbeat (inliers / localPts / KFs / mapPts) so post-mortems see the trend leading into a loss.
+
 ## Notes
 
 - License: GPLv3 (inherited from ORB-SLAM2)
