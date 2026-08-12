@@ -155,7 +155,14 @@ void MapPoint::EraseObservation(Keyframe projKeyframe)
 
             observations.erase(projKeyframe->keyId);
 
-            if(mpRefKF->keyId == projKeyframe->keyId)
+            // Re-point the reference keyframe only if any observation remains: erasing the
+            // last observation (routine for single-observation depth-seeded points when their
+            // keyframe is culled) used to dereference observations.begin() on an EMPTY map —
+            // copying a shared_ptr out of garbage memory, i.e. a refcount increment through a
+            // wild pointer. That was the source of non-deterministic heap corruption and the
+            // GPF segfaults inside EraseObservation itself. When empty, mpRefKF is left as-is:
+            // the point is discarded via SetBadFlag below (size 0 <= 2) and never used again.
+            if(mpRefKF->keyId == projKeyframe->keyId && !observations.empty())
                 mpRefKF = observations.begin()->second->projKeyframe;
 
             // If only 2 observations or less, discard point
