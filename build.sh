@@ -71,7 +71,7 @@ done
 
 # Baseline Dir
 LIBRARY_PATH=$(realpath "$0")
-LIBRARY_DIR=$(dirname "LIBRARY_PATH")
+LIBRARY_DIR=$(dirname "$LIBRARY_PATH")
 
 # Build DBoW2
 library_name="DBoW2"
