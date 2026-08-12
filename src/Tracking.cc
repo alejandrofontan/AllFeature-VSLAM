@@ -660,12 +660,50 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     t_start = std::chrono::steady_clock::now();
 #endif
 
-    // Optimize Pose
-    currentFrame.SetPose(lastFrame.Tcw);
+    // Optimize Pose — seed with the constant-velocity prediction when the motion model
+    // is valid (mVelocity is Zero after a loss/reloc). Seeding with lastFrame.Tcw alone
+    // (constant-position) leaves every pixel residual ~one frame of motion large at the
+    // start: on fast sequences that Huber-saturates the 2D terms while the high-information
+    // RGB-D inverse-depth terms stay quadratic — and depth only constrains the z-component,
+    // so pass-1 LM could walk into a wrong rotation/lateral basin and reject everything
+    // (observed: frame 3325, 445 matches -> 0 inliers, poseDelta 1.48m/3.5deg, instantly
+    // recoverable by from-scratch PnP relocalization).
+    const mat4f posePrior = (mVelocity(3,3) == 1.0f) ? mat4f(mVelocity * lastFrame.Tcw)
+                                                     : lastFrame.Tcw;
+    currentFrame.SetPose(posePrior);
     Optimizer::PoseOptimization(&currentFrame);
 
+    const auto countMapInliers = [this]() {
+        int n = 0;
+        for (auto& [ft, N_ft] : currentFrame.N)
+            for(int i = 0; i < N_ft; i++)
+            {
+                const Pt& pt = currentFrame.pts.at(ft)[i];
+                if(pt && !currentFrame.mvbOutlier.at(ft)[i] && pt->number_of_observations() > 0)
+                    n++;
+            }
+        return n;
+    };
+    int nmatchesMap = countMapInliers();
+
+    // Divergence rescue: a collapse to (almost) zero inliers despite plentiful raw matches
+    // means the optimizer left the basin, not that the matches are bad. Re-seed and
+    // re-optimize once with the RGB-D depth channel disabled — pure 2D reprojection, the
+    // configuration the 4-pass scheme was originally tuned for.
+    if(nmatchesMap < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW
+       && nmatches >= 3 * TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
+    {
+        AF_WARN("TrackReferenceKeyFrame: pose optimization collapsed (" << nmatchesMap
+                << " inliers of " << nmatches << " raw matches) — retrying without depth channel"
+                << " | frame=" << currentFrame.mnId);
+        for (auto& [ft, N_ft] : currentFrame.N)
+            std::fill(currentFrame.mvbOutlier.at(ft).begin(), currentFrame.mvbOutlier.at(ft).end(), false);
+        currentFrame.SetPose(posePrior);
+        Optimizer::PoseOptimization(&currentFrame, /*useDepthChannel=*/false);
+        nmatchesMap = countMapInliers();
+    }
+
     // Discard outliers
-    int nmatchesMap = 0;
     for (auto& [ft, N] : currentFrame.N)
     {
         for(int i = 0; i < N; i++)
@@ -680,8 +718,6 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
                     pt->mbTrackInView = false;
                     pt->idLastFrameSeen = currentFrame.mnId;
                 }
-                else if(currentFrame.pts.at(ft)[i]->number_of_observations() > 0)
-                    nmatchesMap++;
             }
         }
     }

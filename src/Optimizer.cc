@@ -390,7 +390,7 @@ static void ClassifyPoseOnlyEdges(const std::map<FeatureType, vector<EdgeT*>>& e
     }
 }
 
-int Optimizer::PoseOptimization(Frame *pFrame)
+int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
 {
     g2o::SparseOptimizer optimizer;
     g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
@@ -449,7 +449,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
             const vec3f Xw = pMP->get_world_pos();
             const float invDepth_i = invDepthFt[i];
 
-            if(invDepth_i > 0.0f)   // RGB-D sensor-depth observation
+            if(useDepthChannel && invDepth_i > 0.0f)   // RGB-D sensor-depth observation
             {
                 Eigen::Matrix<double,3,1> obs3d;
                 obs3d << kpUn.pt.x, kpUn.pt.y, invDepth_i;

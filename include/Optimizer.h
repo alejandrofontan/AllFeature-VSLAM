@@ -73,7 +73,9 @@ public:
     void static GlobalBundleAdjustemnt(shared_ptr<Map> pMap, int nIterations=5, bool *pbStopFlag=NULL,
                                        const unsigned long nLoopKF=0, const bool bRobust = true);
     void static LocalBundleAdjustment(Keyframe pKF, bool *pbStopFlag, shared_ptr<Map>pMap);
-    int static PoseOptimization(Frame* pFrame);
+    // useDepthChannel=false books RGB-D observations as plain 2D reprojection edges —
+    // used by TrackReferenceKeyFrame's divergence rescue (see Tracking.cc).
+    int static PoseOptimization(Frame* pFrame, const bool useDepthChannel = true);
 
     // if bFixScale is true, 6DoF optimization (stereo,rgbd), 7DoF otherwise (mono)
     void static OptimizeEssentialGraph(shared_ptr<Map>pMap, Keyframe pLoopKF, Keyframe pCurKF,
