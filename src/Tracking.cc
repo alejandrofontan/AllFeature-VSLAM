@@ -931,8 +931,13 @@ bool Tracking::TrackLocalMap()
 
         const size_t numKeyframesInMap = map->KeyFramesInMap();
 
-        // Do not insert keyframes if not enough frames have passed from last relocalisation
-        if((currentFrame.mnId < lastRelocFrameId + maxFrames) && (numKeyframesInMap > maxFrames))
+        // Do not insert keyframes if not enough frames have passed from last relocalisation —
+        // unless tracking is already demonstrably strong again (>=2x the TrackLocalMap "high"
+        // threshold): at driving speed the full embargo freezes the reference keyframe for
+        // ~a second of travel, decaying its matches until tracking is lost AGAIN right after
+        // a successful relocalization (observed echo losses 20-22 frames after reloc; #9).
+        if((currentFrame.mnId < lastRelocFrameId + maxFrames) && (numKeyframesInMap > maxFrames)
+           && mnMatchesInliers < 2 * minMatches_trackLocalMap_high)
             return false;
 
         // Tracked MapPoints in the reference keyframe
