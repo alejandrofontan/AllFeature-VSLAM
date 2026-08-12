@@ -22,6 +22,7 @@
 #ifndef SYSTEM_H
 #define SYSTEM_H
 
+#include<atomic>
 #include<string>
 #include<thread>
 #include<opencv2/core/core.hpp>
@@ -138,6 +139,15 @@ public:
 
     void GBA();
 
+    // Sequence metadata for the Viewer HUD: total images in the sequence (0 = unknown,
+    // e.g. streaming) and whether segmentation masks are being fed with the images.
+    // Safe to call after construction; the Viewer polls these every frame.
+    void SetSequenceInfo(const size_t nImages, const bool useMasks);
+    size_t GetSequenceImageCount() const { return mnSequenceImages.load(); }
+    size_t GetFramesProcessedCount() const { return mnFramesProcessed.load(); }
+    // e.g. "Monocular", "RGB-D + masks"
+    std::string GetModalityDescription() const;
+
 private:
 
     // Input sensor
@@ -182,6 +192,11 @@ private:
 
     // Change mode flags
     std::mutex mMutexMode;
+
+    // Sequence metadata / progress counters (see SetSequenceInfo)
+    std::atomic<size_t> mnSequenceImages{0};
+    std::atomic<size_t> mnFramesProcessed{0};
+    std::atomic<bool> mbUseMasks{false};
 
     // Tracking state
     int mTrackingState;

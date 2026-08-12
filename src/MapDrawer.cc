@@ -25,11 +25,54 @@
 #include "Utils.h"
 
 #include <pangolin/pangolin.h>
+#include <algorithm>
 #include <mutex>
 
 namespace AF_VSLAM
 {
 
+namespace vslamlab_colors
+{
+namespace
+{
+void gradientOver(const float* stops[4], float t, float rgb[3])
+{
+    t = std::clamp(t, 0.0f, 1.0f);
+    const float scaled = t * 3.0f;
+    const int i = std::min(2, int(scaled));
+    const float f = scaled - float(i);
+    for (int c = 0; c < 3; c++)
+        rgb[c] = (1.0f - f) * stops[i][c] + f * stops[i+1][c];
+}
+}
+
+void gradient(float t, float rgb[3])
+{
+    const float* stops[4] = {kCyan, kSky, kPeriwinkle, kLavender};
+    gradientOver(stops, t, rgb);
+}
+
+void gradientVivid(float t, float rgb[3])
+{
+    const float* stops[4] = {kCyanVivid, kSkyVivid, kPeriwinkleVivid, kLavenderVivid};
+    gradientOver(stops, t, rgb);
+}
+}
+
+namespace
+{
+// Wide GL_LINE_SMOOTH lines render broken (clamped or stippled) on common drivers even when
+// the reported smooth-width range claims support, so smooth only 1px lines and draw anything
+// wider aliased — that keeps the thickness controls honest everywhere.
+void applyLineWidth(const float width)
+{
+    if (width > 1.001f)
+        glDisable(GL_LINE_SMOOTH);
+    else
+        glEnable(GL_LINE_SMOOTH);
+    glLineWidth(width);
+}
+}
 
 MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const vector<FeatureType>& featureTypes):
     mpMap(pMap),featureTypes(featureTypes)
@@ -37,70 +80,64 @@ MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const v
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
 
     if (!fSettings["Viewer.KeyFrameSize"].empty())
-        mKeyFrameSize = fSettings["Viewer.KeyFrameSize"];
+        mDefaultStyle.keyFrameSize = fSettings["Viewer.KeyFrameSize"];
     if (!fSettings["Viewer.KeyFrameLineWidth"].empty())
-        mKeyFrameLineWidth = fSettings["Viewer.KeyFrameLineWidth"];
+        mDefaultStyle.keyFrameLineWidth = fSettings["Viewer.KeyFrameLineWidth"];
     if (!fSettings["Viewer.GraphLineWidth"].empty())
-        mGraphLineWidth = fSettings["Viewer.GraphLineWidth"];
+        mDefaultStyle.graphLineWidth = fSettings["Viewer.GraphLineWidth"];
     if (!fSettings["Viewer.PointSize"].empty())
-        mPointSize = fSettings["Viewer.PointSize"];
+        mDefaultStyle.pointSize = fSettings["Viewer.PointSize"];
     if (!fSettings["Viewer.CameraSize"].empty())
-        mCameraSize = fSettings["Viewer.CameraSize"];
+        mDefaultStyle.cameraSize = fSettings["Viewer.CameraSize"];
     if (!fSettings["Viewer.CameraLineWidth"].empty())
-        mCameraLineWidth = fSettings["Viewer.CameraLineWidth"];
+        mDefaultStyle.cameraLineWidth = fSettings["Viewer.CameraLineWidth"];
+    if (!fSettings["Viewer.TrajectoryLineWidth"].empty())
+        mDefaultStyle.trajectoryLineWidth = fSettings["Viewer.TrajectoryLineWidth"];
+
+    for (size_t i = 0; i < featureTypes.size(); i++)
+    {
+        const cv::Scalar c = getFeatureColor(featureTypes[i], 0, true);
+        featureColors[featureTypes[i]] = {float(c[0]), float(c[1]), float(c[2])};
+    }
 }
 
-void MapDrawer::DrawMapPoints()
+const std::array<float,3>& MapDrawer::pointColor(const FeatureType ft) const
+{
+    const auto it = featureColors.find(ft);
+    if (it != featureColors.end())
+        return it->second;
+    static const std::array<float,3> fallback{0.5f, 0.5f, 0.5f};
+    return fallback;
+}
+
+void MapDrawer::DrawMapPoints(const ViewerStyle& style)
 {
     const vector<Pt> &vpMPs = mpMap->GetAllMapPoints();
-    const vector<Pt> &vpRefMPs = mpMap->GetReferenceMapPoints();
-
-    set<Pt> spRefMPs(vpRefMPs.begin(), vpRefMPs.end());
 
     if(vpMPs.empty())
         return;
 
-    glPointSize(mPointSize);
+    glPointSize(style.pointSize);
     glBegin(GL_POINTS);
-    glColor3f(0.0,0.0,0.0);
 
     for(size_t i=0, iend=vpMPs.size(); i<iend;i++)
     {
-        // if((vpMPs[i]->is_bad()) || spRefMPs.count(vpMPs[i]))
-        //     continue;
         if(vpMPs[i]->is_bad())
              continue;
 
+        const std::array<float,3>& c = pointColor(vpMPs[i]->featureType);
         vec3f pos = vpMPs[i]->get_world_pos();
-        cv::Scalar color = getFeatureColor(vpMPs[i]->featureType,0, true);
-        glColor3f(GLfloat(color[0]),GLfloat(color[1]),GLfloat(color[2]));
+        glColor4f(c[0], c[1], c[2], 0.9f);
         glVertex3f(pos(0),pos(1),pos(2));
     }
     glEnd();
-
-    // glPointSize(mPointSize);
-    // glBegin(GL_POINTS);
-    // for(set<Pt>::iterator sit=spRefMPs.begin(), send=spRefMPs.end(); sit!=send; sit++)
-    // {
-    //     if((*sit)->is_bad())
-    //         continue;
-    //     vec3f pos = (*sit)->get_world_pos();
-    //     cv::Scalar color = getFeatureColor((*sit)->featureType,0, true);
-
-    //     //glColor3f(float(color[0])/255.0f, float(color[1])/255.0f, float(color[2])/255.0f);
-    //     glColor3f(GLfloat(color[0]),GLfloat(color[1]),GLfloat(color[2]));
-    //     glVertex3f(pos(0),pos(1),pos(2));
-
-    // }
-
-    // glEnd();
 }
 
-void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
+void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const ViewerStyle& style)
 {
-    const float &w = mKeyFrameSize;
-    const float h = w*0.75;
-    const float z = w*0.6;
+    const float &w = style.keyFrameSize;
+    const float h = w*0.75f;
+    const float z = w*0.6f;
 
     const vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
 
@@ -116,8 +153,11 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
 
             glMultMatrixf(Twc.ptr<GLfloat>(0));
 
-            glLineWidth(mKeyFrameLineWidth);
-            glColor3f(GLfloat(0.f),GLfloat(0.f),GLfloat(0.f));
+            applyLineWidth(style.keyFrameLineWidth);
+            if (style.darkTheme)
+                glColor4f(0.42f, 0.42f, 0.56f, 0.55f);   // muted lavender-grey
+            else
+                glColor4f(0.55f, 0.55f, 0.66f, 0.65f);   // muted slate
             glBegin(GL_LINES);
             glVertex3f(0,0,0);
             glVertex3f(w,h,z);
@@ -147,8 +187,9 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
 
     if(bDrawGraph)
     {
-        glLineWidth(mGraphLineWidth);
-        glColor4f(0.6471f,0.6157f,0.8745f,0.6f);
+        applyLineWidth(style.graphLineWidth);
+        using namespace vslamlab_colors;
+        glColor4f(kSky[0], kSky[1], kSky[2], style.darkTheme ? 0.25f : 0.4f);
         glBegin(GL_LINES);
 
         for(size_t i=0; i<vpKFs.size(); i++)
@@ -193,68 +234,51 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
     }
 }
 
-void MapDrawer::DrawTrajectory(vec3f& trajectoryCenter, float& cameraHeight) {
+void MapDrawer::DrawTrajectory(const ViewerStyle& style)
+{
+    vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
+    vpKFs.erase(std::remove_if(vpKFs.begin(), vpKFs.end(),
+                               [](const Keyframe& kf){ return kf->is_bad(); }),
+                vpKFs.end());
+    if (vpKFs.size() < 2)
+        return;
+    std::sort(vpKFs.begin(), vpKFs.end(), KeyFrame::lId);
+
+    // Sequential keyframe polyline, tinted with the logo gradient along its length.
+    applyLineWidth(style.trajectoryLineWidth);
+    glBegin(GL_LINE_STRIP);
+    const float denom = float(vpKFs.size() - 1);
+    for (size_t i = 0; i < vpKFs.size(); i++)
     {
-        const vector<Keyframe> keyframes = mpMap->GetAllKeyFrames();
-        glPointSize(10.0f);
-        glColor3f(0.0, 0.0, 1.0);
-        glBegin(GL_POINTS);
-
-        // Draw Keyframes
-        trajectoryCenter = vec3f::Zero();
-        for (auto& keyframe: keyframes) {
-            vec3f twc = keyframe->get_camera_center();
-            glVertex3f(twc(0), twc(1), twc(2));
-            trajectoryCenter += twc;
-        }
-        if(!keyframes.empty())
-            trajectoryCenter /= keyframes.size();
-
-        glEnd();
+        float rgb[3];
+        vslamlab_colors::gradientVivid(float(i) / denom, rgb);
+        glColor4f(rgb[0], rgb[1], rgb[2], 1.0f);
+        const vec3f Ow = vpKFs[i]->get_camera_center();
+        glVertex3f(Ow(0), Ow(1), Ow(2));
     }
-    {
-        float maxDistance{1.0};
-        for (auto& twc: trajectory) {
-            float distance = (twc - trajectoryCenter).norm() + 1.0f;
-            if(distance > maxDistance)
-                maxDistance = distance;
-        }
-        cameraHeight = 1.0f * maxDistance;
-    }
-    {
-        // Draw Loop Closures
-        glPointSize(20.0f);
-        glColor3f(1.0, 0.0, 0.0);
-        glBegin(GL_POINTS);
+    glEnd();
 
-        for (auto& twc: loopClosures)
-            glVertex3f(twc(0), twc(1), twc(2));
-
-        glEnd();
-    }
+    // Loop-closure markers.
     {
-        // Draw Camera
-        glPointSize(20.0f);
-        glColor3f(0.0, 1.0, 0.0);
-        glBegin(GL_POINTS);
-
-        vec3f twc;
+        unique_lock<mutex> lock(mutexLoopClosures);
+        if (!loopClosures.empty())
         {
-            unique_lock<mutex> lock(mMutexCamera);
-            mat3f Rwc = mCameraPose.block<3,3>(0,0).transpose();
-            twc = -Rwc * mCameraPose.block<3,1>(0,3);
+            using namespace vslamlab_colors;
+            glPointSize(std::max(6.0f, 3.0f * style.trajectoryLineWidth));
+            glColor4f(kLavenderVivid[0], kLavenderVivid[1], kLavenderVivid[2], 1.0f);
+            glBegin(GL_POINTS);
+            for (const auto& twc : loopClosures)
+                glVertex3f(twc(0), twc(1), twc(2));
+            glEnd();
         }
-        glVertex3f(twc(0), twc(1), twc(2));
-
-        glEnd();
     }
 }
 
-void MapDrawer::DrawCurrentCamera(pangolin::OpenGlMatrix &Twc)
+void MapDrawer::DrawCurrentCamera(pangolin::OpenGlMatrix &Twc, const ViewerStyle& style)
 {
-    const float &w = mCameraSize;
-    const float h = w*0.75;
-    const float z = w*0.6;
+    const float &w = style.cameraSize;
+    const float h = w*0.75f;
+    const float z = w*0.6f;
 
     glPushMatrix();
 
@@ -264,8 +288,9 @@ void MapDrawer::DrawCurrentCamera(pangolin::OpenGlMatrix &Twc)
         glMultMatrixd(Twc.m);
 #endif
 
-    glLineWidth(mCameraLineWidth);
-    glColor3f(0.0f,1.0f,0.0f);
+    applyLineWidth(style.cameraLineWidth);
+    using namespace vslamlab_colors;
+    glColor4f(kPeriwinkleVivid[0], kPeriwinkleVivid[1], kPeriwinkleVivid[2], 1.0f);
     glBegin(GL_LINES);
     glVertex3f(0,0,0);
     glVertex3f(w,h,z);
@@ -297,7 +322,6 @@ void MapDrawer::SetCurrentCameraPose(const mat4f &Tcw_)
 {
     unique_lock<mutex> lock(mMutexCamera);
     mCameraPose = Tcw_;
-    trajectory.push_back(Tcw_.block<3,1>(0,3));
 }
 
 void MapDrawer::AddLoopClosureKeyframe(const mat4f &Tcw_)
@@ -308,16 +332,16 @@ void MapDrawer::AddLoopClosureKeyframe(const mat4f &Tcw_)
 
 void MapDrawer::GetCurrentOpenGLCameraMatrix(pangolin::OpenGlMatrix &M)
 {
-    if(mCameraPose(3,3) == 1.0f)
+    mat4f Tcw{};
     {
-        mat3f Rwc{};
-        vec3f twc{};
-        {
-            unique_lock<mutex> lock(mMutexCamera);
-            Rwc = mCameraPose.block<3,3>(0,0).transpose();
-            twc = -Rwc * mCameraPose.block<3,1>(0,3);
-        }
+        unique_lock<mutex> lock(mMutexCamera);
+        Tcw = mCameraPose;
+    }
 
+    if(Tcw(3,3) == 1.0f)
+    {
+        const mat3f Rwc = Tcw.block<3,3>(0,0).transpose();
+        const vec3f twc = -Rwc * Tcw.block<3,1>(0,3);
         SetCurrentOpenGLCameraMatrix(Rwc,twc, M);
     }
     else

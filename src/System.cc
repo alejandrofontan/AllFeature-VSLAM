@@ -102,7 +102,7 @@ System::System(const string &vocabularyFolder,
     //Initialize the Viewer thread and launch
     if(activateVisualization)
     {
-        viewer = make_shared<Viewer>(static_cast<shared_ptr<System>>(this), frameDrawer,mapDrawer,tracker,
+        viewer = make_shared<Viewer>(this, frameDrawer,mapDrawer,tracker,
                                     strCalibrationFile, strSettingsFile,
                                     featureTypes);
         mptViewer = make_shared<thread>(&Viewer::Run, viewer);
@@ -251,6 +251,8 @@ mat4f System::Track(Image &im, const double &timestamp)
 
     mat4f Tcw = tracker->GrabImageMonocular(im,timestamp);
 
+    mnFramesProcessed.fetch_add(1);
+
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = tracker->mState;
     mTrackedMapPoints = tracker->currentFrame.pts;
@@ -300,7 +302,27 @@ void System::Shutdown()
     }
 
     if(viewer)
-        pangolin::BindToContext("ORB-SLAM2: Map Viewer");
+        pangolin::BindToContext(viewer->GetWindowTitle());
+}
+
+void System::SetSequenceInfo(const size_t nImages, const bool useMasks)
+{
+    mnSequenceImages.store(nImages);
+    mbUseMasks.store(useMasks);
+}
+
+std::string System::GetModalityDescription() const
+{
+    std::string modality;
+    switch(mSensor)
+    {
+        case MONOCULAR: modality = "Monocular"; break;
+        case STEREO:    modality = "Stereo";    break;
+        case RGBD:      modality = "RGB-D";     break;
+    }
+    if(mbUseMasks.load())
+        modality += " + masks";
+    return modality;
 }
 
 void System::SaveTrajectoryTUM(const string &filename)

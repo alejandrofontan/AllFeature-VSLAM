@@ -40,7 +40,9 @@ class System;
 class Viewer
 {
 public:
-    Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> frameDrawer, std::shared_ptr<MapDrawer> mapDrawer,
+    // 'system' is a non-owning pointer: System owns the Viewer (and joins its thread in
+    // Shutdown()), so it always outlives it.
+    Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer, std::shared_ptr<MapDrawer> mapDrawer,
            std::shared_ptr<Tracking> tracker,
            const string &strCalibrationPath, const string &strSettingPath,
            const vector<FeatureType>& featureTypes);
@@ -58,6 +60,8 @@ public:
     bool isStopped();
 
     void Release();
+
+    const std::string& GetWindowTitle() const { return windowTitle; }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -83,7 +87,7 @@ private:
 
     bool Stop();
 
-    std::shared_ptr<System> system;
+    System* system;
     std::shared_ptr<FrameDrawer> frameDrawer;
     std::shared_ptr<MapDrawer> mapDrawer;
     std::shared_ptr<Tracking> tracker;
@@ -93,6 +97,8 @@ private:
     float image_width{640.0}, image_height{480.0};
 
     float mViewpointX{0.0f}, mViewpointY{-0.7f}, mViewpointZ{-1.8f}, mViewpointF{500.0f};
+
+    std::string windowTitle{};
 
     bool CheckFinish();
     void SetFinish();
@@ -112,5 +118,3 @@ private:
 
 
 #endif // VIEWER_H
-
-

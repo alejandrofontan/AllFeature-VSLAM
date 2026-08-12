@@ -24,12 +24,14 @@
 #include <yaml-cpp/yaml.h>
 #include "afvslam_log.hpp"
 
+#include <iomanip>
 #include <mutex>
+#include <sstream>
 
 namespace AF_VSLAM
 {
 
-Viewer::Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> frameDrawer,
+Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
                std::shared_ptr<MapDrawer> mapDrawer, std::shared_ptr<Tracking> tracker,
                const string &strCalibrationPath, const string &strSettingPath,
                const vector<FeatureType>& featureTypes):
@@ -81,6 +83,31 @@ Viewer::Viewer(std::shared_ptr<System> system, std::shared_ptr<FrameDrawer> fram
      AF_CONFIG_FIELD("Viewpoint Z:        ", mViewpointZ);
      AF_CONFIG_FIELD("Viewpoint F:        ", mViewpointF);
     AF_CONFIG_END();
+
+    windowTitle = "VSLAM-LAB | AllFeature-VSLAM (";
+    for(size_t i=0; i<featureTypes.size(); i++){
+        windowTitle += " " + featureName(featureTypes[i]);
+        if (i != featureTypes.size() - 1){
+            windowTitle += ",";
+        }
+    }
+    windowTitle += " )";
+}
+
+namespace
+{
+std::string trackingStateName(const int state)
+{
+    switch(state)
+    {
+        case Tracking::SYSTEM_NOT_READY: return "NOT READY";
+        case Tracking::NO_IMAGES_YET:    return "WAITING";
+        case Tracking::NOT_INITIALIZED:  return "INITIALIZING";
+        case Tracking::OK:               return "TRACKING";
+        case Tracking::LOST:             return "LOST";
+        default:                         return "?";
+    }
+}
 }
 
 void Viewer::Run()
@@ -91,140 +118,165 @@ void Viewer::Run()
     const float scaleFactor{1.25};
     const float w = scaleFactor * 1280.0f;
     const float h = scaleFactor * 720.0f;
-    const float wS{0.35f};
-    const float wS_inv{1.0f - wS};
-    const float w_pixel = wS * w;
-    const float h_pixel = (image_height / float(image_width)) * w_pixel;
-    const float hS = h_pixel / h;
 
-    string title = "AllFeature-VSLAM : Map Viewer (";
-    for(size_t i=0; i<featureTypes.size(); i++){
-        title += " " + featureName(featureTypes[i]);
-        if (i != featureTypes.size() - 1){
-            title += ",";
-        }
-    }
-    title += " )";
-    pangolin::CreateWindowAndBind(title, w, h);
+    // Left panel width (fraction of window); the 3D view fills the rest, with the
+    // camera image rendered as an overlay in the 3D view's top-right corner.
+    const float panelWidth{0.28f};
+    const float imgWidthFrac{0.40f};
+
+    pangolin::CreateWindowAndBind(windowTitle, w, h);
 
     // 3D Mouse handler requires depth testing to be enabled
     glEnable(GL_DEPTH_TEST);
 
-    // Issue specific OpenGl we might need
-    glEnable (GL_BLEND);
-    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
+    // Anti-aliased, alpha-blended primitives (round points, smooth lines)
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_POINT_SMOOTH);
+    glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
+    glEnable(GL_LINE_SMOOTH);
+    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
 
     // Define Camera Render Object (for view / scene browsing)
     pangolin::OpenGlRenderState s_cam(
-        pangolin::ProjectionMatrix(wS_inv * w, h ,mViewpointF,mViewpointF, wS_inv * w/2.0f, h/2.0f,0.1,1000),
+        pangolin::ProjectionMatrix((1.0f - panelWidth) * w, h ,mViewpointF,mViewpointF, (1.0f - panelWidth) * w/2.0f, h/2.0f,0.1,1000),
         pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0)
     );
 
-    const float left_l = 0.01f;
-    const float left_r = wS;
-    const float left_t = 0.99f;
-    const float left_b = 0.01f;
-    pangolin::CreatePanel("menu").SetBounds(left_b, left_t - hS - 0.01f, left_l, left_r);
-    pangolin::Var<bool> menuFollowCamera("menu.Follow Camera",true,true);
-    pangolin::Var<bool> menuAerialCamera("menu.Aerial Camera",false,true);
+    pangolin::CreatePanel("menu").SetBounds(0.0f, 1.0f, 0.0f, panelWidth);
 
+    const ViewerStyle defaults = mapDrawer->GetDefaultStyle();
+
+    // Status
+    pangolin::Var<std::string> menuModality("menu.Modality", system->GetModalityDescription());
+    pangolin::Var<std::string> menuState("menu.Status", "WAITING");
+    pangolin::Var<std::string> menuFrames("menu.Frames Tracked", "0");
+    pangolin::Var<float> menuProgress("menu.Progress %", 0.0f, 0.0f, 100.0f);
+
+    // Section headers: Pangolin has no header widget; an empty string var renders its label
+    // in the same plain style as the status entries above.
+    pangolin::Var<std::string> headerPerformance("menu.PERFORMANCE", "");
+
+    // Profiling
     pangolin::Var<float> menuTrackingTime("menu.Tracking (ms)", 0.0f, 0.0f, 100.0f, false);
     pangolin::Var<float> menuLocalMappingTime("menu.Local Mapping (ms)", 0.0f, 0.0f, 400.0f, false);
 
-    pangolin::View& d_img = pangolin::Display("img")
-            .SetBounds(left_t - hS,  left_t, left_l, left_r);
+    pangolin::Var<std::string> headerVisualization("menu.VISUALIZATION", "");
+
+    // View
+    pangolin::Var<bool> menuFollowCamera("menu.Follow Camera",true,true);
+    pangolin::Var<bool> menuAerialCamera("menu.Aerial View",false,true);
+    pangolin::Var<bool> menuDarkTheme("menu.Dark Theme",true,true);
+
+    // Elements
+    pangolin::Var<bool> menuShowPoints("menu.Show Map Points",true,true);
+    pangolin::Var<bool> menuShowKeyFrames("menu.Show KeyFrames",true,true);
+    pangolin::Var<bool> menuShowGraph("menu.Show Graph",true,true);
+    pangolin::Var<bool> menuShowTrajectory("menu.Show Trajectory",true,true);
+
+    // Thickness
+    pangolin::Var<float> menuPointSize("menu.Point Size", defaults.pointSize, 1.0f, 10.0f);
+    pangolin::Var<float> menuTrajWidth("menu.Trajectory Width", defaults.trajectoryLineWidth, 0.5f, 10.0f);
+    pangolin::Var<float> menuKFLineWidth("menu.KeyFrame Width", defaults.keyFrameLineWidth, 0.5f, 5.0f);
+    pangolin::Var<float> menuGraphLineWidth("menu.Graph Width", defaults.graphLineWidth, 0.5f, 5.0f);
+    pangolin::Var<float> menuCamLineWidth("menu.Camera Width", defaults.cameraLineWidth, 0.5f, 8.0f);
 
     pangolin::View& d_cam = pangolin::CreateDisplay()
-        .SetBounds(0.0, 1.0, left_r ,1.0)
+        .SetBounds(0.0, 1.0, panelWidth ,1.0)
         .SetHandler(new pangolin::Handler3D(s_cam));
 
     pangolin::OpenGlMatrix Twc;
     Twc.SetIdentity();
 
-    pangolin::OpenGlMatrix Twc_aerial;
-    Twc_aerial.SetIdentity();
+    // Camera image overlaid on the 3D view's top-right corner (created after d_cam, so it
+    // renders on top). The texture is kept at the annotated frame's native resolution with
+    // linear sampling — text and keypoint markers stay sharp at any overlay size. It is
+    // (re)initialised lazily because the frame size changes once real images replace
+    // FrameDrawer's 640x480 placeholder.
+    cv::Mat im;
+    const float imgW = imgWidthFrac * (1.0f - panelWidth);
+    const float margin{0.006f};
+    pangolin::View& d_img = pangolin::Display("img");
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    pangolin::GlTexture imageTexture;
+    int texW{0}, texH{0};
 
-    cv::Mat im = frameDrawer->DrawFrame();
-    pangolin::GlTexture imageTexture  = pangolin::GlTexture(int(w_pixel) ,int(h_pixel), GL_RGB,false,0,GL_RGB,GL_UNSIGNED_BYTE);
-
-    int numIt{-1};
-    bool bFollow = true;
     bool bAerial = false;
     while(1)
     {
-        numIt++;
-
+        if(menuDarkTheme)
+            glClearColor(vslamlab_colors::kDarkBg[0], vslamlab_colors::kDarkBg[1], vslamlab_colors::kDarkBg[2], 1.0f);
+        else
+            glClearColor(vslamlab_colors::kLightBg[0], vslamlab_colors::kLightBg[1], vslamlab_colors::kLightBg[2], 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glClearColor(1.0f,1.0f,1.0f,1.0f);
 
         ////////////////////////////////////////////////////////////////////////////////////
-        menuTrackingTime = static_cast<float>(grabImageMonocular_time_median);
-        menuLocalMappingTime = static_cast<float>(runLocalMapping_time_median);
+        {
+            std::unique_lock<std::mutex> lock(mutexProfileStats);
+            menuTrackingTime = static_cast<float>(grabImageMonocular_time_median);
+            menuLocalMappingTime = static_cast<float>(runLocalMapping_time_median);
+        }
 
+        // Status panel (map-size query locks the map, so refresh it sparingly)
+        menuState = trackingStateName(tracker->mState);
+        {
+            const size_t nTotal = system->GetSequenceImageCount();
+            const size_t nProcessed = system->GetFramesProcessedCount();
+            std::ostringstream oss;
+            oss << tracker->numTrackedFrames << " / "
+                << (nTotal > 0 ? std::to_string(nTotal) : std::string("?"));
+            menuFrames = oss.str();
+            menuProgress = nTotal > 0 ? 100.0f * float(nProcessed) / float(nTotal) : 0.0f;
+        }
         ////////////////////////////////////////////////////////////////////////////////////
+        ViewerStyle style;
+        style.darkTheme = menuDarkTheme;
+        style.pointSize = menuPointSize;
+        style.trajectoryLineWidth = menuTrajWidth;
+        style.keyFrameLineWidth = menuKFLineWidth;
+        style.graphLineWidth = menuGraphLineWidth;
+        style.cameraLineWidth = menuCamLineWidth;
+        style.keyFrameSize = defaults.keyFrameSize;
+        style.cameraSize = defaults.cameraSize;
+
         mapDrawer->GetCurrentOpenGLCameraMatrix(Twc);
 
+        if(menuAerialCamera != bAerial)
+        {
+            if(menuAerialCamera)
+                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt( 0, mViewpointY, 0, 0, 0, 0, 0, 0, 1 ));
+            else
+                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0));
+            bAerial = menuAerialCamera;
+        }
+        if(menuFollowCamera)
+            s_cam.Follow(Twc);
+
         d_cam.Activate(s_cam);
-        mapDrawer->DrawCurrentCamera(Twc);
-        mapDrawer->DrawKeyFrames(true,true);
-        mapDrawer->DrawMapPoints();
-
-        if(menuFollowCamera && bFollow)
-        {
-            if(menuAerialCamera && !bAerial){
-                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt( 0, mViewpointY, 0, 0, 0, 0, 0, 0, 1 ));
-            }else if(!menuAerialCamera && bAerial){
-                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0));
-            }
-            s_cam.Follow(Twc);
-        }else if(menuFollowCamera && !bFollow)
-        {
-            if(menuAerialCamera && !bAerial){
-                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt( 0, mViewpointY, 0, 0, 0, 0, 0, 0, 1 ));
-            }else if(!menuAerialCamera && bAerial){
-                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0));
-            }
-            s_cam.Follow(Twc);
-        }
-        else if(!menuFollowCamera && bFollow)
-        {
-            if(menuAerialCamera && !bAerial){
-                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt( 0, mViewpointY, 0, 0, 0, 0, 0, 0, 1 ));
-                s_cam.Follow(Twc);
-            }else if(!menuAerialCamera && bAerial){
-                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0));
-                s_cam.Follow(Twc);
-            }
-        }else if(!menuFollowCamera && !bFollow)
-        {
-            if(menuAerialCamera && !bAerial){
-                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt( 0, mViewpointY, 0, 0, 0, 0, 0, 0, 1 ));
-                s_cam.Follow(Twc);
-            }else if(!menuAerialCamera && bAerial){
-                s_cam.SetModelViewMatrix(pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0));
-                s_cam.Follow(Twc);
-            }
-        }
-
-        if(menuFollowCamera && !bFollow)      bFollow = true;
-        else if(!menuFollowCamera && bFollow) bFollow = false;
-
-        if(menuAerialCamera && !bAerial)      bAerial = true;
-        else if(!menuAerialCamera && bAerial) bAerial = false;
-
+        mapDrawer->DrawCurrentCamera(Twc, style);
+        if(menuShowKeyFrames || menuShowGraph)
+            mapDrawer->DrawKeyFrames(menuShowKeyFrames, menuShowGraph, style);
+        if(menuShowPoints)
+            mapDrawer->DrawMapPoints(style);
+        if(menuShowTrajectory)
+            mapDrawer->DrawTrajectory(style);
 
         im = frameDrawer->DrawFrame();
-        cv::Mat imResized;
-        cv::resize(im,imResized,cv::Size(int(w_pixel), int(h_pixel)));
-
-        /////////////////////////////////////////////////////////
-        cv::flip(imResized.clone(),imResized,0);
-
-        d_img.Activate();
-        glColor3f(1.0,1.0,1.0);
-        imageTexture.Upload(imResized.data,GL_RGB,GL_UNSIGNED_BYTE);
-        imageTexture.RenderToViewport();
+        if(!im.empty() && im.isContinuous())
+        {
+            if(im.cols != texW || im.rows != texH)
+            {
+                imageTexture.Reinitialise(im.cols, im.rows, GL_RGB, true, 0, GL_RGB, GL_UNSIGNED_BYTE);
+                texW = im.cols;
+                texH = im.rows;
+                const float imgH = (float(texH) / float(texW)) * (imgW * w) / h;
+                d_img.SetBounds(1.0f - imgH - margin, 1.0f - margin, 1.0f - imgW - margin, 1.0f - margin);
+            }
+            d_img.Activate();
+            glColor3f(1.0,1.0,1.0);
+            imageTexture.Upload(im.data,GL_RGB,GL_UNSIGNED_BYTE);
+            imageTexture.RenderToViewportFlipY();
+        }
 
         pangolin::FinishFrame();
 

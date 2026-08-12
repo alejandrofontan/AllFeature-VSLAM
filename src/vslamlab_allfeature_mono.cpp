@@ -144,6 +144,8 @@ int main(int argc, char **argv)
                                   featureTypes,
                                   fixImageSize);
 
+    SLAM.SetSequenceInfo(nImages, !maskFilenames.empty());
+
     // Vector for tracking time statistics
     std::vector<AF_VSLAM::Seconds> vTimesTrack;
     vTimesTrack.resize(nImages);
