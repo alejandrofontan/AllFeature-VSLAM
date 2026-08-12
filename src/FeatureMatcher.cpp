@@ -1,10 +1,14 @@
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <sstream>
 
 #include "afvslam_log.hpp"
 #include "FeatureMatcher.h"
+
+#include <PoseLib/robust.h>
 
 using namespace std;
 
@@ -94,8 +98,8 @@ std::vector<cv::DMatch> FeatureMatcher::swap_match_direction(const std::vector<c
 //   1. For each feature type, brute-force NN descriptor matching is run between
 //      the keyframe and the frame. All matches are pooled into a single list with
 //      globally offset indices.
-//   2. Outliers are jointly filtered across all feature types using MAGSAC on the
-//      fundamental matrix (cv::USAC_MAGSAC).
+//   2. Outliers are jointly filtered across all feature types with PoseLib
+//      LO-RANSAC on the fundamental matrix (homography fallback for degenerate scenes).
 //   3. Each inlier match is resolved to a map point via the keyframe's map point
 //      associations. Only valid, non-bad map points are written to map_pts_matches.
 //
@@ -113,6 +117,13 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
     vector<FeatureType> used_feature_types;
     map<FeatureType, vector<Pt>> map_pts_kf;
 
+    // Slow-call diagnosis (hiccup profiling): per-feature matching and filter timings
+    using MatchClock = std::chrono::steady_clock;
+    const auto matchMs = [](MatchClock::time_point a, MatchClock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    std::map<FeatureType, double> msMatchByFt;
+
     for (const auto& ft : feat_types) {
         // Skip feature types not present in both keyframe and frame
         auto it1 = keyframe->descriptors.find(ft);
@@ -127,9 +138,11 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
         // Brute-force NN matching between keyframe and frame descriptors
         const auto& v1 = keyframe->keypoints.at(ft);
         const auto& v2 = frame.keypoints.at(ft);
+        const auto tMatch0 = MatchClock::now();
         vector<cv::DMatch> matches = match_descriptors(
             it1->second, it2->second,
             v1, v2, ft);
+        msMatchByFt[ft] = matchMs(tMatch0, MatchClock::now());
 
         // Offset match indices to account for previously appended feature types
         const size_t size_kpts1 = kps1.size();
@@ -159,8 +172,20 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
         map_pts_matches[ft] = vector<Pt>(frame.N.at(ft), nullptr);
     }
 
-    // Filter outliers using MAGSAC across all feature types jointly
-    auto robust_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::USAC_MAGSAC);
+    // Filter outliers robustly (PoseLib LO-RANSAC) across all feature types jointly
+    const auto tFilter0 = MatchClock::now();
+    auto robust_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
+    const double msFilter = matchMs(tFilter0, MatchClock::now());
+
+    double msMatchTotal = 0.0;
+    for (const auto& [ft, ms] : msMatchByFt) msMatchTotal += ms;
+    if (msMatchTotal + msFilter > 100.0) {
+        std::ostringstream perFt;
+        for (const auto& [ft, ms] : msMatchByFt)
+            perFt << " ft" << int(ft) << "=" << int(ms) << "ms(n=" << keyframe->keypoints.at(ft).size() << ")";
+        AF_WARN("match_keyframe_to_frame slow: match=" << int(msMatchTotal) << "ms [" << perFt.str()
+                << " ], filter=" << int(msFilter) << "ms (nMatches=" << all_matches.size() << ")");
+    }
 
     // Associate surviving matches to map points
     auto& it1 = keyframe->cache_matched_pairs_feat_type[frame.mnId];
@@ -319,7 +344,7 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
         if (all_matches.size() < min_match_keyframes)
             return map<FeatureType, vector<pair<size_t,size_t>>>(); // Not enough matches to reliably estimate fundamental matrix
 
-        computed_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::FM_LMEDS);
+        computed_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
     }
     const vector<cv::DMatch>& filtered_matches = cached ? cache_it->second : computed_matches;
 
@@ -543,7 +568,7 @@ map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_
     }
 
     // Filter outliers jointly across all feature types using fundamental matrix (LMEDS)
-    auto filtered_matches = filter_matches_by_fundamental(all_matches, kps1, kps2, cv::FM_LMEDS);
+    auto filtered_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
 
     std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs;
     for (const auto& m : filtered_matches) {
@@ -1046,7 +1071,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
 
     std::vector<cv::DMatch> FeatureMatcher::filter_matches_by_fundamental(std::vector<cv::DMatch>& matches,
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-        int outlierMethod, const int maxForRansac){
+        const int maxForRansac){
 
         std::sort(matches.begin(), matches.end(),
             [](const cv::DMatch& a, const cv::DMatch& b) { return a.distance < b.distance; });
@@ -1054,32 +1079,62 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         if (matches.size() > static_cast<size_t>(maxForRansac)) matches.resize(maxForRansac);
 
         // Build point correspondences ---
-        std::vector<cv::Point2f> pts1; pts1.reserve(matches.size());
-        std::vector<cv::Point2f> pts2; pts2.reserve(matches.size());
+        std::vector<poselib::Point2D> pts1; pts1.reserve(matches.size());
+        std::vector<poselib::Point2D> pts2; pts2.reserve(matches.size());
         for (const auto& m : matches) {
             // Safety: ensure indices are valid
             if (m.queryIdx < 0 || m.queryIdx >= static_cast<int>(kps1.size())) continue;
             if (m.trainIdx < 0 || m.trainIdx >= static_cast<int>(kps2.size())) continue;
 
-            pts1.push_back(kps1[m.queryIdx].pt);
-            pts2.push_back(kps2[m.trainIdx].pt);
+            const auto& p1 = kps1[m.queryIdx].pt;
+            const auto& p2 = kps2[m.trainIdx].pt;
+            pts1.emplace_back(p1.x, p1.y);
+            pts2.emplace_back(p2.x, p2.y);
         }
 
         if (pts1.size() < 8) return matches; // not enough after filtering
 
-        constexpr double reprojThreshold = 3.0;  // pixels
-        constexpr double confidence      = 0.95;
+        constexpr double inlierThreshold = 3.0;  // pixels (Sampson / transfer error)
+        constexpr size_t minInliersForModel = 8;
 
-        std::vector<uchar> inlierMask;
-        cv::Mat F = cv::findFundamentalMat(
-            pts1, pts2,
-            outlierMethod,
-            reprojThreshold,
-            confidence,
-            inlierMask
-        );
+        // Robust filtering via PoseLib LO-RANSAC. Iterations are hard-bounded: OpenCV's
+        // USAC_MAGSAC previously used here both threw an internal assertion on
+        // H-degenerate+outlier inputs (crash) and ground for seconds per call on real
+        // zero-baseline frames (the stop-section hiccups) — PoseLib does neither.
+        //   1. Fundamental matrix (works at zero baseline too: F=[t]x fits identical points).
+        //   2. If F finds no usable consensus, homography (the right model when the
+        //      scene is planar/rotation-only).
+        //   3. If both fail, pass matches through unfiltered; pose optimization's chi2
+        //      outlier test downstream keeps that soft.
+        std::vector<char> inlierMask;
+        poselib::RelativePoseOptions fOpt;
+        fOpt.max_error = inlierThreshold;
+        fOpt.ransac.max_iterations = 1000;
+        fOpt.ransac.min_iterations = 100;
 
-        if (F.empty() || inlierMask.size() != pts1.size())
+        Eigen::Matrix3d F;
+        poselib::RansacStats stats = poselib::estimate_fundamental(pts1, pts2, fOpt, &F, &inlierMask);
+
+        if (stats.num_inliers < minInliersForModel) {
+            poselib::HomographyOptions hOpt;
+            hOpt.max_error = inlierThreshold;
+            hOpt.ransac.max_iterations = 1000;
+            hOpt.ransac.min_iterations = 100;
+
+            Eigen::Matrix3d H;
+            inlierMask.clear();
+            stats = poselib::estimate_homography(pts1, pts2, hOpt, &H, &inlierMask);
+            if (stats.num_inliers < minInliersForModel) {
+                AF_WARN("filter_matches_by_fundamental: no F/H consensus ("
+                    + std::to_string(stats.num_inliers) + " inliers), passing "
+                    + std::to_string(matches.size()) + " matches unfiltered");
+                return matches; // unfiltered fallback
+            }
+            AF_WARN("filter_matches_by_fundamental: F found no consensus, homography kept "
+                + std::to_string(stats.num_inliers) + "/" + std::to_string(pts1.size()) + " matches");
+        }
+
+        if (inlierMask.size() != pts1.size())
             return matches;
 
         std::vector<cv::DMatch> inlierMatches;

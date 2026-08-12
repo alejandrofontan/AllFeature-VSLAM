@@ -93,6 +93,13 @@ add_subdirectory(${SUPERPOINT_LIGHTGLUE_DIR} ${CMAKE_BINARY_DIR}/superpoint_ligh
 # ---- g2o ----
 add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/g2o ${CMAKE_BINARY_DIR}/g2o)
 
+# ---- PoseLib (robust estimation: replaces OpenCV USAC in FeatureMatcher) ----
+set(MARCH_NATIVE ON CACHE BOOL "" FORCE)  # match this project's -march=native flags
+add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/PoseLib ${CMAKE_BINARY_DIR}/poselib)
+# Vendored code compiles under this project's global -Wall -Wextra -Werror flags;
+# suppress diagnostics for the third-party target only so -Werror can't break it.
+target_compile_options(PoseLib PRIVATE -w)
+
 # Dependencies
 find_package(OpenCV REQUIRED )
 find_package(Eigen3  REQUIRED NO_MODULE)
@@ -145,6 +152,7 @@ target_link_libraries(${PROJECT_NAME}
         LightGlue::lib
         superpoint_lightglue_lib
         SiftGPU::sift_gpu
+        PoseLib::PoseLib
 )
 
 

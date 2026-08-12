@@ -10,3 +10,6 @@
 [submodule "Thirdparty/g2o"]
 	path = Thirdparty/g2o
 	url = https://github.com/alejandrofontan/g2o.git
+[submodule "Thirdparty/PoseLib"]
+	path = Thirdparty/PoseLib
+	url = https://github.com/PoseLib/PoseLib.git

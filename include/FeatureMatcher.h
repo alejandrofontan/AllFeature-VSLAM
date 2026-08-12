@@ -51,8 +51,12 @@ public:
             const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
             float min_score = 0.0f);
 
+    // Robust geometric match filtering via PoseLib LO-RANSAC (replaced OpenCV's
+    // findFundamentalMat/USAC, which both threw on degenerate inputs and ground for
+    // seconds per call at zero-baseline frames — see CLAUDE.md, Stop-Induced Keyframe
+    // Runaway Investigation).
     std::vector<cv::DMatch> filter_matches_by_fundamental(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-        int outlierMehod = cv::FM_RANSAC, const int maxForRansac = 2000);
+        const int maxForRansac = 2000);
 
     std::map<FeatureType, std::vector<cv::DMatch>> match_descriptors_parallel(const std::vector<FeatureType>& featureTypes,
         const std::map<FeatureType, cv::Mat> &desc1, const std::map<FeatureType, cv::Mat> &desc2,
