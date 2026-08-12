@@ -252,6 +252,18 @@ void Tracking::Track()
         {
             ++numTrackedFrames;
 
+            // Low-rate heartbeat so post-mortems can see the inlier/map trend leading
+            // into a tracking loss, not just the loss line itself.
+            if(currentFrame.mnId % 100 == 0)
+            {
+                AF_INFO("Track heartbeat | frame=" << currentFrame.mnId
+                        << " inliers=" << mnMatchesInliers
+                        << " localPts=" << localPts.size()
+                        << " KFs=" << map->KeyFramesInMap()
+                        << " mapPts=" << map->MapPointsInMap());
+                std::cout.flush(); // stdout is fully buffered under the runner's redirect
+            }
+
             // Update motion model
             if(lastFrame.Tcw(3,3) == 1.0f)
             {
