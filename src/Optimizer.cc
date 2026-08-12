@@ -35,6 +35,8 @@
 #include <algorithm>
 #include <vector>
 
+#include "afvslam_log.hpp"
+
 namespace AF_VSLAM
 {
 
@@ -517,6 +519,71 @@ int Optimizer::PoseOptimization(Frame *pFrame)
         // erased from the graph, so that count never changes across iterations.
         if(nInitialCorrespondences - nBad < 10)
             break;
+    }
+
+    // Diagnostic: when pose optimization rejects most of its correspondences, report the
+    // per-channel breakdown and the error split of the rejected RGB-D edges (pixel vs
+    // inverse-depth residual), so a tracking loss right after can be attributed to the
+    // 2D geometry or to the depth channel (see CLAUDE.md, Stop-Induced Keyframe Runaway).
+    if(nInitialCorrespondences >= 20 && nBad * 2 > nInitialCorrespondences)
+    {
+        const auto median = [](std::vector<float>& v) -> float {
+            if(v.empty()) return -1.0f;
+            auto mid = v.begin() + v.size() / 2;
+            std::nth_element(v.begin(), mid, v.end());
+            return *mid;
+        };
+
+        int nMono = 0, nMonoBad = 0, nRGBD = 0, nRGBDBad = 0, nStereo = 0, nStereoBad = 0;
+        std::vector<float> rgbdBadPx, rgbdBadInvD, rgbdBadDepth, monoBadPx;
+        for(const auto& [ft, edges] : vpEdgesMono)
+        {
+            for(size_t i = 0; i < edges.size(); i++)
+            {
+                nMono++;
+                if(pFrame->mvbOutlier.at(ft)[vnIndexEdgeMono.at(ft)[i]])
+                {
+                    nMonoBad++;
+                    monoBadPx.push_back(static_cast<float>(edges[i]->error().norm()));
+                }
+            }
+        }
+        for(const auto& [ft, edges] : vpEdgesStereo)
+        {
+            for(size_t i = 0; i < edges.size(); i++)
+            {
+                nStereo++;
+                if(pFrame->mvbOutlier.at(ft)[vnIndexEdgeStereo.at(ft)[i]])
+                    nStereoBad++;
+            }
+        }
+        for(const auto& [ft, edges] : vpEdgesRGBD)
+        {
+            for(size_t i = 0; i < edges.size(); i++)
+            {
+                nRGBD++;
+                const size_t idx = vnIndexEdgeRGBD.at(ft)[i];
+                if(pFrame->mvbOutlier.at(ft)[idx])
+                {
+                    nRGBDBad++;
+                    const Eigen::Vector3d err = edges[i]->error();
+                    rgbdBadPx.push_back(static_cast<float>(err.head<2>().norm()));
+                    rgbdBadInvD.push_back(static_cast<float>(std::abs(err(2))));
+                    const float invD = pFrame->invDepth.at(ft)[idx];
+                    if(invD > 0.0f)
+                        rgbdBadDepth.push_back(1.0f / invD);
+                }
+            }
+        }
+        AF_WARN("PoseOptimization: rejected " << nBad << "/" << nInitialCorrespondences
+                << " (mono " << nMonoBad << "/" << nMono
+                << ", stereo " << nStereoBad << "/" << nStereo
+                << ", rgbd " << nRGBDBad << "/" << nRGBD << ")"
+                << " | rejected-rgbd medians: pxErr=" << median(rgbdBadPx)
+                << " invDepthErr=" << median(rgbdBadInvD)
+                << " depth=" << median(rgbdBadDepth) << "m"
+                << " | rejected-mono median pxErr=" << median(monoBadPx)
+                << " | frame=" << pFrame->mnId);
     }
 
     // Recover optimized pose and return number of inliers
