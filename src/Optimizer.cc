@@ -135,6 +135,11 @@ static void MarkBAOutliers(const vector<BAObservation<EdgeT>>& observations, flo
         if(obs.mp->is_bad())
             continue;
 
+        // Recompute at the current estimates: after a rejected LM trial g2o restores the
+        // vertices but leaves cached edge errors at the rejected pose (see
+        // ClassifyPoseOnlyEdges) — classifying from stale chi2 here would mark good
+        // observations as outliers.
+        obs.edge->computeError();
         if(obs.edge->chi2() > chi2Threshold || !obs.edge->isDepthPositive())
             obs.edge->setLevel(1);
 
@@ -153,6 +158,9 @@ static void CollectBAOutliers(const vector<BAObservation<EdgeT>>& observations, 
         if(obs.mp->is_bad())
             continue;
 
+        // Same stale-chi2 hazard as MarkBAOutliers — erasing observations from the map
+        // based on a rejected trial pose would silently damage the map.
+        obs.edge->computeError();
         if(obs.edge->chi2() > chi2Threshold || !obs.edge->isDepthPositive())
             vToErase.push_back(make_pair(obs.kf, obs.mp));
     }
@@ -375,8 +383,12 @@ static void ClassifyPoseOnlyEdges(const std::map<FeatureType, vector<EdgeT*>>& e
             EdgeT* e = edges[i];
             const size_t idx = indexByFeature.at(ft)[i];
 
-            if(pFrame->mvbOutlier.at(ft)[idx])
-                e->computeError();
+            // Always recompute at the CURRENT vertex estimate. g2o's LM pops (restores) the
+            // estimate after a rejected trial step but leaves every edge's cached _error at
+            // the rejected pose — classifying from stale chi2() then rejects all
+            // correspondences of a perfectly converged pose (observed: frame 3951, 620
+            // matches at 1.5px median residual classified 617/620 outliers -> tracking lost).
+            e->computeError();
 
             const bool isOutlier = e->chi2() > chi2Threshold;
             pFrame->mvbOutlier.at(ft)[idx] = isOutlier;
@@ -1271,6 +1283,10 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
         if(!e12 || !e21)
             continue;
 
+        // Recompute at the restored estimate (stale-chi2 hazard after a rejected LM trial,
+        // see ClassifyPoseOnlyEdges).
+        e12->computeError();
+        e21->computeError();
         if(e12->chi2()>th2 || e21->chi2()>th2)
         {
             size_t idx = vnIndexEdge[i];
@@ -1305,6 +1321,8 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
         if(!e12 || !e21)
             continue;
 
+        e12->computeError();
+        e21->computeError();
         if(e12->chi2()>th2 || e21->chi2()>th2)
         {
             size_t idx = vnIndexEdge[i];
