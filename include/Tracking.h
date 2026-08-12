@@ -24,6 +24,7 @@
 
 #include <opencv2/core/core.hpp>
 #include <mutex>
+#include <deque>
 
 #include "Viewer.h"
 #include "FrameDrawer.h"
@@ -166,6 +167,11 @@ protected:
     bool NeedNewKeyFrame();
     void CreateNewKeyFrame();
 
+    // Median pixel displacement of map points shared between currentFrame and lastFrame.
+    // Scale-free stationarity signal for NeedNewKeyFrame; returns -1 if too few shared
+    // points to be meaningful (gate then stays inactive).
+    float MedianFlowFromLastFrame() const;
+
     void loadCameraParameters(const string &strCalibrationPath, const string &strSettingPath);
     shared_ptr<FeatureExtractor> getFeatureExtractor(const int& scaleNumFeaturesMonocular_,
                                                      const string &featureSettingsYamlFile,
@@ -232,6 +238,14 @@ protected:
     //Current matches in frame
     int mnMatchesInliers;
 
+    // Rolling inlier history (last inliersHistorySize tracked frames) — reference for the
+    // emergency-keyframe trigger in NeedNewKeyFrame(). Comparing against recent frames
+    // instead of refKeyframe->TrackedMapPoints() avoids the self-inflating feedback loop
+    // where every inserted keyframe grows the reference stat via post-hoc triangulation
+    // (see CLAUDE.md, Stop-Induced Keyframe Runaway Investigation).
+    std::deque<int> recentInliersHistory;
+    FrameId lastEmergencyKFId{0};
+
     // Last Frame, KeyFrame and Relocalisation Info
     Keyframe lastKeyFrame;
     Frame lastFrame;
@@ -293,6 +307,14 @@ protected:
     const int minMatches_trackLocalMap_low{30};
 
     // NeedNewKeyFrame()
+    // Stationarity gate: median frame-to-frame flow (px) below which no keyframe is
+    // inserted (camera considered static — new keyframes would only feed zero-baseline
+    // triangulation). Gate needs at least minSharedPtsForFlow shared points to engage.
+    const float minMedianFlow_needNewKey{1.0f};
+    const int minSharedPtsForFlow{20};
+    // Emergency keyframes: reference window and refire cooldown (frames).
+    const size_t inliersHistorySize{30};
+    const int emergencyKFCooldown{10};
     const float refRatio_high_needNewKey{0.9f};
     const int nMinObs_high{3};
     const int nMinObs_low{2};
