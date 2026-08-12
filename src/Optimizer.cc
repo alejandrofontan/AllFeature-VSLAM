@@ -502,6 +502,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     const int its[4]={params.numItPoseOpt,params.numItPoseOpt,params.numItPoseOpt,params.numItPoseOpt};
 
     int nBad=0;
+    int passInliers[4] = {-1,-1,-1,-1};
     for(size_t it=0; it<4; it++)
     {
         vSE3->setEstimate(Converter::toSE3Quat(pFrame->Tcw));
@@ -513,6 +514,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
         ClassifyPoseOnlyEdges(vpEdgesMono, vnIndexEdgeMono, pFrame, chi2Mono[it], disableRobustKernel, nBad);
         ClassifyPoseOnlyEdges(vpEdgesStereo, vnIndexEdgeStereo, pFrame, chi2Stereo[it], disableRobustKernel, nBad);
         ClassifyPoseOnlyEdges(vpEdgesRGBD, vnIndexEdgeRGBD, pFrame, chi2RGBD[it], disableRobustKernel, nBad);
+        passInliers[it] = nInitialCorrespondences - nBad;
 
         // Stop refining once too few inliers remain to constrain the pose. This is NOT the
         // same as optimizer.edges().size(): outliers are excluded via setLevel(1), never
@@ -575,10 +577,21 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                 }
             }
         }
+        // Initial (pFrame->Tcw is still the entry pose here) -> optimized pose delta:
+        // large delta = the optimizer moved far (divergence / dragged); tiny delta with
+        // uniform pixel errors = the entry pose itself was already inconsistent.
+        const g2o::SE3Quat optPose = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0))->estimate();
+        const g2o::SE3Quat delta = optPose * Converter::toSE3Quat(pFrame->Tcw).inverse();
+        const double dTrans = delta.translation().norm();
+        const double dRotDeg = 2.0 * std::asin(std::min(1.0, delta.rotation().vec().norm())) * 180.0 / M_PI;
+
         AF_WARN("PoseOptimization: rejected " << nBad << "/" << nInitialCorrespondences
                 << " (mono " << nMonoBad << "/" << nMono
                 << ", stereo " << nStereoBad << "/" << nStereo
                 << ", rgbd " << nRGBDBad << "/" << nRGBD << ")"
+                << " | passInliers=[" << passInliers[0] << "," << passInliers[1]
+                << "," << passInliers[2] << "," << passInliers[3] << "]"
+                << " | poseDelta: trans=" << dTrans << "m rot=" << dRotDeg << "deg"
                 << " | rejected-rgbd medians: pxErr=" << median(rgbdBadPx)
                 << " invDepthErr=" << median(rgbdBadInvD)
                 << " depth=" << median(rgbdBadDepth) << "m"
