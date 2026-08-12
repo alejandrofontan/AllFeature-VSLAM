@@ -17,6 +17,7 @@
 #include "Utils.h"
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <unordered_map>
@@ -696,6 +697,42 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
         AF_WARN("TrackReferenceKeyFrame: pose optimization collapsed (" << nmatchesMap
                 << " inliers of " << nmatches << " raw matches) — retrying without depth channel"
                 << " | frame=" << currentFrame.mnId);
+
+        // Post-mortem dump: per-match reprojection residuals AT THE PRIOR POSE (before any
+        // optimization), with each map point's provenance — enough to test offline whether
+        // the match set is bimodal (two coherent populations with no common pose) and which
+        // population (old vs freshly-created points, image region, depth) is inconsistent.
+        if(!FrameDrawer::exp_folder.empty())
+        {
+            const mat3f Rcw_prior = posePrior.block<3,3>(0,0);
+            const vec3f tcw_prior = posePrior.block<3,1>(0,3);
+            const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
+            const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
+            std::ofstream dump(FrameDrawer::exp_folder + "/collapse_frame_"
+                               + std::to_string(currentFrame.mnId) + ".csv");
+            dump << "ft,kpIdx,u_kp,v_kp,u_proj,v_proj,z_cam,invDepth_meas,ptId,firstKFid,nObs\n";
+            for (auto& [ft, N_ft] : currentFrame.N)
+            {
+                const auto& kps = currentFrame.keypoints.at(ft);
+                const auto& invD = currentFrame.invDepth.at(ft);
+                for(int i = 0; i < N_ft; i++)
+                {
+                    const Pt& pt = currentFrame.pts.at(ft)[i];
+                    if(!pt)
+                        continue;
+                    const vec3f Xc = Rcw_prior * pt->get_world_pos() + tcw_prior;
+                    if(Xc(2) <= 0.0f)
+                        continue;
+                    dump << int(ft) << "," << i << ","
+                         << kps[i].pt.x << "," << kps[i].pt.y << ","
+                         << (fx * Xc(0) / Xc(2) + cx) << "," << (fy * Xc(1) / Xc(2) + cy) << ","
+                         << Xc(2) << "," << invD[i] << ","
+                         << pt->ptId << "," << pt->mnFirstKFid << ","
+                         << pt->number_of_observations() << "\n";
+                }
+            }
+        }
+
         for (auto& [ft, N_ft] : currentFrame.N)
             std::fill(currentFrame.mvbOutlier.at(ft).begin(), currentFrame.mvbOutlier.at(ft).end(), false);
         currentFrame.SetPose(posePrior);
