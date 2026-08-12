@@ -124,7 +124,8 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
         tracking_times[int(1000 * t_duration)]++;
 #endif
 
-    viewer->set_grabImageMonocular_time_median(map_median(grabImageMonocular_times));
+    if(viewer)
+        viewer->set_grabImageMonocular_time_median(map_median(grabImageMonocular_times));
 
 #ifdef PROFILING_EXHAUSTIVE
     AF_PROFILE_BEGIN("Tracking Profiling");

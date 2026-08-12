@@ -80,7 +80,8 @@ void LocalMapping::Run()
             }
             loopCloser->InsertKeyFrame(mpCurrentKeyFrame);
 
-            viewer->set_runLocalMapping_time_median(map_median(localMapping_times));
+            if(viewer)
+                viewer->set_runLocalMapping_time_median(map_median(localMapping_times));
 
             //////////////////////////////////////////////////////////////////////////////////////////////////////
             //////////////////////////////////////////////////////////////////////////////////////////////////////
