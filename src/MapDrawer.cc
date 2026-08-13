@@ -274,6 +274,127 @@ void MapDrawer::DrawTrajectory(const ViewerStyle& style)
     }
 }
 
+void MapDrawer::DrawTrajectoryTopView(const ViewerStyle& style)
+{
+    vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
+    vpKFs.erase(std::remove_if(vpKFs.begin(), vpKFs.end(),
+                               [](const Keyframe& kf){ return kf->is_bad(); }),
+                vpKFs.end());
+    if (vpKFs.size() < 2)
+        return;
+    std::sort(vpKFs.begin(), vpKFs.end(), KeyFrame::lId);
+
+    std::vector<vec3f> centers;
+    centers.reserve(vpKFs.size());
+    for (const auto& kf : vpKFs)
+        centers.push_back(kf->get_camera_center());
+
+    bool hasCam = false;
+    vec3f twc = vec3f::Zero();
+    {
+        unique_lock<mutex> lock(mMutexCamera);
+        if (mCameraPose(3,3) == 1.0f)
+        {
+            twc = -mCameraPose.block<3,3>(0,0).transpose() * mCameraPose.block<3,1>(0,3);
+            hasCam = true;
+        }
+    }
+
+    // Ground-plane (x-z) bounds of the whole trajectory plus the current camera.
+    float minX = centers[0](0), maxX = minX, minZ = centers[0](2), maxZ = minZ;
+    for (const auto& Ow : centers)
+    {
+        minX = std::min(minX, Ow(0)); maxX = std::max(maxX, Ow(0));
+        minZ = std::min(minZ, Ow(2)); maxZ = std::max(maxZ, Ow(2));
+    }
+    if (hasCam)
+    {
+        minX = std::min(minX, twc(0)); maxX = std::max(maxX, twc(0));
+        minZ = std::min(minZ, twc(2)); maxZ = std::max(maxZ, twc(2));
+    }
+
+    // Aspect-preserving orthographic fit with a margin, so the trajectory never
+    // stretches whatever rectangle the overlay viewport has.
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    const float aspect = viewport[3] > 0 ? float(viewport[2]) / float(viewport[3]) : 1.0f;
+    const float cx = 0.5f * (minX + maxX);
+    const float cz = 0.5f * (minZ + maxZ);
+    float halfW = std::max(0.5f * (maxX - minX), 1e-4f) * 1.15f;
+    float halfH = std::max(0.5f * (maxZ - minZ), 1e-4f) * 1.15f;
+    if (halfW / halfH > aspect)
+        halfH = halfW / aspect;
+    else
+        halfW = halfH * aspect;
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(cx - halfW, cx + halfW, cz - halfH, cz + halfH, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    // The 3D scene behind the overlay already filled the depth buffer this frame.
+    const GLboolean depthWasEnabled = glIsEnabled(GL_DEPTH_TEST);
+    glDisable(GL_DEPTH_TEST);
+
+    // Background panel + border so the inset reads against the map behind it.
+    using namespace vslamlab_colors;
+    const float* bg = style.darkTheme ? kDarkBg : kLightBg;
+    glColor4f(bg[0], bg[1], bg[2], 0.85f);
+    glBegin(GL_QUADS);
+    glVertex2f(cx - halfW, cz - halfH);
+    glVertex2f(cx + halfW, cz - halfH);
+    glVertex2f(cx + halfW, cz + halfH);
+    glVertex2f(cx - halfW, cz + halfH);
+    glEnd();
+
+    const float bx = 0.995f * halfW;
+    const float bz = 0.995f * halfH;
+    applyLineWidth(1.0f);
+    if (style.darkTheme)
+        glColor4f(0.42f, 0.42f, 0.56f, 0.8f);
+    else
+        glColor4f(0.55f, 0.55f, 0.66f, 0.8f);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(cx - bx, cz - bz);
+    glVertex2f(cx + bx, cz - bz);
+    glVertex2f(cx + bx, cz + bz);
+    glVertex2f(cx - bx, cz + bz);
+    glEnd();
+
+    // Full-trajectory polyline, same gradient as the 3D trajectory.
+    applyLineWidth(std::max(1.5f, 0.6f * style.trajectoryLineWidth));
+    glBegin(GL_LINE_STRIP);
+    const float denom = float(centers.size() - 1);
+    for (size_t i = 0; i < centers.size(); i++)
+    {
+        float rgb[3];
+        gradientVivid(float(i) / denom, rgb);
+        glColor4f(rgb[0], rgb[1], rgb[2], 1.0f);
+        glVertex2f(centers[i](0), centers[i](2));
+    }
+    glEnd();
+
+    // Current camera position marker.
+    if (hasCam)
+    {
+        glPointSize(std::max(5.0f, 2.5f * style.trajectoryLineWidth));
+        glColor4f(kCyanVivid[0], kCyanVivid[1], kCyanVivid[2], 1.0f);
+        glBegin(GL_POINTS);
+        glVertex2f(twc(0), twc(2));
+        glEnd();
+    }
+
+    if (depthWasEnabled)
+        glEnable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+}
+
 void MapDrawer::DrawCurrentCamera(pangolin::OpenGlMatrix &Twc, const ViewerStyle& style)
 {
     const float &w = style.cameraSize;

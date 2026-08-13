@@ -173,6 +173,7 @@ void Viewer::Run()
     pangolin::Var<bool> menuShowKeyFrames("menu.Show KeyFrames",true,true);
     pangolin::Var<bool> menuShowGraph("menu.Show Graph",true,true);
     pangolin::Var<bool> menuShowTrajectory("menu.Show Trajectory",true,true);
+    pangolin::Var<bool> menuShowTopView("menu.Show Top View",true,true);
 
     // Thickness
     pangolin::Var<float> menuPointSize("menu.Point Size", defaults.pointSize, 1.0f, 10.0f);
@@ -200,6 +201,15 @@ void Viewer::Run()
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     pangolin::GlTexture imageTexture;
     int texW{0}, texH{0};
+
+    // Top-down minimap of the complete trajectory, overlaid on the 3D view's bottom-right
+    // corner (created after d_cam for the same on-top reason as d_img). The orthographic
+    // fit to the trajectory bounds happens inside DrawTrajectoryTopView, so the bounds
+    // here only pick the inset's screen rectangle (square in pixels).
+    const float topW = 0.22f * (1.0f - panelWidth);
+    const float topH = topW * w / h;
+    pangolin::View& d_top = pangolin::Display("topview")
+        .SetBounds(margin, margin + topH, 1.0f - topW - margin, 1.0f - margin);
 
     bool bAerial = false;
     while(1)
@@ -276,6 +286,12 @@ void Viewer::Run()
             glColor3f(1.0,1.0,1.0);
             imageTexture.Upload(im.data,GL_RGB,GL_UNSIGNED_BYTE);
             imageTexture.RenderToViewportFlipY();
+        }
+
+        if(menuShowTopView)
+        {
+            d_top.Activate();
+            mapDrawer->DrawTrajectoryTopView(style);
         }
 
         pangolin::FinishFrame();

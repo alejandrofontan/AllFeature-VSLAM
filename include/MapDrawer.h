@@ -81,6 +81,10 @@ public:
     void DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const ViewerStyle& style);
     // Polyline linking sequential (keyId-ordered) keyframes, plus loop-closure markers.
     void DrawTrajectory(const ViewerStyle& style);
+    // Minimap for an overlay view: the full trajectory projected onto the ground plane
+    // (x-z, matching the aerial view's orientation), auto-fitted to the currently active
+    // viewport with its own orthographic projection. Draws nothing before 2 keyframes.
+    void DrawTrajectoryTopView(const ViewerStyle& style);
     void DrawCurrentCamera(pangolin::OpenGlMatrix &Twc, const ViewerStyle& style);
     void SetCurrentCameraPose(const mat4f &Tcw_);
     void SetReferenceKeyFrame(Keyframe pKF);
