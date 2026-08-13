@@ -515,7 +515,13 @@ Last observed loss mode (frame 17166: 469 matches, median residual 2px at the pr
 
 ### Verification
 
-Full-range (19103-frame) RGB-D runs previously lost tracking at frames 2327/3325/4379/4456 (four different runs, never surviving past ~4500). With all fixes: first full run completed with **zero tracking losses** (3 pose-opt collapses all caught by the depth-free rescue, before the prior gate existed; 2 emergency keyframes; runtime ~36 min). Final verification pair with the complete fix set launched after adding the gate.
+Full-range (19103-frame) RGB-D runs previously lost tracking at frames 2327/3325/4379/4456 (four different runs, never surviving past ~4500). With the fixes, four full-range runs were completed:
+
+- pre-gate build: **zero losses** (3 pose-opt collapses, all caught by the depth-free rescue);
+- gate build ×2: one with zero losses, one with two transient 1-2-frame dips (frames 428/450, driving under a large overhanging canopy — dark/dappled imagery; both self-recovered via instant relocalization, the second dip being the #9 embargo echo that motivated the bypass);
+- final build (all fixes incl. embargo bypass): **zero losses, zero collapses** across all 19103 frames, 3 benign emergency keyframes, median tracking time 73 ms, ATE RMSE 16.4 m over the full route (2587 keyframes) — accuracy tuning (e.g. issue #3 depth-info calibration) is follow-up work; this investigation's target was the losses.
+
+Note for reruns: the parent framework's swap watchdog measures absolute system swap, so stale swap from any earlier memory-heavy episode makes it kill new runs instantly (VSLAM-LAB/VSLAM-LAB#119) — the final run above was executed by invoking `pixi run --frozen -e allfeature-dev execute-rgbd ...` directly, then `pixi run evaluate`.
 
 ### Observed, filed as issues (not fixed here)
 
