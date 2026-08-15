@@ -4,6 +4,7 @@
 #include "Optimizer.h"
 #include "Converter.h"
 #include "Utils.h"
+#include "afvslam_log.hpp"
 
 #include <mutex>
 #include <Eigen/Core>
@@ -52,6 +53,7 @@ void LocalMapping::Run()
             CreateNewMapPoints();
             std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
             double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+            createNewMapPoints_times[int(1000 * t_duration)]++;
             //////////////////////////////////////////////////////////////////////////////////////////////////////
 
             if(!CheckNewKeyFrames())
@@ -63,6 +65,7 @@ void LocalMapping::Run()
                 }
                 t_end = std::chrono::steady_clock::now();
                 t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+                searchInNeighbors_times[int(1000 * t_duration)]++;
             }
             mbAbortBA = false;
             //if(!CheckNewKeyFrames() && !stopRequested())
@@ -74,6 +77,7 @@ void LocalMapping::Run()
                     Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);
                     t_end = std::chrono::steady_clock::now();
                     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+                    localbundleadjustment_times[int(1000 * t_duration)]++;
                 }
                 // Check redundant local Keyframes
                 KeyFrameCulling();
@@ -88,6 +92,15 @@ void LocalMapping::Run()
             t_end = std::chrono::steady_clock::now();
             t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
             localMapping_times[int(1000 * t_duration)]++;
+
+            #ifdef PROFILING_EXHAUSTIVE
+            AF_PROFILE_BEGIN("Local Mapping Profiling");
+            AF_PROFILE_FIELD(createNewMapPoints_times,          "  Create NewMap Points");
+            AF_PROFILE_FIELD(searchInNeighbors_times,          "  Search in Neighbors");
+            AF_PROFILE_FIELD(localbundleadjustment_times,          "  Local Bundle Adjustment");
+            AF_PROFILE_FIELD(localMapping_times, "Local Mapping");
+            AF_PROFILE_END();
+            #endif
         }
         else if(Stop())
         {
