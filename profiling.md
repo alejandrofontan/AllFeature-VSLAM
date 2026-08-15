@@ -176,6 +176,50 @@ Notes: <anomalies, first-run effects, anything that qualifies the numbers>
 
 <!-- Results entries go below this line -->
 
+## 2026-08-16 — perf/p3-g2o-openmp — G2O_USE_OPENMP in vendored g2o (addendum P3) — **REGRESSION, reverted**
+
+Change: `G2O_USE_OPENMP=ON` for `Thirdparty/g2o` + parent-side `target_link_libraries(g2o
+OpenMP::OpenMP_CXX)` and `EIGEN_DONT_PARALLELIZE` (needed because the vendored g2o CMakeLists
+consumes `g2o_CXX_FLAGS` into `CMAKE_CXX_FLAGS` at line 23 *before* appending the OpenMP flags
+at line 41 — flag-ordering bug worth fixing in the fork regardless). Verified genuinely active
+before measuring (`#define G2O_OPENMP 1` in config.h, `GOMP_parallel` in `libg2o.so`, libgomp
+linked). Vanilla = M1 state, re-measured fresh on this branch same session.
+
+| Metric (median ms) | van 0 | van 1 | van 2 | van med | mod 0 | mod 1 | mod 2 | mod med | Δ | Verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Resize Image | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 0 | — | (quantization) |
+| Frame Creation | 14 | 14 | 14 | 14 | 15 | 16 | 16 | 16 | +2 | **regression** |
+| Tracking | 50 | 48 | 51 | 50 | 67 | 68 | 70 | 68 | +18 (+36%) | **regression** |
+| — Track Ref | 27 | 27 | 27 | 27 | 28 | 30 | 29 | 29 | +2 | **regression** |
+| — Pose Optimization | 1 | 1 | 1 | 1 | 7 | 7 | 7 | 7 | +6 (7×) | **regression** |
+| — Track Local Map | 16 | 16 | 17 | 16 | 23 | 24 | 24 | 24 | +8 (+50%) | **regression** |
+| Grab Image Monocular | 66 | 65 | 68 | 66 | 85 | 87 | 88 | 87 | +21 (+32%) | **regression** |
+| LM: Create NewMap Points | 51 | 50 | 51 | 51 | 51 | 52 | 52 | 52 | +1 | within noise |
+| LM: Search in Neighbors | 25 | 24 | 24 | 24 | 24 | 23 | 26 | 24 | 0 | within noise |
+| LM: Local Bundle Adjustment | 56 | 49 | 58 | 56 | 71.5 | 71 | 73.5 | 71.5 | +15 (+28%) | **regression** |
+| LM: Local Mapping (total) | 155 | 144 | 149 | 149 | 168 | 168 | 176.5 | 168 | +19 (+13%) | **regression** |
+| Slow frames (n) | 1 | 0 | 0 | 0 | 1 | 2 | 0 | 1 | +1 | (minor) |
+| Wall clock (s) | 100.0 | 100.0 | 100.1 | 100.0 | 120.0 | 130.0 | 130.0 | 130.0 | +30 | **regression** |
+
+Guardrails: losses 0/0/0 (=); ATE RMSE [mm] van 5.5–7.4 vs mod 4.3–5.5 (fine); KFs van 70–72 vs
+mod 66–73 (fine) — the regression is purely speed, not accuracy.
+
+Notes / diagnosis: g2o's OpenMP support spawns a full default-width (28-thread) team on **every**
+`buildSystem` call. `PoseOptimization` makes ~40 such calls per frame (4 passes × 10 LM
+iterations) on graphs of only a few hundred edges — team-spawn overhead is far larger than the
+work being parallelized, hence 1 → 7 ms. LBA's graphs are bigger but still lose (+28%): on top of
+team-spawn cost, `G2O_OPENMP` turns g2o's `openmp_mutex` into a *real* `omp_lock` (adding lock
+traffic throughout the graph structures) and the two SLAM threads' OpenMP pools now fight each
+other and the tracking thread for the same 28 cores — visible as collateral damage in stages that
+don't even use g2o (`Frame Creation` +2 ms, `Track Ref` +2 ms).
+
+**Verdict: revert (done — flag off, cache entry cleared, rebuild verified GOMP-free; branch left
+uncommitted).** A salvageable variant would cap the team size (e.g. 4 threads) and enable it for
+LBA only — but that's a tuning knob, which this tier explicitly excludes; parked as a possible
+follow-up experiment after the bit-exact items land. The vendored CMakeLists flag-ordering bug
+(OpenMP flags appended after `g2o_CXX_FLAGS` is consumed) is independently worth fixing in the
+g2o fork so the option isn't silently inert for the next person.
+
 ## 2026-08-16 — perf/m1-allocator — mimalloc v2.4.5 linked as process allocator (addendum M1)
 
 Change: `Thirdparty/mimalloc` submodule (pinned v2.4.5), built shared-only, linked **first** into
