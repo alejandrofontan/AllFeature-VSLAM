@@ -176,6 +176,42 @@ Notes: <anomalies, first-run effects, anything that qualifies the numbers>
 
 <!-- Results entries go below this line -->
 
+## 2026-08-16 — perf/m1-allocator — mimalloc v2.4.5 linked as process allocator (addendum M1)
+
+Change: `Thirdparty/mimalloc` submodule (pinned v2.4.5), built shared-only, linked **first** into
+the three executables so `libmimalloc.so.2` precedes libc in symbol lookup and interposes
+malloc/free for the whole process (verified: first `NEEDED` entry + `MIMALLOC_VERBOSE=1` banner).
+Zero source-code change. Vanilla columns reused from the same-day baseline below (same tree,
+measured minutes before branching; machine state unchanged, swap 0B in both halves).
+
+| Metric (median ms) | van 0 | van 1 | van 2 | van med | mod 0 | mod 1 | mod 2 | mod med | Δ | Verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Resize Image | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 | unchanged |
+| Frame Creation | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 0 | unchanged |
+| Tracking | 52 | 51 | 50 | 51 | 48 | 49 | 49 | 49 | −2 (−4%) | **improvement** |
+| — Track Ref | 27 | 27 | 27 | 27 | 27 | 27 | 27 | 27 | 0 | unchanged |
+| — Pose Optimization | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 | unchanged |
+| — Track Local Map | 18 | 18 | 16 | 18 | 15 | 15 | 15 | 15 | −3 (−17%) | **improvement** |
+| Grab Image Monocular | 69 | 68 | 67 | 68 | 65 | 65.5 | 65 | 65 | −3 (−4%) | **improvement** |
+| LM: Create NewMap Points | 51 | 51 | 51 | 51 | 52 | 49 | 51 | 51 | 0 | within noise |
+| LM: Search in Neighbors | 27 | 28 | 25 | 27 | 23 | 24 | 23 | 23 | −4 (−15%) | **improvement** |
+| LM: Local Bundle Adjustment | 88.5 | 88 | 84 | 88 | 47 | 47 | 45 | 47 | −41 (−47%) | **improvement** |
+| LM: Local Mapping (total) | 190 | 194 | 185 | 190 | 143 | 141 | 141 | 141 | −49 (−26%) | **improvement** |
+| Slow frames (n) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | — | unchanged |
+| Wall clock (s) | 110.0 | 110.0 | 100.0 | 110.0 | 100.0 | 100.0 | 100.0 | 100.0 | −10 | improvement* |
+
+Guardrails: losses 0/0/0 (=); ATE RMSE [mm] van 4.32–6.56 vs mod 3.98–6.57 (same spread); KFs
+van 68–76 vs mod 67–74 (overlapping). All pass.
+
+Notes: the headline is **Local Bundle Adjustment −47%** (88 → 47 ms median) — g2o's per-edge/
+per-vertex heap churn plus cross-thread allocator contention with tracking was evidently the
+dominant hidden cost of LBA. `Track Local Map` −17% (the descriptor-clone/`cv::Mat push_back`
+path) and `Search in Neighbors` −15% follow the same pattern: the allocation-heaviest stages
+gained the most, while compute-bound stages (`Track Ref` brute-force matching, `Frame Creation`)
+are exactly unchanged — consistent with a pure allocator effect and no behavior change.
+(*) Wall clock is quantized (~10 s steps: 110.0/110.0/100.0 → 100.0×3) — read it as "dropped one
+quantum", not a precise −10 s. Verdict: **keep**; M1 lands as the new baseline for later items.
+
 ## 2026-08-16 — branch `dev` — Vanilla reference (no modification)
 
 First end-to-end execution of this protocol; establishes the initial baseline and validates the

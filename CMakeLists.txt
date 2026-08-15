@@ -100,6 +100,17 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/PoseLib ${CMAKE_BINARY_DIR}/po
 # suppress diagnostics for the third-party target only so -Werror can't break it.
 target_compile_options(PoseLib PRIVATE -w)
 
+# ---- mimalloc (drop-in allocator, issue #13 addendum M1) ----
+# Must be the SHARED library, linked FIRST into each executable: libmimalloc.so then appears
+# before libc in the process's symbol lookup order, so its malloc/free interpose for every
+# shared library in the process (OpenCV, torch, this project). A static mimalloc linked into a
+# non-exporting executable would only cover the executable's own allocations.
+set(MI_BUILD_STATIC OFF CACHE BOOL "" FORCE)
+set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
+set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/mimalloc ${CMAKE_BINARY_DIR}/mimalloc)
+target_compile_options(mimalloc PRIVATE -w)
+
 # Dependencies
 find_package(OpenCV REQUIRED )
 find_package(Eigen3  REQUIRED NO_MODULE)
@@ -157,14 +168,15 @@ target_link_libraries(${PROJECT_NAME}
 
 
 # Example executables
+# mimalloc must stay FIRST in each executable's link line (see the mimalloc section above).
 add_executable(vslamlab_allfeature_mono src/vslamlab_allfeature_mono.cpp)
-target_link_libraries(vslamlab_allfeature_mono ${PROJECT_NAME})
+target_link_libraries(vslamlab_allfeature_mono mimalloc ${PROJECT_NAME})
 
 add_executable(vslamlab_allfeature_mono_stream src/vslamlab_allfeature_mono_stream.cpp)
-target_link_libraries(vslamlab_allfeature_mono_stream ${PROJECT_NAME})
+target_link_libraries(vslamlab_allfeature_mono_stream mimalloc ${PROJECT_NAME})
 
 add_executable(vslamlab_allfeature_rgbd src/vslamlab_allfeature_rgbd.cpp)
-target_link_libraries(vslamlab_allfeature_rgbd ${PROJECT_NAME})
+target_link_libraries(vslamlab_allfeature_rgbd mimalloc ${PROJECT_NAME})
 
 # Install targets and headers
 install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mono_stream vslamlab_allfeature_rgbd

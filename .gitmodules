@@ -13,3 +13,6 @@
 [submodule "Thirdparty/PoseLib"]
 	path = Thirdparty/PoseLib
 	url = https://github.com/PoseLib/PoseLib.git
+[submodule "Thirdparty/mimalloc"]
+	path = Thirdparty/mimalloc
+	url = https://github.com/microsoft/mimalloc.git
