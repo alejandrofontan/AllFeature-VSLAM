@@ -893,8 +893,8 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
 
 Descriptor_Distance_Type FeatureMatcher::descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_)
 {
-    std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType_);
-    return ft->descriptor_distance(a,b);
+    const AF_VSLAM::Feature& ft = get_feature(featureType_);
+    return ft.descriptor_distance(a,b);
 }
 
 void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType) {
@@ -1007,8 +1007,8 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
     std::vector<cv::DMatch> FeatureMatcher::match_descriptors_only(
         const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& featType_){
 
-        std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featType_);
-        const MatcherType matcherType = ft->getMatcherType();
+        const AF_VSLAM::Feature& ft = get_feature(featType_);
+        const MatcherType matcherType = ft.getMatcherType();
 
         std::vector<cv::DMatch> matches;
         switch(matcherType) {
@@ -1050,8 +1050,8 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
         const FeatureType& featType_){
 
-        std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featType_);
-        const MatcherType matcherType = ft->getMatcherType();
+        const AF_VSLAM::Feature& ft = get_feature(featType_);
+        const MatcherType matcherType = ft.getMatcherType();
 
         std::vector<cv::DMatch> matches;
         switch(matcherType) {

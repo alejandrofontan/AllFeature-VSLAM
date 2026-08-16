@@ -1,5 +1,8 @@
 #include "Feature_orb32.h"
 
+#include <cstdint>
+#include <cstring>
+
 // Implementation details private to ORB descriptor/orientation computation -- moved here from
 // Feature_orb32.h (where they were `static` free functions defined directly in the header) since
 // nothing outside this translation unit uses them; leaving them in the header meant every other
@@ -357,22 +360,7 @@ static int bit_pattern_31_[256*4] =
 };
 
 float AF_VSLAM::Orb32::descriptor_distance(const cv::Mat &a, const cv::Mat &b) const {
-    // Bit set count operation from
-    // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
-    const int *pa = a.ptr<int32_t>();
-    const int *pb = b.ptr<int32_t>();
-
-    int dist=0;
-
-    for(int i=0; i<8; i++, pa++, pb++)
-    {
-        unsigned  int v = *pa ^ *pb;
-        v = v - ((v >> 1) & 0x55555555);
-        v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
-        dist += (((v + (v >> 4)) & 0xF0F0F0F) * 0x1010101) >> 24;
-    }
-
-    return Descriptor_Distance_Type(dist);
+    return AF_VSLAM::DescriptorDistance_orb32(a, b);
 }
 
 AF_VSLAM::FeatureExtractor_orb32::FeatureExtractor_orb32(std::shared_ptr<FeatureExtractorSettings> &settings_):
@@ -483,19 +471,18 @@ float AF_VSLAM::FeatureExtractor_orb32::GetKeypointSize(const cv::KeyPoint& keyp
 }
 
 float AF_VSLAM::DescriptorDistance_orb32(const cv::Mat &a, const cv::Mat &b){
-    // Bit set count operation from
-    // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
-    const int *pa = a.ptr<int32_t>();
-    const int *pb = b.ptr<int32_t>();
+    // Hardware POPCNT over 4x 64-bit words (bit-identical to the former 32-bit SWAR loop;
+    // memcpy because descriptor rows carry no 8-byte alignment guarantee).
+    const uint8_t* pa = a.ptr<uint8_t>();
+    const uint8_t* pb = b.ptr<uint8_t>();
 
-    int dist=0;
-
-    for(int i=0; i<8; i++, pa++, pb++)
+    int dist = 0;
+    for(int w = 0; w < 4; w++)
     {
-        unsigned  int v = *pa ^ *pb;
-        v = v - ((v >> 1) & 0x55555555);
-        v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
-        dist += (((v + (v >> 4)) & 0xF0F0F0F) * 0x1010101) >> 24;
+        uint64_t va, vb;
+        std::memcpy(&va, pa + 8 * w, 8);
+        std::memcpy(&vb, pb + 8 * w, 8);
+        dist += __builtin_popcountll(va ^ vb);
     }
 
     return Descriptor_Distance_Type(dist);

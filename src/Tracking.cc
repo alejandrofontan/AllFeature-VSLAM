@@ -1541,8 +1541,8 @@ shared_ptr<FeatureExtractor> Tracking::getFeatureExtractor(const int& scaleNumFe
     shared_ptr<FeatureExtractorSettings> extractorSettings = make_shared<FeatureExtractorSettings>(featureType, featureSettingsYamlFile);
     extractorSettings->maxNumFeatures *= scaleNumFeaturesMonocular_;
 
-    std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType);
-    return ft->createExtractor(extractorSettings);
+    const AF_VSLAM::Feature& ft = get_feature(featureType);
+    return ft.createExtractor(extractorSettings);
 }
 
 void Tracking::getGrayImage(cv::Mat& im , const bool& rgb){

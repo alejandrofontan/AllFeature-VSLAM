@@ -23,15 +23,15 @@ void AF_VSLAM::printError(const std::string& function, const std::string& messag
 }
 
 std::string AF_VSLAM::featureName(const FeatureType& featureType){
-    std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType);
-    return ft->getFeatureName();
+    const AF_VSLAM::Feature& ft = get_feature(featureType);
+    return ft.getFeatureName();
 }
 
 cv::Scalar AF_VSLAM::getFeatureColor(const FeatureType& featureType, const int& format, const bool& normalize){
 
     Eigen::Matrix<float,3,1> color{0,0,0};
-    std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType);
-    color = ft->getColor();
+    const AF_VSLAM::Feature& ft = get_feature(featureType);
+    color = ft.getColor();
 
     if (normalize){
         color /= 255.0f;

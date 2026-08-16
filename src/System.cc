@@ -72,8 +72,8 @@ System::System(const string &vocabularyFolder,
     // Feature settings yaml file
     std::map<FeatureType, string> feature_settings_yaml_file;
     for (const auto& featureType : featureTypes){
-        std::unique_ptr<AF_VSLAM::Feature> ft = get_feature(featureType);
-        feature_settings_yaml_file[featureType] = ft->getSettingsYamlFile();
+        const AF_VSLAM::Feature& ft = get_feature(featureType);
+        feature_settings_yaml_file[featureType] = ft.getSettingsYamlFile();
     }
 
     // Initialize matching thresholds

@@ -40,7 +40,7 @@ void AF_VSLAM::Vocabulary::createVocabulary(){
         }
         case FEAT_ALIKED128:
         case FEAT_SUPERPOINT256:
-            AF_ERROR("[Vocabulary] createVocabulary: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType)->getFeatureName());
+            AF_ERROR("[Vocabulary] createVocabulary: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType).getFeatureName());
             return;
     }
 }
@@ -85,7 +85,7 @@ bool AF_VSLAM::Vocabulary::loadFromTextFile(){
             return orbVocabulary->loadFromTextFile(vocabulary_path);
         }
         default:
-            AF_ERROR("[Vocabulary] loadFromTextFile: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType)->getFeatureName());
+            AF_ERROR("[Vocabulary] loadFromTextFile: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType).getFeatureName());
             return false;
     }
 }
@@ -106,7 +106,7 @@ unsigned int AF_VSLAM::Vocabulary::size(){
         case FEAT_ORB32:
             return orbVocabulary->size();
         default:
-            AF_ERROR("[Vocabulary] size: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType)->getFeatureName());
+            AF_ERROR("[Vocabulary] size: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType).getFeatureName());
             return 0;
     }
 }
@@ -127,7 +127,7 @@ double AF_VSLAM::Vocabulary::score(const DBoW2::BowVector &BowVec_1, const DBoW2
         case FEAT_ORB32:
             return orbVocabulary->score(BowVec_1, BowVec_2);
         default:
-            AF_ERROR("[Vocabulary] score: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType)->getFeatureName());
+            AF_ERROR("[Vocabulary] score: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType).getFeatureName());
             return 0.0;
     }
 }
@@ -168,7 +168,7 @@ void AF_VSLAM::Vocabulary::transform(
         }
         case FEAT_ALIKED128:
         case FEAT_SUPERPOINT256:
-            AF_ERROR("[Vocabulary] transform: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType)->getFeatureName());
+            AF_ERROR("[Vocabulary] transform: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType).getFeatureName());
             return;
     }
 }

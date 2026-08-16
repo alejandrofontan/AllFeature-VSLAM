@@ -654,7 +654,7 @@ vector<size_t> KeyFrame::get_features_in_area(const float &x, const float &y, co
     {
         for(int iy = nMinCellY; iy<=nMaxCellY; iy++)
         {
-            const vector<size_t> vCell = mGrid.at(featType)[ix][iy];
+            const vector<size_t>& vCell = mGrid.at(featType)[ix][iy];
             for(size_t j=0, jend=vCell.size(); j<jend; j++)
             {
                 const cv::KeyPoint &kpUn = keypoints.at(featType)[vCell[j]];

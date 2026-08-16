@@ -316,7 +316,7 @@ vector<size_t> Frame::get_features_in_area(const float &x, const float  &y, cons
     {
         for(int iy = nMinCellY; iy<=nMaxCellY; iy++)
         {
-            const vector<size_t> vCell = mGrid.at(featType)[ix][iy];
+            const vector<size_t>& vCell = mGrid.at(featType)[ix][iy];
             if(vCell.empty())
                 continue;
 
