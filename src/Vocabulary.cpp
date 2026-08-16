@@ -7,6 +7,8 @@
 #include "FeatureFactory.h"
 #include "afvslam_log.hpp"
 
+#include <atomic>
+
 AF_VSLAM::Vocabulary::Vocabulary(const string vocabularyFolder, const FeatureType featureType):
         featureType(featureType), vocabularyFolder(vocabularyFolder)
 {}
@@ -167,9 +169,30 @@ void AF_VSLAM::Vocabulary::transform(
             return;
         }
         case FEAT_ALIKED128:
-        case FEAT_SUPERPOINT256:
-            AF_ERROR("[Vocabulary] transform: no DBoW2 vocabulary support yet for feature type " + get_feature(featureType).getFeatureName());
+        case FEAT_SUPERPOINT256: {
+            // No BoW for learned features — expected when running vocabulary-less (see
+            // Vocabulary::isSupported). Warn once instead of erroring per keyframe.
+            static std::atomic<bool> warned{false};
+            if (!warned.exchange(true))
+                AF_WARN("[Vocabulary] transform: no DBoW2 vocabulary for "
+                        + get_feature(featureType).getFeatureName()
+                        + " — BoW vectors stay empty (loop closing / BoW relocalization inactive)");
             return;
+        }
+    }
+}
+
+bool AF_VSLAM::Vocabulary::isSupported() const {
+    switch (featureType) {
+        case FEAT_SIFT128:
+        case FEAT_KAZE64:
+        case FEAT_SURF64:
+        case FEAT_BRISK48:
+        case FEAT_AKAZE61:
+        case FEAT_ORB32:
+            return true;
+        default:
+            return false;
     }
 }
 

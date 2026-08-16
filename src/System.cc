@@ -52,11 +52,21 @@ System::System(const string &vocabularyFolder,
 
     //Load ORB Vocabulary
     vocabulary = make_shared<Vocabulary>(vocabularyFolder, featureTypes[0]);
-    vocabulary->createVocabulary();
-    bool vocabularyLoaded = vocabulary->loadFromTextFile();
-    if(!vocabularyLoaded){
-        AF_ERROR("[System] Vocabulary loading failed");
-        terminate();
+    if(vocabulary->isSupported()){
+        vocabulary->createVocabulary();
+        bool vocabularyLoaded = vocabulary->loadFromTextFile();
+        if(!vocabularyLoaded){
+            AF_ERROR("[System] Vocabulary loading failed");
+            terminate();
+        }
+    }
+    else{
+        // No DBoW2 vocabulary exists for this feature type (learned features): run without
+        // BoW — the loop-closing thread is not started below, and BoW relocalization can
+        // never find candidates. A tracking loss is therefore unrecoverable in this mode.
+        AF_WARN("[System] No DBoW2 vocabulary for feature type '"
+                + featureName(featureTypes[0])
+                + "' — running WITHOUT loop closing and WITHOUT BoW relocalization");
     }
 
     //Create KeyFrame Database
@@ -93,11 +103,15 @@ System::System(const string &vocabularyFolder,
     localMapper = make_shared<LocalMapping>(mpMap, mSensor==MONOCULAR, featureTypes, tracker->get_image_width(), tracker->get_image_height());
     mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::Run, localMapper);
 
-    //Initialize the Loop Closing thread and launch
+    //Initialize the Loop Closing thread and launch. Without vocabulary support the object
+    //is still constructed (other threads hold pointers to it and enqueue keyframes) but its
+    //thread never starts: LoopClosing's constructor leaves mbFinished=true, so Shutdown()'s
+    //isFinished()/isRunningGBA() waits pass immediately.
     loopCloser =  make_shared<LoopClosing>(mpMap, mpKeyFrameDatabase, vocabulary, mSensor!=MONOCULAR,
         featureTypes[featureLoopClosure], featureTypes,
         tracker->get_image_width(), tracker->get_image_height());
-    mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::Run, loopCloser);
+    if(vocabulary->isSupported())
+        mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::Run, loopCloser);
 
     //Initialize the Viewer thread and launch
     if(activateVisualization)

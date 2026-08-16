@@ -26,6 +26,11 @@ namespace AF_VSLAM {
         std::shared_ptr<Akaze61Vocabulary> akaze61Vocabulary;
         std::shared_ptr<OrbVocabulary> orbVocabulary;
 
+        // Whether a DBoW2 vocabulary exists for this feature type. False for the learned
+        // features (aliked128, superpoint256): the system then runs without BoW — no loop
+        // closing and no BoW relocalization (see System's constructor gate).
+        bool isSupported() const;
+
         void createVocabulary();
         bool loadFromTextFile();
         unsigned int size();
