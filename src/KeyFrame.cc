@@ -721,9 +721,12 @@ float KeyFrame::ComputeSceneMedianDepth(const int q)
             }
         }
     }
-    sort(vDepths.begin(),vDepths.end());
+    // nth_element places exactly the element sort() would put at this position — O(n) not
+    // O(n log n), and this runs once per covisible neighbor in CreateNewMapPoints.
+    const size_t nth = (vDepths.size()-1)/q;
+    nth_element(vDepths.begin(), vDepths.begin() + nth, vDepths.end());
 
-    return vDepths[(vDepths.size()-1)/q];
+    return vDepths[nth];
 }
 
     float KeyFrame::GetKeyPtSize(const KeypointIndex &keyPtIdx, const FeatureType& featType) const {

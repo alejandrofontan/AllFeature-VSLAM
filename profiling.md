@@ -176,6 +176,48 @@ Notes: <anomalies, first-run effects, anything that qualifies the numbers>
 
 <!-- Results entries go below this line -->
 
+## 2026-08-16 — M2-copies — copy/allocation elimination batch (addendum M2 remainder)
+
+Change (value-exact batch): (a) `MapPoint::get_descriptor()` returns a shared `cv::Mat` header
+instead of `clone()` — audited safe: `mDescriptor` is only rebound under its mutex, never written
+in place; (b) `Frame`'s copy constructor shares descriptor buffers instead of `copyTo`
+(~0.6 MB/frame off `lastFrame = Frame(currentFrame)`; `KeyFrame` clones its own copy explicitly);
+(c) `match_map_points_to_frame` builds both descriptor matrices two-pass into preallocated Mats
+(no `cv::Mat::push_back` whole-matrix regrowth); (d) rotation histogram reuses a `thread_local`
+buffer — **inert on this benchmark** (only caller is `SearchByProjection`, reloc-only; zero
+losses here), kept for lost-mode/reloc-storm scenarios; (e) `ComputeSceneMedianDepth` uses
+`nth_element` (same element, O(n)). Full `Frame` move semantics evaluated and rejected:
+`currentFrame` is read after the `lastFrame` assignment, so a move would change behavior.
+Parity harness after changes: 25/25 PASS.
+
+| Metric (median ms) | van 0 | van 1 | van 2 | van med | mod 0 | mod 1 | mod 2 | mod med | Δ | Verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Resize Image | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 | unchanged |
+| Frame Creation | 14 | 14 | 15 | 14 | 15 | 15 | 14 | 15 | +1 | within noise |
+| Tracking | 37 | 37 | 38 | 37 | 37 | 36 | 37 | 37 | 0 | unchanged |
+| — Track Ref | 23 | 23 | 23 | 23 | 23 | 23 | 23 | 23 | 0 | unchanged |
+| — Pose Optimization | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 | unchanged |
+| — Track Local Map | 10 | 11 | 11 | 11 | 11 | 9 | 10 | 10 | −1 | within noise (borderline) |
+| Grab Image Monocular | 55 | 56 | 56 | 56 | 55 | 54 | 55 | 55 | −1 | within noise (borderline) |
+| LM: Create NewMap Points | 34 | 34 | 34 | 34 | 33 | 33 | 33 | 33 | −1 (−3%) | **improvement** |
+| LM: Search in Neighbors | 21 | 23 | 22 | 22 | 19 | 17 | 20 | 19 | −3 (−14%) | **improvement** |
+| LM: Local Bundle Adjustment | 62 | 61 | 60 | 61 | 62 | 56 | 59 | 59 | −2 | **improvement** (noisy) |
+| LM: Local Mapping (total) | 134 | 134 | 136.5 | 134 | 131.5 | 120 | 129 | 129 | −5 (−4%) | **improvement** |
+| Slow frames (n) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | — | unchanged |
+| Wall clock (s) | 80.0 | 80.0 | 80.0 | 80.0 | 80.0 | 80.0 | 80.0 | 80.0 | 0 | unchanged |
+
+Guardrails: losses 0/0/0 (=); KFs van 65–69 vs mod 66–71 (fine); ATE RMSE [mm] van 4.2–4.9 vs
+mod 4.9–6.2 — mod run 1 (6.2) sits above this cycle's unusually tight vanilla range but well
+inside the session's historical run-to-run spread (4.0–7.4 across all cycles today), so treated
+as ordinary variance rather than a change signal; all changes are value-exact by construction.
+
+Notes: the win concentrates exactly where the clones lived — `Search in Neighbors` −14% (fuse
+calls `get_descriptor()` per candidate map point per target keyframe) with smaller gains in
+`Create NewMap Points` and LBA; the tracking thread was already lean here after P2/L1, so
+`match_map_points_to_frame`'s prealloc shows only as the borderline TLM/Grab drift. Verdict:
+**keep**. Local-mapping cycle is now 190 → 129 ms (−32%) cumulative across M1/P2/L1/M2, tracking
+51 → 37 ms (−27%), wall 110 → 80 s.
+
 ## 2026-08-16 — L1-singletons — factory singletons + hardware popcount + grid-cell refs
 
 Change (bit-exact batch): (a) `get_feature()` returns `const Feature&` to 8 function-local

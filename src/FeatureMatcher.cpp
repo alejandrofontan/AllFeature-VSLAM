@@ -234,20 +234,27 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
     map<FeatureType, vector<size_t>> pt_idx, frame_idx;
     map<FeatureType, cv::Mat> desc_pts, desc_frame;
 
-    // Collect valid map points grouped by feature type
+    // Collect valid map points grouped by feature type. Two passes — indices first, then
+    // rows into a preallocated matrix: cv::Mat::push_back reallocates and re-copies the
+    // whole matrix as it grows, which at local-map size dominated this collection step.
     for (size_t idx = 0; idx < map_pts.size(); idx++) {
         const auto& pt = map_pts[idx];
         if (!pt || pt->is_bad())
             continue;
 
-        const FeatureType ft = pt->featureType;
-        pt_idx[ft].push_back(idx);
-        desc_pts[ft].push_back(pt->get_descriptor());
+        pt_idx[pt->featureType].push_back(idx);
+    }
+    for (const auto& [ft, idxs] : pt_idx) {
+        const cv::Mat first = map_pts[idxs[0]]->get_descriptor();
+        cv::Mat& d = desc_pts[ft];
+        d.create(static_cast<int>(idxs.size()), first.cols, first.type());
+        for (size_t k = 0; k < idxs.size(); k++)
+            map_pts[idxs[k]]->get_descriptor().copyTo(d.row(static_cast<int>(k)));
     }
 
     int num_matches = 0;
     for (const auto& [ft, N]: frame.N) {
-        // Collect unmatched frame keypoints grouped by feature type
+        // Collect unmatched frame keypoints grouped by feature type (same two-pass shape)
         const auto& pts_ft  = frame.pts.at(ft);
         const auto& desc_ft = frame.descriptors.at(ft);
         frame_idx[ft].reserve(N);
@@ -257,7 +264,12 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
                 continue;
 
             frame_idx[ft].push_back(i);
-            desc_frame[ft].push_back(desc_ft.row(i));
+        }
+        if (!frame_idx[ft].empty()) {
+            cv::Mat& d = desc_frame[ft];
+            d.create(static_cast<int>(frame_idx[ft].size()), desc_ft.cols, desc_ft.type());
+            for (size_t k = 0; k < frame_idx[ft].size(); k++)
+                desc_ft.row(static_cast<int>(frame_idx[ft][k])).copyTo(d.row(static_cast<int>(k)));
         }
 
         // Skip feature types with no descriptors on either side
@@ -806,7 +818,7 @@ int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const 
     // Rotation Histogram (to check rotation consistency)
     int nMatches{0};
     float rotFactor{};
-    vector<vector<int>> rotHist = initRotationHistogram(rotFactor,HISTO_LENGTH);
+    vector<vector<int>>& rotHist = initRotationHistogram(rotFactor,HISTO_LENGTH);
 
     const vector<Pt> vpMPs = pKF->get_map_point_matches(featType);
 
@@ -913,10 +925,13 @@ void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_setti
     AF_CONFIG_END();
 }
 
-vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, const int& histLength){
-    vector<vector<int>> rotHist(histLength);
-    for(int i = 0; i < histLength; i++)
-        rotHist[i].reserve(500);
+vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, const int& histLength){
+    // Reused thread-local buffer: the old per-call construction allocated histLength
+    // vectors (each reserve(500)) on every SearchByProjection invocation.
+    static thread_local vector<vector<int>> rotHist;
+    rotHist.resize(histLength);
+    for(auto& bin : rotHist)
+        bin.clear();   // keeps each bin's capacity across calls
     rotFactor = 1.0f / static_cast<float>(histLength);
     return rotHist;
 }

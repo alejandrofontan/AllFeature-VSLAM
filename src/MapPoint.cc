@@ -354,7 +354,10 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
 cv::Mat MapPoint::get_descriptor()
 {
     unique_lock<mutex> lock(mMutexFeatures);
-    return mDescriptor.clone();
+    // Shared header, not a clone: mDescriptor is only ever REBOUND under this mutex
+    // (ctor fills it once; ComputeDistinctiveDescriptors assigns a fresh clone), never
+    // written in place — so an outstanding shared view stays valid and immutable.
+    return mDescriptor;
 }
 
 int MapPoint::GetIndexInKeyFrame(Keyframe keyframe)

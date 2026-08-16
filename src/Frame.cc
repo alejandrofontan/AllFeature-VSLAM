@@ -65,11 +65,15 @@ Frame::Frame(const Frame &frame)
             for(int j=0; j<FRAME_GRID_ROWS; j++)
                 mGrid[ft][i][j] = frame.mGrid.at(ft)[i][j];
 
+    // Shared headers, not deep copies (~0.6 MB/frame saved on lastFrame = Frame(currentFrame)):
+    // a Frame's descriptor matrices are only ever rebound at construction, never written in
+    // place afterwards, and KeyFrame's constructor clones its own copy explicitly — so copies
+    // of a Frame can safely alias the source buffers.
     for (auto const& [featType, desc] : frame.descriptors){
-            desc.copyTo(descriptors[featType]);
+            descriptors[featType] = desc;
     }
     for (auto const& [featType, desc] : frame.descriptorsRight){
-            desc.copyTo(descriptorsRight[featType]);
+            descriptorsRight[featType] = desc;
     }
 
     if(frame.Tcw(3,3) == 1.0f)

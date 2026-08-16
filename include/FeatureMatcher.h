@@ -156,7 +156,8 @@ public:
 protected:
 
     string name{};
-    static vector<vector<int>> initRotationHistogram(float& rotFactor, const int& histLength);
+    // Returns a reused thread-local buffer, cleared per call — do not hold across calls.
+    static vector<vector<int>>& initRotationHistogram(float& rotFactor, const int& histLength);
     static void updateRotationHistogram(vector<vector<int>>& rotHist,
                                         const KeypointIndex& idx,
                                         const cv::KeyPoint& keyPt, const cv::KeyPoint& refKeyPt,
