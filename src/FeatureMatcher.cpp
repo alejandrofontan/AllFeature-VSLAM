@@ -450,7 +450,21 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector
     int n_fused = 0;
     const auto& kps_ft  = keyframe->keypoints.at(feat_type);
     const auto& desc_ft = keyframe->descriptors.at(feat_type);
-    for (const auto& pt : map_pts) {
+
+    // Phase A (issue #13 P45): the per-point search — projection, visibility checks, and
+    // best-descriptor lookup — reads only immutable keyframe data (keypoints, descriptors,
+    // grid; pose snapshotted above) and the point's own state, so it parallelizes. All map
+    // MUTATION happens in phase B below, serially in the original order. One bounded
+    // deviation from strict serial order: a candidate's descriptor search sees its pre-call
+    // descriptor even if an earlier fuse in this same call updated it via replace() (rare
+    // shared-point corner — same information-freshness class as the concurrent cross-thread
+    // descriptor updates that already exist).
+    struct FuseCandidate { int best_idx{-1}; Descriptor_Distance_Type best_dist{}; };
+    std::vector<FuseCandidate> fuse_cand(map_pts.size());
+
+    #pragma omp parallel for schedule(dynamic, 64)
+    for (int iPt = 0; iPt < static_cast<int>(map_pts.size()); iPt++) {
+        const auto& pt = map_pts[iPt];
         if (!pt)
             continue;
 
@@ -519,23 +533,41 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector
             }
         }
 
-        // Fuse: replace weaker map point or add new observation
         if (best_dist <= th_low) {
-            Pt existing_pt = keyframe->get_map_point(best_idx, feat_type);
-            if (existing_pt) {
-                if (!existing_pt->is_bad()) {
-                    if (existing_pt->number_of_observations() > pt->number_of_observations())
-                        pt->replace(existing_pt);
-                    else
-                        existing_pt->replace(pt);
-                }
-            }
-            else {
-                pt->add_observation(keyframe, best_idx);
-                keyframe->add_map_point(pt, best_idx);
-            }
-            n_fused++;
+            fuse_cand[iPt].best_idx = best_idx;
+            fuse_cand[iPt].best_dist = best_dist;
         }
+    }
+
+    // Phase B — serial fuse in original order. The is_bad/is_in_keyframe re-check is what
+    // makes this equivalent to the former single loop: a replace() earlier in THIS loop can
+    // turn a later candidate bad or add it to the keyframe (points shared between the two
+    // keyframes appear both as candidates and as existing points) — the serial version saw
+    // that through its iteration order, so the state checks must be evaluated here, not in
+    // phase A.
+    for (size_t iPt = 0; iPt < map_pts.size(); iPt++) {
+        const int best_idx = fuse_cand[iPt].best_idx;
+        if (best_idx < 0)
+            continue;
+        const auto& pt = map_pts[iPt];
+        if (pt->is_bad() || pt->is_in_keyframe(keyframe))
+            continue;
+
+        // Fuse: replace weaker map point or add new observation
+        Pt existing_pt = keyframe->get_map_point(best_idx, feat_type);
+        if (existing_pt) {
+            if (!existing_pt->is_bad()) {
+                if (existing_pt->number_of_observations() > pt->number_of_observations())
+                    pt->replace(existing_pt);
+                else
+                    existing_pt->replace(pt);
+            }
+        }
+        else {
+            pt->add_observation(keyframe, best_idx);
+            keyframe->add_map_point(pt, best_idx);
+        }
+        n_fused++;
     }
 
     return n_fused;
