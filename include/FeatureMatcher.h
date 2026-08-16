@@ -171,8 +171,8 @@ protected:
     const Descriptor_Distance_Type highest_possible_distance{std::numeric_limits<Descriptor_Distance_Type>::max()};
 
     SiftMatchGPU sift_match_gpu_{};
-    cv::BFMatcher bf_matcher_hamming{cv::NORM_HAMMING, true};
-    cv::BFMatcher bf_matcher_L2{cv::NORM_L2, true};
+    // Brute-force matching now goes through BruteForceMatcher.h (issue #13 P2), which
+    // replicates the cv::BFMatcher(<norm>, crossCheck=true) semantics these members had.
     std::shared_ptr<matcher::LightGlue> matcher_lightglue;
     std::shared_ptr<torch::Device> torch_device;
     std::shared_ptr<SuperPointLightGlue> matcher_lightglue_superpoint;

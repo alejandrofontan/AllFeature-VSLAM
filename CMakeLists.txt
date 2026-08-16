@@ -30,6 +30,7 @@ set(SRCS_ALLFEATURE
         src/LocalMapping.cc
         src/LoopClosing.cc
         src/FeatureMatcher.cpp
+        src/BruteForceMatcher.cpp
         src/FrameDrawer.cc
         src/Converter.cc
         src/MapPoint.cc
@@ -177,6 +178,10 @@ target_link_libraries(vslamlab_allfeature_mono_stream mimalloc ${PROJECT_NAME})
 
 add_executable(vslamlab_allfeature_rgbd src/vslamlab_allfeature_rgbd.cpp)
 target_link_libraries(vslamlab_allfeature_rgbd mimalloc ${PROJECT_NAME})
+
+# Parity/benchmark harness for the brute-force matcher (issue #13 P2) — not installed.
+add_executable(test_bfmatcher_parity src/test_bfmatcher_parity.cpp)
+target_link_libraries(test_bfmatcher_parity mimalloc ${PROJECT_NAME})
 
 # Install targets and headers
 install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mono_stream vslamlab_allfeature_rgbd

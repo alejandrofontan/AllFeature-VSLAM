@@ -6,7 +6,10 @@
 #include <sstream>
 
 #include "afvslam_log.hpp"
+#include "BruteForceMatcher.h"
 #include "FeatureMatcher.h"
+
+#include <opencv2/core/utility.hpp>
 
 #include <PoseLib/robust.h>
 
@@ -31,6 +34,15 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
     feature_types(feature_types)
 {
     AF_INFO("Initializing FeatureMatcher: " + name);
+    {
+        // Diagnostic (issue #13 P2): record which parallel backend this OpenCV build runs,
+        // since descriptor-matching cost depends on it and conda builds vary.
+        const std::string info = cv::getBuildInformation();
+        const size_t p = info.find("Parallel framework");
+        AF_INFO("OpenCV threading: getNumThreads=" << cv::getNumThreads() << " | "
+                << (p == std::string::npos ? std::string("Parallel framework: (not reported)")
+                                           : info.substr(p, info.find('\n', p) - p)));
+    }
     for(const auto& feat_type : feature_types) {
         if (feat_type == FEAT_SIFT128) {
             AF_INFO("Initializing SiftMatchGPU...");
@@ -1003,7 +1015,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
             case LIGHTGLUE_SUPERPOINT:
             case LIGHTGLUE_ALIKED:
             case BF_L2:{
-                bf_matcher_L2.match(desc1, desc2, matches);
+                matches = bruteforce_match_l2(desc1, desc2);
                 break;
             }
             case LIGHTGLUE_SIFT:
@@ -1025,7 +1037,7 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
             }
             case BF_HAMMING:
             {
-                bf_matcher_hamming.match(desc1, desc2, matches);
+                matches = bruteforce_match_hamming(desc1, desc2);
                 break;
             }
         }
@@ -1056,12 +1068,12 @@ vector<vector<int>> FeatureMatcher::initRotationHistogram(float& rotFactor, cons
             }
             case BF_L2:
             {
-                bf_matcher_L2.match(desc1, desc2, matches);
+                matches = bruteforce_match_l2(desc1, desc2);
                 break;
             }
             case BF_HAMMING:
             {
-                bf_matcher_hamming.match(desc1, desc2, matches);
+                matches = bruteforce_match_hamming(desc1, desc2);
                 break;
             }
         }
