@@ -53,9 +53,14 @@ int main(int argc, char **argv)
     std::string path_to_vocabulary_folder("allfeature_vocabulary");
     bool fixImageSize = true;
 
-    // Online segmentation (segmentation.md): absent -> masks come from the
-    // offline rgb_csv mask column (or nowhere), exactly as before.
-    std::string segmentation_onnx;
+    // Online segmentation (segmentation.md): ON by default. Pass
+    // 'segmentation_onnx:none' to disable, or a path to use another model.
+    // If the DEFAULT model file is missing (fresh clone, export not run yet)
+    // the run degrades to no-mask with a warning; an explicitly given path
+    // that is missing is an error instead.
+    const std::string kDefaultSegmentationOnnx =
+        "segmentation_models/efficientvit-seg-l1-ade20k_512x512.onnx";
+    std::string segmentation_onnx{kDefaultSegmentationOnnx};
     std::string segmentation_classes;   // empty -> <segmentation_onnx>.classes.yaml
     std::string segmentation_precision{"fp16"};
 
@@ -188,6 +193,19 @@ int main(int argc, char **argv)
     // threads exist, and absorb the one-time lazy CUDA/TRT warmup (~70 ms)
     // here rather than on frame 0.
     std::unique_ptr<segmentation::TensorRTSeg> segmenter{};
+    if (segmentation_onnx == "none" || segmentation_onnx == "off")
+        segmentation_onnx.clear();
+    if (!segmentation_onnx.empty() && !std::ifstream(segmentation_onnx).good()) {
+        if (segmentation_onnx == kDefaultSegmentationOnnx) {
+            AF_WARN("Default segmentation model not found (" << segmentation_onnx
+                    << ") - running WITHOUT online segmentation; generate it with "
+                    << "Thirdparty/Segmentation-TensorRT/convert2onnx/export_efficientvit_seg.py");
+            segmentation_onnx.clear();
+        } else {
+            std::cerr << "segmentation_onnx not found: '" << segmentation_onnx << "'" << std::endl;
+            return 1;
+        }
+    }
     if (!segmentation_onnx.empty()) {
         segmenter = std::make_unique<segmentation::TensorRTSeg>(
             segmentation_onnx, segmentation_precision, segmentation_classes);

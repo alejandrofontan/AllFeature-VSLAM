@@ -93,6 +93,10 @@ DA3 code remains available at `a063c89` as a reference to consult, not to copy.)
    `segmentation_onnx:<path>`, `segmentation_classes:<path>` (default `<onnx>.classes.yaml`),
    `segmentation_precision:<fp16|fp32>` (default fp16). Segmenter constructed once at startup,
    next to where SuperPoint's engine spins up.
+   *(Revised 2026-08-17: `segmentation_onnx` now DEFAULTS to
+   `segmentation_models/efficientvit-seg-l1-ade20k_512x512.onnx` — online segmentation is ON
+   by default. `segmentation_onnx:none` disables it; a missing default model degrades to
+   no-mask with a warning, while an explicitly given missing path is a hard error.)*
 9. In the frame loop, exactly where `im.LoadMask(...)` runs today: if the segmenter exists →
    `im.mask = segmenter->inferMask(im.img)`; `Image`'s existing resize/crop then handles it like
    any offline mask. If **both** an offline mask column and `segmentation_onnx:` are present,
