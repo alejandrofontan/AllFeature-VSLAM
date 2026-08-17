@@ -18,9 +18,9 @@
 std::string AF_VSLAM::FrameDrawer::exp_folder{};
 
 void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
-                std::vector<std::string> &imageFilenames, std::vector<std::string> &maskFilenames,
+                std::vector<std::string> &imageFilenames,
                 std::vector<AF_VSLAM::Seconds> &timestamps,
-                const std::string cam_name = "rgb_0", const std::string mask_cam_name = "mask_0");
+                const std::string cam_name = "rgb_0");
 std::string paddingZeros(const std::string& number, const size_t numberOfZeros = 5);
 
 void removeSubstring(std::string& str, const std::string& substring) {
@@ -53,12 +53,13 @@ int main(int argc, char **argv)
     bool fixImageSize = true;
 
     // Online segmentation (segmentation.md): ON by default. Pass
-    // 'segmentation_onnx:none' to disable, or a path to use another model.
-    // If the DEFAULT model file is missing (fresh clone, export not run yet)
-    // the run degrades to no-mask with a warning; an explicitly given path
-    // that is missing is an error instead.
+    // 'segmentation:0' to disable, or 'segmentation_onnx:<path>' to use
+    // another model. If the DEFAULT model file is missing (fresh clone,
+    // export not run yet) the run degrades to no-mask with a warning; an
+    // explicitly given path that is missing is an error instead.
     const std::string kDefaultSegmentationOnnx =
         "segmentation_models/efficientvit-seg-l1-ade20k_512x512.onnx";
+    bool segmentation{true};
     std::string segmentation_onnx{kDefaultSegmentationOnnx};
     std::string segmentation_classes;   // empty -> <segmentation_onnx>.classes.yaml
     std::string segmentation_precision{"fp16"};
@@ -116,8 +117,15 @@ int main(int argc, char **argv)
             AF_CONFIG_FIELD("Path to vocabulary folder: ", path_to_vocabulary_folder);
             continue;
         }
-        // Order matters: "segmentation_onnx:" et al. share the "segmentation_"
-        // prefix, but hasPrefix matches the full key, so they cannot collide.
+        // "segmentation:" vs "segmentation_onnx:" et al. share a common stem,
+        // but hasPrefix matches the full key including ':'/'_', so they
+        // cannot collide.
+        if (hasPrefix(arg, "segmentation:")) {
+            removeSubstring(arg, "segmentation:");
+            segmentation = bool(std::stoi(arg));
+            AF_CONFIG_FIELD("Online segmentation: ", segmentation);
+            continue;
+        }
         if (hasPrefix(arg, "segmentation_onnx:")) {
             removeSubstring(arg, "segmentation_onnx:");
             segmentation_onnx = arg;
@@ -162,9 +170,8 @@ int main(int argc, char **argv)
 
     // Retrieve paths to images
     std::vector<std::string> imageFilenames{};
-    std::vector<std::string> maskFilenames{};
     std::vector<AF_VSLAM::Seconds> timestamps{};
-    LoadImages(sequence_path, rgb_csv, imageFilenames, maskFilenames, timestamps);
+    LoadImages(sequence_path, rgb_csv, imageFilenames, timestamps);
 
     size_t nImages = imageFilenames.size();
 
@@ -172,7 +179,7 @@ int main(int argc, char **argv)
     // threads exist, and absorb the one-time lazy CUDA/TRT warmup (~70 ms)
     // here rather than on frame 0.
     std::unique_ptr<segmentation::TensorRTSeg> segmenter{};
-    if (segmentation_onnx == "none" || segmentation_onnx == "off")
+    if (!segmentation)
         segmentation_onnx.clear();
     if (!segmentation_onnx.empty() && !std::ifstream(segmentation_onnx).good()) {
         if (segmentation_onnx == kDefaultSegmentationOnnx) {
@@ -192,9 +199,6 @@ int main(int argc, char **argv)
         AF_INFO("Online segmentation ready (engine "
                 << (segmenter->loadedFromCache() ? "cached" : "built") << ": "
                 << segmenter->enginePath() << ")");
-        if (!maskFilenames.empty())
-            AF_WARN("Both an offline mask column and segmentation_onnx are set - "
-                    "online segmentation wins, offline masks are ignored");
     }
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
@@ -206,7 +210,7 @@ int main(int argc, char **argv)
                                   featureTypes,
                                   fixImageSize);
 
-    SLAM.SetSequenceInfo(nImages, !maskFilenames.empty() || segmenter != nullptr);
+    SLAM.SetSequenceInfo(nImages, segmenter != nullptr);
 
     // Vector for tracking time statistics
     std::vector<AF_VSLAM::Seconds> vTimesTrack;
@@ -242,11 +246,8 @@ int main(int argc, char **argv)
             continue;
         }
 
-        if (segmenter) {
+        if (segmenter)
             im.mask = segmenter->inferMask(im.img);
-        } else if (!maskFilenames.empty()) {
-            im.LoadMask(maskFilenames[ni]);
-        }
 
         AF_VSLAM::Seconds tframe = timestamps[ni];
 
@@ -305,13 +306,12 @@ int main(int argc, char **argv)
 }
 
 void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
-                std::vector<std::string> &imageFilenames, std::vector<std::string> &maskFilenames,
+                std::vector<std::string> &imageFilenames,
                 std::vector<AF_VSLAM::Seconds> &timestamps,
-                const std::string cam_name, const std::string mask_cam_name)
+                const std::string cam_name)
 {
 
     imageFilenames.clear();
-    maskFilenames.clear();
     timestamps.clear();
 
     std::ifstream in(rgb_csv);
@@ -333,7 +333,6 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
     // Required headers
     const std::string header_ts = "ts_" + cam_name + " (ns)";
     const std::string header_rgb0 = "path_" + cam_name;
-    const std::string header_mask = "path_" + mask_cam_name;
 
     // Safely get indices
     auto get_index = [&](const std::string& key) -> int {
@@ -343,14 +342,9 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
         }
         return it->second;
     };
-    auto get_index_optional = [&](const std::string& key) -> int {
-        auto it = col_map.find(key);
-        return (it == col_map.end()) ? -1 : it->second;
-    };
 
     int ts_idx = get_index(header_ts);
     int rgb0_idx = get_index(header_rgb0);
-    int mask_idx = get_index_optional(header_mask);
 
     // Read and process data lines using fixed indices
     while (std::getline(in, line)) {
@@ -359,7 +353,6 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
 
         std::vector<std::string> tokens = split(line, ',');
         int max_idx = std::max(ts_idx, rgb0_idx);
-        if (mask_idx >= 0) max_idx = std::max(max_idx, mask_idx);
         if (tokens.size() <= static_cast<size_t>(max_idx)) {
             throw std::runtime_error("LoadImages: malformed row (too few columns) in " + rgb_csv + ": " + line);
         }
@@ -372,9 +365,6 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
 
         timestamps.push_back(t);
         imageFilenames.push_back(pathToSequence + "/" + rel_rgb0_path);
-        if (mask_idx >= 0) {
-            maskFilenames.push_back(pathToSequence + "/" + tokens[mask_idx]);
-        }
     }
 }
 

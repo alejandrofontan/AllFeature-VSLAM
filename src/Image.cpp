@@ -25,14 +25,6 @@ AF_VSLAM::Image::Image(const cv::Mat& image){
     img = image.clone();
 }
 
-void AF_VSLAM::Image::LoadMask(const std::string &maskPath) {
-    maskFile = maskPath;
-    mask = cv::imread(maskFile, cv::IMREAD_UNCHANGED);
-    if (mask.empty()) {
-        std::cerr << "Failed to load mask image: " << maskFile << std::endl;
-    }
-}
-
 void AF_VSLAM::Image::LoadDepth(const std::string &depthPath, const float& depthFactor) {
     depthFile = depthPath;
     depthImg = cv::imread(depthFile, cv::IMREAD_UNCHANGED);
