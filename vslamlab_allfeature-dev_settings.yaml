@@ -4,7 +4,7 @@
 # Camera names
 #--------------------------------------------------------------------------------------------
 cam_mono: rgb_0
-features: ["orb32", "alike128"]   # aliked-only experiment: no vocabulary -> no loop closing / BoW reloc
+features: ["orb32", "aliked128"]   # aliked-only experiment: no vocabulary -> no loop closing / BoW reloc
 debug: false
 
 #--------------------------------------------------------------------------------------------
