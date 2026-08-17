@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <fstream>
 #include <chrono>
+#include <memory>
 #include <opencv2/core/core.hpp>
 
 #include <System.h>
@@ -9,6 +10,7 @@
 #include <yaml-cpp/yaml.h>
 #include <FrameDrawer.h>
 #include "afvslam_log.hpp"
+#include "tensorrt_seg.hpp"
 
 #include "DebugKeyStepper.h"
 #include "StringUtils.h"
@@ -50,6 +52,12 @@ int main(int argc, char **argv)
     std::string feature{"orb32"};
     std::string path_to_vocabulary_folder("allfeature_vocabulary");
     bool fixImageSize = true;
+
+    // Online segmentation (segmentation.md): absent -> masks come from the
+    // offline rgb_csv mask column (or nowhere), exactly as before.
+    std::string segmentation_onnx;
+    std::string segmentation_classes;   // empty -> <segmentation_onnx>.classes.yaml
+    std::string segmentation_precision{"fp16"};
 
     std::cout << std::endl;
 
@@ -102,6 +110,24 @@ int main(int argc, char **argv)
             removeSubstring(arg, "vocabulary_folder:");
             path_to_vocabulary_folder = arg;
             AF_CONFIG_FIELD("Path to vocabulary folder: ", path_to_vocabulary_folder);
+            continue;
+        }
+        if (hasPrefix(arg, "segmentation_onnx:")) {
+            removeSubstring(arg, "segmentation_onnx:");
+            segmentation_onnx = arg;
+            AF_CONFIG_FIELD("Online segmentation model: ", segmentation_onnx);
+            continue;
+        }
+        if (hasPrefix(arg, "segmentation_classes:")) {
+            removeSubstring(arg, "segmentation_classes:");
+            segmentation_classes = arg;
+            AF_CONFIG_FIELD("Online segmentation classes yaml: ", segmentation_classes);
+            continue;
+        }
+        if (hasPrefix(arg, "segmentation_precision:")) {
+            removeSubstring(arg, "segmentation_precision:");
+            segmentation_precision = arg;
+            AF_CONFIG_FIELD("Online segmentation precision: ", segmentation_precision);
             continue;
         }
     }
@@ -158,6 +184,22 @@ int main(int argc, char **argv)
 
     size_t nImages = imageFilenames.size();
 
+    // Online segmentation: build/load the TensorRT engine before the SLAM
+    // threads exist, and absorb the one-time lazy CUDA/TRT warmup (~70 ms)
+    // here rather than on frame 0.
+    std::unique_ptr<segmentation::TensorRTSeg> segmenter{};
+    if (!segmentation_onnx.empty()) {
+        segmenter = std::make_unique<segmentation::TensorRTSeg>(
+            segmentation_onnx, segmentation_precision, segmentation_classes);
+        segmenter->inferMask(cv::Mat::zeros(480, 640, CV_8UC1));
+        AF_INFO("Online segmentation ready (engine "
+                << (segmenter->loadedFromCache() ? "cached" : "built") << ": "
+                << segmenter->enginePath() << ")");
+        if (!maskFilenames.empty())
+            AF_WARN("Both an offline mask column and segmentation_onnx are set - "
+                    "online segmentation wins, offline masks are ignored");
+    }
+
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
 
     AF_VSLAM::System SLAM(path_to_vocabulary_folder,
@@ -167,7 +209,7 @@ int main(int argc, char **argv)
                                   featureTypes,
                                   fixImageSize);
 
-    SLAM.SetSequenceInfo(nImages, !maskFilenames.empty());
+    SLAM.SetSequenceInfo(nImages, !maskFilenames.empty() || segmenter != nullptr);
 
     // Vector for tracking time statistics
     std::vector<AF_VSLAM::Seconds> vTimesTrack;
@@ -210,7 +252,9 @@ int main(int argc, char **argv)
             continue;
         }
 
-        if (!maskFilenames.empty()) {
+        if (segmenter) {
+            im.mask = segmenter->inferMask(im.img);
+        } else if (!maskFilenames.empty()) {
             im.LoadMask(maskFilenames[ni]);
         }
 

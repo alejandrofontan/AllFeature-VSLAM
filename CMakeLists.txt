@@ -101,6 +101,12 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/PoseLib ${CMAKE_BINARY_DIR}/po
 # suppress diagnostics for the third-party target only so -Werror can't break it.
 target_compile_options(PoseLib PRIVATE -w)
 
+# ---- Segmentation-TensorRT (online static/dynamic masking, segmentation.md) ----
+# First-party module (not vendored), so it keeps this project's warning flags.
+# Only the CLI entry points consume it; the SLAM library itself stays unaware
+# of how Image::mask gets filled.
+add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/Segmentation-TensorRT ${CMAKE_BINARY_DIR}/segmentation_tensorrt)
+
 # ---- mimalloc (drop-in allocator, issue #13 addendum M1) ----
 # Must be the SHARED library, linked FIRST into each executable: libmimalloc.so then appears
 # before libc in the process's symbol lookup order, so its malloc/free interpose for every
@@ -171,13 +177,13 @@ target_link_libraries(${PROJECT_NAME}
 # Example executables
 # mimalloc must stay FIRST in each executable's link line (see the mimalloc section above).
 add_executable(vslamlab_allfeature_mono src/vslamlab_allfeature_mono.cpp)
-target_link_libraries(vslamlab_allfeature_mono mimalloc ${PROJECT_NAME})
+target_link_libraries(vslamlab_allfeature_mono mimalloc ${PROJECT_NAME} tensorrt_seg)
 
 add_executable(vslamlab_allfeature_mono_stream src/vslamlab_allfeature_mono_stream.cpp)
 target_link_libraries(vslamlab_allfeature_mono_stream mimalloc ${PROJECT_NAME})
 
 add_executable(vslamlab_allfeature_rgbd src/vslamlab_allfeature_rgbd.cpp)
-target_link_libraries(vslamlab_allfeature_rgbd mimalloc ${PROJECT_NAME})
+target_link_libraries(vslamlab_allfeature_rgbd mimalloc ${PROJECT_NAME} tensorrt_seg)
 
 # Parity/benchmark harness for the brute-force matcher (issue #13 P2) — not installed.
 add_executable(test_bfmatcher_parity src/test_bfmatcher_parity.cpp)
