@@ -14,6 +14,7 @@ endif()
 
 find_package(CUDAToolkit REQUIRED)   # CUDA::cudart (cudaMalloc, streams, memcpy)
 find_package(OpenCV REQUIRED)        # image I/O + preprocessing
+find_package(yaml-cpp REQUIRED)      # sidecar <onnx>.classes.yaml parsing
 
 # TensorRT ships no CMake config - locate headers/libs in the pixi env manually.
 find_path(TENSORRT_INCLUDE_DIR NvInfer.h HINTS $ENV{CONDA_PREFIX}/include)
@@ -38,6 +39,7 @@ target_link_libraries(tensorrt_seg PUBLIC
     ${NVONNXPARSER_LIB}
     ${OpenCV_LIBS}
     CUDA::cudart
+    yaml-cpp
 )
 target_compile_options(tensorrt_seg PRIVATE -Wall -Wextra)
 
