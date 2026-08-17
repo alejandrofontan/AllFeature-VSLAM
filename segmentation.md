@@ -65,17 +65,22 @@ New branch `segmentation` off `aliked-only` (tip `00c8c6b`). Independent of the 
 
 ## Phase 1 — C++ module `Thirdparty/Segmentation-TensorRT/`
 
-4. Restore `tensorrt_common/` + `cuda_utils/` from `a063c89`
-   (`git checkout a063c89 -- Thirdparty/DepthAnything-TensorRT/...` then relocate) — engine
-   build/cache logic, CUDA smart pointers, logger. Keep the vendoring license headers; suppress
-   warnings only on the vendored parts.
-5. New `TensorRTSeg` class modeled on `TensorRTDepthAnything`
-   (`a063c89:Thirdparty/DepthAnything-TensorRT/include/depth_anything_v3/tensorrt_depth_anything.hpp`):
-   - ctor(onnx path, classes yaml, precision) → builds or loads cached
-     `<onnx>.fp16-batch1.engine` (DA3 naming; first build ~a minute, logged);
-   - `cv::Mat inferMask(const cv::Mat& frame)`: resize + normalize → enqueue → class map →
-     LUT to 0/1 → **dilate the dynamic region ~3 px at network resolution** (keypoints
-     concentrate on object boundaries) → nearest-upsample to frame size.
+*(Revised 2026-08-17: written **from scratch** against the TensorRT 10.3 API — the earlier idea
+of restoring the DA3 `tensorrt_common`/`cuda_utils` scaffolding from dangling commit `a063c89`
+was dropped in favor of a minimal, self-authored module, as a TensorRT learning exercise. The
+DA3 code remains available at `a063c89` as a reference to consult, not to copy.)*
+
+4. Minimal engine lifecycle, hand-written: `ILogger` subclass → builder + ONNX parser →
+   FP16 `IBuilderConfig` → `buildSerializedNetwork`, cached to `<onnx>.fp16.engine` next to
+   the ONNX (rebuild when missing; first build ~a minute, logged); at startup prefer
+   deserializing the cache via `IRuntime`.
+5. New `TensorRTSeg` class:
+   - ctor(onnx path, classes yaml, precision) → build-or-load engine as above;
+   - `cv::Mat inferMask(const cv::Mat& frame)`: replicate-to-3-channels if grayscale
+     (NSAVP is mono — must match cv2.imread's BGR replication in the Python self-check),
+     resize + normalize per the sidecar YAML → `enqueueV3` → int32 class map → LUT to 0/1 →
+     **dilate the dynamic region ~3 px at network resolution** (keypoints concentrate on
+     object boundaries) → nearest-upsample to frame size.
 6. Own `CMakeLists.txt`, pulled in via `add_subdirectory` from the main one — same ~14-line
    pattern as `a063c89`'s CMake diff for DA3.
 7. Standalone `test_segmentation` binary (mirroring `a063c89:src/test_depth_anything.cpp`):
