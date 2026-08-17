@@ -25,16 +25,22 @@ if(NOT TENSORRT_INCLUDE_DIR OR NOT NVINFER_LIB OR NOT NVONNXPARSER_LIB)
 endif()
 message(STATUS "TensorRT: ${NVINFER_LIB}")
 
-add_executable(test_segmentation src/test_segmentation.cpp)
-target_include_directories(test_segmentation PRIVATE
+# The library the SLAM system links in Phase 2; PUBLIC usage requirements so
+# consumers (test harness now, libAllFeature-VSLAM later) inherit them.
+add_library(tensorrt_seg STATIC src/tensorrt_seg.cpp)
+target_include_directories(tensorrt_seg PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${TENSORRT_INCLUDE_DIR}
     ${OpenCV_INCLUDE_DIRS}
 )
-target_link_libraries(test_segmentation PRIVATE
+target_link_libraries(tensorrt_seg PUBLIC
     ${NVINFER_LIB}
     ${NVONNXPARSER_LIB}
     ${OpenCV_LIBS}
     CUDA::cudart
 )
+target_compile_options(tensorrt_seg PRIVATE -Wall -Wextra)
+
+add_executable(test_segmentation src/test_segmentation.cpp)
+target_link_libraries(test_segmentation PRIVATE tensorrt_seg)
 target_compile_options(test_segmentation PRIVATE -Wall -Wextra)

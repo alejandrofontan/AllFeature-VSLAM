@@ -2,54 +2,40 @@
  * Module: AllFeature-VSLAM - Segmentation-TensorRT - test_segmentation.cpp
  * - Author: Alejandro Fontan Villacampa
  * - Assisted by: Claude (Fable 5)
- * - Version: 0.1 ("hello TensorRT")
+ * - Version: 0.2 (engine build/load lifecycle)
  * - Created: 2026-08-17
  * - License: GPLv3 License
  *
  * Standalone test harness for the online segmentation module (segmentation.md,
- * Phase 1). Step 1: prove TensorRT links and initializes - print the library
- * version and create/destroy a builder. Later steps grow this into the full
- * ONNX -> engine -> inference -> mask pipeline, verified against the Python
- * self-check in convert2onnx/export_efficientvit_seg.py.
+ * Phase 1). Step 2: build-or-load a TensorRT engine from an exported ONNX and
+ * print its I/O tensors. Next step grows this into full inference, verified
+ * against the Python self-check in convert2onnx/export_efficientvit_seg.py.
+ *
+ * Usage: test_segmentation <model.onnx> [fp16|fp32]
  */
 
+#include <chrono>
 #include <cstdio>
-#include <memory>
 
-#include <NvInfer.h>
+#include "tensorrt_seg.hpp"
 
-/**
- * Every TensorRT entry point takes an ILogger - it is the ONLY channel through
- * which TRT reports diagnostics (e.g. why an engine build failed). Severity is
- * ordered ERROR < WARNING < INFO < VERBOSE, so "<= kWARNING" means "warnings
- * and worse". Lower the filter to kINFO when debugging engine builds.
- */
-class Logger final : public nvinfer1::ILogger
+int main(int argc, char** argv)
 {
-  public:
-    void log(Severity severity, const char* msg) noexcept override
+    if (argc < 2)
     {
-        if (severity <= Severity::kWARNING)
-            std::printf("[TensorRT] %s\n", msg);
-    }
-};
-
-int main()
-{
-    // getInferLibVersion() returns major*10000 + minor*100 + patch.
-    const int32_t v = getInferLibVersion();
-    std::printf("TensorRT %d.%d.%d (raw %d)\n", v / 10000, (v % 10000) / 100, v % 100, v);
-
-    Logger logger;
-    // TRT factory functions return raw pointers the caller owns; since TRT 8+
-    // their destructors are public, so a plain unique_ptr is the idiom.
-    auto builder = std::unique_ptr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(logger));
-    if (!builder)
-    {
-        std::printf("createInferBuilder failed\n");
+        std::printf("usage: %s <model.onnx> [fp16|fp32]\n", argv[0]);
         return 1;
     }
-    std::printf("builder created OK (platform has fast fp16: %s)\n",
-                builder->platformHasFastFp16() ? "yes" : "no");
+    const std::string onnxPath = argv[1];
+    const std::string precision = argc > 2 ? argv[2] : "fp16";
+
+    const auto t0 = std::chrono::steady_clock::now();
+    segmentation::TensorRTSeg seg(onnxPath, precision);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - t0)
+                        .count();
+
+    std::printf("engine %s in %ld ms: %s\nIO tensors:\n%s", seg.loadedFromCache() ? "loaded" : "built",
+                ms, seg.enginePath().c_str(), seg.describeIOTensors().c_str());
     return 0;
 }
