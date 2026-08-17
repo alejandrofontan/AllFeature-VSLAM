@@ -12,3 +12,5 @@ allfeature_vocabulary/
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+Thirdparty/Segmentation-TensorRT/convert2onnx/efficientvit/
+segmentation_models/
