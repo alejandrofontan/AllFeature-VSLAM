@@ -228,7 +228,7 @@ void Viewer::Run()
         }
 
         // Status panel (map-size query locks the map, so refresh it sparingly)
-        menuState = trackingStateName(tracker->mState);
+        menuState = trackingStateName(tracker->state_);
         {
             const size_t nTotal = system->GetSequenceImageCount();
             const size_t nProcessed = system->GetFramesProcessedCount();

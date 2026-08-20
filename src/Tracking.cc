@@ -53,16 +53,16 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
 }
 
 Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
-                   std::shared_ptr<FrameDrawer> frameDrawer, std::shared_ptr<MapDrawer> mapDrawer,
+                   std::shared_ptr<FrameDrawer> frameDrawer, std::shared_ptr<MapDrawer> map_drawer,
                    shared_ptr<Map> map, shared_ptr<KeyFrameDatabase> pKFDB,
                    const string &strCalibrationPath, const string &strSettingPath,
                    const std::map<FeatureType, string>& feature_settings_yaml_file,
                    const int sensor,
                    const vector<FeatureType>& featureTypes,
                    const bool& fixImageSize):
-    mState(NO_IMAGES_YET), mSensor(sensor), feature_types_(featureTypes), mbVO(false), vocabulary(vocabulary),
-    keyFrameDB(pKFDB), mpSystem(pSys), viewer(static_cast<shared_ptr<Viewer>>(nullptr)),
-    frameDrawer(frameDrawer), mapDrawer(mapDrawer), map(map), lastRelocFrameId(0), fixImageSize(fixImageSize)
+    state_(NO_IMAGES_YET), mSensor(sensor), feature_types_(featureTypes), mbVO(false), vocabulary(vocabulary),
+    keyframe_db_(pKFDB), mpSystem(pSys), viewer(static_cast<shared_ptr<Viewer>>(nullptr)),
+    frameDrawer(frameDrawer), map_drawer_(map_drawer), map_(map), lastRelocFrameId(0), fixImageSize(fixImageSize)
 {
     // Load camera parameters from settings yaml file
     Tracking::loadCameraParameters(strCalibrationPath, strSettingPath);
@@ -80,9 +80,9 @@ Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
     matcher_ = std::make_shared<FeatureMatcher>(w, h, featureTypes, "Tracking");
 }
 
-void Tracking::SetLocalMapper(std::shared_ptr<LocalMapping> localMapper_)
+void Tracking::SetLocalMapper(std::shared_ptr<LocalMapping> local_mapper)
 {
-    localMapper = localMapper_;
+    local_mapper_ = local_mapper;
 }
 
 void Tracking::SetLoopClosing(std::shared_ptr<LoopClosing> loopClosing_)
@@ -122,7 +122,7 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     std::chrono::steady_clock::time_point t_start_1 = std::chrono::steady_clock::now();
 #endif
 
-    if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)
+    if(state_==NOT_INITIALIZED || state_==NO_IMAGES_YET)
         current_frame_ = Frame(im,timestamp,initFeatureExtractor,vocabulary,mK,mDistCoef,mbf,mThDepth);
     else
         current_frame_ = Frame(im,timestamp,featureExtractorLeft,vocabulary,mK,mDistCoef,mbf,mThDepth);
@@ -143,7 +143,7 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
 #ifdef PROFILING_EXHAUSTIVE
     t_end = std::chrono::steady_clock::now();
     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_2).count();
-    if(mState == OK)
+    if(state_ == OK)
         tracking_times[int(1000 * t_duration)]++;
 #endif
 
@@ -165,7 +165,7 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     t_end = std::chrono::steady_clock::now();
     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
 
-    if(mState == OK)
+    if(state_ == OK)
         grabImageMonocular_times[int(1000 * t_duration)]++;
 
     return current_frame_.Tcw;
@@ -175,12 +175,12 @@ void Tracking::Track()
 {
 
 
-    if(mState==NO_IMAGES_YET)
+    if(state_==NO_IMAGES_YET)
     {
-        mState = NOT_INITIALIZED;
+        state_ = NOT_INITIALIZED;
     }
 
-    mLastProcessedState=mState;
+    mLastProcessedState=state_;
 
     // Stage timing: report where the time went whenever a frame stalls visibly
     // (hiccup diagnosis; threshold ~3 frame periods at 20 fps).
@@ -191,25 +191,25 @@ void Tracking::Track()
     const auto tTrackStart = StageClock::now();
 
     // Get Map Mutex -> Map cannot be changed
-    unique_lock<mutex> lock(map->mMutexMapUpdate);
+    unique_lock<mutex> lock(map_->mMutexMapUpdate);
     const auto tLockAcquired = StageClock::now();
     const double msLockWait = stageMs(tTrackStart, tLockAcquired);
     double msTrackRef = 0.0, msLocalMap = 0.0, msEmergencyWait = 0.0;
 
-    if(mState==NOT_INITIALIZED)
+    if(state_==NOT_INITIALIZED)
     {
 
         monocular_initialization(feature_types_[featureInitialization]);
         frameDrawer->Update(this);
 
-        if(mState!=OK)
+        if(state_!=OK)
             return;
     }
     else
     {
         // System is initialized. Track Frame.
         bool bOK;
-        if(mState==OK)
+        if(state_==OK)
         {
             // Local Mapping might have changed some MapPoints tracked in last frame
             CheckReplacedInLastFrame();
@@ -230,7 +230,7 @@ void Tracking::Track()
         }
 
 
-        current_frame_.refKeyframe = refKeyframe;
+        current_frame_.refKeyframe = ref_keyframe_;
 
         const auto tAfterTrackRef = StageClock::now();
 
@@ -263,9 +263,9 @@ void Tracking::Track()
 #endif
 
         if(bOK)
-            mState = OK;
+            state_ = OK;
         else
-            mState=LOST;
+            state_=LOST;
 
         // Update drawer
         frameDrawer->Update(this);
@@ -281,9 +281,9 @@ void Tracking::Track()
             {
                 AF_INFO("Track heartbeat | frame=" << current_frame_.mnId
                         << " inliers=" << mnMatchesInliers
-                        << " localPts=" << localPts.size()
-                        << " KFs=" << map->KeyFramesInMap()
-                        << " mapPts=" << map->MapPointsInMap());
+                        << " local_points_=" << local_points_.size()
+                        << " KFs=" << map_->KeyFramesInMap()
+                        << " mapPts=" << map_->MapPointsInMap());
                 std::cout.flush(); // stdout is fully buffered under the runner's redirect
             }
 
@@ -298,7 +298,7 @@ void Tracking::Track()
             else
                 mVelocity = mat4f::Zero();
 
-            mapDrawer->SetCurrentCameraPose(current_frame_.Tcw);
+            map_drawer_->SetCurrentCameraPose(current_frame_.Tcw);
 
             // Clean VO matches
             for (auto& [ft, N] : current_frame_.N) {
@@ -334,11 +334,11 @@ void Tracking::Track()
         }
 
         // Reset if the camera get lost soon after initialization
-        if(mState==LOST)
+        if(state_==LOST)
         {
-            if(map->KeyFramesInMap() <= static_cast<size_t>(minKeyframesInMap))
+            if(map_->KeyFramesInMap() <= static_cast<size_t>(minKeyframesInMap))
             {
-                AF_WARN("Track lost soon after initialisation (" << map->KeyFramesInMap() << " <= "
+                AF_WARN("Track lost soon after initialisation (" << map_->KeyFramesInMap() << " <= "
                         << minKeyframesInMap << " keyframes in map), reason: " << mLastTrackingLostReason
                         << " — reseting...");
                 mpSystem->Reset();
@@ -347,7 +347,7 @@ void Tracking::Track()
         }
 
         if(!current_frame_.refKeyframe)
-            current_frame_.refKeyframe = refKeyframe;
+            current_frame_.refKeyframe = ref_keyframe_;
 
         last_frame_ = Frame(current_frame_);
     }
@@ -357,9 +357,9 @@ void Tracking::Track()
     {
         mat4f Tcr = current_frame_.Tcw * current_frame_.refKeyframe->GetPoseInverse();
         mlRelativeFramePoses.push_back(Tcr);
-        mlpReferences.push_back(refKeyframe);
+        mlpReferences.push_back(ref_keyframe_);
         mlFrameTimes.push_back(current_frame_.mTimeStamp);
-        mlbLost.push_back(mState==LOST);
+        mlbLost.push_back(state_==LOST);
     }
     else
     {
@@ -367,19 +367,19 @@ void Tracking::Track()
         mlRelativeFramePoses.push_back(mlRelativeFramePoses.back());
         mlpReferences.push_back(mlpReferences.back());
         mlFrameTimes.push_back(mlFrameTimes.back());
-        mlbLost.push_back(mState==LOST);
+        mlbLost.push_back(state_==LOST);
     }
 
     if (emergencyKeyframe){
         std::cout << "Tracking::Track: emergency keyframe triggered, waiting for local mapping to be idle..." << std::endl;
         const auto tWaitStart = StageClock::now();
         lock.unlock();
-        bool localMappingIdle = localMapper->AcceptKeyFrames();
+        bool localMappingIdle = local_mapper_->AcceptKeyFrames();
         while(!localMappingIdle)
         {
             // Wait until Local Mapping is idle
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            localMappingIdle = localMapper->AcceptKeyFrames();
+            localMappingIdle = local_mapper_->AcceptKeyFrames();
         }
         emergencyKeyframe = false;
         msEmergencyWait = stageMs(tWaitStart, StageClock::now());
@@ -490,15 +490,15 @@ void Tracking::monocular_initialization(FeatureType feature_type)
 void Tracking::create_initial_map_monocular(FeatureType feature_type)
 {
     // Create KeyFrames
-    Keyframe keyframe_ini = make_shared<KeyFrame>(initial_frame_, map, keyFrameDB);
-    Keyframe keyframe_cur = make_shared<KeyFrame>(current_frame_, map, keyFrameDB);
+    Keyframe keyframe_ini = make_shared<KeyFrame>(initial_frame_, map_, keyframe_db_);
+    Keyframe keyframe_cur = make_shared<KeyFrame>(current_frame_, map_, keyframe_db_);
 
     keyframe_ini->ComputeBoW(feature_type);
     keyframe_cur->ComputeBoW(feature_type);
 
     // Insert KFs in the map
-    map->AddKeyFrame(keyframe_ini);
-    map->AddKeyFrame(keyframe_cur);
+    map_->AddKeyFrame(keyframe_ini);
+    map_->AddKeyFrame(keyframe_cur);
 
     // Create MapPoints and associate to keyframes
     size_t flat_index = 0; // runs over init_matches_, flattened across feature types
@@ -514,7 +514,7 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
             current_frame_.pts.at(ft)[matches[i]] = map_point;
             current_frame_.mvbOutlier.at(ft)[matches[i]] = false;
 
-            map->add_map_point(map_point);
+            map_->add_map_point(map_point);
         }
     }
 
@@ -523,8 +523,8 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     keyframe_cur->UpdateConnections();
 
     // Bundle Adjustment
-    AF_INFO("New Map created with " << map->MapPointsInMap() << " points");
-    Optimizer::GlobalBundleAdjustemnt(map, params.init_gba_iterations);
+    AF_INFO("New Map created with " << map_->MapPointsInMap() << " points");
+    Optimizer::GlobalBundleAdjustemnt(map_, params.init_gba_iterations);
 
     // Set the initial map's scale: prefer a depth-verified scale over the arbitrary
     // monocular "median depth = 1" convention, when enough points have valid sensor depth.
@@ -577,26 +577,26 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
                 map_point->SetWorldPos(map_point->get_world_pos() * inv_median_depth);
     }
 
-    localMapper->InsertKeyFrame(keyframe_ini);
-    localMapper->InsertKeyFrame(keyframe_cur);
+    local_mapper_->InsertKeyFrame(keyframe_ini);
+    local_mapper_->InsertKeyFrame(keyframe_cur);
 
     current_frame_.set_pose(keyframe_cur->GetPose());
-    lastKeyFrameId = current_frame_.mnId;
-    lastKeyFrame = keyframe_cur;
+    last_keyframe_id_ = current_frame_.mnId;
+    last_keyframe_ = keyframe_cur;
 
-    localKeyframes.push_back(keyframe_cur);
-    localKeyframes.push_back(keyframe_ini);
-    localPts = map->GetAllMapPoints();
-    refKeyframe = keyframe_cur;
+    local_keyframes_.push_back(keyframe_cur);
+    local_keyframes_.push_back(keyframe_ini);
+    local_points_ = map_->GetAllMapPoints();
+    ref_keyframe_ = keyframe_cur;
     current_frame_.refKeyframe = keyframe_cur;
 
     last_frame_ = Frame(current_frame_);
 
-    map->SetReferenceMapPoints(localPts);
-    mapDrawer->SetCurrentCameraPose(keyframe_cur->GetPose());
-    map->mvpKeyFrameOrigins.push_back(keyframe_ini);
+    map_->SetReferenceMapPoints(local_points_);
+    map_drawer_->SetCurrentCameraPose(keyframe_cur->GetPose());
+    map_->mvpKeyFrameOrigins.push_back(keyframe_ini);
 
-    mState = OK;
+    state_ = OK;
 }
 
 void Tracking::CheckReplacedInLastFrame()
@@ -627,7 +627,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
 
     // Feature Matching
     std::map<FeatureType, std::vector<Pt>> mapPointMatches;
-    std::map<FeatureType, int> nmatches_ft = matcher_->match_keyframe_to_frame(refKeyframe, current_frame_, mapPointMatches, current_frame_.featureTypes);
+    std::map<FeatureType, int> nmatches_ft = matcher_->match_keyframe_to_frame(ref_keyframe_, current_frame_, mapPointMatches, current_frame_.featureTypes);
     int nmatches = 0;
     for (auto& [ft, N] : current_frame_.N)
     {
@@ -645,7 +645,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
         std::ostringstream reason;
         reason << "TrackReferenceKeyFrame: insufficient matches to reference keyframe (nmatches="
                << nmatches << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH << ")"
-               << " | frame=" << current_frame_.mnId << " refKeyframe=" << refKeyframe->keyId;
+               << " | frame=" << current_frame_.mnId << " ref_keyframe_=" << ref_keyframe_->keyId;
         throw TrackingLostException(reason.str());
     }
 
@@ -878,7 +878,7 @@ bool Tracking::TrackLocalMap()
         std::ostringstream reason;
         reason << "TrackLocalMap: insufficient inliers against local map (mnMatchesInliers="
                << mnMatchesInliers << " < " << minMatches_trackLocalMap_low << ")"
-               << " | frame=" << current_frame_.mnId << " localPts=" << localPts.size();
+               << " | frame=" << current_frame_.mnId << " local_points_=" << local_points_.size();
         throw TrackingLostException(reason.str());
     }
 
@@ -921,10 +921,10 @@ bool Tracking::TrackLocalMap()
     bool Tracking::NeedNewKeyFrame()
     {
         // If Local Mapping is freezed by a Loop Closure do not insert keyframes
-        if(localMapper->isStopped() || localMapper->stopRequested())
+        if(local_mapper_->isStopped() || local_mapper_->stopRequested())
             return false;
 
-        const size_t numKeyframesInMap = map->KeyFramesInMap();
+        const size_t numKeyframesInMap = map_->KeyFramesInMap();
 
         // Do not insert keyframes if not enough frames have passed from last relocalisation —
         // unless tracking is already demonstrably strong again (>=2x the TrackLocalMap "high"
@@ -939,10 +939,10 @@ bool Tracking::TrackLocalMap()
         int nMinObs = nMinObs_high;
         if(numKeyframesInMap <= size_t(minNKFs))
             nMinObs = nMinObs_low;
-        int nRefMatches = refKeyframe->TrackedMapPoints(nMinObs);
+        int nRefMatches = ref_keyframe_->TrackedMapPoints(nMinObs);
 
         // Local Mapping accept keyframes?
-        bool localMappingIdle = localMapper->AcceptKeyFrames();
+        bool localMappingIdle = local_mapper_->AcceptKeyFrames();
 
         // Check how many "close" points are being tracked and how many could be potentially created.
         int nNonTrackedClose = 0;
@@ -1003,7 +1003,7 @@ bool Tracking::TrackLocalMap()
                 //     return true;
                 // }
                 // Emergency keyframe: only on a genuine drop against the *recent frames'*
-                // own inlier level (not refKeyframe->TrackedMapPoints(), which inflates
+                // own inlier level (not ref_keyframe_->TrackedMapPoints(), which inflates
                 // after every insertion as LocalMapping triangulates new points into the
                 // keyframe, re-arming the trigger indefinitely), and with a refire
                 // cooldown so a persistent low-inlier state can't chain insertions.
@@ -1025,18 +1025,18 @@ bool Tracking::TrackLocalMap()
     }
 
     void Tracking::CreateNewKeyFrame(){
-        if(!localMapper->SetNotStop(true))
+        if(!local_mapper_->SetNotStop(true))
             return;
 
-        Keyframe keyframe = make_shared<KeyFrame>(current_frame_,map,keyFrameDB);
+        Keyframe keyframe = make_shared<KeyFrame>(current_frame_,map_,keyframe_db_);
 
-        refKeyframe = keyframe;
+        ref_keyframe_ = keyframe;
         current_frame_.refKeyframe = keyframe;
 
-        localMapper->InsertKeyFrame(keyframe);
-        localMapper->SetNotStop(false);
-        lastKeyFrameId = current_frame_.mnId;
-        lastKeyFrame = keyframe;
+        local_mapper_->InsertKeyFrame(keyframe);
+        local_mapper_->SetNotStop(false);
+        last_keyframe_id_ = current_frame_.mnId;
+        last_keyframe_ = keyframe;
     }
 
     void Tracking::SearchLocalPoints()
@@ -1056,7 +1056,7 @@ bool Tracking::TrackLocalMap()
 
         // Project points in frame and check its visibility
         int nToMatch=0;
-        for(auto& pt: localPts){
+        for(auto& pt: local_points_){
             if(pt->idLastFrameSeen == current_frame_.mnId)
                 continue;
             if(pt->is_bad())
@@ -1070,14 +1070,14 @@ bool Tracking::TrackLocalMap()
         }
 
         if(nToMatch > 0){
-            matcher_->match_map_points_to_frame(current_frame_, localPts);
+            matcher_->match_map_points_to_frame(current_frame_, local_points_);
         }
     }
 
     void Tracking::UpdateLocalMap()
     {
         // This is for visualization
-        map->SetReferenceMapPoints(localPts);
+        map_->SetReferenceMapPoints(local_points_);
         // Update
         UpdateLocalKeyFrames();
         UpdateLocalPoints();
@@ -1085,9 +1085,9 @@ bool Tracking::TrackLocalMap()
 
     void Tracking::UpdateLocalPoints()
     {
-        localPts.clear();
+        local_points_.clear();
         set<PtId> ptIds{};
-        for(const auto& keyframe : localKeyframes){
+        for(const auto& keyframe : local_keyframes_){
             for(const auto& ft: feature_types_){
                 const vector<Pt> pts = keyframe->get_map_point_matches(ft);
                 for(const auto& pt : pts){
@@ -1096,7 +1096,7 @@ bool Tracking::TrackLocalMap()
                     if (ptIds.find(pt->ptId) != ptIds.end())
                         continue;
                     if(!pt->is_bad()){
-                        localPts.push_back(pt);
+                        local_points_.push_back(pt);
                         ptIds.insert(pt->ptId);
                     }
                 }
@@ -1132,8 +1132,8 @@ bool Tracking::TrackLocalMap()
                 return;
 
             // All keyframes that observe a map point are included in the local map. Also check which keyframe shares most points
-            localKeyframes.clear();
-            localKeyframes.reserve(scaleReserveKey * keyframeCounter.size());
+            local_keyframes_.clear();
+            local_keyframes_.reserve(scaleReserveKey * keyframeCounter.size());
             for (const auto &[keyId, keyframe]: keyframes) {
                 if(keyframe->is_bad())
                     continue;
@@ -1144,28 +1144,28 @@ bool Tracking::TrackLocalMap()
                     keyframeMaxObs = keyframe;
                 }
 
-                localKeyframes.push_back(keyframe);
+                local_keyframes_.push_back(keyframe);
                 keyframeIds.insert(keyframe->keyId);
             }
 
             if(keyframeMaxObs){
-                refKeyframe = keyframeMaxObs;
-                current_frame_.refKeyframe = refKeyframe;
+                ref_keyframe_ = keyframeMaxObs;
+                current_frame_.refKeyframe = ref_keyframe_;
             }
         }
 
         // Include also some not-already-included keyframes that are neighbors to already-included keyframes
-        for(const auto& keyframe: localKeyframes){
+        for(const auto& keyframe: local_keyframes_){
 
             // Limit the number of keyframes
-            if(int(localKeyframes.size()) > _maxNumKey_)
+            if(int(local_keyframes_.size()) > _maxNumKey_)
                 break;
 
             const vector<Keyframe> neighbors = keyframe->GetBestCovisibilityKeyFrames(_bestCovKey_);
             for(const auto& neighbor: neighbors){
                 if(!neighbor->is_bad()){
                     if (keyframeIds.find(neighbor->keyId) == keyframeIds.end()){
-                        localKeyframes.push_back(neighbor);
+                        local_keyframes_.push_back(neighbor);
                         keyframeIds.insert(neighbor->keyId);
                         break;
                     }
@@ -1176,7 +1176,7 @@ bool Tracking::TrackLocalMap()
             for(const auto& child: childs){
                 if(!child->is_bad()){
                     if (keyframeIds.find(child->keyId) == keyframeIds.end()){
-                        localKeyframes.push_back(child);
+                        local_keyframes_.push_back(child);
                         keyframeIds.insert(child->keyId);
                         break;
                     }
@@ -1186,7 +1186,7 @@ bool Tracking::TrackLocalMap()
             Keyframe parent = keyframe->GetParent();
             if(parent and !parent->is_bad()){
                 if (keyframeIds.find(parent->keyId) == keyframeIds.end()){
-                    localKeyframes.push_back(parent);
+                    local_keyframes_.push_back(parent);
                     keyframeIds.insert(parent->keyId);
                     break;
                 }
@@ -1201,7 +1201,7 @@ bool Tracking::Relocalization(const FeatureType& featureType)
 
     // Relocalization is performed when tracking is lost
     // Track Lost: Query KeyFrame Database for keyframe candidates for relocalisation
-    vector<Keyframe> vpCandidateKFs = keyFrameDB->DetectRelocalizationCandidates(&current_frame_);
+    vector<Keyframe> vpCandidateKFs = keyframe_db_->DetectRelocalizationCandidates(&current_frame_);
 
     if(vpCandidateKFs.empty())
         return false;
@@ -1378,7 +1378,7 @@ void Tracking::Reset()
 
     // Reset Local Mapping
     cout << "Reseting Local Mapper...";
-    localMapper->RequestReset();
+    local_mapper_->RequestReset();
     cout << " done" << endl;
 
     // Reset Loop Closing
@@ -1388,15 +1388,15 @@ void Tracking::Reset()
 
     // Clear BoW Database
     cout << "Reseting Database...";
-    keyFrameDB->clear();
+    keyframe_db_->clear();
     cout << " done" << endl;
 
     // Clear Map (this erase MapPoints and KeyFrames)
-    map->clear();
+    map_->clear();
 
     KeyFrame::nNextId = 0;
     Frame::nNextId = 0;
-    mState = NO_IMAGES_YET;
+    state_ = NO_IMAGES_YET;
 
     if(initializer_)
     {

@@ -185,7 +185,7 @@ mat4f System::TrackStereo(const cv::Mat &, const cv::Mat &, const double &)
     // mat4f Tcw = tracker->GrabImageStereo(imLeft,imRight,timestamp);
 
     // unique_lock<mutex> lock2(mMutexState);
-    // mTrackingState = tracker->mState;
+    // mTrackingState = tracker->state_;
     // mTrackedMapPoints = tracker->currentFrame.pts;
     // mTrackedKeyPointsUn = tracker->currentFrame.keypoints;
     // return Tcw;
@@ -238,7 +238,7 @@ mat4f System::TrackRGBD(const cv::Mat &, const cv::Mat &, const double &)
     // mat4f Tcw = tracker->GrabImageRGBD(im,depthmap,timestamp);
 
     // unique_lock<mutex> lock2(mMutexState);
-    // mTrackingState = tracker->mState;
+    // mTrackingState = tracker->state_;
     // mTrackedMapPoints = tracker->currentFrame.pts;
     // mTrackedKeyPointsUn = tracker->currentFrame.keypoints;
     // return Tcw;
@@ -269,7 +269,7 @@ mat4f System::Track(Image &im, const double &timestamp)
     mnFramesProcessed.fetch_add(1);
 
     unique_lock<mutex> lock2(mMutexState);
-    mTrackingState = tracker->mState;
+    mTrackingState = tracker->state_;
     mTrackedMapPoints = tracker->current_frame_.pts;
     mTrackedKeyPointsUn = tracker->current_frame_.keypoints;
 

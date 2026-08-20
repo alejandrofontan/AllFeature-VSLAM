@@ -86,7 +86,7 @@ public:
     // Preprocess the input and call Track(). Extract features and performs stereo matching.
     mat4f GrabImageMonocular(Image &im, const double &timestamp);
 
-    void SetLocalMapper(std::shared_ptr<LocalMapping> localMapper_);
+    void SetLocalMapper(std::shared_ptr<LocalMapping> local_mapper);
     void SetLoopClosing(std::shared_ptr<LoopClosing> loopClosing_);
     void SetViewer(shared_ptr<Viewer> viewer_);
 
@@ -111,7 +111,7 @@ public:
         LOST=3
     };
 
-    eTrackingState mState;
+    eTrackingState state_;
     eTrackingState mLastProcessedState;
 
     // Input sensor
@@ -208,7 +208,7 @@ protected:
     bool mbVO;
 
     //Other Thread Pointers
-    std::shared_ptr<LocalMapping> localMapper;
+    std::shared_ptr<LocalMapping> local_mapper_;
     std::shared_ptr<LoopClosing> loopClosing;
 
     // Features
@@ -217,15 +217,15 @@ protected:
 
     //BoW
     shared_ptr<Vocabulary> vocabulary;
-    shared_ptr<KeyFrameDatabase> keyFrameDB;
+    shared_ptr<KeyFrameDatabase> keyframe_db_;
 
     // Initalization (only for monocular)
     shared_ptr<Initializer> initializer_;
 
     //Local Map
-    Keyframe refKeyframe;
-    std::vector<Keyframe> localKeyframes;
-    std::vector<Pt> localPts;
+    Keyframe ref_keyframe_;
+    std::vector<Keyframe> local_keyframes_;
+    std::vector<Pt> local_points_;
 
     // System
     System* mpSystem;
@@ -233,10 +233,10 @@ protected:
     //Drawers
     std::shared_ptr<Viewer> viewer;
     std::shared_ptr<FrameDrawer> frameDrawer;
-    std::shared_ptr<MapDrawer> mapDrawer;
+    std::shared_ptr<MapDrawer> map_drawer_;
 
     // Map
-    shared_ptr<Map> map;
+    shared_ptr<Map> map_;
 
     //Calibration matrix
     cv::Mat mK;
@@ -263,16 +263,16 @@ protected:
 
     // Rolling inlier history (last inliersHistorySize tracked frames) — reference for the
     // emergency-keyframe trigger in NeedNewKeyFrame(). Comparing against recent frames
-    // instead of refKeyframe->TrackedMapPoints() avoids the self-inflating feedback loop
+    // instead of ref_keyframe_->TrackedMapPoints() avoids the self-inflating feedback loop
     // where every inserted keyframe grows the reference stat via post-hoc triangulation
     // (see CLAUDE.md, Stop-Induced Keyframe Runaway Investigation).
     std::deque<int> recentInliersHistory;
     FrameId lastEmergencyKFId{0};
 
     // Last Frame, KeyFrame and Relocalisation Info
-    Keyframe lastKeyFrame;
+    Keyframe last_keyframe_;
     Frame last_frame_;
-    KeyframeId lastKeyFrameId;
+    KeyframeId last_keyframe_id_;
     FrameId lastRelocFrameId;
 
     //Motion Model
