@@ -53,9 +53,9 @@ Frame::Frame(const Frame &frame)
      mTimeStamp(frame.mTimeStamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()), w(frame.w), h(frame.h),
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
      mvKeysRight(frame.mvKeysRight), keypoints(frame.keypoints),  mvuRight(frame.mvuRight),
-     mvDepth(frame.mvDepth), invDepth(frame.invDepth), sigma2invDepth(frame.sigma2invDepth),
+     mvDepth(frame.mvDepth), inv_depth(frame.inv_depth), sigma2invDepth(frame.sigma2invDepth),
      mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec),
-     pts(frame.pts), mvbOutlier(frame.mvbOutlier), mnId(frame.mnId), refKeyframe(frame.refKeyframe),
+     pts(frame.pts), outliers(frame.outliers), frame_id(frame.frame_id), ref_keyframe(frame.ref_keyframe),
      sizeTolerance(frame.sizeTolerance),invSizeTolerance(frame.invSizeTolerance),
      keyPtsSigma2(frame.keyPtsSigma2),keyPtsInf(frame.keyPtsInf),keyPtsSize(frame.keyPtsSize),
      maxKeyPtSize(frame.maxKeyPtSize),maxKeyPtSigma(frame.maxKeyPtSigma)
@@ -100,7 +100,7 @@ Frame::Frame(const Image & img, const double &timeStamp,
     mTimeStamp(timeStamp), mK(K.clone()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
 {
     // Frame ID
-    mnId = nNextId++;
+    frame_id = nNextId++;
     w = img.img.cols;
     h = img.img.rows;
 
@@ -121,7 +121,7 @@ Frame::Frame(const Image & img, const double &timeStamp,
         mvuRight[ft] = vector<float>(N_, -1);
         mvDepth[ft] = vector<float>(N_, -1);
         pts[ft] = vector<Pt>(N_, static_cast<Pt>(nullptr));
-        mvbOutlier[ft] = vector<bool>(N_, false);
+        outliers[ft] = vector<bool>(N_, false);
     }
 
     // This is done only for the first Frame (or after a change in the calibration)
@@ -403,7 +403,7 @@ void Frame::GetDepth(const Image& img)
 {
     for(auto& [ft, N_] : N)
     {
-        invDepth[ft] = vector<float>(N_, 0.0f);
+        inv_depth[ft] = vector<float>(N_, 0.0f);
         sigma2invDepth[ft] = vector<float>(N_, 0.0f);
 
         if(img.depthImg.empty())
@@ -435,7 +435,7 @@ void Frame::GetDepth(const Image& img)
 
             if(depth > 0.0f)
             {
-                invDepth[ft][i] = 1.0f / depth;
+                inv_depth[ft][i] = 1.0f / depth;
                 sigma2invDepth[ft][i] = depthNoiseCoeff * depthNoiseCoeff;
             }
         }
@@ -585,9 +585,9 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
         // const float covA = (A > 0) ? (float)I / (float)A : 0.0f;              // coverage of mask by mask_0
         // const float dice = (A + B > 0) ? (2.0f * (float)I) / (float)(A + B) : 0.0f;
 
-        //std::cout << "Frame " << mnId << " cov(B)=" << covB << std::endl;
+        //std::cout << "Frame " << frame_id << " cov(B)=" << covB << std::endl;
 
-        // std::cout << "Frame " << mnId
+        // std::cout << "Frame " << frame_id
         //         << " A=" << A << " B=" << B << " I=" << I << " U=" << U
         //         << " IoU=" << iou << " Dice=" << dice
         //         << " cov(B)=" << covB << " cov(A)=" << covA

@@ -17,7 +17,7 @@ namespace AF_VSLAM {
         Observation() = default;
 
         Observation(Keyframe projKeyframe, const KeypointIndex &projIndex,
-                    Keyframe refKeyframe , const KeypointIndex &refIndex);
+                    Keyframe ref_keyframe , const KeypointIndex &refIndex);
 
         // Observations are matched respect to a reference keyframe and projected to a projection keyframe
         // ref : reference keyframe
@@ -26,7 +26,7 @@ namespace AF_VSLAM {
         Keyframe projKeyframe{};
         KeypointIndex projIndex{};
 
-        Keyframe refKeyframe{};
+        Keyframe ref_keyframe{};
         KeypointIndex refIndex{};
     };
 

@@ -182,10 +182,10 @@ public:
 
     // Inverse depth (1/depth) per keypoint, from the RGB-D sensor's depth image.
     // 0 where no valid depth is available (monocular, or a missing/invalid depth pixel).
-    std::map<FeatureType, std::vector<float>> invDepth;
+    std::map<FeatureType, std::vector<float>> inv_depth;
 
-    // Variance of invDepth, from a quadratic depth-sensor noise model (sigma_depth = k*depth^2,
-    // standard for RGB-D/ToF sensors) propagated through invDepth=1/depth. 0 wherever invDepth is 0.
+    // Variance of inv_depth, from a quadratic depth-sensor noise model (sigma_depth = k*depth^2,
+    // standard for RGB-D/ToF sensors) propagated through inv_depth=1/depth. 0 wherever inv_depth is 0.
     std::map<FeatureType, std::vector<float>> sigma2invDepth;
 
     // Bag of Words Vector structures.
@@ -199,7 +199,7 @@ public:
     std::map<FeatureType, std::vector<Pt>> pts;
 
     // Flag to identify outlier associations.
-    std::map<FeatureType,std::vector<bool>> mvbOutlier;
+    std::map<FeatureType,std::vector<bool>> outliers;
 
     // Keypoints are assigned to cells in a grid to reduce matching complexity when projecting MapPoints.
     static float mfGridElementWidthInv;
@@ -211,10 +211,10 @@ public:
 
     // Current and Next Frame id.
     static long unsigned int nNextId;
-    FrameId mnId;
+    FrameId frame_id;
 
     // Reference Keyframe.
-    Keyframe refKeyframe;
+    Keyframe ref_keyframe;
 
     // Scale pyramid info.
     float sizeTolerance{};
@@ -242,13 +242,13 @@ private:
     // (called in the constructor).
     void UndistortKeyPoints();
 
-    // Populate invDepth (and sigma2invDepth) by sampling img.depthImg at each keypoint's (distorted)
+    // Populate inv_depth (and sigma2invDepth) by sampling img.depthImg at each keypoint's (distorted)
     // pixel coordinates, matching how the depth image itself is indexed (called in the constructor).
     void GetDepth(const Image& img);
 
     // Quadratic depth-sensor noise coefficient k in sigma_depth(z) = k*z^2 (e.g. Khoshelham &
     // Elberink 2012, Nguyen et al. 2012 for Kinect-style RGB-D sensors). Propagated through
-    // invDepth=1/depth, Var(invDepth) collapses to k^2 — depth-independent, the classical
+    // inv_depth=1/depth, Var(inv_depth) collapses to k^2 — depth-independent, the classical
     // justification for inverse-depth parameterization. Starting estimate, not yet calibrated
     // against real sensors/datasets (same caveat as Optimizer's invDepthInfo, see issue #3).
     static constexpr float depthNoiseCoeff{0.0028f};

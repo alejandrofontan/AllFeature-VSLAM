@@ -74,7 +74,7 @@ void Optimizer::LoadParameters(const cv::FileStorage &fSettings)
 // Frame/KeyFrame::sigma2invDepth (Frame::GetDepth's quadratic depth-noise model) instead of the
 // single global params.invDepthInfo placeholder every observation used to share. Falls back to
 // that placeholder if sigma2 is non-positive -- shouldn't happen in practice, since Frame::GetDepth
-// always sets sigma2invDepth alongside invDepth, but keeps this safe if that invariant ever breaks.
+// always sets sigma2invDepth alongside inv_depth, but keeps this safe if that invariant ever breaks.
 static double RGBDInvDepthInformation(float sigma2invDepth)
 {
     return sigma2invDepth > 0.0f ? 1.0 / sigma2invDepth : Optimizer::params.invDepthInfo;
@@ -238,7 +238,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
             nEdges++;
 
             const cv::KeyPoint &kpUn = pKF->keypoints.at(featType)[obs.second->projIndex];
-            const float invDepth_i = pKF->invDepth.at(featType)[obs.second->projIndex];
+            const float invDepth_i = pKF->inv_depth.at(featType)[obs.second->projIndex];
 
             if(invDepth_i > 0.0f)   // RGB-D sensor-depth observation
             {
@@ -391,7 +391,7 @@ static void ClassifyPoseOnlyEdges(const std::map<FeatureType, vector<EdgeT*>>& e
             e->computeError();
 
             const bool isOutlier = e->chi2() > chi2Threshold;
-            pFrame->mvbOutlier.at(ft)[idx] = isOutlier;
+            pFrame->outliers.at(ft)[idx] = isOutlier;
             e->setLevel(isOutlier ? 1 : 0);
             if(isOutlier)
                 nBad++;
@@ -439,7 +439,7 @@ int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
     for (auto& [ft, pts] : pFrame->pts) {
         const int N_ft = pFrame->N.at(ft);
         const auto& keypointsFt = pFrame->keypoints.at(ft);
-        const auto& invDepthFt = pFrame->invDepth.at(ft);
+        const auto& invDepthFt = pFrame->inv_depth.at(ft);
         const auto& sigma2invDepthFt = pFrame->sigma2invDepth.at(ft);
         const auto& mvuRightFt = pFrame->mvuRight.at(ft);
         auto& edgesMonoFt = vpEdgesMono.at(ft);
@@ -455,7 +455,7 @@ int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
                 continue;
 
             nInitialCorrespondences++;
-            pFrame->mvbOutlier[ft][i] = false;
+            pFrame->outliers[ft][i] = false;
 
             const cv::KeyPoint &kpUn = keypointsFt[i];
             const vec3f Xw = pMP->get_world_pos();
@@ -555,7 +555,7 @@ int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
             for(size_t i = 0; i < edges.size(); i++)
             {
                 nMono++;
-                if(pFrame->mvbOutlier.at(ft)[vnIndexEdgeMono.at(ft)[i]])
+                if(pFrame->outliers.at(ft)[vnIndexEdgeMono.at(ft)[i]])
                 {
                     nMonoBad++;
                     monoBadPx.push_back(static_cast<float>(edges[i]->error().norm()));
@@ -567,7 +567,7 @@ int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
             for(size_t i = 0; i < edges.size(); i++)
             {
                 nStereo++;
-                if(pFrame->mvbOutlier.at(ft)[vnIndexEdgeStereo.at(ft)[i]])
+                if(pFrame->outliers.at(ft)[vnIndexEdgeStereo.at(ft)[i]])
                     nStereoBad++;
             }
         }
@@ -577,13 +577,13 @@ int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
             {
                 nRGBD++;
                 const size_t idx = vnIndexEdgeRGBD.at(ft)[i];
-                if(pFrame->mvbOutlier.at(ft)[idx])
+                if(pFrame->outliers.at(ft)[idx])
                 {
                     nRGBDBad++;
                     const Eigen::Vector3d err = edges[i]->error();
                     rgbdBadPx.push_back(static_cast<float>(err.head<2>().norm()));
                     rgbdBadInvD.push_back(static_cast<float>(std::abs(err(2))));
-                    const float invD = pFrame->invDepth.at(ft)[idx];
+                    const float invD = pFrame->inv_depth.at(ft)[idx];
                     if(invD > 0.0f)
                         rgbdBadDepth.push_back(1.0f / invD);
                 }
@@ -608,7 +608,7 @@ int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
                 << " invDepthErr=" << median(rgbdBadInvD)
                 << " depth=" << median(rgbdBadDepth) << "m"
                 << " | rejected-mono median pxErr=" << median(monoBadPx)
-                << " | frame=" << pFrame->mnId);
+                << " | frame=" << pFrame->frame_id);
     }
 
     // Recover optimized pose and return number of inliers
@@ -756,7 +756,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
             if(!pKFi->is_bad())
             {
                 const cv::KeyPoint &kpUn = pKFi->keypoints.at(featType)[obs.second->projIndex];
-                const float invDepth_i = pKFi->invDepth.at(featType)[obs.second->projIndex];
+                const float invDepth_i = pKFi->inv_depth.at(featType)[obs.second->projIndex];
 
                 if(invDepth_i > 0.0f)   // RGB-D sensor-depth observation
                 {

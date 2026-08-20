@@ -144,7 +144,7 @@ protected:
 
      // Best descriptor to fast matching
      cv::Mat mDescriptor;
-     Keyframe refKeyframe;
+     Keyframe ref_keyframe;
      KeypointIndex refIndex;
 
      float refDistance;

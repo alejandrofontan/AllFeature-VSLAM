@@ -231,7 +231,7 @@ void FrameDrawer::Update(Tracking *pTracker)
                 Pt pMP = pTracker->current_frame_.pts.at(featType)[i];
                 if(pMP)
                 {
-                    if(!pTracker->current_frame_.mvbOutlier.at(featType)[i])
+                    if(!pTracker->current_frame_.outliers.at(featType)[i])
                     {
                         if(pMP->number_of_observations() > 0)
                             mvbMap[featType][i] = true;

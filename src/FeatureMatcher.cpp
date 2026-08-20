@@ -200,7 +200,7 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
     }
 
     // Associate surviving matches to map points
-    auto& it1 = keyframe->cache_matched_pairs_feat_type[frame.mnId];
+    auto& it1 = keyframe->cache_matched_pairs_feat_type[frame.frame_id];
     auto& it2 = frame.cache_matched_pairs_feat_type[keyframe->frame_id];
 
     map<FeatureType, int> matches_count;
@@ -220,7 +220,7 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
 
     // Cache matched pairs in both keyframe and frame for downstream use
     frame.cache_matched_pairs.insert_or_assign(keyframe->frame_id, swap_match_direction(robust_matches));
-    keyframe->cache_matched_pairs.insert_or_assign(frame.mnId, std::move(robust_matches));
+    keyframe->cache_matched_pairs.insert_or_assign(frame.frame_id, std::move(robust_matches));
 
     return matches_count;
 }

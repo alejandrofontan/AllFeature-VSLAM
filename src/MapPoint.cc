@@ -43,13 +43,13 @@ MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, con
     unique_lock<mutex> lock(mpMap->mMutexPointCreation);
     ptId = nNextId++;
 
-    refKeyframe = mpRefKF;
+    ref_keyframe = mpRefKF;
     refIndex = -1;
 
 }
 
 MapPoint::MapPoint(const vec3f &XYZ_, shared_ptr<Map> pMap, Frame* pFrame, const int &idxF, const FeatureType& featureType):
-    mnFirstKFid(-1), mnFirstFrame(pFrame->mnId), nObs(0), idLastFrameSeen(0),
+    mnFirstKFid(-1), mnFirstFrame(pFrame->frame_id), nObs(0), idLastFrameSeen(0),
     mnBALocalForKF(0), mnFuseCandidateForKF(0),mnLoopPointForKF(0), mnCorrectedByKF(0),
     mnCorrectedReference(0), mnBAGlobalForKF(0), featureType(featureType),
     mpRefKF(static_cast<Keyframe>(NULL)), mnVisible(1),
@@ -74,7 +74,7 @@ MapPoint::MapPoint(const vec3f &XYZ_, shared_ptr<Map> pMap, Frame* pFrame, const
     unique_lock<mutex> lock(mpMap->mMutexPointCreation);
     ptId = nNextId++;
 
-    refKeyframe = nullptr;
+    ref_keyframe = nullptr;
     refIndex = -1;
 }
 
@@ -111,7 +111,7 @@ void MapPoint::add_observation(Keyframe projKeyframe,  const KeypointIndex& proj
             return;
 
         observations[projKeyframe->keyId] = make_shared<Observation>(projKeyframe, projIndex,
-                                                                    refKeyframe , refIndex);
+                                                                    ref_keyframe , refIndex);
         increasePointObservability(projKeyframe,projIndex);
     }
     ComputeDistinctiveDescriptors()->UpdateNormalAndDepth();
@@ -136,7 +136,7 @@ void MapPoint::decreasePointObservability(Keyframe projKeyframe, const KeypointI
         nObs--;
 }
 Keyframe MapPoint::GetCurrentRefKeyframe(){
-    return refKeyframe;
+    return ref_keyframe;
 }
 
 void MapPoint::SetRefIndex(const KeypointIndex& refIndex_){
@@ -346,7 +346,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
         unique_lock<mutex> lock(mMutexFeatures);
         mDescriptor = descriptors[BestIdx].clone();
         refIndex = projIndexes[BestIdx];
-        refKeyframe = projKeyframes[BestIdx];
+        ref_keyframe = projKeyframes[BestIdx];
     }
     return thisPt();
 }

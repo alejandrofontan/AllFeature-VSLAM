@@ -38,7 +38,7 @@ Initializer::Initializer(const Frame &ReferenceFrame, float sigma_, int iteratio
     invDepth1.clear();
     for (const auto& [ft, keypoints]: ReferenceFrame.keypoints) {
         keypoints1.insert(keypoints1.end(), keypoints.begin(), keypoints.end());
-        const auto& d = ReferenceFrame.invDepth.at(ft);
+        const auto& d = ReferenceFrame.inv_depth.at(ft);
         invDepth1.insert(invDepth1.end(), d.begin(), d.end());
     }
 
@@ -59,7 +59,7 @@ bool Initializer::initialize(const Frame &CurrentFrame, const vector<int> &match
     invDepth2.clear();
     for (const auto& [ft, keypoints]: CurrentFrame.keypoints) {
         keypoints2.insert(keypoints2.end(), keypoints.begin(), keypoints.end());
-        const auto& d = CurrentFrame.invDepth.at(ft);
+        const auto& d = CurrentFrame.inv_depth.at(ft);
         invDepth2.insert(invDepth2.end(), d.begin(), d.end());
     }
 

@@ -402,8 +402,8 @@ void LocalMapping::CreateNewMapPoints()
 
                 vec3f x3D;
                 bool fromSensorDepth = false;
-                const float invDepth1 = mpCurrentKeyFrame->invDepth.at(featureType)[idx1];
-                const float invDepth2 = pKF2->invDepth.at(featureType)[idx2];
+                const float invDepth1 = mpCurrentKeyFrame->inv_depth.at(featureType)[idx1];
+                const float invDepth2 = pKF2->inv_depth.at(featureType)[idx2];
                 const bool haveDepth1 = invDepth1 > 0.0f;
                 const bool haveDepth2 = invDepth2 > 0.0f;
                 //if(true)
@@ -524,10 +524,10 @@ void LocalMapping::CreateNewMapPoints()
     // perfectly good sensor-depth reading but no such match (textureless region, repeated
     // pattern, fast motion) was previously silently dropped, even though depth alone already
     // places it in the map with no matching required at all. Matches the existing haveDepth1/
-    // haveDepth2 branch above: any invDepth>0 is trusted, no mThDepth range gate.
+    // haveDepth2 branch above: any inv_depth>0 is trusted, no mThDepth range gate.
     for(const auto& featureType : fts)
     {
-        const auto& invDepthFt = mpCurrentKeyFrame->invDepth.at(featureType);
+        const auto& invDepthFt = mpCurrentKeyFrame->inv_depth.at(featureType);
         const auto& keypointsFt = mpCurrentKeyFrame->keypoints.at(featureType);
 
         for(size_t idx = 0; idx < invDepthFt.size(); idx++)

@@ -34,13 +34,13 @@ long unsigned int KeyFrame::nNextId=0;
 
 KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>pKFDB):
     featureTypes(F.featureTypes), cache_matched_pairs(F.cache_matched_pairs), cache_matched_pairs_feat_type(F.cache_matched_pairs_feat_type),
-    frame_id(F.mnId),  mTimeStamp(F.mTimeStamp), mnGridCols(FRAME_GRID_COLS), mnGridRows(FRAME_GRID_ROWS),
+    frame_id(F.frame_id),  mTimeStamp(F.mTimeStamp), mnGridCols(FRAME_GRID_COLS), mnGridRows(FRAME_GRID_ROWS),
     mfGridElementWidthInv(F.mfGridElementWidthInv), mfGridElementHeightInv(F.mfGridElementHeightInv),
     mnFuseTargetForKF(0), mnBALocalForKF(0), mnBAFixedForKF(0),
     mnLoopQuery(0), mnLoopWords(0), mnRelocQuery(0), mnRelocWords(0), mnBAGlobalForKF(0),
     fx(F.fx), fy(F.fy), cx(F.cx), cy(F.cy), invfx(F.invfx), invfy(F.invfy),
     mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), mvKeys(F.mvKeys), keypoints(F.keypoints),
-    mvuRight(F.mvuRight), mvDepth(F.mvDepth), invDepth(F.invDepth), sigma2invDepth(F.sigma2invDepth),
+    mvuRight(F.mvuRight), mvDepth(F.mvDepth), inv_depth(F.inv_depth), sigma2invDepth(F.sigma2invDepth),
     mBowVec(F.mBowVec), mFeatVec(F.mFeatVec),  sizeTolerance(F.sizeTolerance),
     keyPtsSigma2(F.keyPtsSigma2),keyPtsInf(F.keyPtsInf),keyPtsSize(F.keyPtsSize),
     maxKeyPtSize(F.maxKeyPtSize),maxKeyPtSigma(F.maxKeyPtSigma),

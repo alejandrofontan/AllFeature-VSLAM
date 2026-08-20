@@ -230,7 +230,7 @@ void Tracking::Track()
         }
 
 
-        current_frame_.refKeyframe = ref_keyframe_;
+        current_frame_.ref_keyframe = ref_keyframe_;
 
         const auto tAfterTrackRef = StageClock::now();
 
@@ -277,9 +277,9 @@ void Tracking::Track()
 
             // Low-rate heartbeat so post-mortems can see the inlier/map trend leading
             // into a tracking loss, not just the loss line itself.
-            if(current_frame_.mnId % 100 == 0)
+            if(current_frame_.frame_id % 100 == 0)
             {
-                AF_INFO("Track heartbeat | frame=" << current_frame_.mnId
+                AF_INFO("Track heartbeat | frame=" << current_frame_.frame_id
                         << " inliers=" << mnMatchesInliers
                         << " local_points_=" << local_points_.size()
                         << " KFs=" << map_->KeyFramesInMap()
@@ -308,7 +308,7 @@ void Tracking::Track()
                     if(pMP)
                         if(pMP->number_of_observations() < 1)
                         {
-                            current_frame_.mvbOutlier.at(ft)[i] = false;
+                            current_frame_.outliers.at(ft)[i] = false;
                             current_frame_.pts.at(ft)[i]=static_cast<Pt>(nullptr);
                         }
                 }
@@ -327,7 +327,7 @@ void Tracking::Track()
             for (auto& [ft, N] : current_frame_.N) {
                 for(int i =0; i < N; i++)
                 {
-                    if(current_frame_.pts.at(ft)[i] && current_frame_.mvbOutlier.at(ft)[i])
+                    if(current_frame_.pts.at(ft)[i] && current_frame_.outliers.at(ft)[i])
                         current_frame_.pts.at(ft)[i]=static_cast<Pt>(nullptr);
                 }
             }
@@ -346,8 +346,8 @@ void Tracking::Track()
             }
         }
 
-        if(!current_frame_.refKeyframe)
-            current_frame_.refKeyframe = ref_keyframe_;
+        if(!current_frame_.ref_keyframe)
+            current_frame_.ref_keyframe = ref_keyframe_;
 
         last_frame_ = Frame(current_frame_);
     }
@@ -355,7 +355,7 @@ void Tracking::Track()
     // Store frame pose information to retrieve the complete camera trajectory afterward.
     if(current_frame_.Tcw(3,3) == 1.0f)
     {
-        mat4f Tcr = current_frame_.Tcw * current_frame_.refKeyframe->get_pose_inverse();
+        mat4f Tcr = current_frame_.Tcw * current_frame_.ref_keyframe->get_pose_inverse();
         mlRelativeFramePoses.push_back(Tcr);
         mlpReferences.push_back(ref_keyframe_);
         mlFrameTimes.push_back(current_frame_.mTimeStamp);
@@ -397,7 +397,7 @@ void Tracking::Track()
                 << ", localMap=" << int(msLocalMap)
                 << ", emergencyWait=" << int(msEmergencyWait)
                 << ", other=" << int(msTotal - msLockWait - msTrackRef - msLocalMap - msEmergencyWait)
-                << ") | frame=" << current_frame_.mnId);
+                << ") | frame=" << current_frame_.frame_id);
     }
 }
 
@@ -512,7 +512,7 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
                                                                  keyframe_ini, KeypointIndex(i), ft);
             // Fill current frame structure
             current_frame_.pts.at(ft)[matches[i]] = map_point;
-            current_frame_.mvbOutlier.at(ft)[matches[i]] = false;
+            current_frame_.outliers.at(ft)[matches[i]] = false;
 
             map_->add_map_point(map_point);
         }
@@ -541,7 +541,7 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
 
     vector<float> depth_ratios;
     for (const auto& ft : feature_types_) {
-        const auto& inv_depth_kf = keyframe_ini->invDepth.at(ft);
+        const auto& inv_depth_kf = keyframe_ini->inv_depth.at(ft);
         const vector<Pt> map_points = keyframe_ini->get_map_point_matches(ft);
         for (size_t i = 0; i < map_points.size(); i++)
         {
@@ -581,14 +581,14 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     local_mapper_->insert_keyframe(keyframe_cur);
 
     current_frame_.set_pose(keyframe_cur->get_pose());
-    last_keyframe_id_ = current_frame_.mnId;
+    last_keyframe_id_ = current_frame_.frame_id;
     last_keyframe_ = keyframe_cur;
 
     local_keyframes_.push_back(keyframe_cur);
     local_keyframes_.push_back(keyframe_ini);
     local_points_ = map_->get_all_map_points();
     ref_keyframe_ = keyframe_cur;
-    current_frame_.refKeyframe = keyframe_cur;
+    current_frame_.ref_keyframe = keyframe_cur;
 
     last_frame_ = Frame(current_frame_);
 
@@ -632,7 +632,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     for (auto& [ft, N] : current_frame_.N)
     {
         current_frame_.pts[ft] = mapPointMatches[ft];
-        current_frame_.mvbOutlier[ft] = vector<bool>(mapPointMatches[ft].size(), false);
+        current_frame_.outliers[ft] = vector<bool>(mapPointMatches[ft].size(), false);
         nmatches += nmatches_ft[ft];
     }
 
@@ -645,7 +645,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
         std::ostringstream reason;
         reason << "TrackReferenceKeyFrame: insufficient matches to reference keyframe (nmatches="
                << nmatches << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH << ")"
-               << " | frame=" << current_frame_.mnId << " ref_keyframe_=" << ref_keyframe_->keyId;
+               << " | frame=" << current_frame_.frame_id << " ref_keyframe_=" << ref_keyframe_->keyId;
         throw TrackingLostException(reason.str());
     }
 
@@ -710,7 +710,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
         }
         if(nGated > 0)
             AF_INFO("TrackReferenceKeyFrame: prior-consistency gate dropped " << nGated
-                    << " matches | frame=" << current_frame_.mnId);
+                    << " matches | frame=" << current_frame_.frame_id);
     }
 
     current_frame_.set_pose(posePrior);
@@ -722,7 +722,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
             for(int i = 0; i < N_ft; i++)
             {
                 const Pt& pt = current_frame_.pts.at(ft)[i];
-                if(pt && !current_frame_.mvbOutlier.at(ft)[i] && pt->number_of_observations() > 0)
+                if(pt && !current_frame_.outliers.at(ft)[i] && pt->number_of_observations() > 0)
                     n++;
             }
         return n;
@@ -738,7 +738,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     {
         AF_WARN("TrackReferenceKeyFrame: pose optimization collapsed (" << nmatchesMap
                 << " inliers of " << nmatches << " raw matches) — retrying without depth channel"
-                << " | frame=" << current_frame_.mnId);
+                << " | frame=" << current_frame_.frame_id);
 
         // Post-mortem dump: per-match reprojection residuals AT THE PRIOR POSE (before any
         // optimization), with each map point's provenance — enough to test offline whether
@@ -751,12 +751,12 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
             const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
             const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
             std::ofstream dump(FrameDrawer::exp_folder + "/collapse_frame_"
-                               + std::to_string(current_frame_.mnId) + ".csv");
+                               + std::to_string(current_frame_.frame_id) + ".csv");
             dump << "ft,kpIdx,u_kp,v_kp,u_proj,v_proj,z_cam,invDepth_meas,ptId,firstKFid,nObs\n";
             for (auto& [ft, N_ft] : current_frame_.N)
             {
                 const auto& kps = current_frame_.keypoints.at(ft);
-                const auto& invD = current_frame_.invDepth.at(ft);
+                const auto& invD = current_frame_.inv_depth.at(ft);
                 for(int i = 0; i < N_ft; i++)
                 {
                     const Pt& pt = current_frame_.pts.at(ft)[i];
@@ -776,7 +776,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
         }
 
         for (auto& [ft, N_ft] : current_frame_.N)
-            std::fill(current_frame_.mvbOutlier.at(ft).begin(), current_frame_.mvbOutlier.at(ft).end(), false);
+            std::fill(current_frame_.outliers.at(ft).begin(), current_frame_.outliers.at(ft).end(), false);
         current_frame_.set_pose(posePrior);
         Optimizer::PoseOptimization(&current_frame_, /*useDepthChannel=*/false);
         nmatchesMap = countMapInliers();
@@ -790,12 +790,12 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
             Pt pt = current_frame_.pts.at(ft)[i];
             if(pt)
             {
-                if(current_frame_.mvbOutlier.at(ft)[i])
+                if(current_frame_.outliers.at(ft)[i])
                 {
                     current_frame_.pts.at(ft)[i] = static_cast<Pt>(nullptr);
-                    current_frame_.mvbOutlier.at(ft)[i] = false;
+                    current_frame_.outliers.at(ft)[i] = false;
                     pt->mbTrackInView = false;
-                    pt->idLastFrameSeen = current_frame_.mnId;
+                    pt->idLastFrameSeen = current_frame_.frame_id;
                 }
             }
         }
@@ -812,7 +812,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
         std::ostringstream reason;
         reason << "TrackReferenceKeyFrame: insufficient inlier matches after pose optimization (nmatchesMap="
                << nmatchesMap << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW << ")"
-               << " | frame=" << current_frame_.mnId << " rawMatches=" << nmatches;
+               << " | frame=" << current_frame_.frame_id << " rawMatches=" << nmatches;
         throw TrackingLostException(reason.str());
     }
 
@@ -822,7 +822,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
 void Tracking::UpdateLastFrame()
 {
     // Update pose according to reference keyframe
-    Keyframe pRef = last_frame_.refKeyframe;
+    Keyframe pRef = last_frame_.ref_keyframe;
     mat4f Tlr = mlRelativeFramePoses.back();
 
     last_frame_.set_pose(Tlr * pRef->get_pose());
@@ -846,7 +846,7 @@ bool Tracking::TrackLocalMap()
         {
             if(current_frame_.pts.at(ft)[i])
             {
-                if(!current_frame_.mvbOutlier.at(ft)[i])
+                if(!current_frame_.outliers.at(ft)[i])
                 {
                     current_frame_.pts.at(ft)[i]->IncreaseFound();
 
@@ -863,13 +863,13 @@ bool Tracking::TrackLocalMap()
 
     // Decide if the tracking was succesful
     // More restrictive if there was a relocalization recently
-    if(current_frame_.mnId < lastRelocFrameId + maxFrames && mnMatchesInliers < minMatches_trackLocalMap_high)
+    if(current_frame_.frame_id < lastRelocFrameId + maxFrames && mnMatchesInliers < minMatches_trackLocalMap_high)
     {
         std::ostringstream reason;
         reason << "TrackLocalMap: insufficient inliers shortly after relocalization (mnMatchesInliers="
                << mnMatchesInliers << " < " << minMatches_trackLocalMap_high << ")"
-               << " | frame=" << current_frame_.mnId
-               << " framesSinceReloc=" << (current_frame_.mnId - lastRelocFrameId) << " maxFrames=" << maxFrames;
+               << " | frame=" << current_frame_.frame_id
+               << " framesSinceReloc=" << (current_frame_.frame_id - lastRelocFrameId) << " maxFrames=" << maxFrames;
         throw TrackingLostException(reason.str());
     }
 
@@ -878,7 +878,7 @@ bool Tracking::TrackLocalMap()
         std::ostringstream reason;
         reason << "TrackLocalMap: insufficient inliers against local map (mnMatchesInliers="
                << mnMatchesInliers << " < " << minMatches_trackLocalMap_low << ")"
-               << " | frame=" << current_frame_.mnId << " local_points_=" << local_points_.size();
+               << " | frame=" << current_frame_.frame_id << " local_points_=" << local_points_.size();
         throw TrackingLostException(reason.str());
     }
 
@@ -931,7 +931,7 @@ bool Tracking::TrackLocalMap()
         // threshold): at driving speed the full embargo freezes the reference keyframe for
         // ~a second of travel, decaying its matches until tracking is lost AGAIN right after
         // a successful relocalization (observed echo losses 20-22 frames after reloc; #9).
-        if((current_frame_.mnId < lastRelocFrameId + maxFrames) && (numKeyframesInMap > maxFrames)
+        if((current_frame_.frame_id < lastRelocFrameId + maxFrames) && (numKeyframesInMap > maxFrames)
            && mnMatchesInliers < 2 * minMatches_trackLocalMap_high)
             return false;
 
@@ -955,12 +955,12 @@ bool Tracking::TrackLocalMap()
 
         bool c2{false};
         #ifdef ALLFEATURE_EVALUATION
-        c2 = ((int( current_frame_.mnId) % ALLFEATURE_EVALUATION) == 0);
+        c2 = ((int( current_frame_.frame_id) % ALLFEATURE_EVALUATION) == 0);
         #endif
 
         bool c3{false};
         #ifdef ALLFEATURE_MAX_KEYFRAMES
-        c3 = ((current_frame_.mnId % ALLFEATURE_MAX_KEYFRAMES) == 0);
+        c3 = ((current_frame_.frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0);
         #endif
 
         float overlap = current_frame_.GetOverlap();
@@ -998,7 +998,7 @@ bool Tracking::TrackLocalMap()
             else
             {
                 // if(c2 || c3 || c4){
-                //     std::cout << "\nEmergency keyframe triggered by evaluation condition at frame " << current_frame_.mnId << std::endl;
+                //     std::cout << "\nEmergency keyframe triggered by evaluation condition at frame " << current_frame_.frame_id << std::endl;
                 //     emergencyKeyframe = true;
                 //     return true;
                 // }
@@ -1009,11 +1009,11 @@ bool Tracking::TrackLocalMap()
                 // cooldown so a persistent low-inlier state can't chain insertions.
                 if(medianRecentInliers > 0
                    && mnMatchesInliers < 0.5f * static_cast<float>(medianRecentInliers)
-                   && current_frame_.mnId >= lastEmergencyKFId + static_cast<FrameId>(emergencyKFCooldown)){
+                   && current_frame_.frame_id >= lastEmergencyKFId + static_cast<FrameId>(emergencyKFCooldown)){
                     AF_WARN("NeedNewKeyFrame: emergency keyframe (mnMatchesInliers=" << mnMatchesInliers
                             << " < 0.5*medianRecentInliers=" << medianRecentInliers
-                            << ", medianFlow=" << medianFlow << ") | frame=" << current_frame_.mnId);
-                    lastEmergencyKFId = current_frame_.mnId;
+                            << ", medianFlow=" << medianFlow << ") | frame=" << current_frame_.frame_id);
+                    lastEmergencyKFId = current_frame_.frame_id;
                     emergencyKeyframe = true;
                     return true;
                 }
@@ -1031,11 +1031,11 @@ bool Tracking::TrackLocalMap()
         Keyframe keyframe = make_shared<KeyFrame>(current_frame_,map_,keyframe_db_);
 
         ref_keyframe_ = keyframe;
-        current_frame_.refKeyframe = keyframe;
+        current_frame_.ref_keyframe = keyframe;
 
         local_mapper_->insert_keyframe(keyframe);
         local_mapper_->SetNotStop(false);
-        last_keyframe_id_ = current_frame_.mnId;
+        last_keyframe_id_ = current_frame_.frame_id;
         last_keyframe_ = keyframe;
     }
 
@@ -1046,7 +1046,7 @@ bool Tracking::TrackLocalMap()
             for(auto& pt: current_frame_.pts.at(ft)){
                 if(pt && !pt->is_bad()){
                     pt->IncreaseVisible();
-                    pt->idLastFrameSeen = current_frame_.mnId;
+                    pt->idLastFrameSeen = current_frame_.frame_id;
                     pt->mbTrackInView = false;
                 }
                 else
@@ -1057,7 +1057,7 @@ bool Tracking::TrackLocalMap()
         // Project points in frame and check its visibility
         int nToMatch=0;
         for(auto& pt: local_points_){
-            if(pt->idLastFrameSeen == current_frame_.mnId)
+            if(pt->idLastFrameSeen == current_frame_.frame_id)
                 continue;
             if(pt->is_bad())
                 continue;
@@ -1150,7 +1150,7 @@ bool Tracking::TrackLocalMap()
 
             if(keyframeMaxObs){
                 ref_keyframe_ = keyframeMaxObs;
-                current_frame_.refKeyframe = ref_keyframe_;
+                current_frame_.ref_keyframe = ref_keyframe_;
             }
         }
 
@@ -1299,7 +1299,7 @@ bool Tracking::Relocalization(const FeatureType& featureType)
                     continue;
 
                 for(int io =0; io<current_frame_.N.at(featureType); io++)
-                    if(current_frame_.mvbOutlier.at(featureType)[io])
+                    if(current_frame_.outliers.at(featureType)[io])
                         current_frame_.pts.at(featureType)[io]=static_cast<Pt>(nullptr);
 
                 // If few inliers, search by projection in a coarse window and optimize again
@@ -1327,7 +1327,7 @@ bool Tracking::Relocalization(const FeatureType& featureType)
                                 nGood = Optimizer::PoseOptimization(&current_frame_);
 
                                 for(int io =0; io < current_frame_.N.at(featureType); io++)
-                                    if(current_frame_.mvbOutlier.at(featureType)[io])
+                                    if(current_frame_.outliers.at(featureType)[io])
                                         current_frame_.pts.at(featureType)[io]=nullptr;
                             }
                         }
@@ -1338,7 +1338,7 @@ bool Tracking::Relocalization(const FeatureType& featureType)
                 // If the pose is supported by enough inliers stop ransacs and continue
                 if(nGood >= nGood_high)
                 {
-                    AF_INFO("Relocalization succeeded | frame=" << current_frame_.mnId
+                    AF_INFO("Relocalization succeeded | frame=" << current_frame_.frame_id
                             << " feature=" << featureName(featureType)
                             << " matchedKeyframe=" << vpCandidateKFs[i]->keyId
                             << " inliers=" << nGood << " requiredInliers=" << nGood_high);
@@ -1359,7 +1359,7 @@ bool Tracking::Relocalization(const FeatureType& featureType)
     }
     else
     {
-        lastRelocFrameId = current_frame_.mnId;
+        lastRelocFrameId = current_frame_.frame_id;
         return true;
     }
 
