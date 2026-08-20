@@ -47,6 +47,9 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     readIfPresent("Tracking.InitMinMatches", params.init_min_matches);
     readIfPresent("Tracking.InitRansacIterations", params.init_ransac_iterations);
     readIfPresent("Tracking.InitMinMedianDisparity", params.init_min_median_disparity);
+    readIfPresent("Tracking.InitGbaIterations", params.init_gba_iterations);
+    readIfPresent("Tracking.InitMinTrackedPoints", params.init_min_tracked_points);
+    readIfPresent("Tracking.InitMinDepthSamples", params.init_min_depth_samples);
 }
 
 Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
@@ -521,17 +524,17 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
 
     // Bundle Adjustment
     AF_INFO("New Map created with " << map->MapPointsInMap() << " points");
-    Optimizer::GlobalBundleAdjustemnt(map, numItGBA);
+    Optimizer::GlobalBundleAdjustemnt(map, params.init_gba_iterations);
 
     // Set the initial map's scale: prefer a depth-verified scale over the arbitrary
     // monocular "median depth = 1" convention, when enough points have valid sensor depth.
     const float median_depth = keyframe_ini->ComputeSceneMedianDepth(2);
     const int tracked_map_points = keyframe_cur->TrackedMapPoints(1);
 
-    if (median_depth < 0 || tracked_map_points < keyframeTrackedMapPoints)
+    if (median_depth < 0 || tracked_map_points < params.init_min_tracked_points)
     {
         AF_WARN("Wrong initialization (median_depth=" << median_depth << ", tracked map points="
-                << tracked_map_points << " < " << keyframeTrackedMapPoints << ") — resetting...");
+                << tracked_map_points << " < " << params.init_min_tracked_points << ") — resetting...");
         Reset();
         return;
     }
@@ -555,7 +558,7 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     }
 
     float inv_median_depth = 1.0f / median_depth;
-    if (depth_ratios.size() >= static_cast<size_t>(minDepthSamples_createInitialMap))
+    if (depth_ratios.size() >= static_cast<size_t>(params.init_min_depth_samples))
     {
         const auto mid = depth_ratios.begin() + depth_ratios.size() / 2;
         std::nth_element(depth_ratios.begin(), mid, depth_ratios.end());

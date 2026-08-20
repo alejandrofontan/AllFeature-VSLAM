@@ -64,6 +64,11 @@ struct TrackingParameters
     int init_min_matches{100};       // min correspondences to attempt initialization
     int init_ransac_iterations{200}; // initializer RANSAC iteration budget
     float init_min_median_disparity{10.0f}; // px; below this (static camera) skip the init attempt
+
+    // create_initial_map_monocular()
+    int init_gba_iterations{20};      // global-BA iteration budget on the initial map
+    int init_min_tracked_points{100}; // min tracked map points in the current keyframe to accept the map
+    int init_min_depth_samples{10};   // min sensor-depth ratio samples to prefer depth-verified scale
 };
 
 class Tracking
@@ -307,10 +312,6 @@ protected:
 
     //////////////////////////////////////////////// Constants
 
-    // create_initial_map_monocular()
-    const int keyframeTrackedMapPoints{100};
-    const int minDepthSamples_createInitialMap{10};
-
     // TrackReferenceKeyFrame()
     const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH{15};
     const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW{10};
@@ -357,7 +358,6 @@ protected:
     const int nGood_low{10};
 
     // # Iterations
-    const int numItGBA{20}; // create_initial_map_monocular()
     const int numItpSolver{5}; // Relocalization
 
     // Memory
