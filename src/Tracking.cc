@@ -449,7 +449,7 @@ void Tracking::monocular_initialization(FeatureType feature_type)
         mat3f Rcw{}; // Current Camera Rotation
         vec3f tcw{}; // Current Camera Translation
         std::vector<bool> triangulated;
-        if(initializer_->Initialize(current_frame_, init_matches_, Rcw, tcw, init_points3d_, triangulated))
+        if(initializer_->initialize(current_frame_, init_matches_, Rcw, tcw, init_points3d_, triangulated))
         {
             // Discard matches the initializer could not triangulate
             for (size_t j = 0; j < init_matches_.size(); j++)

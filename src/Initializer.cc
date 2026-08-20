@@ -48,7 +48,7 @@ Initializer::Initializer(const Frame &ReferenceFrame, float sigma_, int iteratio
 
 }
 
-bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &matches12_,
+bool Initializer::initialize(const Frame &CurrentFrame, const vector<int> &matches12_,
                              mat3f &R21, vec3f &t21,
                              vector<vec3f> &pts3D, vector<bool> &isTriangulated)
 {

@@ -40,7 +40,7 @@ public:
 
     // Computes in parallel a fundamental matrix and a homography
     // Selects a model and tries to recover the motion and the structure from motion
-    bool Initialize(const Frame &CurrentFrame, const vector<int> &matches12_,
+    bool initialize(const Frame &CurrentFrame, const vector<int> &matches12_,
                     mat3f &R21, vec3f &t21,
                     vector<vec3f> &pts3D, vector<bool> &isTriangulated);
 
@@ -121,7 +121,7 @@ private:
 
     // Heuristics
 
-    // Initialize
+    // initialize
     const float minRH{0.5};
     const float minParallax{1.0f};
     const int minTriangulated{50};
