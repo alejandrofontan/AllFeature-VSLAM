@@ -439,8 +439,8 @@ void Tracking::monocular_initialization(FeatureType feature_type)
         }
 
         // Check if there are enough correspondences
-        const size_t nmatches = matched_pairs.at(feature_type).size();
-        if(nmatches < static_cast<size_t>(params.init_min_matches))
+        const size_t num_matches = matched_pairs.at(feature_type).size();
+        if(num_matches < static_cast<size_t>(params.init_min_matches))
         {
             initializer_ = nullptr;
             return;
