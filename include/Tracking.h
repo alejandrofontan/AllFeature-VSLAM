@@ -165,7 +165,7 @@ protected:
     void Track();
 
     // Map initialization for monocular
-    void monocular_initialization(const FeatureType& featureType);
+    void monocular_initialization(FeatureType featureType);
     void CreateInitialMapMonocular(const FeatureType& featureType);
 
     void CheckReplacedInLastFrame();

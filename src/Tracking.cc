@@ -397,7 +397,7 @@ void Tracking::Track()
     }
 }
 
-void Tracking::monocular_initialization(const FeatureType& featureType)
+void Tracking::monocular_initialization(FeatureType featureType)
 {
     if(!initializer_)
     {
