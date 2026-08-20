@@ -210,7 +210,7 @@ void FrameDrawer::Update(Tracking *pTracker)
     pTracker->mImGray.copyTo(mIm);
     pTracker->mImMask.copyTo(mMask);
     imName = pTracker->imName;
-    mvCurrentKeys = pTracker->currentFrame.mvKeys;
+    mvCurrentKeys = pTracker->current_frame_.mvKeys;
     for (auto const& [featType, mvKeys] : mvCurrentKeys) {
         N[featType] = mvKeys.size();
         mvbVO[featType] = vector<bool>(N[featType],false);
@@ -228,10 +228,10 @@ void FrameDrawer::Update(Tracking *pTracker)
         for (auto const& [featType, N_] : N) {
             for(int i = 0; i < N_; i++)
             {
-                Pt pMP = pTracker->currentFrame.pts.at(featType)[i];
+                Pt pMP = pTracker->current_frame_.pts.at(featType)[i];
                 if(pMP)
                 {
-                    if(!pTracker->currentFrame.mvbOutlier.at(featType)[i])
+                    if(!pTracker->current_frame_.mvbOutlier.at(featType)[i])
                     {
                         if(pMP->number_of_observations() > 0)
                             mvbMap[featType][i] = true;

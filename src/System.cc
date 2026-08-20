@@ -48,7 +48,7 @@ System::System(const string &vocabularyFolder,
 
     Optimizer::LoadParameters(fsSettings);
     Tracking::LoadParameters(fsSettings);
-    
+
     DUtils::Random::SeedRandOnce(0);
 
     //Load ORB Vocabulary
@@ -270,8 +270,8 @@ mat4f System::Track(Image &im, const double &timestamp)
 
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = tracker->mState;
-    mTrackedMapPoints = tracker->currentFrame.pts;
-    mTrackedKeyPointsUn = tracker->currentFrame.keypoints;
+    mTrackedMapPoints = tracker->current_frame_.pts;
+    mTrackedKeyPointsUn = tracker->current_frame_.keypoints;
 
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();

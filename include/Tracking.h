@@ -74,7 +74,7 @@ public:
              const string &strCalibrationPath, const string &strSettingPath,
              const std::map<FeatureType, string>& feature_settings_yaml_file,
              const int sensor,
-             const vector<FeatureType>& featureTypes,
+             const vector<FeatureType>& feature_types,
              const bool& fixImageSize = false);
 
     // Preprocess the input and call Track(). Extract features and performs stereo matching.
@@ -112,7 +112,7 @@ public:
     int mSensor;
 
     // Current Frame
-    Frame currentFrame;
+    Frame current_frame_;
     cv::Mat mImGray;
     cv::Mat mImMask; // segmentation mask of the current image (1 = static, 0 = dynamic); empty when segmentation is off
     std::string imName;
@@ -138,7 +138,7 @@ public:
 
     size_t numTrackedFrames{2};
 
-    vector<FeatureType> featureTypes{};
+    vector<FeatureType> feature_types_{};
     int featureInitialization{0};
     int featureRelocalization{0};
 
@@ -184,7 +184,7 @@ protected:
     bool NeedNewKeyFrame();
     void CreateNewKeyFrame();
 
-    // Median pixel displacement of map points shared between currentFrame and lastFrame.
+    // Median pixel displacement of map points shared between current_frame_ and last_frame_.
     // Scale-free stationarity signal for NeedNewKeyFrame; returns -1 if too few shared
     // points to be meaningful (gate then stays inactive).
     float MedianFlowFromLastFrame() const;
@@ -265,7 +265,7 @@ protected:
 
     // Last Frame, KeyFrame and Relocalisation Info
     Keyframe lastKeyFrame;
-    Frame lastFrame;
+    Frame last_frame_;
     KeyframeId lastKeyFrameId;
     FrameId lastRelocFrameId;
 
@@ -380,7 +380,7 @@ protected:
     // Track()
     const int minKeyframesInMap{5};
 
-    std::shared_ptr<FeatureMatcher> matcher;
+    std::shared_ptr<FeatureMatcher> matcher_;
 
     bool emergencyKeyframe{false};
 
