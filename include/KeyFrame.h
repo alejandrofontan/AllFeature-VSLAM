@@ -54,7 +54,7 @@ public:
     }
 
     // Pose functions
-    void SetPose(const mat4f &Tcw_);
+    void set_pose(const mat4f &Tcw_);
     mat4f GetPose();
     mat4f GetPoseInverse();
     vec3f get_camera_center();

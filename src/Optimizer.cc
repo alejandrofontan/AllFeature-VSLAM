@@ -301,7 +301,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 
         if(nLoopKF==0)
         {
-            pKF->SetPose(Converter::toMatrix4f(SE3quat));
+            pKF->set_pose(Converter::toMatrix4f(SE3quat));
         }
         else
         {
@@ -614,7 +614,7 @@ int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
     // Recover optimized pose and return number of inliers
     g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
     g2o::SE3Quat SE3quat_recov = vSE3_recov->estimate();
-    pFrame->SetPose(Converter::toMatrix4f(SE3quat_recov));
+    pFrame->set_pose(Converter::toMatrix4f(SE3quat_recov));
 
     return nInitialCorrespondences-nBad;
 }
@@ -858,7 +858,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
         Keyframe pKF = *lit;
         g2o::VertexSE3Expmap* vSE3 = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(pKF->keyId));
         g2o::SE3Quat SE3quat = vSE3->estimate();
-        pKF->SetPose(Converter::toMatrix4f(SE3quat));
+        pKF->set_pose(Converter::toMatrix4f(SE3quat));
     }
 
     //Points
@@ -1098,7 +1098,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
 
         mat4f Tiw = Converter::toMatrix4f(eigR,eigt);
 
-        pKFi->SetPose(Tiw);
+        pKFi->set_pose(Tiw);
     }
 
     // Correct points. Transform to "non-optimized" reference keyframe pose and transform back with optimized pose

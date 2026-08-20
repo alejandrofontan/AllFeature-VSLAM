@@ -145,7 +145,7 @@ float Map::NormalizeMap()
     {
         mat4f Tc2w = keyframe->GetPose();
         Tc2w.block<3,1>(0,3) /= medianDepth;
-        keyframe->SetPose(Tc2w);
+        keyframe->set_pose(Tc2w);
 
     }
 

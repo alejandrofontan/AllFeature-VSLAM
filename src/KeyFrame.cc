@@ -59,7 +59,7 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>p
                 mGrid[ft][i][j] = F.mGrid[ft][i][j];
         }
     }
-    SetPose(F.Tcw);
+    set_pose(F.Tcw);
 
     for(auto& [ft, N_] : N)
         if (N_ > 0){
@@ -77,7 +77,7 @@ void KeyFrame::ComputeBoW(const FeatureType &featType)
     }
 }
 
-void KeyFrame::SetPose(const mat4f &Tcw_)
+void KeyFrame::set_pose(const mat4f &Tcw_)
 {
     unique_lock<mutex> lock(mMutexPose);
 

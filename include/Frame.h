@@ -82,7 +82,7 @@ public:
     void ComputeBoW(const FeatureType& featType);
 
     // Set the camera pose.
-    void SetPose(const mat4f& Tcw_);
+    void set_pose(const mat4f& Tcw_);
 
     // Computes rotation, translation and camera center matrices from the camera pose.
     void UpdatePoseMatrices();

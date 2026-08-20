@@ -457,11 +457,11 @@ void Tracking::monocular_initialization(FeatureType feature_type)
                     init_matches_[j] = -1;
 
             // Set Frame Poses
-            initial_frame_.SetPose(mat4f::Identity());
+            initial_frame_.set_pose(mat4f::Identity());
             mat4f Tcw{mat4f::Identity()};
             Tcw.block<3,3>(0,0) = Rcw;
             Tcw.block<3,1>(0,3) = tcw;
-            current_frame_.SetPose(Tcw);
+            current_frame_.set_pose(Tcw);
             create_initial_map_monocular(feature_type);
         }
     }
@@ -556,7 +556,7 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     // Scale initial baseline
     mat4f Tc2w = pKFcur->GetPose();
     Tc2w.block<3,1>(0,3) *= invMedianDepth;
-    pKFcur->SetPose(Tc2w);
+    pKFcur->set_pose(Tc2w);
 
     // Scale points
 
@@ -576,7 +576,7 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     localMapper->InsertKeyFrame(pKFini);
     localMapper->InsertKeyFrame(pKFcur);
 
-    current_frame_.SetPose(pKFcur->GetPose());
+    current_frame_.set_pose(pKFcur->GetPose());
     lastKeyFrameId=current_frame_.mnId;
     lastKeyFrame = pKFcur;
 
@@ -711,7 +711,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
                     << " matches | frame=" << current_frame_.mnId);
     }
 
-    current_frame_.SetPose(posePrior);
+    current_frame_.set_pose(posePrior);
     Optimizer::PoseOptimization(&current_frame_);
 
     const auto countMapInliers = [this]() {
@@ -775,7 +775,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
 
         for (auto& [ft, N_ft] : current_frame_.N)
             std::fill(current_frame_.mvbOutlier.at(ft).begin(), current_frame_.mvbOutlier.at(ft).end(), false);
-        current_frame_.SetPose(posePrior);
+        current_frame_.set_pose(posePrior);
         Optimizer::PoseOptimization(&current_frame_, /*useDepthChannel=*/false);
         nmatchesMap = countMapInliers();
     }
@@ -823,7 +823,7 @@ void Tracking::UpdateLastFrame()
     Keyframe pRef = last_frame_.refKeyframe;
     mat4f Tlr = mlRelativeFramePoses.back();
 
-    last_frame_.SetPose(Tlr * pRef->GetPose());
+    last_frame_.set_pose(Tlr * pRef->GetPose());
 }
 
 bool Tracking::TrackLocalMap()

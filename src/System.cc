@@ -428,7 +428,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
             continue;
         }
         #endif
-       // pKF->SetPose(pKF->GetPose()*Two);
+       // pKF->set_pose(pKF->GetPose()*Two);
 
         if(pKF->is_bad())
             continue;

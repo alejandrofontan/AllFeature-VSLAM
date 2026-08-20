@@ -77,7 +77,7 @@ Frame::Frame(const Frame &frame)
     }
 
     if(frame.Tcw(3,3) == 1.0f)
-        SetPose(frame.Tcw);
+        set_pose(frame.Tcw);
 }
 
 // Copy assignment: destroy the current object and placement-new a fresh copy via the copy
@@ -224,7 +224,7 @@ void Frame::ExtractFeatures(int, const Image& img)
     maxKeyPtSigma = featureExtractorLeft.begin()->second->GetMaxKeyPtSigma();
 }
 
-void Frame::SetPose(const mat4f& Tcw_)
+void Frame::set_pose(const mat4f& Tcw_)
 {
     Tcw = Tcw_;
     UpdatePoseMatrices();

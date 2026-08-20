@@ -544,7 +544,7 @@ void LoopClosing::CorrectLoop()
 
             mat4f correctedTiw = Converter::toMatrix4f(eigR,eigt);
 
-            pKFi->SetPose(correctedTiw);
+            pKFi->set_pose(correctedTiw);
 
             // Make sure connections are updated
             pKFi->UpdateConnections();
@@ -728,7 +728,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
                 }
 
                 pKF->TcwBefGBA = pKF->GetPose();
-                pKF->SetPose(pKF->TcwGBA);
+                pKF->set_pose(pKF->TcwGBA);
                 lpKFtoCheck.pop_front();
             }
 
