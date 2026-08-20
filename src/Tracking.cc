@@ -397,23 +397,23 @@ void Tracking::Track()
     }
 }
 
-void Tracking::monocular_initialization(FeatureType featureType)
+void Tracking::monocular_initialization(FeatureType feature_type)
 {
     if(!initializer_)
     {
         // Set Reference Frame
-        if(currentFrame.mvKeys.at(featureType).size() > static_cast<size_t>(params.init_min_keypoints))
+        if(currentFrame.mvKeys.at(feature_type).size() > static_cast<size_t>(params.init_min_keypoints))
         {
             initial_frame_ = currentFrame;
             lastFrame = currentFrame;
-            initializer_ = std::make_shared<Initializer>(currentFrame, params.init_sigma, params.init_ransac_iterations, featureType);
+            initializer_ = std::make_shared<Initializer>(currentFrame, params.init_sigma, params.init_ransac_iterations, feature_type);
             return;
         }
     }
     else
     {
         // Try to initialize
-        if(currentFrame.mvKeys.at(featureType).size() <= static_cast<size_t>(params.init_min_keypoints))
+        if(currentFrame.mvKeys.at(feature_type).size() <= static_cast<size_t>(params.init_min_keypoints))
         {
             initializer_ = nullptr;
             return;
@@ -423,10 +423,10 @@ void Tracking::monocular_initialization(FeatureType featureType)
         const auto matched_pairs = matcher->match_frames_for_initialization(initial_frame_, currentFrame, featureTypes);
 
         // Convert matches to init_matches_, which is the structure used by the initializer
-        size_t numKeypoints = 0;
+        size_t num_keypoints = 0;
         for (const auto& ft : featureTypes)
-            numKeypoints += initial_frame_.keypoints.at(ft).size();
-        init_matches_.assign(numKeypoints, -1);
+            num_keypoints += initial_frame_.keypoints.at(ft).size();
+        init_matches_.assign(num_keypoints, -1);
 
         // Also fill matches_per_feature_ for later use in CreateInitialMapMonocular
         size_t num_keypoints1 = 0;
@@ -443,7 +443,7 @@ void Tracking::monocular_initialization(FeatureType featureType)
         }
 
         // Check if there are enough correspondences
-        const size_t nmatches = matched_pairs.at(featureType).size();
+        const size_t nmatches = matched_pairs.at(feature_type).size();
         if(nmatches < static_cast<size_t>(params.init_min_matches))
         {
             initializer_ = nullptr;
@@ -452,12 +452,12 @@ void Tracking::monocular_initialization(FeatureType featureType)
 
         mat3f Rcw{}; // Current Camera Rotation
         vec3f tcw{}; // Current Camera Translation
-        std::vector<bool> vbTriangulated;
-        if(initializer_->Initialize(currentFrame, init_matches_, Rcw, tcw, init_points3d_, vbTriangulated))
+        std::vector<bool> triangulated;
+        if(initializer_->Initialize(currentFrame, init_matches_, Rcw, tcw, init_points3d_, triangulated))
         {
             // Discard matches the initializer could not triangulate
             for (size_t j = 0; j < init_matches_.size(); j++)
-                if (init_matches_[j] >= 0 && !vbTriangulated[j])
+                if (init_matches_[j] >= 0 && !triangulated[j])
                     init_matches_[j] = -1;
 
             // Set Frame Poses
@@ -466,7 +466,7 @@ void Tracking::monocular_initialization(FeatureType featureType)
             Tcw.block<3,3>(0,0) = Rcw;
             Tcw.block<3,1>(0,3) = tcw;
             currentFrame.SetPose(Tcw);
-            CreateInitialMapMonocular(featureType);
+            CreateInitialMapMonocular(feature_type);
         }
     }
 }
