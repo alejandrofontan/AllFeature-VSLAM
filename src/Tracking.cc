@@ -422,7 +422,7 @@ void Tracking::monocular_initialization(FeatureType feature_type)
         // Find correspondences
         const auto matched_pairs = matcher_->match_frames_for_initialization(initial_frame_, current_frame_, feature_types_);
 
-        // Fill matches_per_feature_ (used later in CreateInitialMapMonocular) and
+        // Fill matches_per_feature_ (used later in create_initial_map_monocular) and
         // init_matches_ (flat over all feature types, the structure the initializer uses).
         init_matches_.clear();
         size_t offset2 = 0;
@@ -462,12 +462,12 @@ void Tracking::monocular_initialization(FeatureType feature_type)
             Tcw.block<3,3>(0,0) = Rcw;
             Tcw.block<3,1>(0,3) = tcw;
             current_frame_.SetPose(Tcw);
-            CreateInitialMapMonocular(feature_type);
+            create_initial_map_monocular(feature_type);
         }
     }
 }
 
-void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
+void Tracking::create_initial_map_monocular(FeatureType feature_type)
 {
 
     // Create KeyFrames
@@ -475,8 +475,8 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
     Keyframe pKFcur = make_shared<KeyFrame>(current_frame_, map, keyFrameDB);
 
 
-    pKFini->ComputeBoW(featureType);
-    pKFcur->ComputeBoW(featureType);
+    pKFini->ComputeBoW(feature_type);
+    pKFcur->ComputeBoW(feature_type);
 
     // Insert KFs in the map
     map->AddKeyFrame(pKFini);

@@ -166,7 +166,7 @@ protected:
 
     // Map initialization for monocular
     void monocular_initialization(FeatureType feature_type);
-    void CreateInitialMapMonocular(const FeatureType& featureType);
+    void create_initial_map_monocular(FeatureType feature_type);
 
     void CheckReplacedInLastFrame();
     bool TrackReferenceKeyFrame(const bool& optimizePose = true);
@@ -306,7 +306,7 @@ protected:
 
     //////////////////////////////////////////////// Constants
 
-    // CreateInitialMapMonocular()
+    // create_initial_map_monocular()
     const int keyframeTrackedMapPoints{100};
     const int minDepthSamples_createInitialMap{10};
 
@@ -356,7 +356,7 @@ protected:
     const int nGood_low{10};
 
     // # Iterations
-    const int numItGBA{20}; // CreateInitialMapMonocular()
+    const int numItGBA{20}; // create_initial_map_monocular()
     const int numItpSolver{5}; // Relocalization
 
     // Memory
