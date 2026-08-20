@@ -47,7 +47,8 @@ System::System(const string &vocabularyFolder,
     }
 
     Optimizer::LoadParameters(fsSettings);
-
+    Tracking::LoadParameters(fsSettings);
+    
     DUtils::Random::SeedRandOnce(0);
 
     //Load ORB Vocabulary

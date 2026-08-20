@@ -31,6 +31,23 @@ using namespace std;
 namespace AF_VSLAM
 {
 
+TrackingParameters Tracking::params{};
+
+void Tracking::LoadParameters(const cv::FileStorage &fSettings)
+{
+    auto readIfPresent = [&fSettings](const char* key, auto& field)
+    {
+        const cv::FileNode node = fSettings[key];
+        if(!node.empty())
+            node >> field;
+    };
+
+    readIfPresent("Tracking.InitMinKeypoints", params.init_min_keypoints);
+    readIfPresent("Tracking.InitSigma", params.init_sigma);
+    readIfPresent("Tracking.InitMinMatches", params.init_min_matches);
+    readIfPresent("Tracking.InitRansacIterations", params.init_ransac_iterations);
+}
+
 Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
                    std::shared_ptr<FrameDrawer> frameDrawer, std::shared_ptr<MapDrawer> mapDrawer,
                    shared_ptr<Map> map, shared_ptr<KeyFrameDatabase> pKFDB,
@@ -385,18 +402,18 @@ void Tracking::monocular_initialization(const FeatureType& featureType)
     if(!initializer_)
     {
         // Set Reference Frame
-        if(currentFrame.mvKeys.at(featureType).size() > static_cast<size_t>(minKeypointsMonocular))
+        if(currentFrame.mvKeys.at(featureType).size() > static_cast<size_t>(params.init_min_keypoints))
         {
             initial_frame_ = currentFrame;
             lastFrame = currentFrame;
-            initializer_ = std::make_shared<Initializer>(currentFrame, sigmaInitializer, numItInitializer, featureType);
+            initializer_ = std::make_shared<Initializer>(currentFrame, params.init_sigma, params.init_ransac_iterations, featureType);
             return;
         }
     }
     else
     {
         // Try to initialize
-        if(currentFrame.mvKeys.at(featureType).size() <= static_cast<size_t>(minKeypointsMonocular))
+        if(currentFrame.mvKeys.at(featureType).size() <= static_cast<size_t>(params.init_min_keypoints))
         {
             initializer_ = nullptr;
             return;
@@ -427,7 +444,7 @@ void Tracking::monocular_initialization(const FeatureType& featureType)
 
         // Check if there are enough correspondences
         const size_t nmatches = matched_pairs.at(featureType).size();
-        if(nmatches < static_cast<size_t>(minMatches_monoInit))
+        if(nmatches < static_cast<size_t>(params.init_min_matches))
         {
             initializer_ = nullptr;
             return;

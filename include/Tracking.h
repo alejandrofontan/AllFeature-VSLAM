@@ -52,6 +52,19 @@ class LocalMapping;
 class LoopClosing;
 class System;
 
+// Tunable tracking heuristics, loaded from the settings YAML at System startup.
+// Same pattern as OptimizerParameters: compiled-in defaults, overridden only by
+// keys present in the file, so settings YAMLs without a Tracking.* block keep
+// working unchanged.
+struct TrackingParameters
+{
+    // monocular_initialization()
+    int init_min_keypoints{100};     // min keypoints to accept a frame for two-view init
+    float init_sigma{1.0f};          // measurement sigma for the two-view initializer
+    int init_min_matches{100};       // min correspondences to attempt initialization
+    int init_ransac_iterations{200}; // initializer RANSAC iteration budget
+};
+
 class Tracking
 {
 
@@ -78,6 +91,10 @@ public:
 
 public:
     VerbosityLevel verbosity{LOW};
+
+    // Tunable parameters, loaded from the settings YAML at System startup
+    static TrackingParameters params;
+    static void LoadParameters(const cv::FileStorage &fSettings);
 
     // Tracking states
     enum eTrackingState{
@@ -289,11 +306,6 @@ protected:
 
     //////////////////////////////////////////////// Constants
 
-    // monocular_initialization()
-    const int minKeypointsMonocular{100};
-    const float sigmaInitializer{1.0};
-    const int minMatches_monoInit{100};
-
     // CreateInitialMapMonocular()
     const int keyframeTrackedMapPoints{100};
     const int minDepthSamples_createInitialMap{10};
@@ -345,7 +357,6 @@ protected:
 
     // # Iterations
     const int numItGBA{20}; // CreateInitialMapMonocular()
-    const int numItInitializer{200}; // monocular_initialization()
     const int numItpSolver{5}; // Relocalization
 
     // Memory
