@@ -10,12 +10,10 @@
 #include <yaml-cpp/yaml.h>
 #include <FrameDrawer.h>
 #include "afvslam_log.hpp"
-#include "tensorrt_seg.hpp"
+#include "SegmentationCLI.h"
 
 #include "DebugKeyStepper.h"
 #include "StringUtils.h"
-
-std::string AF_VSLAM::FrameDrawer::exp_folder{};
 
 void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
                 std::vector<std::string> &imageFilenames,
@@ -52,17 +50,9 @@ int main(int argc, char **argv)
     std::string path_to_vocabulary_folder("allfeature_vocabulary");
     bool fixImageSize = true;
 
-    // Online segmentation (segmentation.md): ON by default. Pass
-    // 'segmentation:0' to disable, or 'segmentation_onnx:<path>' to use
-    // another model. If the DEFAULT model file is missing (fresh clone,
-    // export not run yet) the run degrades to no-mask with a warning; an
-    // explicitly given path that is missing is an error instead.
-    const std::string kDefaultSegmentationOnnx =
-        "segmentation_models/efficientvit-seg-l1-ade20k_512x512.onnx";
-    bool segmentation{true};
-    std::string segmentation_onnx{kDefaultSegmentationOnnx};
-    std::string segmentation_classes;   // empty -> <segmentation_onnx>.classes.yaml
-    std::string segmentation_precision{"fp16"};
+    // Online segmentation (segmentation.md): defaults, argument parsing, and
+    // the missing-model policy are shared across entry points in SegmentationCLI.h.
+    segmentation::SegmentationCLI segmentationCli{};
 
     std::cout << std::endl;
 
@@ -117,33 +107,8 @@ int main(int argc, char **argv)
             AF_CONFIG_FIELD("Path to vocabulary folder: ", path_to_vocabulary_folder);
             continue;
         }
-        // "segmentation:" vs "segmentation_onnx:" et al. share a common stem,
-        // but hasPrefix matches the full key including ':'/'_', so they
-        // cannot collide.
-        if (hasPrefix(arg, "segmentation:")) {
-            removeSubstring(arg, "segmentation:");
-            segmentation = bool(std::stoi(arg));
-            AF_CONFIG_FIELD("Online segmentation: ", segmentation);
+        if (segmentationCli.parseArg(arg))
             continue;
-        }
-        if (hasPrefix(arg, "segmentation_onnx:")) {
-            removeSubstring(arg, "segmentation_onnx:");
-            segmentation_onnx = arg;
-            AF_CONFIG_FIELD("Online segmentation model: ", segmentation_onnx);
-            continue;
-        }
-        if (hasPrefix(arg, "segmentation_classes:")) {
-            removeSubstring(arg, "segmentation_classes:");
-            segmentation_classes = arg;
-            AF_CONFIG_FIELD("Online segmentation classes yaml: ", segmentation_classes);
-            continue;
-        }
-        if (hasPrefix(arg, "segmentation_precision:")) {
-            removeSubstring(arg, "segmentation_precision:");
-            segmentation_precision = arg;
-            AF_CONFIG_FIELD("Online segmentation precision: ", segmentation_precision);
-            continue;
-        }
     }
 
     // AllFeature-VSLAM inputs
@@ -176,29 +141,13 @@ int main(int argc, char **argv)
     size_t nImages = imageFilenames.size();
 
     // Online segmentation: build/load the TensorRT engine before the SLAM
-    // threads exist, and absorb the one-time lazy CUDA/TRT warmup (~70 ms)
-    // here rather than on frame 0.
+    // threads exist (policy and announcements in SegmentationCLI.h).
     std::unique_ptr<segmentation::TensorRTSeg> segmenter{};
-    if (!segmentation)
-        segmentation_onnx.clear();
-    if (!segmentation_onnx.empty() && !std::ifstream(segmentation_onnx).good()) {
-        if (segmentation_onnx == kDefaultSegmentationOnnx) {
-            AF_WARN("Default segmentation model not found (" << segmentation_onnx
-                    << ") - running WITHOUT online segmentation; generate it with "
-                    << "Thirdparty/Segmentation-TensorRT/convert2onnx/export_efficientvit_seg.py");
-            segmentation_onnx.clear();
-        } else {
-            std::cerr << "segmentation_onnx not found: '" << segmentation_onnx << "'" << std::endl;
-            return 1;
-        }
-    }
-    if (!segmentation_onnx.empty()) {
-        segmenter = std::make_unique<segmentation::TensorRTSeg>(
-            segmentation_onnx, segmentation_precision, segmentation_classes);
-        segmenter->inferMask(cv::Mat::zeros(480, 640, CV_8UC1));
-        AF_INFO("Online segmentation ready (engine "
-                << (segmenter->loadedFromCache() ? "cached" : "built") << ": "
-                << segmenter->enginePath() << ")");
+    try {
+        segmenter = segmentationCli.makeSegmenter();
+    } catch (const std::runtime_error& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
     }
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.

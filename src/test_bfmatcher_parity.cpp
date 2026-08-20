@@ -20,10 +20,6 @@
 #include <string>
 #include <vector>
 
-// libAllFeature-VSLAM.so leaves this static member undefined for each executable TU to
-// provide (same as vslamlab_allfeature_mono.cpp / _rgbd.cpp).
-std::string AF_VSLAM::FrameDrawer::exp_folder{};
-
 namespace
 {
 

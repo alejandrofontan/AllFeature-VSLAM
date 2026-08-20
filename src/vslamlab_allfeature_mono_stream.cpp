@@ -9,6 +9,7 @@
 
 #include<System.h>
 #include<FrameDrawer.h>
+#include "SegmentationCLI.h"
 
 static bool hasPrefix(const std::string& str, const std::string& prefix) {
     return str.rfind(prefix, 0) == 0;
@@ -27,12 +28,17 @@ int main(int argc, char** argv) {
     bool verbose{true};
     bool fixImageSize = false;
 
+    // Online segmentation (segmentation.md): defaults, argument parsing, and
+    // the missing-model policy are shared across entry points in SegmentationCLI.h.
+    segmentation::SegmentationCLI segmentationCli{};
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (hasPrefix(arg, "calibration_yaml:")) { calibration_yaml = arg.substr(std::string("calibration_yaml:").size()); continue; }
         if (hasPrefix(arg, "settings_yaml:")) { settings_yaml = arg.substr(std::string("settings_yaml:").size()); continue; }
         if (hasPrefix(arg, "vocabulary_folder:")) { path_to_vocabulary_folder = arg.substr(std::string("vocabulary_folder:").size()); continue; }
         if (hasPrefix(arg, "stream_url:")) { stream_url = arg.substr(std::string("stream_url:").size()); continue; }
+        if (segmentationCli.parseArg(arg)) continue;
     }
 
     YAML::Node settings;
@@ -53,6 +59,16 @@ int main(int argc, char** argv) {
         std::cout << "[vslamlab_allfeature_mono_stream.cpp] Loaded feature from settings YAML: " << feat << std::endl;
     }
 
+    // Online segmentation: build/load the TensorRT engine before the SLAM
+    // threads exist (policy and announcements in SegmentationCLI.h).
+    std::unique_ptr<segmentation::TensorRTSeg> segmenter{};
+    try {
+        segmenter = segmentationCli.makeSegmenter();
+    } catch (const std::runtime_error& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
+
     // Setting AllFeature-VSLAM
     AF_VSLAM::System SLAM(path_to_vocabulary_folder,
                                   calibration_yaml, settings_yaml,
@@ -60,6 +76,10 @@ int main(int argc, char** argv) {
                                   verbose,
                                   featureTypes,
                                   fixImageSize);
+
+    // Stream length is unknown; 0 keeps the frame counter unset while still
+    // reporting whether masks are in use.
+    SLAM.SetSequenceInfo(0, segmenter != nullptr);
 
     // Some builds prefer explicitly selecting FFmpeg backend:
     const std::string& url = stream_url;
@@ -80,6 +100,8 @@ int main(int argc, char** argv) {
         }
 
         AF_VSLAM::Image im(frame);
+        if (segmenter)
+            im.mask = segmenter->inferMask(im.img);
         AF_VSLAM::Seconds tframe = idx * (1.f/kAssumedFps);
 
         SLAM.Track(im,tframe);

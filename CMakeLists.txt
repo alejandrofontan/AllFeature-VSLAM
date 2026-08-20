@@ -180,7 +180,7 @@ add_executable(vslamlab_allfeature_mono src/vslamlab_allfeature_mono.cpp)
 target_link_libraries(vslamlab_allfeature_mono mimalloc ${PROJECT_NAME} tensorrt_seg)
 
 add_executable(vslamlab_allfeature_mono_stream src/vslamlab_allfeature_mono_stream.cpp)
-target_link_libraries(vslamlab_allfeature_mono_stream mimalloc ${PROJECT_NAME})
+target_link_libraries(vslamlab_allfeature_mono_stream mimalloc ${PROJECT_NAME} tensorrt_seg)
 
 add_executable(vslamlab_allfeature_rgbd src/vslamlab_allfeature_rgbd.cpp)
 target_link_libraries(vslamlab_allfeature_rgbd mimalloc ${PROJECT_NAME} tensorrt_seg)

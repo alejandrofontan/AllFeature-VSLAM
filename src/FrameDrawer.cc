@@ -32,6 +32,10 @@
 namespace AF_VSLAM
 {
 
+// Defined here (not per-executable) so every binary linking the library gets
+// it; entry points that want collapse dumps assign it from their exp_folder.
+std::string FrameDrawer::exp_folder{};
+
 FrameDrawer::FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& featureTypes):
     mpMap(pMap), featureTypes(featureTypes)
 {
