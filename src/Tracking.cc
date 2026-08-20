@@ -402,7 +402,7 @@ void Tracking::monocular_initialization(FeatureType feature_type)
     if(!initializer_)
     {
         // Set Reference Frame
-        if(currentFrame.mvKeys.at(feature_type).size() > static_cast<size_t>(params.init_min_keypoints))
+        if(currentFrame.keypoints.at(feature_type).size() > static_cast<size_t>(params.init_min_keypoints))
         {
             initial_frame_ = currentFrame;
             lastFrame = currentFrame;
@@ -413,7 +413,7 @@ void Tracking::monocular_initialization(FeatureType feature_type)
     else
     {
         // Try to initialize
-        if(currentFrame.mvKeys.at(feature_type).size() <= static_cast<size_t>(params.init_min_keypoints))
+        if(currentFrame.keypoints.at(feature_type).size() <= static_cast<size_t>(params.init_min_keypoints))
         {
             initializer_ = nullptr;
             return;
