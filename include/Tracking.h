@@ -63,6 +63,7 @@ struct TrackingParameters
     float init_sigma{1.0f};          // measurement sigma for the two-view initializer
     int init_min_matches{100};       // min correspondences to attempt initialization
     int init_ransac_iterations{200}; // initializer RANSAC iteration budget
+    float init_min_median_disparity{10.0f}; // px; below this (static camera) skip the init attempt
 };
 
 class Tracking

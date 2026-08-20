@@ -46,6 +46,7 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     readIfPresent("Tracking.InitSigma", params.init_sigma);
     readIfPresent("Tracking.InitMinMatches", params.init_min_matches);
     readIfPresent("Tracking.InitRansacIterations", params.init_ransac_iterations);
+    readIfPresent("Tracking.InitMinMedianDisparity", params.init_min_median_disparity);
 }
 
 Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
@@ -444,6 +445,22 @@ void Tracking::monocular_initialization(FeatureType feature_type)
         {
             initializer_ = nullptr;
             return;
+        }
+
+        // Disparity gate: with (near-)zero baseline — e.g. a static camera — two-view
+        // initialization can only produce ill-conditioned geometry, so don't attempt it.
+        // Keep the reference frame: disparity only grows once the camera starts moving.
+        {
+            const auto& keypoints1 = initial_frame_.keypoints.at(feature_type);
+            const auto& keypoints2 = current_frame_.keypoints.at(feature_type);
+            std::vector<float> disparities;
+            disparities.reserve(num_matches);
+            for (const auto& m : matched_pairs.at(feature_type))
+                disparities.push_back(static_cast<float>(cv::norm(keypoints2[m.second].pt - keypoints1[m.first].pt)));
+            const auto mid = disparities.begin() + disparities.size() / 2;
+            std::nth_element(disparities.begin(), mid, disparities.end());
+            if (*mid < params.init_min_median_disparity)
+                return;
         }
 
         mat3f Rcw{}; // Current Camera Rotation
