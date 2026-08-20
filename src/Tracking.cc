@@ -486,132 +486,114 @@ void Tracking::monocular_initialization(FeatureType feature_type)
 
 void Tracking::create_initial_map_monocular(FeatureType feature_type)
 {
-
     // Create KeyFrames
-    Keyframe pKFini = make_shared<KeyFrame>(initial_frame_, map, keyFrameDB);
-    Keyframe pKFcur = make_shared<KeyFrame>(current_frame_, map, keyFrameDB);
+    Keyframe keyframe_ini = make_shared<KeyFrame>(initial_frame_, map, keyFrameDB);
+    Keyframe keyframe_cur = make_shared<KeyFrame>(current_frame_, map, keyFrameDB);
 
-
-    pKFini->ComputeBoW(feature_type);
-    pKFcur->ComputeBoW(feature_type);
+    keyframe_ini->ComputeBoW(feature_type);
+    keyframe_cur->ComputeBoW(feature_type);
 
     // Insert KFs in the map
-    map->AddKeyFrame(pKFini);
-    map->AddKeyFrame(pKFcur);
+    map->AddKeyFrame(keyframe_ini);
+    map->AddKeyFrame(keyframe_cur);
 
-    // Create MapPoints and asscoiate to keyframes
-    int j = -1;
+    // Create MapPoints and associate to keyframes
+    size_t flat_index = 0; // runs over init_matches_, flattened across feature types
     for (const auto& ft : feature_types_) {
-        const auto matches = matches_per_feature_[ft];
-
-        for (size_t i = 0; i < matches.size(); i++) {
-            j++;
-            if (init_matches_[j] < 0)
+        const auto& matches = matches_per_feature_.at(ft);
+        for (size_t i = 0; i < matches.size(); i++, flat_index++) {
+            if (init_matches_[flat_index] < 0)
                 continue;
 
-            //Create MapPoint.
-            Pt pMP = pKFcur->CreateMonocularMapPoint(init_points3d_[j], KeypointIndex(matches[i]),
-                                                    pKFini, KeypointIndex(i), ft);
-            //Fill Current Frame structure
-            current_frame_.pts[ft][matches[i]] = pMP;
-            current_frame_.mvbOutlier[ft][matches[i]] = false;
+            Pt map_point = keyframe_cur->CreateMonocularMapPoint(init_points3d_[flat_index], KeypointIndex(matches[i]),
+                                                                 keyframe_ini, KeypointIndex(i), ft);
+            // Fill current frame structure
+            current_frame_.pts.at(ft)[matches[i]] = map_point;
+            current_frame_.mvbOutlier.at(ft)[matches[i]] = false;
 
-            //Add to Map
-            map->add_map_point(pMP);
+            map->add_map_point(map_point);
         }
     }
 
     // Update Connections
-    pKFini->UpdateConnections();
-    pKFcur->UpdateConnections();
+    keyframe_ini->UpdateConnections();
+    keyframe_cur->UpdateConnections();
 
     // Bundle Adjustment
     AF_INFO("New Map created with " << map->MapPointsInMap() << " points");
-
-    Optimizer::GlobalBundleAdjustemnt(map,numItGBA);
+    Optimizer::GlobalBundleAdjustemnt(map, numItGBA);
 
     // Set the initial map's scale: prefer a depth-verified scale over the arbitrary
     // monocular "median depth = 1" convention, when enough points have valid sensor depth.
-    float medianDepth = pKFini->ComputeSceneMedianDepth(2);
+    const float median_depth = keyframe_ini->ComputeSceneMedianDepth(2);
+    const int tracked_map_points = keyframe_cur->TrackedMapPoints(1);
 
-    if(medianDepth<0 || pKFcur->TrackedMapPoints(1) < keyframeTrackedMapPoints)
+    if (median_depth < 0 || tracked_map_points < keyframeTrackedMapPoints)
     {
-        cout << "Wrong initialization, reseting..." << endl;
+        AF_WARN("Wrong initialization (median_depth=" << median_depth << ", tracked map points="
+                << tracked_map_points << " < " << keyframeTrackedMapPoints << ") — resetting...");
         Reset();
         return;
     }
 
-    vector<float> depthRatios;
+    vector<float> depth_ratios;
     for (const auto& ft : feature_types_) {
-        const auto& invDepthKF = pKFini->invDepth.at(ft);
-        vector<Pt> vpAllMapPoints = pKFini->get_map_point_matches(ft);
-        for(size_t iMP=0; iMP<vpAllMapPoints.size(); iMP++)
+        const auto& inv_depth_kf = keyframe_ini->invDepth.at(ft);
+        const vector<Pt> map_points = keyframe_ini->get_map_point_matches(ft);
+        for (size_t i = 0; i < map_points.size(); i++)
         {
-            if(!vpAllMapPoints[iMP])
+            if (!map_points[i])
                 continue;
-            float sensorInvDepth = invDepthKF[iMP];
-            if(sensorInvDepth <= 0.0f)
+            const float sensor_inv_depth = inv_depth_kf[i];
+            if (sensor_inv_depth <= 0.0f)
                 continue;
-            float triangulatedDepth = vpAllMapPoints[iMP]->get_world_pos()(2);
-            if(triangulatedDepth <= 0.0f)
+            const float triangulated_depth = map_points[i]->get_world_pos()(2);
+            if (triangulated_depth <= 0.0f)
                 continue;
-            depthRatios.push_back((1.0f / sensorInvDepth) / triangulatedDepth);
+            depth_ratios.push_back((1.0f / sensor_inv_depth) / triangulated_depth);
         }
     }
 
-    float invMedianDepth;
-    if((int)depthRatios.size() >= minDepthSamples_createInitialMap)
+    float inv_median_depth = 1.0f / median_depth;
+    if (depth_ratios.size() >= static_cast<size_t>(minDepthSamples_createInitialMap))
     {
-        sort(depthRatios.begin(), depthRatios.end());
-        invMedianDepth = depthRatios[depthRatios.size() / 2];
-    }
-    else
-    {
-        invMedianDepth = 1.0f / medianDepth;
+        const auto mid = depth_ratios.begin() + depth_ratios.size() / 2;
+        std::nth_element(depth_ratios.begin(), mid, depth_ratios.end());
+        inv_median_depth = *mid;
     }
 
     // Scale initial baseline
-    mat4f Tc2w = pKFcur->GetPose();
-    Tc2w.block<3,1>(0,3) *= invMedianDepth;
-    pKFcur->set_pose(Tc2w);
+    mat4f Tc2w = keyframe_cur->GetPose();
+    Tc2w.block<3,1>(0,3) *= inv_median_depth;
+    keyframe_cur->set_pose(Tc2w);
 
     // Scale points
-
     for (const auto& ft : feature_types_) {
-        vector<Pt> vpAllMapPoints = pKFini->get_map_point_matches(ft);
-        for(size_t iMP=0; iMP<vpAllMapPoints.size(); iMP++)
-        {
-            if(vpAllMapPoints[iMP])
-            {
-                Pt pMP = vpAllMapPoints[iMP];
-                pMP->SetWorldPos(pMP->get_world_pos()*invMedianDepth);
-            }
-        }
+        for (const Pt& map_point : keyframe_ini->get_map_point_matches(ft))
+            if (map_point)
+                map_point->SetWorldPos(map_point->get_world_pos() * inv_median_depth);
     }
 
+    localMapper->InsertKeyFrame(keyframe_ini);
+    localMapper->InsertKeyFrame(keyframe_cur);
 
-    localMapper->InsertKeyFrame(pKFini);
-    localMapper->InsertKeyFrame(pKFcur);
+    current_frame_.set_pose(keyframe_cur->GetPose());
+    lastKeyFrameId = current_frame_.mnId;
+    lastKeyFrame = keyframe_cur;
 
-    current_frame_.set_pose(pKFcur->GetPose());
-    lastKeyFrameId=current_frame_.mnId;
-    lastKeyFrame = pKFcur;
-
-    localKeyframes.push_back(pKFcur);
-    localKeyframes.push_back(pKFini);
+    localKeyframes.push_back(keyframe_cur);
+    localKeyframes.push_back(keyframe_ini);
     localPts = map->GetAllMapPoints();
-    refKeyframe = pKFcur;
-    current_frame_.refKeyframe = pKFcur;
+    refKeyframe = keyframe_cur;
+    current_frame_.refKeyframe = keyframe_cur;
 
     last_frame_ = Frame(current_frame_);
 
     map->SetReferenceMapPoints(localPts);
+    mapDrawer->SetCurrentCameraPose(keyframe_cur->GetPose());
+    map->mvpKeyFrameOrigins.push_back(keyframe_ini);
 
-    mapDrawer->SetCurrentCameraPose(pKFcur->GetPose());
-
-    map->mvpKeyFrameOrigins.push_back(pKFini);
-
-    mState=OK;
+    mState = OK;
 }
 
 void Tracking::CheckReplacedInLastFrame()
