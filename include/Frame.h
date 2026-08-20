@@ -79,7 +79,7 @@ public:
     void ExtractFeatures(int flag, const Image & img);
 
     // Compute Bag of Words representation.
-    void ComputeBoW(const FeatureType& featType);
+    void compute_bow(const FeatureType& featType);
 
     // Set the camera pose.
     void set_pose(const mat4f& Tcw_);

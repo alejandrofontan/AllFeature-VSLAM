@@ -177,7 +177,7 @@ mat4f System::TrackStereo(const cv::Mat &, const cv::Mat &, const double &)
     // unique_lock<mutex> lock(mMutexReset);
     // if(mbReset)
     // {
-    //     tracker->Reset();
+    //     tracker->reset();
     //     mbReset = false;
     // }
     // }
@@ -230,7 +230,7 @@ mat4f System::TrackRGBD(const cv::Mat &, const cv::Mat &, const double &)
     // unique_lock<mutex> lock(mMutexReset);
     // if(mbReset)
     // {
-    //     tracker->Reset();
+    //     tracker->reset();
     //     mbReset = false;
     // }
     // }
@@ -259,7 +259,7 @@ mat4f System::Track(Image &im, const double &timestamp)
     unique_lock<mutex> lock(mMutexReset);
     if(mbReset)
     {
-        tracker->Reset();
+        tracker->reset();
         mbReset = false;
     }
     }
@@ -293,7 +293,7 @@ bool System::MapChanged()
         return false;
 }
 
-void System::Reset()
+void System::reset()
 {
     unique_lock<mutex> lock(mMutexReset);
     mbReset = true;
@@ -354,7 +354,7 @@ void System::SaveTrajectoryTUM(const string &filename)
 
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.
-    mat4f Two = vpKFs[0]->GetPoseInverse();
+    mat4f Two = vpKFs[0]->get_pose_inverse();
 
     ofstream f;
     f.open(filename.c_str());
@@ -386,7 +386,7 @@ void System::SaveTrajectoryTUM(const string &filename)
             pKF = pKF->GetParent();
         }
 
-        Trw = Trw*pKF->GetPose()*Two;
+        Trw = Trw*pKF->get_pose()*Two;
 
         mat4f Tcw = (*lit) * Trw;
         mat3f Rwc = Tcw.block<3,3>(0,0).transpose();
@@ -411,7 +411,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.
-    //cv::Mat Two = vpKFs[0]->GetPoseInverse();
+    //cv::Mat Two = vpKFs[0]->get_pose_inverse();
 
     std::ofstream f(filename.c_str());
     f.imbue(std::locale::classic());
@@ -428,7 +428,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
             continue;
         }
         #endif
-       // pKF->set_pose(pKF->GetPose()*Two);
+       // pKF->set_pose(pKF->get_pose()*Two);
 
         if(pKF->is_bad())
             continue;
@@ -495,7 +495,7 @@ void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>
     AF_INFO("Saving point cloud to " << filename << " ...");
 
     std::vector<PointRGB> pts;
-    auto mapPoints = mpMap->GetAllMapPoints();
+    auto mapPoints = mpMap->get_all_map_points();
     int numPoints = 0;
     std::map<int, cv::Mat> imageCache;
     float alpha = 0.0f;
@@ -558,7 +558,7 @@ void System::SaveTrajectoryKITTI(const string &filename)
 
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.
-    mat4f Two = vpKFs[0]->GetPoseInverse();
+    mat4f Two = vpKFs[0]->get_pose_inverse();
 
     ofstream f;
     f.open(filename.c_str());
@@ -584,7 +584,7 @@ void System::SaveTrajectoryKITTI(const string &filename)
             pKF = pKF->GetParent();
         }
 
-        Trw = Trw *pKF->GetPose()*Two;
+        Trw = Trw *pKF->get_pose()*Two;
 
         mat4f Tcw = (*lit) * Trw;
         mat3f Rwc = Tcw.block<3,3>(0,0).transpose();
@@ -619,7 +619,7 @@ std::map<FeatureType, std::vector<cv::KeyPoint>> System::GetTrackedKeyPointsUn()
 
 void System::SaveStatistics(const std::string &filename){
     // auto keyframes = mpMap->GetAllKeyFrames();
-    // auto pts = mpMap->GetAllMapPoints();
+    // auto pts = mpMap->get_all_map_points();
 
     // size_t numKeyframes{0};
     // for (auto& keyframe: keyframes) {
@@ -697,7 +697,7 @@ void System::setImageSize(const int width, const int height){
 
 void System::GBA(){
     AF_INFO("Starting Global Bundle Adjustment...");
-    Optimizer::GlobalBundleAdjustemnt(mpMap, 100);
+    Optimizer::global_bundle_adjustment(mpMap, 100);
     AF_INFO("Global Bundle Adjustment finished.");
 }
 

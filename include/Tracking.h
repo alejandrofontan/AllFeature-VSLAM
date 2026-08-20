@@ -136,7 +136,7 @@ public:
     list<double> mlFrameTimes;
     list<bool> mlbLost;
 
-    void Reset();
+    void reset();
 
     // Reason (with statistics) reported by the most recent TrackingLostException, kept around so
     // the "reset if lost soon after init" branch in Track() can reference why tracking was lost.
@@ -263,7 +263,7 @@ protected:
 
     // Rolling inlier history (last inliersHistorySize tracked frames) — reference for the
     // emergency-keyframe trigger in NeedNewKeyFrame(). Comparing against recent frames
-    // instead of ref_keyframe_->TrackedMapPoints() avoids the self-inflating feedback loop
+    // instead of ref_keyframe_->tracked_map_points() avoids the self-inflating feedback loop
     // where every inserted keyframe grows the reference stat via post-hoc triangulation
     // (see CLAUDE.md, Stop-Induced Keyframe Runaway Investigation).
     std::deque<int> recentInliersHistory;

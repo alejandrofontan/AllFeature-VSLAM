@@ -33,7 +33,7 @@ public:
     // Main function
     void Run();
 
-    void InsertKeyFrame(Keyframe pKF);
+    void insert_keyframe(Keyframe pKF);
 
     // Thread Synch
     void RequestStop();

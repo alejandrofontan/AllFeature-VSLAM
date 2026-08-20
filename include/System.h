@@ -89,7 +89,7 @@ public:
     bool MapChanged();
 
     // Reset the system (clear map)
-    void Reset();
+    void reset();
 
     // All threads will be requested to finish.
     // It waits until all threads have finished.

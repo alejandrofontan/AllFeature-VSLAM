@@ -55,8 +55,8 @@ public:
 
     // Pose functions
     void set_pose(const mat4f &Tcw_);
-    mat4f GetPose();
-    mat4f GetPoseInverse();
+    mat4f get_pose();
+    mat4f get_pose_inverse();
     vec3f get_camera_center();
     vec4f GetStereoCenter();
     mat3f get_rotation();
@@ -65,12 +65,12 @@ public:
     void getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_);
 
     // Bag of Words Representation
-    void ComputeBoW(const FeatureType &featType);
+    void compute_bow(const FeatureType &featType);
 
     // Covisibility graph functions
     void AddConnection(Keyframe pKF, const int &weight);
     void EraseConnection(Keyframe pKF);
-    void UpdateConnections();
+    void update_connections();
     void UpdateBestCovisibles();
     map<KeyframeId,Keyframe> GetConnectedKeyFrames();
     std::vector<Keyframe > GetVectorCovisibleKeyFrames();
@@ -91,7 +91,7 @@ public:
     std::set<Keyframe> GetLoopEdges();
 
     // MapPoint observation functions
-    Pt CreateMonocularMapPoint(const vec3f& worldPos,
+    Pt create_monocular_map_point(const vec3f& worldPos,
                              const KeypointIndex& refIndex,
                              Keyframe projKeyframe, const KeypointIndex& projIndex,
                              const FeatureType& featureType);
@@ -105,7 +105,7 @@ public:
     void ReplaceMapPointMatch(const size_t &idx, Pt pMP);
     std::set<Pt> get_map_points(const FeatureType& featType);
     std::vector<Pt> get_map_point_matches(const FeatureType& feat_type);
-    int TrackedMapPoints(const int &minObs);
+    int tracked_map_points(const int &minObs);
     Pt get_map_point(const size_t &idx, const FeatureType& featType);
 
     // KeyPoint functions
@@ -124,7 +124,7 @@ public:
     bool is_bad();
 
     // Compute Scene Depth (q=2 median). Used in monocular.
-    float ComputeSceneMedianDepth(const int q);
+    float compute_scene_median_depth(const int q);
 
     static bool weightComp( int a, int b){
         return a>b;

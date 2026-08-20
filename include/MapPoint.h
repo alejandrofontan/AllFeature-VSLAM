@@ -50,7 +50,7 @@ public:
         return shared_from_this();
     }
 
-    void SetWorldPos(const vec3f &XYZ_);
+    void set_world_pos(const vec3f &XYZ_);
     vec3f get_world_pos();
 
     vec3f get_normal();

@@ -90,7 +90,7 @@ void LoopClosing::Run()
                    CorrectLoop();
 
                    ++numOfLoopClosures;
-                   mapDrawer->AddLoopClosureKeyframe(mpCurrentKF->GetPoseInverse());
+                   mapDrawer->AddLoopClosureKeyframe(mpCurrentKF->get_pose_inverse());
 
                    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
                    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
@@ -110,7 +110,7 @@ void LoopClosing::Run()
     SetFinish();
 }
 
-void LoopClosing::InsertKeyFrame(Keyframe pKF)
+void LoopClosing::insert_keyframe(Keyframe pKF)
 {
     unique_lock<mutex> lock(mMutexLoopQueue);
     if(pKF->keyId != 0)
@@ -465,7 +465,7 @@ void LoopClosing::CorrectLoop()
     }
 
     // Ensure current keyframe is updated
-    mpCurrentKF->UpdateConnections();
+    mpCurrentKF->update_connections();
 
     // Retrive keyframes connected to the current keyframe and compute corrected Sim3 pose by propagation
     mvpCurrentConnectedKFs = mpCurrentKF->GetVectorCovisibleKeyFrames();
@@ -473,7 +473,7 @@ void LoopClosing::CorrectLoop()
 
     KeyFrameAndPose CorrectedSim3, NonCorrectedSim3;
     CorrectedSim3[mpCurrentKF]=mg2oScw;
-    mat4f Twc = mpCurrentKF->GetPoseInverse();
+    mat4f Twc = mpCurrentKF->get_pose_inverse();
 
 
     {
@@ -484,7 +484,7 @@ void LoopClosing::CorrectLoop()
         {
             Keyframe pKFi = *vit;
 
-            mat4f Tiw = pKFi->GetPose();
+            mat4f Tiw = pKFi->get_pose();
 
             if(pKFi!=mpCurrentKF)
             {
@@ -529,7 +529,7 @@ void LoopClosing::CorrectLoop()
                 Eigen::Matrix<double,3,1> eigP3Dw = P3Dw.cast<double>();
                 Eigen::Matrix<double,3,1> eigCorrectedP3Dw = g2oCorrectedSwi.map(g2oSiw.map(eigP3Dw));
 
-                pMPi->SetWorldPos(eigCorrectedP3Dw.cast<float>());
+                pMPi->set_world_pos(eigCorrectedP3Dw.cast<float>());
                 pMPi->mnCorrectedByKF = mpCurrentKF->keyId;
                 pMPi->mnCorrectedReference = pKFi->keyId;
                 pMPi->UpdateNormalAndDepth();
@@ -547,7 +547,7 @@ void LoopClosing::CorrectLoop()
             pKFi->set_pose(correctedTiw);
 
             // Make sure connections are updated
-            pKFi->UpdateConnections();
+            pKFi->update_connections();
         }
 
         // Start Loop Fusion
@@ -584,7 +584,7 @@ void LoopClosing::CorrectLoop()
         vector<Keyframe> vpPreviousNeighbors = pKFi->GetVectorCovisibleKeyFrames();
 
         // Update connections. Detect new links.
-        pKFi->UpdateConnections();
+        pKFi->update_connections();
         loopConnections.insert(std::make_pair(pKFi->keyId, LoopConnections(pKFi->keyId, pKFi, pKFi->GetConnectedKeyFrames())));
 
         for(auto& vit_prev: vpPreviousNeighbors)
@@ -680,7 +680,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
     cout << "Starting Global Bundle Adjustment" << endl;
 
     int idx =  mnFullBAIdx;
-    Optimizer::GlobalBundleAdjustemnt(mpMap,10,&mbStopGBA,nLoopKF,false);
+    Optimizer::global_bundle_adjustment(mpMap,10,&mbStopGBA,nLoopKF,false);
 
     // Update all MapPoints and KeyFrames
     // Local Mapping was active during BA, that means that there might be new keyframes
@@ -707,19 +707,19 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
             unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
 
             // Correct keyframes starting at map first keyframe
-            list<Keyframe> lpKFtoCheck(mpMap->mvpKeyFrameOrigins.begin(),mpMap->mvpKeyFrameOrigins.end());
+            list<Keyframe> lpKFtoCheck(mpMap->keyframe_origins_.begin(),mpMap->keyframe_origins_.end());
 
             while(!lpKFtoCheck.empty())
             {
                 Keyframe pKF = lpKFtoCheck.front();
                 const set<Keyframe> sChilds = pKF->GetChilds();
-                mat4f Twc = pKF->GetPoseInverse();
+                mat4f Twc = pKF->get_pose_inverse();
                 for(set<Keyframe>::const_iterator sit=sChilds.begin();sit!=sChilds.end();sit++)
                 {
                     Keyframe pChild = *sit;
                     if(pChild->mnBAGlobalForKF!=nLoopKF)
                     {
-                        mat4f Tchildc = pChild->GetPose() * Twc;
+                        mat4f Tchildc = pChild->get_pose() * Twc;
                         pChild->TcwGBA = Tchildc * pKF->TcwGBA;//*Tcorc*pKF->mTcwGBA;
                         pChild->mnBAGlobalForKF=nLoopKF;
 
@@ -727,13 +727,13 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
                     lpKFtoCheck.push_back(pChild);
                 }
 
-                pKF->TcwBefGBA = pKF->GetPose();
+                pKF->TcwBefGBA = pKF->get_pose();
                 pKF->set_pose(pKF->TcwGBA);
                 lpKFtoCheck.pop_front();
             }
 
             // Correct MapPoints
-            const vector<Pt> vpMPs = mpMap->GetAllMapPoints();
+            const vector<Pt> vpMPs = mpMap->get_all_map_points();
 
             for(size_t i=0; i<vpMPs.size(); i++)
             {
@@ -745,7 +745,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
                 if(pMP->mnBAGlobalForKF==nLoopKF)
                 {
                     // If optimized by Global BA, just update
-                    pMP->SetWorldPos(pMP->PosGBA);
+                    pMP->set_world_pos(pMP->PosGBA);
                 }
                 else
                 {
@@ -761,11 +761,11 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
                     vec3f Xc = Rcw*pMP->get_world_pos()+tcw;
 
                     // Backproject using corrected camera
-                    mat4f Twc = pRefKF->GetPoseInverse();
+                    mat4f Twc = pRefKF->get_pose_inverse();
                     mat3f Rwc = Twc.block<3,3>(0,0);
                     vec3f twc = Twc.block<3,1>(0,3);
 
-                    pMP->SetWorldPos(Rwc*Xc+twc);
+                    pMP->set_world_pos(Rwc*Xc+twc);
                 }
             }
 

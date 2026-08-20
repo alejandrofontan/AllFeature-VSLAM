@@ -40,16 +40,16 @@ class Map
 public:
     Map();
 
-    void AddKeyFrame(Keyframe pKF);
+    void add_keyframe(Keyframe pKF);
     void add_map_point(Pt pMP);
     void EraseMapPoint(Pt pMP);
     void EraseKeyFrame(Keyframe pKF);
-    void SetReferenceMapPoints(const std::vector<Pt> &vpMPs);
+    void set_reference_map_points(const std::vector<Pt> &vpMPs);
     void InformNewBigChange();
     int GetLastBigChangeIdx();
 
     std::vector<Keyframe> GetAllKeyFrames();
-    std::vector<Pt> GetAllMapPoints();
+    std::vector<Pt> get_all_map_points();
     std::vector<Pt> GetReferenceMapPoints();
 
     size_t MapPointsInMap();
@@ -60,7 +60,7 @@ public:
     void clear();
     float NormalizeMap();
 
-    vector<Keyframe> mvpKeyFrameOrigins;
+    vector<Keyframe> keyframe_origins_;
 
     std::mutex mMutexMapUpdate;
 

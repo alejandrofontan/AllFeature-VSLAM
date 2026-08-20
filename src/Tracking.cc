@@ -298,7 +298,7 @@ void Tracking::Track()
             else
                 mVelocity = mat4f::Zero();
 
-            map_drawer_->SetCurrentCameraPose(current_frame_.Tcw);
+            map_drawer_->set_current_camera_pose(current_frame_.Tcw);
 
             // Clean VO matches
             for (auto& [ft, N] : current_frame_.N) {
@@ -341,7 +341,7 @@ void Tracking::Track()
                 AF_WARN("Track lost soon after initialisation (" << map_->KeyFramesInMap() << " <= "
                         << minKeyframesInMap << " keyframes in map), reason: " << mLastTrackingLostReason
                         << " — reseting...");
-                mpSystem->Reset();
+                mpSystem->reset();
                 return;
             }
         }
@@ -355,7 +355,7 @@ void Tracking::Track()
     // Store frame pose information to retrieve the complete camera trajectory afterward.
     if(current_frame_.Tcw(3,3) == 1.0f)
     {
-        mat4f Tcr = current_frame_.Tcw * current_frame_.refKeyframe->GetPoseInverse();
+        mat4f Tcr = current_frame_.Tcw * current_frame_.refKeyframe->get_pose_inverse();
         mlRelativeFramePoses.push_back(Tcr);
         mlpReferences.push_back(ref_keyframe_);
         mlFrameTimes.push_back(current_frame_.mTimeStamp);
@@ -493,12 +493,12 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     Keyframe keyframe_ini = make_shared<KeyFrame>(initial_frame_, map_, keyframe_db_);
     Keyframe keyframe_cur = make_shared<KeyFrame>(current_frame_, map_, keyframe_db_);
 
-    keyframe_ini->ComputeBoW(feature_type);
-    keyframe_cur->ComputeBoW(feature_type);
+    keyframe_ini->compute_bow(feature_type);
+    keyframe_cur->compute_bow(feature_type);
 
     // Insert KFs in the map
-    map_->AddKeyFrame(keyframe_ini);
-    map_->AddKeyFrame(keyframe_cur);
+    map_->add_keyframe(keyframe_ini);
+    map_->add_keyframe(keyframe_cur);
 
     // Create MapPoints and associate to keyframes
     size_t flat_index = 0; // runs over init_matches_, flattened across feature types
@@ -508,7 +508,7 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
             if (init_matches_[flat_index] < 0)
                 continue;
 
-            Pt map_point = keyframe_cur->CreateMonocularMapPoint(init_points3d_[flat_index], KeypointIndex(matches[i]),
+            Pt map_point = keyframe_cur->create_monocular_map_point(init_points3d_[flat_index], KeypointIndex(matches[i]),
                                                                  keyframe_ini, KeypointIndex(i), ft);
             // Fill current frame structure
             current_frame_.pts.at(ft)[matches[i]] = map_point;
@@ -519,23 +519,23 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     }
 
     // Update Connections
-    keyframe_ini->UpdateConnections();
-    keyframe_cur->UpdateConnections();
+    keyframe_ini->update_connections();
+    keyframe_cur->update_connections();
 
     // Bundle Adjustment
     AF_INFO("New Map created with " << map_->MapPointsInMap() << " points");
-    Optimizer::GlobalBundleAdjustemnt(map_, params.init_gba_iterations);
+    Optimizer::global_bundle_adjustment(map_, params.init_gba_iterations);
 
     // Set the initial map's scale: prefer a depth-verified scale over the arbitrary
     // monocular "median depth = 1" convention, when enough points have valid sensor depth.
-    const float median_depth = keyframe_ini->ComputeSceneMedianDepth(2);
-    const int tracked_map_points = keyframe_cur->TrackedMapPoints(1);
+    const float median_depth = keyframe_ini->compute_scene_median_depth(2);
+    const int tracked_map_points = keyframe_cur->tracked_map_points(1);
 
     if (median_depth < 0 || tracked_map_points < params.init_min_tracked_points)
     {
         AF_WARN("Wrong initialization (median_depth=" << median_depth << ", tracked map points="
                 << tracked_map_points << " < " << params.init_min_tracked_points << ") — resetting...");
-        Reset();
+        reset();
         return;
     }
 
@@ -566,7 +566,7 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     }
 
     // Scale initial baseline
-    mat4f Tc2w = keyframe_cur->GetPose();
+    mat4f Tc2w = keyframe_cur->get_pose();
     Tc2w.block<3,1>(0,3) *= inv_median_depth;
     keyframe_cur->set_pose(Tc2w);
 
@@ -574,27 +574,27 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     for (const auto& ft : feature_types_) {
         for (const Pt& map_point : keyframe_ini->get_map_point_matches(ft))
             if (map_point)
-                map_point->SetWorldPos(map_point->get_world_pos() * inv_median_depth);
+                map_point->set_world_pos(map_point->get_world_pos() * inv_median_depth);
     }
 
-    local_mapper_->InsertKeyFrame(keyframe_ini);
-    local_mapper_->InsertKeyFrame(keyframe_cur);
+    local_mapper_->insert_keyframe(keyframe_ini);
+    local_mapper_->insert_keyframe(keyframe_cur);
 
-    current_frame_.set_pose(keyframe_cur->GetPose());
+    current_frame_.set_pose(keyframe_cur->get_pose());
     last_keyframe_id_ = current_frame_.mnId;
     last_keyframe_ = keyframe_cur;
 
     local_keyframes_.push_back(keyframe_cur);
     local_keyframes_.push_back(keyframe_ini);
-    local_points_ = map_->GetAllMapPoints();
+    local_points_ = map_->get_all_map_points();
     ref_keyframe_ = keyframe_cur;
     current_frame_.refKeyframe = keyframe_cur;
 
     last_frame_ = Frame(current_frame_);
 
-    map_->SetReferenceMapPoints(local_points_);
-    map_drawer_->SetCurrentCameraPose(keyframe_cur->GetPose());
-    map_->mvpKeyFrameOrigins.push_back(keyframe_ini);
+    map_->set_reference_map_points(local_points_);
+    map_drawer_->set_current_camera_pose(keyframe_cur->get_pose());
+    map_->keyframe_origins_.push_back(keyframe_ini);
 
     state_ = OK;
 }
@@ -825,7 +825,7 @@ void Tracking::UpdateLastFrame()
     Keyframe pRef = last_frame_.refKeyframe;
     mat4f Tlr = mlRelativeFramePoses.back();
 
-    last_frame_.set_pose(Tlr * pRef->GetPose());
+    last_frame_.set_pose(Tlr * pRef->get_pose());
 }
 
 bool Tracking::TrackLocalMap()
@@ -939,7 +939,7 @@ bool Tracking::TrackLocalMap()
         int nMinObs = nMinObs_high;
         if(numKeyframesInMap <= size_t(minNKFs))
             nMinObs = nMinObs_low;
-        int nRefMatches = ref_keyframe_->TrackedMapPoints(nMinObs);
+        int nRefMatches = ref_keyframe_->tracked_map_points(nMinObs);
 
         // Local Mapping accept keyframes?
         bool localMappingIdle = local_mapper_->AcceptKeyFrames();
@@ -1003,7 +1003,7 @@ bool Tracking::TrackLocalMap()
                 //     return true;
                 // }
                 // Emergency keyframe: only on a genuine drop against the *recent frames'*
-                // own inlier level (not ref_keyframe_->TrackedMapPoints(), which inflates
+                // own inlier level (not ref_keyframe_->tracked_map_points(), which inflates
                 // after every insertion as LocalMapping triangulates new points into the
                 // keyframe, re-arming the trigger indefinitely), and with a refire
                 // cooldown so a persistent low-inlier state can't chain insertions.
@@ -1033,7 +1033,7 @@ bool Tracking::TrackLocalMap()
         ref_keyframe_ = keyframe;
         current_frame_.refKeyframe = keyframe;
 
-        local_mapper_->InsertKeyFrame(keyframe);
+        local_mapper_->insert_keyframe(keyframe);
         local_mapper_->SetNotStop(false);
         last_keyframe_id_ = current_frame_.mnId;
         last_keyframe_ = keyframe;
@@ -1077,7 +1077,7 @@ bool Tracking::TrackLocalMap()
     void Tracking::UpdateLocalMap()
     {
         // This is for visualization
-        map_->SetReferenceMapPoints(local_points_);
+        map_->set_reference_map_points(local_points_);
         // Update
         UpdateLocalKeyFrames();
         UpdateLocalPoints();
@@ -1197,7 +1197,7 @@ bool Tracking::TrackLocalMap()
 bool Tracking::Relocalization(const FeatureType& featureType)
 {
     // Compute Bag of Words Vector
-    current_frame_.ComputeBoW(featureType);
+    current_frame_.compute_bow(featureType);
 
     // Relocalization is performed when tracking is lost
     // Track Lost: Query KeyFrame Database for keyframe candidates for relocalisation
@@ -1365,7 +1365,7 @@ bool Tracking::Relocalization(const FeatureType& featureType)
 
 }
 
-void Tracking::Reset()
+void Tracking::reset()
 {
 
     cout << "System Reseting" << endl;

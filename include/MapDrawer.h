@@ -86,7 +86,7 @@ public:
     // viewport with its own orthographic projection. Draws nothing before 2 keyframes.
     void DrawTrajectoryTopView(const ViewerStyle& style);
     void DrawCurrentCamera(pangolin::OpenGlMatrix &Twc, const ViewerStyle& style);
-    void SetCurrentCameraPose(const mat4f &Tcw_);
+    void set_current_camera_pose(const mat4f &Tcw_);
     void SetReferenceKeyFrame(Keyframe pKF);
     void GetCurrentOpenGLCameraMatrix(pangolin::OpenGlMatrix &M);
     void SetCurrentOpenGLCameraMatrix(const mat3f& Rwc,const vec3f& twc, pangolin::OpenGlMatrix &M);

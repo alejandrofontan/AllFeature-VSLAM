@@ -76,7 +76,7 @@ public:
     // Main function
     void Run();
 
-    void InsertKeyFrame(Keyframe pKF);
+    void insert_keyframe(Keyframe pKF);
 
     void RequestReset();
 

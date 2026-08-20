@@ -112,7 +112,7 @@ const std::array<float,3>& MapDrawer::pointColor(const FeatureType ft) const
 
 void MapDrawer::DrawMapPoints(const ViewerStyle& style)
 {
-    const vector<Pt> &vpMPs = mpMap->GetAllMapPoints();
+    const vector<Pt> &vpMPs = mpMap->get_all_map_points();
 
     if(vpMPs.empty())
         return;
@@ -146,7 +146,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
         for(size_t i=0; i<vpKFs.size(); i++)
         {
             Keyframe pKF = vpKFs[i];
-            mat4f Twc_tmp = pKF->GetPoseInverse().transpose();
+            mat4f Twc_tmp = pKF->get_pose_inverse().transpose();
             cv::Mat Twc = Converter::toCvMat(Twc_tmp);
 
             glPushMatrix();
@@ -439,7 +439,7 @@ void MapDrawer::DrawCurrentCamera(pangolin::OpenGlMatrix &Twc, const ViewerStyle
 }
 
 
-void MapDrawer::SetCurrentCameraPose(const mat4f &Tcw_)
+void MapDrawer::set_current_camera_pose(const mat4f &Tcw_)
 {
     unique_lock<mutex> lock(mMutexCamera);
     mCameraPose = Tcw_;

@@ -29,7 +29,7 @@ Map::Map():mnMaxKFid(0),mnBigChangeIdx(0)
 {
 }
 
-void Map::AddKeyFrame(Keyframe pKF)
+void Map::add_keyframe(Keyframe pKF)
 {
     unique_lock<mutex> lock(mMutexMap);
     mspKeyFrames.insert(pKF);
@@ -61,7 +61,7 @@ void Map::EraseKeyFrame(Keyframe pKF)
     // Delete the MapPoint
 }
 
-void Map::SetReferenceMapPoints(const vector<Pt > &vpMPs)
+void Map::set_reference_map_points(const vector<Pt > &vpMPs)
 {
     unique_lock<mutex> lock(mMutexMap);
     mvpReferenceMapPoints = vpMPs;
@@ -85,7 +85,7 @@ vector<Keyframe> Map::GetAllKeyFrames()
     return vector<Keyframe>(mspKeyFrames.begin(),mspKeyFrames.end());
 }
 
-vector<Pt> Map::GetAllMapPoints()
+vector<Pt> Map::get_all_map_points()
 {
     unique_lock<mutex> lock(mMutexMap);
     return vector<Pt>(mspMapPoints.begin(),mspMapPoints.end());
@@ -121,7 +121,7 @@ void Map::clear()
     mspKeyFrames.clear();
     mnMaxKFid = 0;
     mvpReferenceMapPoints.clear();
-    mvpKeyFrameOrigins.clear();
+    keyframe_origins_.clear();
 }
 
 float Map::NormalizeMap()
@@ -131,7 +131,7 @@ float Map::NormalizeMap()
     depths.reserve(mspKeyFrames.size());
     for(const auto& keyframe: mspKeyFrames)
     {
-        float medianDepth = keyframe->ComputeSceneMedianDepth(2);
+        float medianDepth = keyframe->compute_scene_median_depth(2);
         depths.push_back(medianDepth);
     }
     float medianDepth = 0.0f;
@@ -143,19 +143,19 @@ float Map::NormalizeMap()
 
     for(const auto& keyframe: mspKeyFrames)
     {
-        mat4f Tc2w = keyframe->GetPose();
+        mat4f Tc2w = keyframe->get_pose();
         Tc2w.block<3,1>(0,3) /= medianDepth;
         keyframe->set_pose(Tc2w);
 
     }
 
-    std::vector<Pt> mspMapPoints_ = GetAllMapPoints();
+    std::vector<Pt> mspMapPoints_ = get_all_map_points();
     for(size_t iMP=0; iMP<mspMapPoints_.size(); iMP++)
     {
         Pt pMP = mspMapPoints_[iMP];
         if(pMP)
         {
-            pMP->SetWorldPos(pMP->get_world_pos()/medianDepth);
+            pMP->set_world_pos(pMP->get_world_pos()/medianDepth);
         }
     }
 

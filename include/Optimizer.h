@@ -70,7 +70,7 @@ public:
     void static BundleAdjustment(const std::vector<Keyframe> &vpKF, const std::vector<Pt> &vpMP,
                                  int nIterations = 5, bool *pbStopFlag=NULL, const unsigned long nLoopKF=0,
                                  const bool bRobust = true);
-    void static GlobalBundleAdjustemnt(shared_ptr<Map> pMap, int nIterations=5, bool *pbStopFlag=NULL,
+    void static global_bundle_adjustment(shared_ptr<Map> pMap, int nIterations=5, bool *pbStopFlag=NULL,
                                        const unsigned long nLoopKF=0, const bool bRobust = true);
     void static LocalBundleAdjustment(Keyframe pKF, bool *pbStopFlag, shared_ptr<Map>pMap);
     // useDepthChannel=false books RGB-D observations as plain 2D reprojection edges —

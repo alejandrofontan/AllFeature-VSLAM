@@ -82,7 +82,7 @@ void LocalMapping::Run()
                 // Check redundant local Keyframes
                 KeyFrameCulling();
             }
-            loopCloser->InsertKeyFrame(mpCurrentKeyFrame);
+            loopCloser->insert_keyframe(mpCurrentKeyFrame);
 
             if(viewer)
                 viewer->set_runLocalMapping_time_median(map_median(localMapping_times));
@@ -126,7 +126,7 @@ void LocalMapping::Run()
     SetFinish();
 }
 
-void LocalMapping::InsertKeyFrame(Keyframe pKF)
+void LocalMapping::insert_keyframe(Keyframe pKF)
 {
     unique_lock<mutex> lock(mMutexNewKFs);
     mlNewKeyFrames.push_back(pKF);
@@ -149,7 +149,7 @@ void LocalMapping::ProcessNewKeyFrame()
     }
 
     // Compute Bags of Words structures
-    mpCurrentKeyFrame->ComputeBoW(featureTypes[featureProcessNewKeyframe]);
+    mpCurrentKeyFrame->compute_bow(featureTypes[featureProcessNewKeyframe]);
 
     // Associate MapPoints to the new keyframe and update normal and descriptor
     for(const auto& feat: mpCurrentKeyFrame->featureTypes){
@@ -175,10 +175,10 @@ void LocalMapping::ProcessNewKeyFrame()
         }
     }
     // Update links in the Covisibility Graph
-    mpCurrentKeyFrame->UpdateConnections();
+    mpCurrentKeyFrame->update_connections();
 
     // Insert Keyframe in Map
-    mpMap->AddKeyFrame(mpCurrentKeyFrame);
+    mpMap->add_keyframe(mpCurrentKeyFrame);
 
 }
 
@@ -358,7 +358,7 @@ void LocalMapping::CreateNewMapPoints()
         vec3f vBaseline = twc2 - twc1;
         const float baseline = vBaseline.norm();
 
-        const float medianDepthKF2 = pKF2->ComputeSceneMedianDepth(2);
+        const float medianDepthKF2 = pKF2->compute_scene_median_depth(2);
         const float ratioBaselineDepth = baseline/medianDepthKF2;
 
         if(ratioBaselineDepth < CREATE_NEW_MAP_POINTS_RATIO_BASELINE_DEPTH)
@@ -508,7 +508,7 @@ void LocalMapping::CreateNewMapPoints()
                     nFromSensor++;
                 else
                     nFromTriangulation++;
-                Pt pMP = mpCurrentKeyFrame->CreateMonocularMapPoint(x3D, KeypointIndex(idx1),
+                Pt pMP = mpCurrentKeyFrame->create_monocular_map_point(x3D, KeypointIndex(idx1),
                                                                     pKF2,  KeypointIndex(idx2),
                                                                     featureType);
                 mlpRecentAddedMapPoints.push_back(pMP);
@@ -625,7 +625,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
         }
     }
     // Update connections in covisibility graph
-    mpCurrentKeyFrame->UpdateConnections();
+    mpCurrentKeyFrame->update_connections();
 }
 
 void LocalMapping::RequestStop()

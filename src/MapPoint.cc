@@ -78,7 +78,7 @@ MapPoint::MapPoint(const vec3f &XYZ_, shared_ptr<Map> pMap, Frame* pFrame, const
     refIndex = -1;
 }
 
-void MapPoint::SetWorldPos(const vec3f &XYZ_)
+void MapPoint::set_world_pos(const vec3f &XYZ_)
 {
     unique_lock<mutex> lock2(mGlobalMutex);
     unique_lock<mutex> lock(mMutexPos);

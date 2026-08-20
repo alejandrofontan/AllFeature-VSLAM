@@ -67,7 +67,7 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>p
         }
 }
 
-void KeyFrame::ComputeBoW(const FeatureType &featType)
+void KeyFrame::compute_bow(const FeatureType &featType)
 {
     if(mBowVec.empty() || mFeatVec.empty())
     {
@@ -96,13 +96,13 @@ void KeyFrame::set_pose(const mat4f &Tcw_)
     Cw = Twc * center;
 }
 
-mat4f KeyFrame::GetPose()
+mat4f KeyFrame::get_pose()
 {
     unique_lock<mutex> lock(mMutexPose);
     return Tcw;
 }
 
-mat4f KeyFrame::GetPoseInverse()
+mat4f KeyFrame::get_pose_inverse()
 {
     unique_lock<mutex> lock(mMutexPose);
     return Twc;
@@ -223,7 +223,7 @@ int KeyFrame::GetWeight(Keyframe keyframe)
         return 0;
 }
 
-Pt KeyFrame::CreateMonocularMapPoint(const vec3f& worldPos,
+Pt KeyFrame::create_monocular_map_point(const vec3f& worldPos,
                             const KeypointIndex& refIndex,
                             Keyframe projKeyframe, const KeypointIndex& projIndex,
                             const FeatureType& featureType)
@@ -292,7 +292,7 @@ set<Pt> KeyFrame::get_map_points(const FeatureType& featType)
     return s;
 }
 
-int KeyFrame::TrackedMapPoints(const int &minObs)
+int KeyFrame::tracked_map_points(const int &minObs)
 {
     unique_lock<mutex> lock(mMutexFeatures);
 
@@ -333,7 +333,7 @@ Pt KeyFrame::get_map_point(const size_t &idx, const FeatureType& featType)
     return mvpMapPoints.at(featType)[idx];
 }
 
-void KeyFrame::UpdateConnections()
+void KeyFrame::update_connections()
 {
     map<KeyframeId ,int> KFweightsCounter;
     map<KeyframeId ,Keyframe> KFcounter;
@@ -594,7 +594,7 @@ void KeyFrame::SetBadFlag()
             }
 
         mpParent->EraseChild(thisKeyframe());
-        Tcp = Tcw * mpParent->GetPoseInverse();
+        Tcp = Tcw * mpParent->get_pose_inverse();
         mbBad = true;
     }
 
@@ -695,7 +695,7 @@ vec3f KeyFrame::UnprojectStereo([[maybe_unused]] int i)
     //     return vec3f{0.0f,0.0f,-1.0f};
 }
 
-float KeyFrame::ComputeSceneMedianDepth(const int q)
+float KeyFrame::compute_scene_median_depth(const int q)
 {
     std::map<FeatureType, std::vector<Pt>> vpMapPoints;
     mat4f Tcw_;

@@ -358,7 +358,7 @@ bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 }
 
 
-void Frame::ComputeBoW(const FeatureType& featType)
+void Frame::compute_bow(const FeatureType& featType)
 {
     if(mBowVec.empty())
         vocabulary->transform(descriptors[featType], mBowVec,mFeatVec);

@@ -166,10 +166,10 @@ static void CollectBAOutliers(const vector<BAObservation<EdgeT>>& observations, 
     }
 }
 
-void Optimizer::GlobalBundleAdjustemnt(shared_ptr<Map> pMap, int nIterations, bool* pbStopFlag, const unsigned long nLoopKF, const bool bRobust)
+void Optimizer::global_bundle_adjustment(shared_ptr<Map> pMap, int nIterations, bool* pbStopFlag, const unsigned long nLoopKF, const bool bRobust)
 {
     vector<Keyframe> vpKFs = pMap->GetAllKeyFrames();
-    vector<Pt> vpMP = pMap->GetAllMapPoints();
+    vector<Pt> vpMP = pMap->get_all_map_points();
     BundleAdjustment(vpKFs,vpMP,nIterations,pbStopFlag, nLoopKF, bRobust);
 }
 
@@ -200,7 +200,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
         if(pKF->is_bad())
             continue;
         g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
-        vSE3->setEstimate(Converter::toSE3Quat(pKF->GetPose()));
+        vSE3->setEstimate(Converter::toSE3Quat(pKF->get_pose()));
         vSE3->setId(pKF->keyId);
         vSE3->setFixed(pKF->keyId == 0);
         optimizer.addVertex(vSE3);
@@ -325,7 +325,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 
         if(nLoopKF==0)
         {
-            pMP->SetWorldPos(vPoint->estimate().cast<float>());
+            pMP->set_world_pos(vPoint->estimate().cast<float>());
             pMP->UpdateNormalAndDepth();
         }
         else
@@ -698,7 +698,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
     {
         Keyframe pKFi = *lit;
         g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
-        vSE3->setEstimate(Converter::toSE3Quat(pKFi->GetPose()));
+        vSE3->setEstimate(Converter::toSE3Quat(pKFi->get_pose()));
         vSE3->setId(pKFi->keyId);
         vSE3->setFixed(pKFi->keyId==0);
 
@@ -712,7 +712,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
     {
         Keyframe pKFi = *lit;
         g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
-        vSE3->setEstimate(Converter::toSE3Quat(pKFi->GetPose()));
+        vSE3->setEstimate(Converter::toSE3Quat(pKFi->get_pose()));
         vSE3->setId(pKFi->keyId);
         vSE3->setFixed(true);
         optimizer.addVertex(vSE3);
@@ -866,7 +866,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
     {
         Pt pMP = *lit;
         g2o::VertexSBAPointXYZ* vPoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pMP->ptId + maxKFid+1));
-        pMP->SetWorldPos(vPoint->estimate().cast<float>());
+        pMP->set_world_pos(vPoint->estimate().cast<float>());
         pMP->UpdateNormalAndDepth();
     }
 }
@@ -889,7 +889,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
     optimizer.setAlgorithm(solver);
 
     const vector<Keyframe> vpKFs = pMap->GetAllKeyFrames();
-    const vector<Pt> vpMPs = pMap->GetAllMapPoints();
+    const vector<Pt> vpMPs = pMap->get_all_map_points();
 
     const unsigned int nMaxKFid = pMap->GetMaxKFid();
 
@@ -1128,7 +1128,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         Eigen::Matrix<double,3,1> eigP3Dw = P3Dw.cast<double>();
         Eigen::Matrix<double,3,1> eigCorrectedP3Dw = correctedSwr.map(Srw.map(eigP3Dw));
 
-        pMP->SetWorldPos(eigCorrectedP3Dw.cast<float>());
+        pMP->set_world_pos(eigCorrectedP3Dw.cast<float>());
 
         pMP->UpdateNormalAndDepth();
     }
