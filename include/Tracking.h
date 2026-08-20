@@ -101,12 +101,11 @@ public:
     std::string imName;
 
     // Initialization Variables (mono)
-    std::vector<int> mvIniLastMatches;
-    std::vector<int> mvIniMatches;
-    std::vector<vec3f> mvIniP3D;
-    Frame mInitialFrame;
+    std::vector<int> init_matches_;
+    std::vector<vec3f> init_points3d_;
+    Frame initial_frame_;
 
-    std::map<FeatureType, std::vector<int>> matches_featType;
+    std::map<FeatureType, std::vector<int>> matches_per_feature_;
     // Lists used to recover the full camera trajectory at the end of the execution.
     // Basically we store the reference keyframe for each frame and its relative transformation
     list<mat4f> mlRelativeFramePoses;
@@ -149,7 +148,7 @@ protected:
     void Track();
 
     // Map initialization for monocular
-    void MonocularInitialization(const FeatureType& featureType);
+    void monocular_initialization(const FeatureType& featureType);
     void CreateInitialMapMonocular(const FeatureType& featureType);
 
     void CheckReplacedInLastFrame();
@@ -198,7 +197,7 @@ protected:
     shared_ptr<KeyFrameDatabase> keyFrameDB;
 
     // Initalization (only for monocular)
-    shared_ptr<Initializer> mpInitializer;
+    shared_ptr<Initializer> initializer_;
 
     //Local Map
     Keyframe refKeyframe;
@@ -290,7 +289,7 @@ protected:
 
     //////////////////////////////////////////////// Constants
 
-    // MonocularInitialization()
+    // monocular_initialization()
     const int minKeypointsMonocular{100};
     const float sigmaInitializer{1.0};
     const int minMatches_monoInit{100};
@@ -346,7 +345,7 @@ protected:
 
     // # Iterations
     const int numItGBA{20}; // CreateInitialMapMonocular()
-    const int numItInitializer{200}; // MonocularInitialization()
+    const int numItInitializer{200}; // monocular_initialization()
     const int numItpSolver{5}; // Relocalization
 
     // Memory

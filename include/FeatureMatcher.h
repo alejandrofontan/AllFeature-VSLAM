@@ -102,7 +102,7 @@ public:
     // Matches keypoints between two frames across all feature types for monocular initialization.
     // Runs parallel descriptor matching, filters outliers jointly with LMEDS fundamental matrix
     // estimation, and populates matched_pairs per feature type.
-    // Used in: Tracking::MonocularInitialization
+    // Used in: Tracking::monocular_initialization
     map<FeatureType, vector<pair<size_t, size_t>>> match_frames_for_initialization(const Frame& F1, const Frame& F2,
         const vector<FeatureType>& feat_types);
 
@@ -193,7 +193,7 @@ protected:
     static constexpr bool sFT_kk_lightglue = true;
 
     // SearchForInitialization Frame-Frame
-    // Tracking::MonocularInitialization
+    // Tracking::monocular_initialization
     static constexpr int sFI_ff_outlierMethod = cv::FM_RANSAC;
 
     std::mutex lightglue_superpoint_mutex_;

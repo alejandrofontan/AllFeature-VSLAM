@@ -61,7 +61,7 @@ protected:
     std::map<FeatureType, vector<bool>> mvbMap, mvbVO;
     int mnTracked, mnTrackedVO;
     std::map<FeatureType, vector<cv::KeyPoint>> mvIniKeys;
-    std::map<FeatureType, std::vector<int>> mvIniMatches;
+    std::map<FeatureType, std::vector<int>> matches_per_feature_;
     int mState;
 
     shared_ptr<Map> mpMap;

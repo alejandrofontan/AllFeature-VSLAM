@@ -67,7 +67,7 @@ cv::Mat FrameDrawer::DrawFrame()
         {
             vCurrentKeys = mvCurrentKeys;
             vIniKeys = mvIniKeys;
-            for (const auto& [ft, matches] : mvIniMatches) {
+            for (const auto& [ft, matches] : matches_per_feature_) {
                 vMatches[ft] = matches;
             }
         }
@@ -220,8 +220,8 @@ void FrameDrawer::Update(Tracking *pTracker)
 
     if(pTracker->mLastProcessedState==Tracking::NOT_INITIALIZED)
     {
-        mvIniKeys = pTracker->mInitialFrame.mvKeys;
-        mvIniMatches = pTracker->matches_featType;
+        mvIniKeys = pTracker->initial_frame_.mvKeys;
+        matches_per_feature_ = pTracker->matches_per_feature_;
     }
     else if(pTracker->mLastProcessedState==Tracking::OK)
     {

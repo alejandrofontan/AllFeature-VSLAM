@@ -577,7 +577,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector
 // Descriptors are matched in parallel per feature type, then all matches are pooled and filtered
 // jointly via LMEDS fundamental matrix estimation. Matched index pairs are written into
 // matched_pairs per feature type.
-// Used in: Tracking::MonocularInitialization
+// Used in: Tracking::monocular_initialization
 map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_initialization(const Frame& F1, const Frame& F2,
     const vector<FeatureType>& feat_types)
 {

@@ -40,7 +40,7 @@ Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
                    const vector<FeatureType>& featureTypes,
                    const bool& fixImageSize):
     mState(NO_IMAGES_YET), mSensor(sensor), featureTypes(featureTypes), mbVO(false), vocabulary(vocabulary),
-    keyFrameDB(pKFDB), mpInitializer(static_cast<Initializer*>(nullptr)), mpSystem(pSys), viewer(static_cast<shared_ptr<Viewer>>(nullptr)),
+    keyFrameDB(pKFDB), mpSystem(pSys), viewer(static_cast<shared_ptr<Viewer>>(nullptr)),
     frameDrawer(frameDrawer), mapDrawer(mapDrawer), map(map), lastRelocFrameId(0), fixImageSize(fixImageSize)
 {
     // Load camera parameters from settings yaml file
@@ -178,7 +178,7 @@ void Tracking::Track()
     if(mState==NOT_INITIALIZED)
     {
 
-        MonocularInitialization(featureTypes[featureInitialization]);
+        monocular_initialization(featureTypes[featureInitialization]);
         frameDrawer->Update(this);
 
         if(mState!=OK)
@@ -380,92 +380,71 @@ void Tracking::Track()
     }
 }
 
-void Tracking::MonocularInitialization(const FeatureType& featureType)
+void Tracking::monocular_initialization(const FeatureType& featureType)
 {
-    if(!mpInitializer)
+    if(!initializer_)
     {
         // Set Reference Frame
-        if(currentFrame.mvKeys[featureType].size() > static_cast<size_t>(minKeypointsMonocular))
+        if(currentFrame.mvKeys.at(featureType).size() > static_cast<size_t>(minKeypointsMonocular))
         {
-            mInitialFrame = Frame(currentFrame);
-            lastFrame = Frame(currentFrame);
-            mpInitializer =  make_shared<Initializer>(currentFrame, sigmaInitializer, numItInitializer, featureType);
-            fill(mvIniMatches.begin(),mvIniMatches.end(),-1);
+            initial_frame_ = currentFrame;
+            lastFrame = currentFrame;
+            initializer_ = std::make_shared<Initializer>(currentFrame, sigmaInitializer, numItInitializer, featureType);
             return;
         }
     }
     else
     {
         // Try to initialize
-        if((int)currentFrame.mvKeys[featureType].size() <= minKeypointsMonocular)
+        if(currentFrame.mvKeys.at(featureType).size() <= static_cast<size_t>(minKeypointsMonocular))
         {
-            mpInitializer = nullptr;
-            fill(mvIniMatches.begin(),mvIniMatches.end(),-1);
+            initializer_ = nullptr;
             return;
         }
 
         // Find correspondences
-        std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs =
-            matcher->match_frames_for_initialization(mInitialFrame, currentFrame, featureTypes);
+        const auto matched_pairs = matcher->match_frames_for_initialization(initial_frame_, currentFrame, featureTypes);
 
-        // for (const auto& ft : featureTypes_) {
-        //     const auto& matches = matched_pairs[ft];
-        //     for (const auto& m : matches) {
-        //         const auto& kp1 = mInitialFrame.keypoints.at(ft).at(m.first);
-        //         const auto& kp2 = currentFrame.keypoints.at(ft).at(m.second);
-        //         if (kp1.octave != 0 || kp2.octave != 0) {
-        //             matched_pairs[ft].erase(std::remove(matched_pairs[ft].begin(), matched_pairs[ft].end(), m), matched_pairs[ft].end());
-        //         }
-        //     }
-        // }
-
-        // Convert matches to mvIniMatches, which is the structure used by the initializer
-        mvIniMatches.clear();
-        int numKeypoints = 0;
+        // Convert matches to init_matches_, which is the structure used by the initializer
+        size_t numKeypoints = 0;
         for (const auto& ft : featureTypes)
-            numKeypoints += mInitialFrame.keypoints.at(ft).size();
-        mvIniMatches = vector<int>(numKeypoints,-1);
+            numKeypoints += initial_frame_.keypoints.at(ft).size();
+        init_matches_.assign(numKeypoints, -1);
 
-        // Also fill matches_featType for later use in CreateInitialMapMonocular
-        int num_keypoints1 = 0;
-        int num_keypoints2 = 0;
+        // Also fill matches_per_feature_ for later use in CreateInitialMapMonocular
+        size_t num_keypoints1 = 0;
+        size_t num_keypoints2 = 0;
         for (const auto& ft : featureTypes) {
-            matches_featType[ft].clear();
-            matches_featType[ft] = vector<int>(mInitialFrame.keypoints.at(ft).size(), -1);
-            for (const auto& m : matched_pairs[ft]) {
-                matches_featType[ft][m.first] = m.second;
-                mvIniMatches[m.first + num_keypoints1] = m.second + num_keypoints2;
+            auto& matches_ft = matches_per_feature_[ft];
+            matches_ft.assign(initial_frame_.keypoints.at(ft).size(), -1);
+            for (const auto& m : matched_pairs.at(ft)) {
+                matches_ft[m.first] = m.second;
+                init_matches_[m.first + num_keypoints1] = m.second + num_keypoints2;
             }
-            num_keypoints1 += mInitialFrame.keypoints.at(ft).size();
+            num_keypoints1 += initial_frame_.keypoints.at(ft).size();
             num_keypoints2 += currentFrame.keypoints.at(ft).size();
         }
 
-        int nmatches = matched_pairs[featureType].size();
-
         // Check if there are enough correspondences
-        if(nmatches < minMatches_monoInit)
+        const size_t nmatches = matched_pairs.at(featureType).size();
+        if(nmatches < static_cast<size_t>(minMatches_monoInit))
         {
-            mpInitializer = nullptr;
+            initializer_ = nullptr;
             return;
         }
+
         mat3f Rcw{}; // Current Camera Rotation
-        vec3f tcw {}; // Current Camera Translation
-        vector<bool> vbTriangulated; // Triangulated Correspondences (mvIniMatches)
-        if(mpInitializer->Initialize(currentFrame, mvIniMatches, Rcw, tcw, mvIniP3D, vbTriangulated))
+        vec3f tcw{}; // Current Camera Translation
+        std::vector<bool> vbTriangulated;
+        if(initializer_->Initialize(currentFrame, init_matches_, Rcw, tcw, init_points3d_, vbTriangulated))
         {
-            int j = 0;
-            for (const auto& ft : featureTypes) {
-                for (size_t i = 0; i < matches_featType[ft].size(); i++) {
-                    if (mvIniMatches[j] >= 0 && !vbTriangulated[j]) {
-                        mvIniMatches[j] = -1;
-                        nmatches--;
-                    }
-                    j++;
-                }
-            }
+            // Discard matches the initializer could not triangulate
+            for (size_t j = 0; j < init_matches_.size(); j++)
+                if (init_matches_[j] >= 0 && !vbTriangulated[j])
+                    init_matches_[j] = -1;
 
             // Set Frame Poses
-            mInitialFrame.SetPose(mat4f::Identity());
+            initial_frame_.SetPose(mat4f::Identity());
             mat4f Tcw{mat4f::Identity()};
             Tcw.block<3,3>(0,0) = Rcw;
             Tcw.block<3,1>(0,3) = tcw;
@@ -479,7 +458,7 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
 {
 
     // Create KeyFrames
-    Keyframe pKFini = make_shared<KeyFrame>(mInitialFrame, map, keyFrameDB);
+    Keyframe pKFini = make_shared<KeyFrame>(initial_frame_, map, keyFrameDB);
     Keyframe pKFcur = make_shared<KeyFrame>(currentFrame, map, keyFrameDB);
 
 
@@ -493,15 +472,15 @@ void Tracking::CreateInitialMapMonocular(const FeatureType& featureType)
     // Create MapPoints and asscoiate to keyframes
     int j = -1;
     for (const auto& ft : featureTypes) {
-        const auto matches = matches_featType[ft];
+        const auto matches = matches_per_feature_[ft];
 
         for (size_t i = 0; i < matches.size(); i++) {
             j++;
-            if (mvIniMatches[j] < 0)
+            if (init_matches_[j] < 0)
                 continue;
 
             //Create MapPoint.
-            Pt pMP = pKFcur->CreateMonocularMapPoint(mvIniP3D[j], KeypointIndex(matches[i]),
+            Pt pMP = pKFcur->CreateMonocularMapPoint(init_points3d_[j], KeypointIndex(matches[i]),
                                                     pKFini, KeypointIndex(i), ft);
             //Fill Current Frame structure
             currentFrame.pts[ft][matches[i]] = pMP;
@@ -1404,9 +1383,9 @@ void Tracking::Reset()
     Frame::nNextId = 0;
     mState = NO_IMAGES_YET;
 
-    if(mpInitializer)
+    if(initializer_)
     {
-        mpInitializer = nullptr;
+        initializer_ = nullptr;
     }
 
     mlRelativeFramePoses.clear();
