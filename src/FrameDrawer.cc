@@ -42,6 +42,7 @@ FrameDrawer::FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& featur
 cv::Mat FrameDrawer::DrawFrame()
 {
     cv::Mat im;
+    cv::Mat mask;
     std::map<FeatureType, vector<cv::KeyPoint>> vIniKeys; // Initialization: KeyPoints in reference frame
     std::map<FeatureType, vector<int>> vMatches; // Initialization: correspondeces with reference keypoints
     std::map<FeatureType, vector<cv::KeyPoint>> vCurrentKeys; // KeyPoints in current frame
@@ -56,6 +57,7 @@ cv::Mat FrameDrawer::DrawFrame()
             mState=Tracking::NO_IMAGES_YET;
 
         mIm.copyTo(im);
+        mMask.copyTo(mask);
 
         if(mState==Tracking::NOT_INITIALIZED)
         {
@@ -79,6 +81,15 @@ cv::Mat FrameDrawer::DrawFrame()
 
     if(im.channels()<3) //this should be always true
         cvtColor(im,im,cv::COLOR_GRAY2BGR);
+
+    // Tint the dynamic (mask == 0) region red, same style as the export self-check
+    // overlay. The viewer uploads this buffer as GL_RGB, so red is channel 0.
+    if(!mask.empty() && mask.size() == im.size())
+    {
+        cv::Mat tinted;
+        cv::addWeighted(im, 0.4, cv::Mat(im.size(), im.type(), cv::Scalar(153,0,0)), 1.0, 0.0, tinted);
+        tinted.copyTo(im, mask == 0);
+    }
 
     //Draw
     if(state==Tracking::NOT_INITIALIZED) //INITIALIZING
@@ -193,6 +204,7 @@ void FrameDrawer::Update(Tracking *pTracker)
 {
     unique_lock<mutex> lock(mMutex);
     pTracker->mImGray.copyTo(mIm);
+    pTracker->mImMask.copyTo(mMask);
     imName = pTracker->imName;
     mvCurrentKeys = pTracker->currentFrame.mvKeys;
     for (auto const& [featType, mvKeys] : mvCurrentKeys) {

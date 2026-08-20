@@ -97,6 +97,7 @@ public:
     // Current Frame
     Frame currentFrame;
     cv::Mat mImGray;
+    cv::Mat mImMask; // segmentation mask of the current image (1 = static, 0 = dynamic); empty when segmentation is off
     std::string imName;
 
     // Initialization Variables (mono)

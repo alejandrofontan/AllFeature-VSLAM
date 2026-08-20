@@ -54,6 +54,7 @@ protected:
 
     // Info of the frame to be drawn
     cv::Mat mIm;
+    cv::Mat mMask; // segmentation mask (1 = static, 0 = dynamic); empty when segmentation is off
     std::string imName;
     std::map<FeatureType, int> N;
     std::map<FeatureType, vector<cv::KeyPoint>> mvCurrentKeys;

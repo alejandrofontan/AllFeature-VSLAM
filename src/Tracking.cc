@@ -85,6 +85,7 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
         im.FixImageSize(w,h);
 
     mImGray = im.grayImg;
+    mImMask = im.mask;
     imName = im.imageName;
 
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
