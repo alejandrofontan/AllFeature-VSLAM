@@ -422,24 +422,20 @@ void Tracking::monocular_initialization(FeatureType feature_type)
         // Find correspondences
         const auto matched_pairs = matcher->match_frames_for_initialization(initial_frame_, currentFrame, featureTypes);
 
-        // Convert matches to init_matches_, which is the structure used by the initializer
-        size_t num_keypoints = 0;
-        for (const auto& ft : featureTypes)
-            num_keypoints += initial_frame_.keypoints.at(ft).size();
-        init_matches_.assign(num_keypoints, -1);
-
-        // Also fill matches_per_feature_ for later use in CreateInitialMapMonocular
-        size_t num_keypoints1 = 0;
-        size_t num_keypoints2 = 0;
+        // Fill matches_per_feature_ (used later in CreateInitialMapMonocular) and
+        // init_matches_ (flat over all feature types, the structure the initializer uses).
+        init_matches_.clear();
+        size_t offset2 = 0;
         for (const auto& ft : featureTypes) {
+            const size_t offset1 = init_matches_.size();
+            init_matches_.resize(offset1 + initial_frame_.keypoints.at(ft).size(), -1);
             auto& matches_ft = matches_per_feature_[ft];
             matches_ft.assign(initial_frame_.keypoints.at(ft).size(), -1);
             for (const auto& m : matched_pairs.at(ft)) {
                 matches_ft[m.first] = m.second;
-                init_matches_[m.first + num_keypoints1] = m.second + num_keypoints2;
+                init_matches_[offset1 + m.first] = m.second + offset2;
             }
-            num_keypoints1 += initial_frame_.keypoints.at(ft).size();
-            num_keypoints2 += currentFrame.keypoints.at(ft).size();
+            offset2 += currentFrame.keypoints.at(ft).size();
         }
 
         // Check if there are enough correspondences
