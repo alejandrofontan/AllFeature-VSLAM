@@ -69,6 +69,9 @@ struct TrackingParameters
     int init_gba_iterations{20};      // global-BA iteration budget on the initial map
     int init_min_tracked_points{100}; // min tracked map points in the current keyframe to accept the map
     int init_min_depth_samples{10};   // min sensor-depth ratio samples to prefer depth-verified scale
+
+    // Track()
+    int min_keyframes_in_map{5}; // if lost with <= this many keyframes in map, reset instead of relocalizing
 };
 
 class Tracking
@@ -375,9 +378,6 @@ protected:
 
     // GrabImageRGBD()
     const float mDepthMapFactor_th{1e-5};
-
-    // Track()
-    const int minKeyframesInMap{5};
 
     std::shared_ptr<FeatureMatcher> matcher_;
 

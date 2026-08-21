@@ -50,6 +50,7 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     readIfPresent("Tracking.InitGbaIterations", params.init_gba_iterations);
     readIfPresent("Tracking.InitMinTrackedPoints", params.init_min_tracked_points);
     readIfPresent("Tracking.InitMinDepthSamples", params.init_min_depth_samples);
+    readIfPresent("Tracking.MinKeyframesInMap", params.min_keyframes_in_map);
 }
 
 Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
@@ -315,10 +316,10 @@ void Tracking::Track()
         }
 
         // Reset if the camera gets lost soon after initialization
-        if(state_ == LOST && map_->KeyFramesInMap() <= static_cast<size_t>(minKeyframesInMap))
+        if(state_ == LOST && map_->KeyFramesInMap() <= static_cast<size_t>(params.min_keyframes_in_map))
         {
             AF_WARN("Track lost soon after initialisation (" << map_->KeyFramesInMap() << " <= "
-                    << minKeyframesInMap << " keyframes in map), reason: " << mLastTrackingLostReason
+                    << params.min_keyframes_in_map << " keyframes in map), reason: " << mLastTrackingLostReason
                     << " — resetting...");
             mpSystem->reset();
             return;
