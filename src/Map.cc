@@ -91,13 +91,13 @@ vector<Pt> Map::get_all_map_points()
     return vector<Pt>(mspMapPoints.begin(),mspMapPoints.end());
 }
 
-size_t Map::MapPointsInMap()
+size_t Map::map_points_in_map()
 {
     unique_lock<mutex> lock(mMutexMap);
     return mspMapPoints.size();
 }
 
-size_t Map::KeyFramesInMap()
+size_t Map::keyframes_in_map()
 {
     unique_lock<mutex> lock(mMutexMap);
     return mspKeyFrames.size();

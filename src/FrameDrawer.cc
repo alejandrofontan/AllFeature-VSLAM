@@ -178,8 +178,8 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
     {
         s << "SLAM MODE |  ";
 
-        int nKFs = mpMap->KeyFramesInMap();
-        int nMPs = mpMap->MapPointsInMap();
+        int nKFs = mpMap->keyframes_in_map();
+        int nMPs = mpMap->map_points_in_map();
         s << "KFs: " << nKFs << ", MPs: " << nMPs << ", Matches: " << mnTracked;
         if(mnTrackedVO>0)
             s << ", + VO matches: " << mnTrackedVO;
@@ -204,7 +204,7 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
 
 }
 
-void FrameDrawer::Update(Tracking *pTracker)
+void FrameDrawer::update(Tracking *pTracker)
 {
     unique_lock<mutex> lock(mMutex);
     pTracker->mImGray.copyTo(mIm);

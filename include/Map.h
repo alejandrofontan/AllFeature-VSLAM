@@ -52,8 +52,8 @@ public:
     std::vector<Pt> get_all_map_points();
     std::vector<Pt> GetReferenceMapPoints();
 
-    size_t MapPointsInMap();
-    size_t KeyFramesInMap();
+    size_t map_points_in_map();
+    size_t keyframes_in_map();
 
     long unsigned int GetMaxKFid();
 

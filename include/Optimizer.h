@@ -74,7 +74,7 @@ public:
                                        const unsigned long nLoopKF=0, const bool bRobust = true);
     void static LocalBundleAdjustment(Keyframe pKF, bool *pbStopFlag, shared_ptr<Map>pMap);
     // useDepthChannel=false books RGB-D observations as plain 2D reprojection edges —
-    // used by TrackReferenceKeyFrame's divergence rescue (see Tracking.cc).
+    // used by track_reference_keyframe's divergence rescue (see Tracking.cc).
     int static PoseOptimization(Frame* pFrame, const bool useDepthChannel = true);
 
     // if bFixScale is true, 6DoF optimization (stereo,rgbd), 7DoF otherwise (mono)

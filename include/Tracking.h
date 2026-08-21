@@ -177,24 +177,24 @@ protected:
     void monocular_initialization(FeatureType feature_type);
     void create_initial_map_monocular(FeatureType feature_type);
 
-    void CheckReplacedInLastFrame();
-    bool TrackReferenceKeyFrame(const bool& optimizePose = true);
+    void check_replaced_in_last_frame();
+    bool track_reference_keyframe(const bool& optimizePose = true);
     void UpdateLastFrame();
 
-    bool Relocalization(const FeatureType& featureType);
+    bool relocalize(const FeatureType& featureType);
 
     void UpdateLocalMap();
     void UpdateLocalPoints();
     void UpdateLocalKeyFrames();
 
-    bool TrackLocalMap();
+    bool track_local_map();
     void SearchLocalPoints();
 
-    bool NeedNewKeyFrame();
-    void CreateNewKeyFrame();
+    bool need_new_keyframe();
+    void create_new_keyframe();
 
     // Median pixel displacement of map points shared between current_frame_ and last_frame_.
-    // Scale-free stationarity signal for NeedNewKeyFrame; returns -1 if too few shared
+    // Scale-free stationarity signal for need_new_keyframe; returns -1 if too few shared
     // points to be meaningful (gate then stays inactive).
     float MedianFlowFromLastFrame() const;
 
@@ -265,7 +265,7 @@ protected:
     int num_inlier_matches_;
 
     // Rolling inlier history (last inliersHistorySize tracked frames) — reference for the
-    // emergency-keyframe trigger in NeedNewKeyFrame(). Comparing against recent frames
+    // emergency-keyframe trigger in need_new_keyframe(). Comparing against recent frames
     // instead of ref_keyframe_->tracked_map_points() avoids the self-inflating feedback loop
     // where every inserted keyframe grows the reference stat via post-hoc triangulation
     // (see CLAUDE.md, Stop-Induced Keyframe Runaway Investigation).
@@ -313,7 +313,7 @@ protected:
 
     //////////////////////////////////////////////// Constants
 
-    // TrackReferenceKeyFrame()
+    // track_reference_keyframe()
     const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH{15};
     const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW{10};
     // Prior-consistency gate on the globally-matched map points: drop matches whose map
@@ -323,11 +323,11 @@ protected:
     const float reprojPriorGate{80.0f};
     const float minDepthPriorGate{0.2f};
 
-    // TrackLocalMap()
+    // track_local_map()
     const int minMatches_trackLocalMap_high{50};
     const int minMatches_trackLocalMap_low{30};
 
-    // NeedNewKeyFrame()
+    // need_new_keyframe()
     // Stationarity gate: median frame-to-frame flow (px) below which no keyframe is
     // inserted (camera considered static — new keyframes would only feed zero-baseline
     // triangulation). Gate needs at least minSharedPtsForFlow shared points to engage.
@@ -346,20 +346,20 @@ protected:
     const int minMatchesInliers{15};
     const int minKeyframesInQueue{3};
 
-    // CreateNewKeyFrame()
+    // create_new_keyframe()
     const int minNumPoints_createNewKey{100};
 
     // SearchLocalPoints()
     const int idSum{2};
 
-    // Relocalization()
+    // relocalize()
     const int minNmatches{15};
     const int nGood_high{50};
     const int nGood_medium{30};
     const int nGood_low{10};
 
     // # Iterations
-    const int numItpSolver{5}; // Relocalization
+    const int numItpSolver{5}; // relocalize
 
     // Memory
     const int scaleReserveKey{3}; // UpdateLocalKeyFrames()

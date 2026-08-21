@@ -7,7 +7,7 @@
 namespace AF_VSLAM
 {
 
-// Thrown by Tracking's per-frame tracking stages (TrackReferenceKeyFrame, TrackLocalMap) at the
+// Thrown by Tracking's per-frame tracking stages (track_reference_keyframe, track_local_map) at the
 // exact point a tracking-quality check fails, carrying a human-readable reason plus the statistics
 // that triggered it. Caught in Tracking::Track(), which prints it and folds it into the state_=LOST
 // transition — kept as its own type (rather than a bare std::runtime_error) so that catch sites only

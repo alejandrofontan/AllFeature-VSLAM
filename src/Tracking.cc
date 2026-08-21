@@ -199,7 +199,7 @@ void Tracking::Track()
     if(state_ == NOT_INITIALIZED)
     {
         monocular_initialization(feature_types_[init_feature_index_]);
-        frame_drawer_->Update(this);
+        frame_drawer_->update(this);
 
         if(state_ != OK)
             return;
@@ -223,11 +223,11 @@ void Tracking::Track()
         if(state_ == OK)
         {
             // Local Mapping might have changed some MapPoints tracked in last frame
-            CheckReplacedInLastFrame();
-            ok = run_stage([this] { return TrackReferenceKeyFrame(); });
+            check_replaced_in_last_frame();
+            ok = run_stage([this] { return track_reference_keyframe(); });
         }
         else
-            ok = Relocalization(feature_types_[reloc_feature_index_]);
+            ok = relocalize(feature_types_[reloc_feature_index_]);
 
         current_frame_.ref_keyframe = ref_keyframe_;
 
@@ -239,7 +239,7 @@ void Tracking::Track()
 #endif
 
         if(ok)
-            ok = run_stage([this] { return TrackLocalMap(); });
+            ok = run_stage([this] { return track_local_map(); });
 
         ms_track_ref = stage_ms(t_lock_acquired, t_after_track_ref);
         ms_local_map = stage_ms(t_after_track_ref, StageClock::now());
@@ -253,7 +253,7 @@ void Tracking::Track()
         state_ = ok ? OK : LOST;
 
         // Update drawer
-        frame_drawer_->Update(this);
+        frame_drawer_->update(this);
 
         // If tracking was good, check if we insert a keyframe
         if(ok)
@@ -267,8 +267,8 @@ void Tracking::Track()
                 AF_INFO("Track heartbeat | frame=" << current_frame_.frame_id
                         << " inliers=" << num_inlier_matches_
                         << " localPts=" << local_points_.size()
-                        << " KFs=" << map_->KeyFramesInMap()
-                        << " mapPts=" << map_->MapPointsInMap());
+                        << " KFs=" << map_->keyframes_in_map()
+                        << " mapPts=" << map_->map_points_in_map());
                 std::cout.flush(); // stdout is fully buffered under the runner's redirect
             }
 
@@ -276,7 +276,7 @@ void Tracking::Track()
             if(last_frame_.Tcw(3,3) == 1.0f)
             {
                 mat4f Twc_last{mat4f::Identity()};
-                Twc_last.block<3,3>(0,0) = last_frame_.GetRotationInverse();
+                Twc_last.block<3,3>(0,0) = last_frame_.get_rotation_inverse();
                 Twc_last.block<3,1>(0,3) = last_frame_.get_camera_center();
                 velocity_ = current_frame_.Tcw * Twc_last;
             }
@@ -299,8 +299,8 @@ void Tracking::Track()
             }
 
             // Check if we need to insert a new keyframe
-            if(NeedNewKeyFrame())
-                CreateNewKeyFrame();
+            if(need_new_keyframe())
+                create_new_keyframe();
 
             // We allow points with high innovation (considered outliers by the Huber function)
             // to pass to the new keyframe, so that bundle adjustment will finally decide
@@ -316,9 +316,9 @@ void Tracking::Track()
         }
 
         // Reset if the camera gets lost soon after initialization
-        if(state_ == LOST && map_->KeyFramesInMap() <= static_cast<size_t>(params.min_keyframes_in_map))
+        if(state_ == LOST && map_->keyframes_in_map() <= static_cast<size_t>(params.min_keyframes_in_map))
         {
-            AF_WARN("Track lost soon after initialisation (" << map_->KeyFramesInMap() << " <= "
+            AF_WARN("Track lost soon after initialisation (" << map_->keyframes_in_map() << " <= "
                     << params.min_keyframes_in_map << " keyframes in map), reason: " << last_tracking_lost_reason_
                     << " — resetting...");
             system_->reset();
@@ -350,13 +350,13 @@ void Tracking::Track()
     }
 
     // An emergency keyframe was just inserted: block until Local Mapping has processed
-    // it (the trigger is already logged by NeedNewKeyFrame, and the wait shows up as
+    // it (the trigger is already logged by need_new_keyframe, and the wait shows up as
     // emergencyWait in the slow-frame report below).
     if (emergency_keyframe_)
     {
         const auto t_wait_start = StageClock::now();
         lock.unlock();
-        while(!local_mapper_->AcceptKeyFrames())
+        while(!local_mapper_->accepts_keyframes())
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         emergency_keyframe_ = false;
         ms_emergency_wait = stage_ms(t_wait_start, StageClock::now());
@@ -499,7 +499,7 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     keyframe_cur->update_connections();
 
     // Bundle Adjustment
-    AF_INFO("New Map created with " << map_->MapPointsInMap() << " points");
+    AF_INFO("New Map created with " << map_->map_points_in_map() << " points");
     Optimizer::global_bundle_adjustment(map_, params.init_gba_iterations);
 
     // Set the initial map's scale: prefer a depth-verified scale over the arbitrary
@@ -575,7 +575,7 @@ void Tracking::create_initial_map_monocular(FeatureType feature_type)
     state_ = OK;
 }
 
-void Tracking::CheckReplacedInLastFrame()
+void Tracking::check_replaced_in_last_frame()
 {
     for (auto& [ft, pts] : last_frame_.pts) {
         for(int i = 0; i<last_frame_.N.at(ft); i++)
@@ -595,7 +595,7 @@ void Tracking::CheckReplacedInLastFrame()
 }
 
 
-bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
+bool Tracking::track_reference_keyframe(const bool& optimizePose)
 {
     #ifdef PROFILING_EXHAUSTIVE
             std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
@@ -619,7 +619,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     if(nmatches < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
     {
         std::ostringstream reason;
-        reason << "TrackReferenceKeyFrame: insufficient matches to reference keyframe (nmatches="
+        reason << "track_reference_keyframe: insufficient matches to reference keyframe (nmatches="
                << nmatches << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH << ")"
                << " | frame=" << current_frame_.frame_id << " ref_keyframe_=" << ref_keyframe_->keyId;
         throw TrackingLostException(reason.str());
@@ -685,7 +685,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
             }
         }
         if(nGated > 0)
-            AF_INFO("TrackReferenceKeyFrame: prior-consistency gate dropped " << nGated
+            AF_INFO("track_reference_keyframe: prior-consistency gate dropped " << nGated
                     << " matches | frame=" << current_frame_.frame_id);
     }
 
@@ -712,7 +712,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     if(nmatchesMap < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW
        && nmatches >= 3 * TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
     {
-        AF_WARN("TrackReferenceKeyFrame: pose optimization collapsed (" << nmatchesMap
+        AF_WARN("track_reference_keyframe: pose optimization collapsed (" << nmatchesMap
                 << " inliers of " << nmatches << " raw matches) — retrying without depth channel"
                 << " | frame=" << current_frame_.frame_id);
 
@@ -786,7 +786,7 @@ bool Tracking::TrackReferenceKeyFrame(const bool& optimizePose)
     if(nmatchesMap < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW)
     {
         std::ostringstream reason;
-        reason << "TrackReferenceKeyFrame: insufficient inlier matches after pose optimization (nmatchesMap="
+        reason << "track_reference_keyframe: insufficient inlier matches after pose optimization (nmatchesMap="
                << nmatchesMap << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW << ")"
                << " | frame=" << current_frame_.frame_id << " rawMatches=" << nmatches;
         throw TrackingLostException(reason.str());
@@ -804,7 +804,7 @@ void Tracking::UpdateLastFrame()
     last_frame_.set_pose(Tlr * pRef->get_pose());
 }
 
-bool Tracking::TrackLocalMap()
+bool Tracking::track_local_map()
 {
 
     // We have an estimation of the camera pose and some map points tracked in the frame.
@@ -842,7 +842,7 @@ bool Tracking::TrackLocalMap()
     if(current_frame_.frame_id < lastRelocFrameId + maxFrames && num_inlier_matches_ < minMatches_trackLocalMap_high)
     {
         std::ostringstream reason;
-        reason << "TrackLocalMap: insufficient inliers shortly after relocalization (num_inlier_matches_="
+        reason << "track_local_map: insufficient inliers shortly after relocalization (num_inlier_matches_="
                << num_inlier_matches_ << " < " << minMatches_trackLocalMap_high << ")"
                << " | frame=" << current_frame_.frame_id
                << " framesSinceReloc=" << (current_frame_.frame_id - lastRelocFrameId) << " maxFrames=" << maxFrames;
@@ -852,7 +852,7 @@ bool Tracking::TrackLocalMap()
     if(num_inlier_matches_ < minMatches_trackLocalMap_low)
     {
         std::ostringstream reason;
-        reason << "TrackLocalMap: insufficient inliers against local map (num_inlier_matches_="
+        reason << "track_local_map: insufficient inliers against local map (num_inlier_matches_="
                << num_inlier_matches_ << " < " << minMatches_trackLocalMap_low << ")"
                << " | frame=" << current_frame_.frame_id << " local_points_=" << local_points_.size();
         throw TrackingLostException(reason.str());
@@ -894,16 +894,16 @@ bool Tracking::TrackLocalMap()
         return *mid;
     }
 
-    bool Tracking::NeedNewKeyFrame()
+    bool Tracking::need_new_keyframe()
     {
         // If Local Mapping is freezed by a Loop Closure do not insert keyframes
         if(local_mapper_->isStopped() || local_mapper_->stopRequested())
             return false;
 
-        const size_t numKeyframesInMap = map_->KeyFramesInMap();
+        const size_t numKeyframesInMap = map_->keyframes_in_map();
 
         // Do not insert keyframes if not enough frames have passed from last relocalisation —
-        // unless tracking is already demonstrably strong again (>=2x the TrackLocalMap "high"
+        // unless tracking is already demonstrably strong again (>=2x the track_local_map "high"
         // threshold): at driving speed the full embargo freezes the reference keyframe for
         // ~a second of travel, decaying its matches until tracking is lost AGAIN right after
         // a successful relocalization (observed echo losses 20-22 frames after reloc; #9).
@@ -918,7 +918,7 @@ bool Tracking::TrackLocalMap()
         int nRefMatches = ref_keyframe_->tracked_map_points(nMinObs);
 
         // Local Mapping accept keyframes?
-        bool localMappingIdle = local_mapper_->AcceptKeyFrames();
+        bool localMappingIdle = local_mapper_->accepts_keyframes();
 
         // Check how many "close" points are being tracked and how many could be potentially created.
         int nNonTrackedClose = 0;
@@ -986,7 +986,7 @@ bool Tracking::TrackLocalMap()
                 if(medianRecentInliers > 0
                    && num_inlier_matches_ < 0.5f * static_cast<float>(medianRecentInliers)
                    && current_frame_.frame_id >= lastEmergencyKFId + static_cast<FrameId>(emergencyKFCooldown)){
-                    AF_WARN("NeedNewKeyFrame: emergency keyframe (num_inlier_matches_=" << num_inlier_matches_
+                    AF_WARN("need_new_keyframe: emergency keyframe (num_inlier_matches_=" << num_inlier_matches_
                             << " < 0.5*medianRecentInliers=" << medianRecentInliers
                             << ", medianFlow=" << medianFlow << ") | frame=" << current_frame_.frame_id);
                     lastEmergencyKFId = current_frame_.frame_id;
@@ -1000,7 +1000,7 @@ bool Tracking::TrackLocalMap()
             return false;
     }
 
-    void Tracking::CreateNewKeyFrame(){
+    void Tracking::create_new_keyframe(){
         if(!local_mapper_->SetNotStop(true))
             return;
 
@@ -1170,12 +1170,12 @@ bool Tracking::TrackLocalMap()
         }
     }
 
-bool Tracking::Relocalization(const FeatureType& featureType)
+bool Tracking::relocalize(const FeatureType& featureType)
 {
     // Compute Bag of Words Vector
     current_frame_.compute_bow(featureType);
 
-    // Relocalization is performed when tracking is lost
+    // relocalize is performed when tracking is lost
     // Track Lost: Query KeyFrame Database for keyframe candidates for relocalisation
     vector<Keyframe> vpCandidateKFs = keyframe_db_->DetectRelocalizationCandidates(&current_frame_);
 
@@ -1314,7 +1314,7 @@ bool Tracking::Relocalization(const FeatureType& featureType)
                 // If the pose is supported by enough inliers stop ransacs and continue
                 if(nGood >= nGood_high)
                 {
-                    AF_INFO("Relocalization succeeded | frame=" << current_frame_.frame_id
+                    AF_INFO("relocalize: succeeded | frame=" << current_frame_.frame_id
                             << " feature=" << featureName(featureType)
                             << " matchedKeyframe=" << vpCandidateKFs[i]->keyId
                             << " inliers=" << nGood << " requiredInliers=" << nGood_high);

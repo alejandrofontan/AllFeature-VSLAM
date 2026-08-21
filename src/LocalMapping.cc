@@ -72,7 +72,7 @@ void LocalMapping::Run()
             if(!CheckNewKeyFrames())
             {
                 // Local BA
-                if(mpMap->KeyFramesInMap()>2){
+                if(mpMap->keyframes_in_map()>2){
                     t_start = std::chrono::steady_clock::now();
                     Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);
                     t_end = std::chrono::steady_clock::now();
@@ -674,7 +674,7 @@ void LocalMapping::Release()
     cout << "Local Mapping RELEASE" << endl;
 }
 
-bool LocalMapping::AcceptKeyFrames()
+bool LocalMapping::accepts_keyframes()
 {
     unique_lock<mutex> lock(mMutexAccept);
     return mbAcceptKeyFrames;

@@ -42,7 +42,7 @@ public:
     void Release();
     bool isStopped();
     bool stopRequested();
-    bool AcceptKeyFrames();
+    bool accepts_keyframes();
     void SetAcceptKeyFrames(bool flag);
     bool SetNotStop(bool flag);
     void InterruptBA();

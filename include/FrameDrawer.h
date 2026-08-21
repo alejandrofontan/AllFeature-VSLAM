@@ -41,7 +41,7 @@ public:
     FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& featureTypes);
 
     // Update info from the last processed frame.
-    void Update(Tracking *pTracker);
+    void update(Tracking *pTracker);
 
     // Draw last processed frame.
     cv::Mat DrawFrame();

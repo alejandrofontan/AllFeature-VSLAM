@@ -119,7 +119,7 @@ std::vector<cv::DMatch> FeatureMatcher::swap_match_direction(const std::vector<c
 // for downstream use (e.g. visualization, loop closing).
 //
 // Returns the number of valid map point matches per feature type.
-// Used in: Tracking::TrackReferenceKeyFrame, Tracking::Relocalization
+// Used in: Tracking::track_reference_keyframe, Tracking::relocalize
 map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe, Frame& frame,
     map<FeatureType, vector<Pt>>& map_pts_matches, const vector<FeatureType>& feat_types)
 {
@@ -228,7 +228,7 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
 // For each feature type, matches unmatched frame keypoints against projected map points
 // by descriptor similarity, then verifies each match via a spatial projection check.
 // Returns the number of new map point assignments made to the frame.
-// Used in: Tracking::TrackLocalMap
+// Used in: Tracking::track_local_map
 int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& map_pts)
 {
     map<FeatureType, vector<size_t>> pt_idx, frame_idx;

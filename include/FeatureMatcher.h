@@ -82,7 +82,7 @@ public:
 
     // Matches a set of map points to frame keypoints via descriptor matching + projection check.
     // Returns the number of new map point assignments made to the frame.
-    // Used in: Tracking::TrackLocalMap
+    // Used in: Tracking::track_local_map
     const float projection_match_radius_th = 20.0f;
     int match_map_points_to_frame(Frame& Frame, const vector<Pt>& map_pts);
 
@@ -185,7 +185,7 @@ protected:
     std::vector<FeatureType> feature_types;
 
     // match_keyframe_to_frame Keyframe-Frame
-    // Tracking::match_keyframe_to_frame & Tracking::Relocalization
+    // Tracking::match_keyframe_to_frame & Tracking::relocalize
     static constexpr bool sBF_kf_lightglue = true;
 
     // match_keyframes_for_triangulation Keyframe-Keyframe

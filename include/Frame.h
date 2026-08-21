@@ -93,7 +93,7 @@ public:
     }
 
     // Returns inverse of rotation
-    inline mat3f GetRotationInverse(){
+    inline mat3f get_rotation_inverse(){
         return Rwc;
     }
 
