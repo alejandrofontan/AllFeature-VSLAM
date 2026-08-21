@@ -337,7 +337,7 @@ void Tracking::Track()
         const mat4f Tcr = current_frame_.Tcw * current_frame_.ref_keyframe->get_pose_inverse();
         relative_frame_poses_.push_back(Tcr);
         reference_keyframes_.push_back(current_frame_.ref_keyframe);
-        frame_timestamps_.push_back(current_frame_.mTimeStamp);
+        frame_timestamps_.push_back(current_frame_.timestamp);
         lost_flags_.push_back(state_ == LOST);
     }
     else

@@ -50,7 +50,7 @@ Frame::Frame()
 //Copy Constructor
 Frame::Frame(const Frame &frame)
     :featureTypes(frame.featureTypes), vocabulary(frame.vocabulary), featureExtractorLeft(frame.featureExtractorLeft), featureExtractorRight(frame.featureExtractorRight),
-     mTimeStamp(frame.mTimeStamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()), w(frame.w), h(frame.h),
+     timestamp(frame.timestamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()), w(frame.w), h(frame.h),
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
      mvKeysRight(frame.mvKeysRight), keypoints(frame.keypoints),  mvuRight(frame.mvuRight),
      mvDepth(frame.mvDepth), inv_depth(frame.inv_depth), sigma2invDepth(frame.sigma2invDepth),
@@ -97,7 +97,7 @@ Frame::Frame(const Image & img, const double &timeStamp,
              shared_ptr<Vocabulary> vocabulary, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth)
     :vocabulary(vocabulary),
     featureExtractorLeft(extractor), featureExtractorRight(),
-    mTimeStamp(timeStamp), mK(K.clone()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
+    timestamp(timeStamp), mK(K.clone()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
 {
     // Frame ID
     frame_id = nNextId++;

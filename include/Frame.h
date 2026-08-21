@@ -139,7 +139,7 @@ public:
     std::map<FeatureType, shared_ptr<FeatureExtractor>> featureExtractorLeft, featureExtractorRight;
 
     // Frame timestamp.
-    double mTimeStamp;
+    double timestamp;
 
     // Calibration matrix and OpenCV distortion parameters.
     cv::Mat mK; // Remove ???????????????????????

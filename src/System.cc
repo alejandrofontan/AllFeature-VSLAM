@@ -437,7 +437,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
         Eigen::Quaternionf q(R);
         vec3f t = pKF->get_camera_center();
 
-        long long ts_ns = static_cast<long long>(std::round(pKF->mTimeStamp * 1e9));
+        long long ts_ns = static_cast<long long>(std::round(pKF->timestamp * 1e9));
         f << std::fixed << std::setprecision(9) << ts_ns << ','
           << std::scientific << std::setprecision(7)
           << static_cast<double>(t(0)) << ','

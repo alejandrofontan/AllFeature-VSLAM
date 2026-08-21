@@ -154,7 +154,7 @@ public:
     KeyframeId keyId;
     const long unsigned int frame_id;
 
-    const double mTimeStamp;
+    const double timestamp;
 
     // Grid (to speed up feature matching)
     const int mnGridCols;
