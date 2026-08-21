@@ -115,7 +115,7 @@ public:
     };
 
     eTrackingState state_;
-    eTrackingState mLastProcessedState;
+    eTrackingState last_processed_state_;
 
     // Input sensor
     int mSensor;
@@ -134,22 +134,22 @@ public:
     std::map<FeatureType, std::vector<int>> matches_per_feature_;
     // Lists used to recover the full camera trajectory at the end of the execution.
     // Basically we store the reference keyframe for each frame and its relative transformation
-    list<mat4f> mlRelativeFramePoses;
-    list<Keyframe> mlpReferences;
-    list<double> mlFrameTimes;
-    list<bool> mlbLost;
+    list<mat4f> relative_frame_poses_;
+    list<Keyframe> reference_keyframes_;
+    list<double> frame_timestamps_;
+    list<bool> lost_flags_;
 
     void reset();
 
     // Reason (with statistics) reported by the most recent TrackingLostException, kept around so
     // the "reset if lost soon after init" branch in Track() can reference why tracking was lost.
-    std::string mLastTrackingLostReason{};
+    std::string last_tracking_lost_reason_{};
 
-    size_t numTrackedFrames{2};
+    size_t num_tracked_frames_{2};
 
     vector<FeatureType> feature_types_{};
-    int featureInitialization{0};
-    int featureRelocalization{0};
+    int init_feature_index_{0};
+    int reloc_feature_index_{0};
 
     int get_image_width() const {return w;};
     int get_image_height() const {return h;};
@@ -231,11 +231,11 @@ protected:
     std::vector<Pt> local_points_;
 
     // System
-    System* mpSystem;
+    System* system_;
 
     //Drawers
     std::shared_ptr<Viewer> viewer;
-    std::shared_ptr<FrameDrawer> frameDrawer;
+    std::shared_ptr<FrameDrawer> frame_drawer_;
     std::shared_ptr<MapDrawer> map_drawer_;
 
     // Map
@@ -262,7 +262,7 @@ protected:
     float mDepthMapFactor;
 
     //Current matches in frame
-    int mnMatchesInliers;
+    int num_inlier_matches_;
 
     // Rolling inlier history (last inliersHistorySize tracked frames) — reference for the
     // emergency-keyframe trigger in NeedNewKeyFrame(). Comparing against recent frames
@@ -279,7 +279,7 @@ protected:
     FrameId lastRelocFrameId;
 
     //Motion Model
-    mat4f mVelocity;
+    mat4f velocity_;
 
     //Color order (true RGB, false BGR, ignored if grayscale)
     bool mbRGB{true};
@@ -381,7 +381,7 @@ protected:
 
     std::shared_ptr<FeatureMatcher> matcher_;
 
-    bool emergencyKeyframe{false};
+    bool emergency_keyframe_{false};
 
 };
 

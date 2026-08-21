@@ -366,11 +366,11 @@ void System::SaveTrajectoryTUM(const string &filename)
 
     // For each frame we have a reference keyframe (lRit), the timestamp (lT) and a flag
     // which is true when tracking failed (lbL).
-    list<AF_VSLAM::Keyframe>::iterator lRit = tracker->mlpReferences.begin();
-    list<double>::iterator lT = tracker->mlFrameTimes.begin();
-    list<bool>::iterator lbL = tracker->mlbLost.begin();
-    for(list<mat4f>::iterator lit=tracker->mlRelativeFramePoses.begin(),
-        lend=tracker->mlRelativeFramePoses.end();lit!=lend;lit++, lRit++, lT++, lbL++)
+    list<AF_VSLAM::Keyframe>::iterator lRit = tracker->reference_keyframes_.begin();
+    list<double>::iterator lT = tracker->frame_timestamps_.begin();
+    list<bool>::iterator lbL = tracker->lost_flags_.begin();
+    for(list<mat4f>::iterator lit=tracker->relative_frame_poses_.begin(),
+        lend=tracker->relative_frame_poses_.end();lit!=lend;lit++, lRit++, lT++, lbL++)
     {
         if(*lbL)
             continue;
@@ -570,9 +570,9 @@ void System::SaveTrajectoryKITTI(const string &filename)
 
     // For each frame we have a reference keyframe (lRit), the timestamp (lT) and a flag
     // which is true when tracking failed (lbL).
-    list<AF_VSLAM::Keyframe>::iterator lRit = tracker->mlpReferences.begin();
-    list<double>::iterator lT = tracker->mlFrameTimes.begin();
-    for(list<mat4f>::iterator lit=tracker->mlRelativeFramePoses.begin(), lend=tracker->mlRelativeFramePoses.end();lit!=lend;lit++, lRit++, lT++)
+    list<AF_VSLAM::Keyframe>::iterator lRit = tracker->reference_keyframes_.begin();
+    list<double>::iterator lT = tracker->frame_timestamps_.begin();
+    for(list<mat4f>::iterator lit=tracker->relative_frame_poses_.begin(), lend=tracker->relative_frame_poses_.end();lit!=lend;lit++, lRit++, lT++)
     {
         AF_VSLAM::Keyframe pKF = *lRit;
 
@@ -658,7 +658,7 @@ void System::SaveStatistics(const std::string &filename){
     // f << fixed;
     // f << setprecision(0) << numKeyframes << " " << numPts << " " << numObservations << " " << setprecision(3) << numObservationsPerPt  <<
     // " " << setprecision(9) << median_tracking_time << " " << medianLocalMapppingTime << " " << medianLoopClosingTime <<
-    // " " << tracker->numTrackedFrames <<" " << loopCloser->numOfLoopClosures << setprecision(0) <<
+    // " " << tracker->num_tracked_frames_ <<" " << loopCloser->numOfLoopClosures << setprecision(0) <<
     // " " << firstVirtualMemUsed <<" " << maxVirtualMemUsed << " " << finalVirtualMemUsed <<
     // endl;
 
@@ -675,7 +675,7 @@ void System::SaveStatistics(const std::string &filename){
     // node["profiling"]["medianLocalMapppingTime"] = medianLocalMapppingTime;
     // node["profiling"]["medianLoopClosingTime"] = medianLoopClosingTime;
 
-    // node["recall"]["numTrackedFrames"] = tracker->numTrackedFrames;
+    // node["recall"]["num_tracked_frames_"] = tracker->num_tracked_frames_;
     // node["recall"]["loopCloser->numOfLoopClosures"] = loopCloser->numOfLoopClosures;
 
     // node["memory"]["firstVirtualMemUsed"] = firstVirtualMemUsed;

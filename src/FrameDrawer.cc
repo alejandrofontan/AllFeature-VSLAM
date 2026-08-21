@@ -218,12 +218,12 @@ void FrameDrawer::Update(Tracking *pTracker)
     }
 
 
-    if(pTracker->mLastProcessedState==Tracking::NOT_INITIALIZED)
+    if(pTracker->last_processed_state_==Tracking::NOT_INITIALIZED)
     {
         mvIniKeys = pTracker->initial_frame_.mvKeys;
         matches_per_feature_ = pTracker->matches_per_feature_;
     }
-    else if(pTracker->mLastProcessedState==Tracking::OK)
+    else if(pTracker->last_processed_state_==Tracking::OK)
     {
         for (auto const& [featType, N_] : N) {
             for(int i = 0; i < N_; i++)
@@ -242,7 +242,7 @@ void FrameDrawer::Update(Tracking *pTracker)
             }
         }
     }
-    mState=static_cast<int>(pTracker->mLastProcessedState);
+    mState=static_cast<int>(pTracker->last_processed_state_);
 }
 
 } //namespace ORB_SLAM

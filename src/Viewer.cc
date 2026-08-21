@@ -233,7 +233,7 @@ void Viewer::Run()
             const size_t nTotal = system->GetSequenceImageCount();
             const size_t nProcessed = system->GetFramesProcessedCount();
             std::ostringstream oss;
-            oss << tracker->numTrackedFrames << " / "
+            oss << tracker->num_tracked_frames_ << " / "
                 << (nTotal > 0 ? std::to_string(nTotal) : std::string("?"));
             menuFrames = oss.str();
             menuProgress = nTotal > 0 ? 100.0f * float(nProcessed) / float(nTotal) : 0.0f;
