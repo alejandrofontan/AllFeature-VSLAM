@@ -281,8 +281,6 @@ protected:
     //Color order (true RGB, false BGR, ignored if grayscale)
     bool mbRGB{true};
 
-    list<Pt> mlpTemporalPoints;
-
     // Fix image size to nominal size 307200 pixels
     bool fixImageSize{false};
 

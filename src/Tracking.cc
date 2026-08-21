@@ -173,115 +173,99 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
 
 void Tracking::Track()
 {
-
-
-    if(state_==NO_IMAGES_YET)
-    {
+    if(state_ == NO_IMAGES_YET)
         state_ = NOT_INITIALIZED;
-    }
 
-    mLastProcessedState=state_;
+    mLastProcessedState = state_;
 
-    // Stage timing: report where the time went whenever a frame stalls visibly
-    // (hiccup diagnosis; threshold ~3 frame periods at 20 fps).
+    // Diagnostics cadence/thresholds (heartbeat period; visible-stall report ~3 frame periods at 20 fps)
+    constexpr int HEARTBEAT_PERIOD_FRAMES = 100;
+    constexpr double SLOW_FRAME_WARN_MS = 150.0;
+
+    // Stage timing: report where the time went whenever a frame stalls visibly (hiccup diagnosis).
     using StageClock = std::chrono::steady_clock;
-    const auto stageMs = [](StageClock::time_point a, StageClock::time_point b) {
+    const auto stage_ms = [](StageClock::time_point a, StageClock::time_point b) {
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
-    const auto tTrackStart = StageClock::now();
+    const auto t_track_start = StageClock::now();
 
     // Get Map Mutex -> Map cannot be changed
     unique_lock<mutex> lock(map_->mMutexMapUpdate);
-    const auto tLockAcquired = StageClock::now();
-    const double msLockWait = stageMs(tTrackStart, tLockAcquired);
-    double msTrackRef = 0.0, msLocalMap = 0.0, msEmergencyWait = 0.0;
+    const auto t_lock_acquired = StageClock::now();
+    const double ms_lock_wait = stage_ms(t_track_start, t_lock_acquired);
+    double ms_track_ref = 0.0, ms_local_map = 0.0, ms_emergency_wait = 0.0;
 
-    if(state_==NOT_INITIALIZED)
+    if(state_ == NOT_INITIALIZED)
     {
-
         monocular_initialization(feature_types_[featureInitialization]);
         frameDrawer->Update(this);
 
-        if(state_!=OK)
+        if(state_ != OK)
             return;
     }
     else
     {
-        // System is initialized. Track Frame.
-        bool bOK;
-        if(state_==OK)
+        // System is initialized: track the frame. A TrackingLostException from a stage
+        // fails that stage; record why for the post-loss diagnostics.
+        const auto run_stage = [this](auto&& stage) {
+            try {
+                return stage();
+            }
+            catch(const TrackingLostException& e) {
+                mLastTrackingLostReason = e.what();
+                AF_WARN("Tracking lost — " << mLastTrackingLostReason);
+                return false;
+            }
+        };
+
+        bool ok{false};
+        if(state_ == OK)
         {
             // Local Mapping might have changed some MapPoints tracked in last frame
             CheckReplacedInLastFrame();
-            try
-            {
-                bOK = TrackReferenceKeyFrame();
-            }
-            catch(const TrackingLostException& e)
-            {
-                mLastTrackingLostReason = e.what();
-                AF_WARN("Tracking lost — " << mLastTrackingLostReason);
-                bOK = false;
-            }
+            ok = run_stage([this] { return TrackReferenceKeyFrame(); });
         }
         else
-        {
-            bOK = Relocalization(feature_types_[featureRelocalization]);
-        }
-
+            ok = Relocalization(feature_types_[featureRelocalization]);
 
         current_frame_.ref_keyframe = ref_keyframe_;
 
-        const auto tAfterTrackRef = StageClock::now();
+        const auto t_after_track_ref = StageClock::now();
 
-        // If we have an initial estimation of the camera pose and matching. Track the local map.
+        // If we have an initial estimation of the camera pose and matching, track the local map.
 #ifdef PROFILING_EXHAUSTIVE
-        std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
+        auto t_start = std::chrono::steady_clock::now();
 #endif
 
-        if(bOK)
-        {
-            try
-            {
-                bOK = TrackLocalMap();
-            }
-            catch(const TrackingLostException& e)
-            {
-                mLastTrackingLostReason = e.what();
-                AF_WARN("Tracking lost — " << mLastTrackingLostReason);
-                bOK = false;
-            }
-        }
+        if(ok)
+            ok = run_stage([this] { return TrackLocalMap(); });
 
-        msTrackRef = stageMs(tLockAcquired, tAfterTrackRef);
-        msLocalMap = stageMs(tAfterTrackRef, StageClock::now());
+        ms_track_ref = stage_ms(t_lock_acquired, t_after_track_ref);
+        ms_local_map = stage_ms(t_after_track_ref, StageClock::now());
 
 #ifdef PROFILING_EXHAUSTIVE
-        std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
+        auto t_end = std::chrono::steady_clock::now();
         double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
         local_map_times[int(1000 * t_duration)]++;
 #endif
 
-        if(bOK)
-            state_ = OK;
-        else
-            state_=LOST;
+        state_ = ok ? OK : LOST;
 
         // Update drawer
         frameDrawer->Update(this);
 
-        // If tracking were good, check if we insert a keyframe
-        if(bOK)
+        // If tracking was good, check if we insert a keyframe
+        if(ok)
         {
             ++numTrackedFrames;
 
             // Low-rate heartbeat so post-mortems can see the inlier/map trend leading
             // into a tracking loss, not just the loss line itself.
-            if(current_frame_.frame_id % 100 == 0)
+            if(current_frame_.frame_id % HEARTBEAT_PERIOD_FRAMES == 0)
             {
                 AF_INFO("Track heartbeat | frame=" << current_frame_.frame_id
                         << " inliers=" << mnMatchesInliers
-                        << " local_points_=" << local_points_.size()
+                        << " localPts=" << local_points_.size()
                         << " KFs=" << map_->KeyFramesInMap()
                         << " mapPts=" << map_->MapPointsInMap());
                 std::cout.flush(); // stdout is fully buffered under the runner's redirect
@@ -290,60 +274,54 @@ void Tracking::Track()
             // Update motion model
             if(last_frame_.Tcw(3,3) == 1.0f)
             {
-                mat4f LastTwc{mat4f::Identity()};
-                LastTwc.block<3,3>(0,0) = last_frame_.GetRotationInverse();
-                LastTwc.block<3,1>(0,3) = last_frame_.get_camera_center();
-                mVelocity = current_frame_.Tcw * LastTwc;
+                mat4f Twc_last{mat4f::Identity()};
+                Twc_last.block<3,3>(0,0) = last_frame_.GetRotationInverse();
+                Twc_last.block<3,1>(0,3) = last_frame_.get_camera_center();
+                mVelocity = current_frame_.Tcw * Twc_last;
             }
             else
                 mVelocity = mat4f::Zero();
 
             map_drawer_->set_current_camera_pose(current_frame_.Tcw);
 
-            // Clean VO matches
+            // Clean VO matches: drop points no map observation backs
             for (auto& [ft, N] : current_frame_.N) {
                 for(int i = 0; i < N; i++)
                 {
-                    Pt pMP = current_frame_.pts.at(ft)[i];
-                    if(pMP)
-                        if(pMP->number_of_observations() < 1)
-                        {
-                            current_frame_.outliers.at(ft)[i] = false;
-                            current_frame_.pts.at(ft)[i]=static_cast<Pt>(nullptr);
-                        }
+                    const Pt& map_point = current_frame_.pts.at(ft)[i];
+                    if(map_point && map_point->number_of_observations() < 1)
+                    {
+                        current_frame_.outliers.at(ft)[i] = false;
+                        current_frame_.pts.at(ft)[i] = nullptr;
+                    }
                 }
             }
-            mlpTemporalPoints.clear();
 
             // Check if we need to insert a new keyframe
             if(NeedNewKeyFrame())
                 CreateNewKeyFrame();
 
-
-            // We allow points with high innovation (considererd outliers by the Huber Function)
-            // pass to the new keyframe, so that bundle adjustment will finally decide
-            // if they are outliers or not. We don't want next frame to estimate its position
-            // with those points so, we discard them in the frame.
+            // We allow points with high innovation (considered outliers by the Huber function)
+            // to pass to the new keyframe, so that bundle adjustment will finally decide
+            // if they are outliers or not. We don't want the next frame to estimate its pose
+            // with those points, so we discard them in the frame.
             for (auto& [ft, N] : current_frame_.N) {
-                for(int i =0; i < N; i++)
+                for(int i = 0; i < N; i++)
                 {
                     if(current_frame_.pts.at(ft)[i] && current_frame_.outliers.at(ft)[i])
-                        current_frame_.pts.at(ft)[i]=static_cast<Pt>(nullptr);
+                        current_frame_.pts.at(ft)[i] = nullptr;
                 }
             }
         }
 
-        // Reset if the camera get lost soon after initialization
-        if(state_==LOST)
+        // Reset if the camera gets lost soon after initialization
+        if(state_ == LOST && map_->KeyFramesInMap() <= static_cast<size_t>(minKeyframesInMap))
         {
-            if(map_->KeyFramesInMap() <= static_cast<size_t>(minKeyframesInMap))
-            {
-                AF_WARN("Track lost soon after initialisation (" << map_->KeyFramesInMap() << " <= "
-                        << minKeyframesInMap << " keyframes in map), reason: " << mLastTrackingLostReason
-                        << " — reseting...");
-                mpSystem->reset();
-                return;
-            }
+            AF_WARN("Track lost soon after initialisation (" << map_->KeyFramesInMap() << " <= "
+                    << minKeyframesInMap << " keyframes in map), reason: " << mLastTrackingLostReason
+                    << " — resetting...");
+            mpSystem->reset();
+            return;
         }
 
         if(!current_frame_.ref_keyframe)
@@ -355,11 +333,11 @@ void Tracking::Track()
     // Store frame pose information to retrieve the complete camera trajectory afterward.
     if(current_frame_.Tcw(3,3) == 1.0f)
     {
-        mat4f Tcr = current_frame_.Tcw * current_frame_.ref_keyframe->get_pose_inverse();
+        const mat4f Tcr = current_frame_.Tcw * current_frame_.ref_keyframe->get_pose_inverse();
         mlRelativeFramePoses.push_back(Tcr);
-        mlpReferences.push_back(ref_keyframe_);
+        mlpReferences.push_back(current_frame_.ref_keyframe);
         mlFrameTimes.push_back(current_frame_.mTimeStamp);
-        mlbLost.push_back(state_==LOST);
+        mlbLost.push_back(state_ == LOST);
     }
     else
     {
@@ -367,36 +345,33 @@ void Tracking::Track()
         mlRelativeFramePoses.push_back(mlRelativeFramePoses.back());
         mlpReferences.push_back(mlpReferences.back());
         mlFrameTimes.push_back(mlFrameTimes.back());
-        mlbLost.push_back(state_==LOST);
+        mlbLost.push_back(state_ == LOST);
     }
 
-    if (emergencyKeyframe){
-        std::cout << "Tracking::Track: emergency keyframe triggered, waiting for local mapping to be idle..." << std::endl;
-        const auto tWaitStart = StageClock::now();
+    // An emergency keyframe was just inserted: block until Local Mapping has processed
+    // it (the trigger is already logged by NeedNewKeyFrame, and the wait shows up as
+    // emergencyWait in the slow-frame report below).
+    if (emergencyKeyframe)
+    {
+        const auto t_wait_start = StageClock::now();
         lock.unlock();
-        bool localMappingIdle = local_mapper_->AcceptKeyFrames();
-        while(!localMappingIdle)
-        {
-            // Wait until Local Mapping is idle
+        while(!local_mapper_->AcceptKeyFrames())
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            localMappingIdle = local_mapper_->AcceptKeyFrames();
-        }
         emergencyKeyframe = false;
-        msEmergencyWait = stageMs(tWaitStart, StageClock::now());
-        std::cout << "Tracking::Track: local mapping is idle, inserting emergency keyframe..." << std::endl;
+        ms_emergency_wait = stage_ms(t_wait_start, StageClock::now());
     }
 
     // Hiccup diagnosis: whenever this frame stalled visibly, say where the time went.
     // "other" covers keyframe decision/creation, drawer updates, and pose bookkeeping.
-    const double msTotal = stageMs(tTrackStart, StageClock::now());
-    if (msTotal > 150.0)
+    const double ms_total = stage_ms(t_track_start, StageClock::now());
+    if (ms_total > SLOW_FRAME_WARN_MS)
     {
-        AF_WARN("Track: slow frame, " << int(msTotal) << " ms"
-                << " (mapMutexWait=" << int(msLockWait)
-                << ", trackRef=" << int(msTrackRef)
-                << ", localMap=" << int(msLocalMap)
-                << ", emergencyWait=" << int(msEmergencyWait)
-                << ", other=" << int(msTotal - msLockWait - msTrackRef - msLocalMap - msEmergencyWait)
+        AF_WARN("Track: slow frame, " << int(ms_total) << " ms"
+                << " (mapMutexWait=" << int(ms_lock_wait)
+                << ", trackRef=" << int(ms_track_ref)
+                << ", localMap=" << int(ms_local_map)
+                << ", emergencyWait=" << int(ms_emergency_wait)
+                << ", other=" << int(ms_total - ms_lock_wait - ms_track_ref - ms_local_map - ms_emergency_wait)
                 << ") | frame=" << current_frame_.frame_id);
     }
 }
