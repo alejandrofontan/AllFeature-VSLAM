@@ -84,6 +84,25 @@ struct TrackProfiler
     }
 };
 
+// One-shot stage timer for the PROFILING_EXHAUSTIVE histograms: record()
+// buckets the milliseconds since construction (or since the previous record)
+// into the given histogram. Compiles to a no-op when profiling is off.
+struct StageTimer
+{
+#ifdef PROFILING_EXHAUSTIVE
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point t_last{Clock::now()};
+#endif
+
+    void record([[maybe_unused]] std::map<int, int>& histogram) {
+#ifdef PROFILING_EXHAUSTIVE
+        const auto now = Clock::now();
+        histogram[int(std::chrono::duration<double, std::milli>(now - t_last).count())]++;
+        t_last = now;
+#endif
+    }
+};
+
 // Stage timing for Tracking::grab_image. The per-stage histograms (resize /
 // frame creation / tracking) are PROFILING_EXHAUSTIVE-only; the total grab
 // time is always measured — its histogram feeds the viewer's median-time

@@ -90,6 +90,10 @@ public:
     // Drop matches flagged as outliers by pose optimization.
     void drop_outlier_points();
 
+    // Number of matches to map points that survived pose optimization as
+    // inliers and are backed by at least one observation.
+    int count_inlier_map_points() const;
+
     // Set the camera pose.
     void set_pose(const mat4f& Tcw_);
 

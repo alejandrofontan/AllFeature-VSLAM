@@ -373,6 +373,19 @@ void Frame::drop_unobserved_points()
     }
 }
 
+int Frame::count_inlier_map_points() const
+{
+    int count = 0;
+    for (const auto& [ft, num_keypoints] : N)
+        for(int i = 0; i < num_keypoints; i++)
+        {
+            const Pt& map_point = pts.at(ft)[i];
+            if(map_point && !outliers.at(ft)[i] && map_point->number_of_observations() > 0)
+                count++;
+        }
+    return count;
+}
+
 void Frame::drop_outlier_points()
 {
     for (auto& [ft, num_keypoints] : N) {

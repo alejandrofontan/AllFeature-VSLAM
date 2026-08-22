@@ -177,6 +177,10 @@ protected:
     // PROFILING_EXHAUSTIVE-only).
     void log_profile();
 
+    // CSV of per-match residuals at the seed pose when pose optimization
+    // collapses (track_reference_keyframe's divergence rescue); diagnostics only.
+    void dump_pose_collapse();
+
     // Append this frame's pose (relative to its reference keyframe) to the
     // trajectory-recovery lists; repeats the previous entry when the frame has
     // no valid pose (tracking lost).
@@ -190,7 +194,7 @@ protected:
     void create_initial_map_monocular();
 
     void check_replaced_in_last_frame();
-    bool track_reference_keyframe(const bool& optimizePose = true);
+    bool track_reference_keyframe();
     void UpdateLastFrame();
 
     bool relocalize();
@@ -320,8 +324,8 @@ protected:
     //////////////////////////////////////////////// Constants
 
     // track_reference_keyframe()
-    const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH{15};
-    const int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW{10};
+    static constexpr int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH{15};
+    static constexpr int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW{10};
 
     // track_local_map()
     const int minMatches_trackLocalMap_high{50};

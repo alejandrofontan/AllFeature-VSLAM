@@ -464,148 +464,85 @@ void Tracking::check_replaced_in_last_frame()
 }
 
 
-bool Tracking::track_reference_keyframe(const bool& optimizePose)
+bool Tracking::track_reference_keyframe()
 {
-    #ifdef PROFILING_EXHAUSTIVE
-            std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
-    #endif
+    StageTimer timer{};
 
-    // Feature Matching
-    std::map<FeatureType, std::vector<Pt>> mapPointMatches;
-    std::map<FeatureType, int> nmatches_ft = matcher_->match_keyframe_to_frame(ref_keyframe_, current_frame_, mapPointMatches, current_frame_.featureTypes);
-    int nmatches = 0;
-    for (auto& [ft, N] : current_frame_.N)
+    // Feature matching against the reference keyframe (global descriptor matching)
+    std::map<FeatureType, std::vector<Pt>> map_point_matches;
+    const std::map<FeatureType, int> num_matches_per_feature =
+        matcher_->match_keyframe_to_frame(ref_keyframe_, current_frame_, map_point_matches, current_frame_.featureTypes);
+
+    int num_matches = 0;
+    for (auto& [ft, matches] : map_point_matches)
     {
-        current_frame_.pts[ft] = mapPointMatches[ft];
-        current_frame_.outliers[ft] = vector<bool>(mapPointMatches[ft].size(), false);
-        nmatches += nmatches_ft[ft];
+        current_frame_.outliers.at(ft) = std::vector<bool>(matches.size(), false);
+        current_frame_.pts.at(ft) = std::move(matches);
+        num_matches += num_matches_per_feature.at(ft);
     }
 
-
-    if (!optimizePose)
-        return true;
-
-    if(nmatches < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
+    if(num_matches < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
     {
         std::ostringstream reason;
-        reason << "track_reference_keyframe: insufficient matches to reference keyframe (nmatches="
-               << nmatches << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH << ")"
+        reason << "track_reference_keyframe: insufficient matches to reference keyframe (num_matches="
+               << num_matches << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH << ")"
                << " | frame=" << current_frame_.frame_id << " ref_keyframe_=" << ref_keyframe_->keyId;
         throw TrackingLostException(reason.str());
     }
+    timer.record(track_ref_times_);
 
-#ifdef PROFILING_EXHAUSTIVE
-    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
-    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    track_ref_times_[int(1000 * t_duration)]++;
-    t_start = std::chrono::steady_clock::now();
-#endif
-
-    // Optimize Pose — seeded from the last frame's pose (constant-position). No motion
+    // Optimize pose — seeded from the last frame's pose (constant-position). No motion
     // prior anywhere: a prediction is only as good as its assumption, and a violated one
     // (abrupt motion change) turns anything built on it into a failure cascade. Divergence
     // protection comes from the optimizer itself (g2o LM monotone-acceptance fix) plus the
     // depth-free rescue below.
     current_frame_.set_pose(last_frame_.Tcw);
     Optimizer::PoseOptimization(&current_frame_);
-
-    const auto countMapInliers = [this]() {
-        int n = 0;
-        for (auto& [ft, N_ft] : current_frame_.N)
-            for(int i = 0; i < N_ft; i++)
-            {
-                const Pt& pt = current_frame_.pts.at(ft)[i];
-                if(pt && !current_frame_.outliers.at(ft)[i] && pt->number_of_observations() > 0)
-                    n++;
-            }
-        return n;
-    };
-    int nmatchesMap = countMapInliers();
+    int num_map_inliers = current_frame_.count_inlier_map_points();
 
     // Divergence rescue: a collapse to (almost) zero inliers despite plentiful raw matches
     // means the optimizer left the basin, not that the matches are bad. Re-seed and
     // re-optimize once with the RGB-D depth channel disabled — pure 2D reprojection, the
     // configuration the 4-pass scheme was originally tuned for.
-    if(nmatchesMap < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW
-       && nmatches >= 3 * TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
+    if(num_map_inliers < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW
+       && num_matches >= 3 * TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
     {
-        AF_WARN("track_reference_keyframe: pose optimization collapsed (" << nmatchesMap
-                << " inliers of " << nmatches << " raw matches) — retrying without depth channel"
+        AF_WARN("track_reference_keyframe: pose optimization collapsed (" << num_map_inliers
+                << " inliers of " << num_matches << " raw matches) — retrying without depth channel"
                 << " | frame=" << current_frame_.frame_id);
+        dump_pose_collapse();
 
-        // Post-mortem dump: per-match reprojection residuals AT THE SEED POSE (before any
-        // optimization), with each map point's provenance — enough to test offline whether
-        // the match set is bimodal (two coherent populations with no common pose) and which
-        // population (old vs freshly-created points, image region, depth) is inconsistent.
-        if(!FrameDrawer::exp_folder.empty())
-        {
-            const mat3f Rcw_seed = last_frame_.Tcw.block<3,3>(0,0);
-            const vec3f tcw_seed = last_frame_.Tcw.block<3,1>(0,3);
-            const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
-            const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
-            std::ofstream dump(FrameDrawer::exp_folder + "/collapse_frame_"
-                               + std::to_string(current_frame_.frame_id) + ".csv");
-            dump << "ft,kpIdx,u_kp,v_kp,u_proj,v_proj,z_cam,invDepth_meas,ptId,firstKFid,nObs\n";
-            for (auto& [ft, N_ft] : current_frame_.N)
-            {
-                const auto& kps = current_frame_.keypoints.at(ft);
-                const auto& invD = current_frame_.inv_depth.at(ft);
-                for(int i = 0; i < N_ft; i++)
-                {
-                    const Pt& pt = current_frame_.pts.at(ft)[i];
-                    if(!pt)
-                        continue;
-                    const vec3f Xc = Rcw_seed * pt->get_world_pos() + tcw_seed;
-                    if(Xc(2) <= 0.0f)
-                        continue;
-                    dump << int(ft) << "," << i << ","
-                         << kps[i].pt.x << "," << kps[i].pt.y << ","
-                         << (fx * Xc(0) / Xc(2) + cx) << "," << (fy * Xc(1) / Xc(2) + cy) << ","
-                         << Xc(2) << "," << invD[i] << ","
-                         << pt->ptId << "," << pt->mnFirstKFid << ","
-                         << pt->number_of_observations() << "\n";
-                }
-            }
-        }
-
-        for (auto& [ft, N_ft] : current_frame_.N)
-            std::fill(current_frame_.outliers.at(ft).begin(), current_frame_.outliers.at(ft).end(), false);
+        for (auto& [ft, outlier_flags] : current_frame_.outliers)
+            std::fill(outlier_flags.begin(), outlier_flags.end(), false);
         current_frame_.set_pose(last_frame_.Tcw);
         Optimizer::PoseOptimization(&current_frame_, /*useDepthChannel=*/false);
-        nmatchesMap = countMapInliers();
+        num_map_inliers = current_frame_.count_inlier_map_points();
     }
 
-    // Discard outliers
-    for (auto& [ft, N] : current_frame_.N)
+    // Discard outliers: remove the match, and mark the map point so search_local_points
+    // neither revisits nor double-counts it this frame.
+    for (auto& [ft, num_keypoints] : current_frame_.N)
     {
-        for(int i = 0; i < N; i++)
+        for(int i = 0; i < num_keypoints; i++)
         {
-            Pt pt = current_frame_.pts.at(ft)[i];
-            if(pt)
+            const Pt& map_point = current_frame_.pts.at(ft)[i];
+            if(map_point && current_frame_.outliers.at(ft)[i])
             {
-                if(current_frame_.outliers.at(ft)[i])
-                {
-                    current_frame_.pts.at(ft)[i] = static_cast<Pt>(nullptr);
-                    current_frame_.outliers.at(ft)[i] = false;
-                    pt->mbTrackInView = false;
-                    pt->idLastFrameSeen = current_frame_.frame_id;
-                }
+                map_point->mbTrackInView = false;
+                map_point->idLastFrameSeen = current_frame_.frame_id;
+                current_frame_.outliers.at(ft)[i] = false;
+                current_frame_.pts.at(ft)[i] = nullptr;
             }
         }
     }
+    timer.record(pose_opt_times_);
 
-    #ifdef PROFILING_EXHAUSTIVE
-    t_end = std::chrono::steady_clock::now();
-    t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    pose_opt_times_[int(1000 * t_duration)]++;
-#endif
-
-    if(nmatchesMap < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW)
+    if(num_map_inliers < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW)
     {
         std::ostringstream reason;
-        reason << "track_reference_keyframe: insufficient inlier matches after pose optimization (nmatchesMap="
-               << nmatchesMap << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW << ")"
-               << " | frame=" << current_frame_.frame_id << " rawMatches=" << nmatches;
+        reason << "track_reference_keyframe: insufficient inlier matches after pose optimization (num_map_inliers="
+               << num_map_inliers << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW << ")"
+               << " | frame=" << current_frame_.frame_id << " raw_matches=" << num_matches;
         throw TrackingLostException(reason.str());
     }
 
