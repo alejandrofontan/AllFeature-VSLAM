@@ -580,6 +580,162 @@ bool Tracking::track_local_map()
     return true;
 }
 
+
+void Tracking::update_local_map()
+{
+    // This is for visualization
+    map_->set_reference_map_points(local_points_);
+    // Update
+    UpdateLocalKeyFrames();
+    UpdateLocalPoints();
+}
+
+void Tracking::UpdateLocalKeyFrames()
+{
+    // Each map point vote for the keyframes in which it has been observed
+    set<KeyframeId> keyframeIds{};
+    {
+        int maxObs = 0;
+        auto keyframeMaxObs = static_cast<Keyframe>(nullptr);
+
+        std::map<KeyframeId,int> keyframeCounter;
+        std::map<KeyframeId,Keyframe> keyframes;
+
+        for (auto& [ft, pts] : current_frame_.pts) {
+            for(auto& pt: pts){
+                if(pt && !pt->is_bad()) {
+                    const std::map<KeyframeId, Obs> observations = pt->GetObservations();
+                    for (const auto &[keyId, obs]: observations) {
+                        keyframeCounter[keyId]++;
+                        keyframes[keyId] = obs->projKeyframe;
+                    }
+                }
+                else
+                    pt = nullptr;
+            }
+        }
+        if(keyframeCounter.empty())
+            return;
+
+        // All keyframes that observe a map point are included in the local map. Also check which keyframe shares most points
+        local_keyframes_.clear();
+        local_keyframes_.reserve(scaleReserveKey * keyframeCounter.size());
+        for (const auto &[keyId, keyframe]: keyframes) {
+            if(keyframe->is_bad())
+                continue;
+
+            int keyFrameCount = keyframeCounter[keyframe->keyId];
+            if(keyFrameCount > maxObs){
+                maxObs = keyFrameCount;
+                keyframeMaxObs = keyframe;
+            }
+
+            local_keyframes_.push_back(keyframe);
+            keyframeIds.insert(keyframe->keyId);
+        }
+
+        if(keyframeMaxObs){
+            ref_keyframe_ = keyframeMaxObs;
+            current_frame_.ref_keyframe = ref_keyframe_;
+        }
+    }
+
+    // Include also some not-already-included keyframes that are neighbors to already-included keyframes
+    for(const auto& keyframe: local_keyframes_){
+
+        // Limit the number of keyframes
+        if(int(local_keyframes_.size()) > _maxNumKey_)
+            break;
+
+        const vector<Keyframe> neighbors = keyframe->GetBestCovisibilityKeyFrames(_bestCovKey_);
+        for(const auto& neighbor: neighbors){
+            if(!neighbor->is_bad()){
+                if (keyframeIds.find(neighbor->keyId) == keyframeIds.end()){
+                    local_keyframes_.push_back(neighbor);
+                    keyframeIds.insert(neighbor->keyId);
+                    break;
+                }
+            }
+        }
+
+        const set<Keyframe> childs = keyframe->GetChilds();
+        for(const auto& child: childs){
+            if(!child->is_bad()){
+                if (keyframeIds.find(child->keyId) == keyframeIds.end()){
+                    local_keyframes_.push_back(child);
+                    keyframeIds.insert(child->keyId);
+                    break;
+                }
+            }
+        }
+
+        Keyframe parent = keyframe->GetParent();
+        if(parent and !parent->is_bad()){
+            if (keyframeIds.find(parent->keyId) == keyframeIds.end()){
+                local_keyframes_.push_back(parent);
+                keyframeIds.insert(parent->keyId);
+                break;
+            }
+        }
+    }
+}
+
+void Tracking::UpdateLocalPoints()
+{
+    local_points_.clear();
+    set<PtId> ptIds{};
+    for(const auto& keyframe : local_keyframes_){
+        for(const auto& ft: feature_types_){
+            const vector<Pt> pts = keyframe->get_map_point_matches(ft);
+            for(const auto& pt : pts){
+                if(!pt)
+                    continue;
+                if (ptIds.find(pt->ptId) != ptIds.end())
+                    continue;
+                if(!pt->is_bad()){
+                    local_points_.push_back(pt);
+                    ptIds.insert(pt->ptId);
+                }
+            }
+        }
+    }
+}
+
+void Tracking::search_local_points()
+{
+    // Do not search map points already matched
+    for (const auto& [ft, N] : current_frame_.N) {
+        for(auto& pt: current_frame_.pts.at(ft)){
+            if(pt && !pt->is_bad()){
+                pt->IncreaseVisible();
+                pt->idLastFrameSeen = current_frame_.frame_id;
+                pt->mbTrackInView = false;
+            }
+            else
+                pt = nullptr;
+        }
+    }
+
+    // Project points in frame and check its visibility
+    int nToMatch=0;
+    for(auto& pt: local_points_){
+        if(pt->idLastFrameSeen == current_frame_.frame_id)
+            continue;
+        if(pt->is_bad())
+            continue;
+
+        // Project (this fills MapPoint variables for matching)
+        if(current_frame_.isInFrustum(pt,viewingCosLimit_slp)){
+            pt->IncreaseVisible();
+            nToMatch++;
+        }
+    }
+
+    if(nToMatch > 0){
+        matcher_->match_map_points_to_frame(current_frame_, local_points_);
+    }
+}
+
     float Tracking::MedianFlowFromLastFrame() const
     {
         // Collect pixel positions of last frame's map points, then measure how far the
@@ -732,161 +888,6 @@ bool Tracking::track_local_map()
         local_mapper_->SetNotStop(false);
         last_keyframe_id_ = current_frame_.frame_id;
         last_keyframe_ = keyframe;
-    }
-
-    void Tracking::search_local_points()
-    {
-        // Do not search map points already matched
-        for (const auto& [ft, N] : current_frame_.N) {
-            for(auto& pt: current_frame_.pts.at(ft)){
-                if(pt && !pt->is_bad()){
-                    pt->IncreaseVisible();
-                    pt->idLastFrameSeen = current_frame_.frame_id;
-                    pt->mbTrackInView = false;
-                }
-                else
-                    pt = nullptr;
-            }
-        }
-
-        // Project points in frame and check its visibility
-        int nToMatch=0;
-        for(auto& pt: local_points_){
-            if(pt->idLastFrameSeen == current_frame_.frame_id)
-                continue;
-            if(pt->is_bad())
-                continue;
-
-            // Project (this fills MapPoint variables for matching)
-            if(current_frame_.isInFrustum(pt,viewingCosLimit_slp)){
-                pt->IncreaseVisible();
-                nToMatch++;
-            }
-        }
-
-        if(nToMatch > 0){
-            matcher_->match_map_points_to_frame(current_frame_, local_points_);
-        }
-    }
-
-    void Tracking::update_local_map()
-    {
-        // This is for visualization
-        map_->set_reference_map_points(local_points_);
-        // Update
-        UpdateLocalKeyFrames();
-        UpdateLocalPoints();
-    }
-
-    void Tracking::UpdateLocalPoints()
-    {
-        local_points_.clear();
-        set<PtId> ptIds{};
-        for(const auto& keyframe : local_keyframes_){
-            for(const auto& ft: feature_types_){
-                const vector<Pt> pts = keyframe->get_map_point_matches(ft);
-                for(const auto& pt : pts){
-                    if(!pt)
-                        continue;
-                    if (ptIds.find(pt->ptId) != ptIds.end())
-                        continue;
-                    if(!pt->is_bad()){
-                        local_points_.push_back(pt);
-                        ptIds.insert(pt->ptId);
-                    }
-                }
-            }
-        }
-    }
-
-    void Tracking::UpdateLocalKeyFrames()
-    {
-        // Each map point vote for the keyframes in which it has been observed
-        set<KeyframeId> keyframeIds{};
-        {
-            int maxObs = 0;
-            auto keyframeMaxObs = static_cast<Keyframe>(nullptr);
-
-            std::map<KeyframeId,int> keyframeCounter;
-            std::map<KeyframeId,Keyframe> keyframes;
-
-            for (auto& [ft, pts] : current_frame_.pts) {
-                for(auto& pt: pts){
-                    if(pt && !pt->is_bad()) {
-                        const std::map<KeyframeId, Obs> observations = pt->GetObservations();
-                        for (const auto &[keyId, obs]: observations) {
-                            keyframeCounter[keyId]++;
-                            keyframes[keyId] = obs->projKeyframe;
-                        }
-                    }
-                    else
-                        pt = nullptr;
-                }
-            }
-            if(keyframeCounter.empty())
-                return;
-
-            // All keyframes that observe a map point are included in the local map. Also check which keyframe shares most points
-            local_keyframes_.clear();
-            local_keyframes_.reserve(scaleReserveKey * keyframeCounter.size());
-            for (const auto &[keyId, keyframe]: keyframes) {
-                if(keyframe->is_bad())
-                    continue;
-
-                int keyFrameCount = keyframeCounter[keyframe->keyId];
-                if(keyFrameCount > maxObs){
-                    maxObs = keyFrameCount;
-                    keyframeMaxObs = keyframe;
-                }
-
-                local_keyframes_.push_back(keyframe);
-                keyframeIds.insert(keyframe->keyId);
-            }
-
-            if(keyframeMaxObs){
-                ref_keyframe_ = keyframeMaxObs;
-                current_frame_.ref_keyframe = ref_keyframe_;
-            }
-        }
-
-        // Include also some not-already-included keyframes that are neighbors to already-included keyframes
-        for(const auto& keyframe: local_keyframes_){
-
-            // Limit the number of keyframes
-            if(int(local_keyframes_.size()) > _maxNumKey_)
-                break;
-
-            const vector<Keyframe> neighbors = keyframe->GetBestCovisibilityKeyFrames(_bestCovKey_);
-            for(const auto& neighbor: neighbors){
-                if(!neighbor->is_bad()){
-                    if (keyframeIds.find(neighbor->keyId) == keyframeIds.end()){
-                        local_keyframes_.push_back(neighbor);
-                        keyframeIds.insert(neighbor->keyId);
-                        break;
-                    }
-                }
-            }
-
-            const set<Keyframe> childs = keyframe->GetChilds();
-            for(const auto& child: childs){
-                if(!child->is_bad()){
-                    if (keyframeIds.find(child->keyId) == keyframeIds.end()){
-                        local_keyframes_.push_back(child);
-                        keyframeIds.insert(child->keyId);
-                        break;
-                    }
-                }
-            }
-
-            Keyframe parent = keyframe->GetParent();
-            if(parent and !parent->is_bad()){
-                if (keyframeIds.find(parent->keyId) == keyframeIds.end()){
-                    local_keyframes_.push_back(parent);
-                    keyframeIds.insert(parent->keyId);
-                    break;
-                }
-            }
-        }
     }
 
 bool Tracking::relocalize()
