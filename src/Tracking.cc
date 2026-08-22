@@ -60,10 +60,10 @@ Tracking::Tracking(shared_ptr<Vocabulary> vocabulary,
                    const std::map<FeatureType, string>& feature_settings_yaml_file,
                    const int sensor,
                    const vector<FeatureType>& featureTypes,
-                   const bool& fixImageSize):
+                   const bool fix_image_size):
     state_(NO_IMAGES_YET), mSensor(sensor), feature_types_(featureTypes), mbVO(false), vocabulary(vocabulary),
     keyframe_db_(pKFDB),
-    frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), lastRelocFrameId(0), fixImageSize(fixImageSize)
+    frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), lastRelocFrameId(0), fix_image_size_(fix_image_size)
 {
     // Load camera parameters from settings yaml file
     Tracking::loadCameraParameters(strCalibrationPath, strSettingPath);
@@ -74,11 +74,11 @@ Tracking::Tracking(shared_ptr<Vocabulary> vocabulary,
 
     // Load feature parameters from settings yaml file
     for (auto& ft: featureTypes){
-        featureExtractorLeft[ft] = Tracking::getFeatureExtractor(1, feature_settings_yaml_file.at(ft), ft);
-        initFeatureExtractor[ft] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , feature_settings_yaml_file.at(ft), ft);
+        feature_extractor_left_[ft] = Tracking::getFeatureExtractor(1, feature_settings_yaml_file.at(ft), ft);
+        init_feature_extractor_[ft] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , feature_settings_yaml_file.at(ft), ft);
     }
 
-    matcher_ = std::make_shared<FeatureMatcher>(w, h, featureTypes, "Tracking");
+    matcher_ = std::make_shared<FeatureMatcher>(image_width_, image_height_, featureTypes, "Tracking");
 }
 
 mat4f Tracking::grab_image(Image &im, const double timestamp)
@@ -86,18 +86,18 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     GrabProfiler profiler{};
 
     // Convert image to grayscale and resize
-    im.GetGrayImage(mbRGB);
-    if(fixImageSize)
-        im.FixImageSize(w, h);
+    im.GetGrayImage(is_rgb_);
+    if(fix_image_size_)
+        im.FixImageSize(image_width_, image_height_);
 
-    mImGray = im.grayImg;
-    mImMask = im.mask;
-    imName = im.imageName;
+    gray_image_ = im.grayImg;
+    mask_image_ = im.mask;
+    image_name_ = im.imageName;
     profiler.resize_done(resize_times_);
 
     // Create the frame (feature extraction); initialization uses the denser extractor set
     const auto& extractors = (state_ == NOT_INITIALIZED || state_ == NO_IMAGES_YET)
-                           ? initFeatureExtractor : featureExtractorLeft;
+                           ? init_feature_extractor_ : feature_extractor_left_;
     current_frame_ = Frame(im, timestamp, extractors, vocabulary, mK, mDistCoef, mbf, mThDepth);
     profiler.frame_created(frame_times_);
 
@@ -764,9 +764,9 @@ bool Tracking::track_local_map()
         // count, so the current frame is compared against its predecessors.
         int medianRecentInliers = -1;
         if (recentInliersHistory.size() >= inliersHistorySize / 2) {
-            std::vector<int> h(recentInliersHistory.begin(), recentInliersHistory.end());
-            auto mid = h.begin() + h.size() / 2;
-            std::nth_element(h.begin(), mid, h.end());
+            std::vector<int> history(recentInliersHistory.begin(), recentInliersHistory.end());
+            auto mid = history.begin() + history.size() / 2;
+            std::nth_element(history.begin(), mid, history.end());
             medianRecentInliers = *mid;
         }
         recentInliersHistory.push_back(num_inlier_matches_);
@@ -1273,18 +1273,18 @@ void Tracking::loadCameraParameters(const string &strCalibrationPath, const stri
             0.0f, cam["focal_length"][1].as<float>(), cam["principal_point"][1].as<float>(),
             0.0f, 0.0f, 1.0f);
 
-    w = cam["image_dimension"][0].as<int>();
-    h = cam["image_dimension"][1].as<int>();
+    image_width_ = cam["image_dimension"][0].as<int>();
+    image_height_ = cam["image_dimension"][1].as<int>();
 
-    if(fixImageSize){
-        float ratio = float(w) / float(h);
+    if(fix_image_size_){
+        float ratio = float(image_width_) / float(image_height_);
         int new_h = (int) sqrt(307200.f / ratio);
         int new_w = (int) (float(new_h) * ratio);
-        float conv_ratio_h = float(new_h)/float(h);
-        float conv_ratio_w = float(new_w)/float(w);
+        float conv_ratio_h = float(new_h)/float(image_height_);
+        float conv_ratio_w = float(new_w)/float(image_width_);
 
-        w = new_w;
-        h = new_h;
+        image_width_ = new_w;
+        image_height_ = new_h;
 
         mK.at<float>(0,0) *= conv_ratio_w;
         mK.at<float>(1,1) *= conv_ratio_h;
@@ -1305,7 +1305,7 @@ void Tracking::loadCameraParameters(const string &strCalibrationPath, const stri
         fps = fps0;
 
     // RGB order
-    bool mbRGB = cam["cam_type"].as<std::string>() != "bgr";
+    bool is_rgb_ = cam["cam_type"].as<std::string>() != "bgr";
 
     // Load settings file
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
@@ -1324,7 +1324,7 @@ void Tracking::loadCameraParameters(const string &strCalibrationPath, const stri
     if (cam["distortion_type"] && cam["distortion_coefficients"])
         AF_CONFIG_FIELD("distortion_coefficients: ", mDistCoef.t());
     AF_CONFIG_FIELD("fps:                ", cam["fps"].as<float>());
-    if(mbRGB)        AF_CONFIG_FIELD("color order:        ", "RGB (ignored if grayscale)");
+    if(is_rgb_)        AF_CONFIG_FIELD("color order:        ", "RGB (ignored if grayscale)");
     else            AF_CONFIG_FIELD("color order:        ", "BGR (ignored if grayscale)");
     AF_CONFIG_END();
 }

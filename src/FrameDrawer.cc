@@ -207,9 +207,9 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
 void FrameDrawer::update(Tracking *pTracker)
 {
     unique_lock<mutex> lock(mMutex);
-    pTracker->mImGray.copyTo(mIm);
-    pTracker->mImMask.copyTo(mMask);
-    imName = pTracker->imName;
+    pTracker->gray_image_.copyTo(mIm);
+    pTracker->mask_image_.copyTo(mMask);
+    imName = pTracker->image_name_;
     mvCurrentKeys = pTracker->current_frame_.mvKeys;
     for (auto const& [featType, mvKeys] : mvCurrentKeys) {
         N[featType] = mvKeys.size();

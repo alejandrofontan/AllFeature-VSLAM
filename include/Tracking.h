@@ -82,7 +82,7 @@ public:
              const std::map<FeatureType, string>& feature_settings_yaml_file,
              const int sensor,
              const vector<FeatureType>& feature_types,
-             const bool& fixImageSize = false);
+             const bool fix_image_size = false);
 
     // Preprocess the input, extract features, and run track() on the frame.
     mat4f grab_image(Image &im, double timestamp);
@@ -120,9 +120,9 @@ public:
 
     // Current Frame
     Frame current_frame_;
-    cv::Mat mImGray;
-    cv::Mat mImMask; // segmentation mask of the current image (1 = static, 0 = dynamic); empty when segmentation is off
-    std::string imName;
+    cv::Mat gray_image_;
+    cv::Mat mask_image_; // segmentation mask of the current image (1 = static, 0 = dynamic); empty when segmentation is off
+    std::string image_name_;
 
     // Initialization Variables (mono)
     std::vector<int> init_matches_;
@@ -143,8 +143,8 @@ public:
 
     vector<FeatureType> feature_types_{};
 
-    int get_image_width() const {return w;};
-    int get_image_height() const {return h;};
+    int get_image_width() const {return image_width_;};
+    int get_image_height() const {return image_height_;};
 
     ////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////
@@ -227,8 +227,8 @@ protected:
     std::shared_ptr<LoopClosing> loop_closing_;
 
     // Features
-    std::map<FeatureType, shared_ptr<FeatureExtractor>> featureExtractorLeft, featureExtractorRight;
-    std::map<FeatureType, shared_ptr<FeatureExtractor>> initFeatureExtractor;
+    std::map<FeatureType, shared_ptr<FeatureExtractor>> feature_extractor_left_;
+    std::map<FeatureType, shared_ptr<FeatureExtractor>> init_feature_extractor_;
 
     //BoW
     shared_ptr<Vocabulary> vocabulary;
@@ -254,8 +254,8 @@ protected:
     cv::Mat mK;
     cv::Mat mDistCoef;
     float mbf;
-    int w{};
-    int h{};
+    int image_width_{};
+    int image_height_{};
 
     // New KeyFrame rules (according to fps)
     size_t minFrames;
@@ -288,10 +288,10 @@ protected:
     FrameId lastRelocFrameId;
 
     //Color order (true RGB, false BGR, ignored if grayscale)
-    bool mbRGB{true};
+    bool is_rgb_{true};
 
     // Fix image size to nominal size 307200 pixels
-    bool fixImageSize{false};
+    bool fix_image_size_{false};
 
     //////////////////////////////////////////////// Heuristics
     // Tracking()
