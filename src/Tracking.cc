@@ -592,90 +592,83 @@ void Tracking::update_local_map()
 
 void Tracking::update_local_keyframes()
 {
-    // Each map point vote for the keyframes in which it has been observed
-    set<KeyframeId> keyframeIds{};
-    {
-        int maxObs = 0;
-        auto keyframeMaxObs = static_cast<Keyframe>(nullptr);
-
-        std::map<KeyframeId,int> keyframeCounter;
-        std::map<KeyframeId,Keyframe> keyframes;
-
-        for (auto& [ft, pts] : current_frame_.pts) {
-            for(auto& pt: pts){
-                if(pt && !pt->is_bad()) {
-                    const std::map<KeyframeId, Obs> observations = pt->GetObservations();
-                    for (const auto &[keyId, obs]: observations) {
-                        keyframeCounter[keyId]++;
-                        keyframes[keyId] = obs->projKeyframe;
-                    }
-                }
-                else
-                    pt = nullptr;
-            }
-        }
-        if(keyframeCounter.empty())
-            return;
-
-        // All keyframes that observe a map point are included in the local map. Also check which keyframe shares most points
-        local_keyframes_.clear();
-        local_keyframes_.reserve(scaleReserveKey * keyframeCounter.size());
-        for (const auto &[keyId, keyframe]: keyframes) {
-            if(keyframe->is_bad())
+    // Each map point of the current frame votes for the keyframes observing it
+    // (bad points are dropped from the frame along the way)
+    std::map<KeyframeId, int> shared_points_per_keyframe;
+    std::map<KeyframeId, Keyframe> keyframe_by_id;
+    for (auto& [ft, pts] : current_frame_.pts) {
+        for(auto& pt : pts){
+            if(!pt)
                 continue;
-
-            int keyFrameCount = keyframeCounter[keyframe->keyId];
-            if(keyFrameCount > maxObs){
-                maxObs = keyFrameCount;
-                keyframeMaxObs = keyframe;
+            if(pt->is_bad()){
+                pt = nullptr;
+                continue;
             }
-
-            local_keyframes_.push_back(keyframe);
-            keyframeIds.insert(keyframe->keyId);
-        }
-
-        if(keyframeMaxObs){
-            ref_keyframe_ = keyframeMaxObs;
-            current_frame_.ref_keyframe = ref_keyframe_;
+            // By-value snapshot: GetObservations copies under the point's mutex
+            const std::map<KeyframeId, Obs> observations = pt->GetObservations();
+            for (const auto& [key_id, obs] : observations) {
+                shared_points_per_keyframe[key_id]++;
+                keyframe_by_id[key_id] = obs->projKeyframe;
+            }
         }
     }
+    if(shared_points_per_keyframe.empty())
+        return;
 
-    // Include also some not-already-included keyframes that are neighbors to already-included keyframes
-    for(const auto& keyframe: local_keyframes_){
+    // Every keyframe observing a current map point joins the local map; the one
+    // sharing the most points becomes the reference keyframe.
+    int max_shared_points = 0;
+    Keyframe keyframe_most_shared{};
+    std::set<KeyframeId> seen_keyframe_ids;
+    local_keyframes_.clear();
+    local_keyframes_.reserve(LOCAL_KEYFRAMES_RESERVE_SCALE * shared_points_per_keyframe.size());
+    for (const auto& [key_id, keyframe] : keyframe_by_id) {
+        if(keyframe->is_bad())
+            continue;
 
-        // Limit the number of keyframes
-        if(int(local_keyframes_.size()) > _maxNumKey_)
+        const int num_shared = shared_points_per_keyframe.at(key_id);
+        if(num_shared > max_shared_points){
+            max_shared_points = num_shared;
+            keyframe_most_shared = keyframe;
+        }
+
+        local_keyframes_.push_back(keyframe);
+        seen_keyframe_ids.insert(key_id);
+    }
+
+    if(keyframe_most_shared){
+        ref_keyframe_ = keyframe_most_shared;
+        current_frame_.ref_keyframe = ref_keyframe_;
+    }
+
+    // Expand with neighbors of the included keyframes: per keyframe, ONE best
+    // covisible neighbor, ONE child, and the parent. Indexed loop because the
+    // vector grows while being traversed (a range-for reference would dangle on
+    // reallocation). Semantics match stock ORB-SLAM2, including the outer-loop
+    // break after the first parent insertion.
+    for(size_t i = 0; i < local_keyframes_.size(); i++){
+        if(local_keyframes_.size() > MAX_LOCAL_KEYFRAMES)
             break;
+        const Keyframe keyframe = local_keyframes_[i]; // copy: push_back may reallocate
 
-        const vector<Keyframe> neighbors = keyframe->GetBestCovisibilityKeyFrames(_bestCovKey_);
-        for(const auto& neighbor: neighbors){
-            if(!neighbor->is_bad()){
-                if (keyframeIds.find(neighbor->keyId) == keyframeIds.end()){
-                    local_keyframes_.push_back(neighbor);
-                    keyframeIds.insert(neighbor->keyId);
-                    break;
-                }
-            }
-        }
-
-        const set<Keyframe> childs = keyframe->GetChilds();
-        for(const auto& child: childs){
-            if(!child->is_bad()){
-                if (keyframeIds.find(child->keyId) == keyframeIds.end()){
-                    local_keyframes_.push_back(child);
-                    keyframeIds.insert(child->keyId);
-                    break;
-                }
-            }
-        }
-
-        Keyframe parent = keyframe->GetParent();
-        if(parent and !parent->is_bad()){
-            if (keyframeIds.find(parent->keyId) == keyframeIds.end()){
-                local_keyframes_.push_back(parent);
-                keyframeIds.insert(parent->keyId);
+        for(const Keyframe& neighbor : keyframe->GetBestCovisibilityKeyFrames(BEST_COVISIBLE_KEYFRAMES)){
+            if(!neighbor->is_bad() && seen_keyframe_ids.insert(neighbor->keyId).second){
+                local_keyframes_.push_back(neighbor);
                 break;
             }
+        }
+
+        for(const Keyframe& child : keyframe->GetChilds()){
+            if(!child->is_bad() && seen_keyframe_ids.insert(child->keyId).second){
+                local_keyframes_.push_back(child);
+                break;
+            }
+        }
+
+        const Keyframe parent = keyframe->GetParent();
+        if(parent && !parent->is_bad() && seen_keyframe_ids.insert(parent->keyId).second){
+            local_keyframes_.push_back(parent);
+            break;
         }
     }
 }

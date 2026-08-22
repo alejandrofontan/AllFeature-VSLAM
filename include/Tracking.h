@@ -292,10 +292,6 @@ protected:
     // Tracking()
     const int scaleNumFeaturesMonocular{4};
 
-    // update_local_keyframes()
-    const int _maxNumKey_{80};
-    const int _bestCovKey_{10};
-
     // Matching
     const float nnratio_monoInit{0.9f};
     const float nnratio_trackRefKey{0.7f};
@@ -321,6 +317,11 @@ protected:
     // track_local_map()
     static constexpr int TRACK_LOCAL_MAP_MIN_INLIERS_HIGH{50};
     static constexpr int TRACK_LOCAL_MAP_MIN_INLIERS_LOW{30};
+
+    // update_local_keyframes()
+    static constexpr size_t MAX_LOCAL_KEYFRAMES{80};
+    static constexpr int BEST_COVISIBLE_KEYFRAMES{10};
+    static constexpr size_t LOCAL_KEYFRAMES_RESERVE_SCALE{3};
 
     // need_new_keyframe()
     // Stationarity gate: median frame-to-frame flow (px) below which no keyframe is
@@ -355,9 +356,6 @@ protected:
 
     // # Iterations
     const int numItpSolver{5}; // relocalize
-
-    // Memory
-    const int scaleReserveKey{3}; // update_local_keyframes()
 
     // RANSAC
     const float ransac_probability{0.99};
