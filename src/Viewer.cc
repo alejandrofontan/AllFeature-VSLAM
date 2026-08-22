@@ -152,6 +152,9 @@ void Viewer::Run()
     pangolin::Var<std::string> menuState("menu.Status", "WAITING");
     pangolin::Var<std::string> menuFrames("menu.Frames Tracked", "0");
     pangolin::Var<float> menuProgress("menu.Progress %", 0.0f, 0.0f, 100.0f);
+    // Manual reset (clears the map and re-initializes): the flag is consumed by
+    // System::Track on the main thread before the next frame is processed.
+    pangolin::Var<bool> menuReset("menu.Reset", false, false);
 
     // Section headers: Pangolin has no header widget; an empty string var renders its label
     // in the same plain style as the status entries above.
@@ -261,6 +264,12 @@ void Viewer::Run()
         }
         if(menuFollowCamera)
             s_cam.Follow(Twc);
+
+        if(menuReset)
+        {
+            system->reset();
+            menuReset = false;
+        }
 
         d_cam.Activate(s_cam);
         mapDrawer->DrawCurrentCamera(Twc, style);

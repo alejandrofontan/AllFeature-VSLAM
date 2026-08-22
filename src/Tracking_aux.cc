@@ -34,8 +34,7 @@ bool Tracking::run_tracking_stage(const std::function<bool()>& stage)
         return stage();
     }
     catch(const TrackingLostException& e) {
-        last_tracking_lost_reason_ = e.what();
-        AF_WARN("Tracking lost — " << last_tracking_lost_reason_);
+        AF_WARN("Tracking lost — " << e.what());
         return false;
     }
 }

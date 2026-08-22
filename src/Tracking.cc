@@ -51,10 +51,9 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     readIfPresent("Tracking.InitGbaIterations", params.init_gba_iterations);
     readIfPresent("Tracking.InitMinTrackedPoints", params.init_min_tracked_points);
     readIfPresent("Tracking.InitMinDepthSamples", params.init_min_depth_samples);
-    readIfPresent("Tracking.MinKeyframesInMap", params.min_keyframes_in_map);
 }
 
-Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
+Tracking::Tracking(shared_ptr<Vocabulary> vocabulary,
                    std::shared_ptr<FrameDrawer> frame_drawer, std::shared_ptr<MapDrawer> map_drawer,
                    shared_ptr<Map> map, shared_ptr<KeyFrameDatabase> pKFDB,
                    const string &strCalibrationPath, const string &strSettingPath,
@@ -63,7 +62,7 @@ Tracking::Tracking(System *pSys, shared_ptr<Vocabulary> vocabulary,
                    const vector<FeatureType>& featureTypes,
                    const bool& fixImageSize):
     state_(NO_IMAGES_YET), mSensor(sensor), feature_types_(featureTypes), mbVO(false), vocabulary(vocabulary),
-    keyframe_db_(pKFDB), system_(pSys), viewer(static_cast<shared_ptr<Viewer>>(nullptr)),
+    keyframe_db_(pKFDB), viewer(static_cast<shared_ptr<Viewer>>(nullptr)),
     frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), lastRelocFrameId(0), fixImageSize(fixImageSize)
 {
     // Load camera parameters from settings yaml file
@@ -237,16 +236,6 @@ void Tracking::track()
         // if they are outliers or not. We don't want the next frame to estimate its pose
         // with those points, so we discard them in the frame.
         current_frame_.drop_outlier_points();
-    }
-
-    // Reset if the camera gets lost soon after initialization
-    if(state_ == LOST && map_->keyframes_in_map() <= static_cast<size_t>(params.min_keyframes_in_map))
-    {
-        AF_WARN("track: lost soon after initialisation (" << map_->keyframes_in_map() << " <= "
-                << params.min_keyframes_in_map << " keyframes in map), reason: " << last_tracking_lost_reason_
-                << " — resetting...");
-        system_->reset();
-        return;
     }
 
     if(!current_frame_.ref_keyframe)

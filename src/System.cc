@@ -162,7 +162,7 @@ System::System(const string &vocabularyFolder,
 
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
-    tracker = make_shared<Tracking>(this, vocabulary, frameDrawer, mapDrawer,
+    tracker = make_shared<Tracking>(vocabulary, frameDrawer, mapDrawer,
                              mpMap, mpKeyFrameDatabase,
                              strCalibrationFile, strSettingsFile,
                              feature_settings_yaml_file,

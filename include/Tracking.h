@@ -70,16 +70,13 @@ struct TrackingParameters
     int init_gba_iterations{20};      // global-BA iteration budget on the initial map
     int init_min_tracked_points{100}; // min tracked map points in the current keyframe to accept the map
     int init_min_depth_samples{10};   // min sensor-depth ratio samples to prefer depth-verified scale
-
-    // track()
-    int min_keyframes_in_map{5}; // if lost with <= this many keyframes in map, reset instead of relocalizing
 };
 
 class Tracking
 {
 
 public:
-    Tracking(System* pSys, shared_ptr<Vocabulary> vocabulary, std::shared_ptr<FrameDrawer> pFrameDrawer, std::shared_ptr<MapDrawer> pMapDrawer, shared_ptr<Map> pMap,
+    Tracking(shared_ptr<Vocabulary> vocabulary, std::shared_ptr<FrameDrawer> pFrameDrawer, std::shared_ptr<MapDrawer> pMapDrawer, shared_ptr<Map> pMap,
              shared_ptr<KeyFrameDatabase> pKFDB,
              const string &strCalibrationPath, const string &strSettingPath,
              const std::map<FeatureType, string>& feature_settings_yaml_file,
@@ -142,10 +139,6 @@ public:
 
     void reset();
 
-    // Reason (with statistics) reported by the most recent TrackingLostException, kept around so
-    // the "reset if lost soon after init" branch in track() can reference why tracking was lost.
-    std::string last_tracking_lost_reason_{};
-
     size_t num_tracked_frames_{2};
 
     vector<FeatureType> feature_types_{};
@@ -172,8 +165,8 @@ protected:
     // Main tracking function. It is independent of the input sensor.
     void track();
 
-    // Runs one tracking stage: a TrackingLostException fails the stage and
-    // records why for the post-loss diagnostics.
+    // Runs one tracking stage: a TrackingLostException fails the stage (logged
+    // with its reason and statistics).
     bool run_tracking_stage(const std::function<bool()>& stage);
 
     // Low-rate tracking-stats heartbeat for post-mortems (PROFILING_EXHAUSTIVE
@@ -244,9 +237,6 @@ protected:
     Keyframe ref_keyframe_;
     std::vector<Keyframe> local_keyframes_;
     std::vector<Pt> local_points_;
-
-    // System
-    System* system_;
 
     //Drawers
     std::shared_ptr<Viewer> viewer;
