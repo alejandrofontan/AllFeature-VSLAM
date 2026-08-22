@@ -183,7 +183,7 @@ void Tracking::track()
     TrackProfiler profiler{};
 
     // Get Map Mutex -> Map cannot be changed
-    std::unique_lock<std::mutex> lock(map_->mMutexMapUpdate);
+    std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
     profiler.lock_acquired();
 
     // No map yet: the frame goes to two-view initialization, which finishes the

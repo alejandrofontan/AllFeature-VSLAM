@@ -478,7 +478,7 @@ void LoopClosing::CorrectLoop()
 
     {
         // Get Map Mutex
-        unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
+        unique_lock<mutex> lock(mpMap->map_update_mutex_);
 
         for(vector<Keyframe>::iterator vit=mvpCurrentConnectedKFs.begin(), vend=mvpCurrentConnectedKFs.end(); vit!=vend; vit++)
         {
@@ -632,7 +632,7 @@ void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap)
         matcher->fuse_map_points_to_keyframe(pKF,cvScw,mvpLoopMapPoints,4.0f,vpReplacePoints, featureType);
 
         // Get Map Mutex
-        unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
+        unique_lock<mutex> lock(mpMap->map_update_mutex_);
         const int nLP = mvpLoopMapPoints.size();
         for(int i=0; i<nLP;i++)
         {
@@ -704,7 +704,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
             }
 
             // Get Map Mutex
-            unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
+            unique_lock<mutex> lock(mpMap->map_update_mutex_);
 
             // Correct keyframes starting at map first keyframe
             list<Keyframe> lpKFtoCheck(mpMap->keyframe_origins_.begin(),mpMap->keyframe_origins_.end());

@@ -62,7 +62,7 @@ public:
 
     vector<Keyframe> keyframe_origins_;
 
-    std::mutex mMutexMapUpdate;
+    std::mutex map_update_mutex_;
 
     // This avoid that two points are created simultaneously in separate threads (id conflict)
     std::mutex mMutexPointCreation;
