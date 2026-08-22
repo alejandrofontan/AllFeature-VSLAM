@@ -128,7 +128,7 @@ void Tracking::track()
     profiler.lock_acquired();
 
     // No map yet: the frame goes to two-view initialization, which finishes the
-    // frame itself (drawer update, first trajectory entry once a map exists).
+    // frame itself (drawer update, first stored relative pose once a map exists).
     if(state_ == NOT_INITIALIZED)
     {
         monocular_initialization();
@@ -185,7 +185,7 @@ void Tracking::track()
 
     last_frame_ = Frame(current_frame_);
 
-    store_trajectory_entry();
+    store_relative_pose();
 
     // An emergency keyframe was just inserted: block until Local Mapping has processed
     // it (the trigger is already logged by need_new_keyframe, and in profiling builds the
@@ -203,25 +203,10 @@ void Tracking::track()
     profiler.report(current_frame_.frame_id);
 }
 
-void Tracking::store_trajectory_entry()
+void Tracking::store_relative_pose()
 {
-    // Store frame pose information to retrieve the complete camera trajectory afterward.
     if(current_frame_.Tcw(3,3) == 1.0f)
-    {
-        const mat4f Tcr = current_frame_.Tcw * current_frame_.ref_keyframe->get_pose_inverse();
-        relative_frame_poses_.push_back(Tcr);
-        reference_keyframes_.push_back(current_frame_.ref_keyframe);
-        frame_timestamps_.push_back(current_frame_.timestamp);
-        lost_flags_.push_back(state_ == LOST);
-    }
-    else
-    {
-        // This can happen if tracking is lost
-        relative_frame_poses_.push_back(relative_frame_poses_.back());
-        reference_keyframes_.push_back(reference_keyframes_.back());
-        frame_timestamps_.push_back(frame_timestamps_.back());
-        lost_flags_.push_back(state_ == LOST);
-    }
+        last_frame_relative_pose_ = current_frame_.Tcw * current_frame_.ref_keyframe->get_pose_inverse();
 }
 
 void Tracking::monocular_initialization()
@@ -229,7 +214,7 @@ void Tracking::monocular_initialization()
     attempt_monocular_initialization();
     frame_drawer_->update(this);
     if(state_ == OK)
-        store_trajectory_entry();
+        store_relative_pose();
 }
 
 void Tracking::attempt_monocular_initialization()
@@ -497,9 +482,9 @@ bool Tracking::track_reference_keyframe()
     // motion change) turns anything built on it into a failure cascade. Divergence
     // protection comes from the optimizer itself (g2o LM monotone-acceptance fix) plus
     // the depth-free rescue below.
-    // Invariant: relative_frame_poses_.back() is last_frame_'s entry — every path here
-    // had state_ == OK last frame, which stored a valid pose.
-    const mat4f seed_pose = relative_frame_poses_.back() * last_frame_.ref_keyframe->get_pose();
+    // Invariant: last_frame_relative_pose_ belongs to last_frame_ — every path here
+    // had state_ == OK last frame, which stored it.
+    const mat4f seed_pose = last_frame_relative_pose_ * last_frame_.ref_keyframe->get_pose();
     current_frame_.set_pose(seed_pose);
     Optimizer::PoseOptimization(&current_frame_);
     int num_map_inliers = current_frame_.count_inlier_map_points();
@@ -1119,11 +1104,6 @@ void Tracking::reset()
     {
         initializer_ = nullptr;
     }
-
-    relative_frame_poses_.clear();
-    reference_keyframes_.clear();
-    frame_timestamps_.clear();
-    lost_flags_.clear();
 
     resize_times_.clear();
     frame_times_.clear();

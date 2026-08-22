@@ -126,12 +126,6 @@ public:
     Frame initial_frame_;
 
     std::map<FeatureType, std::vector<int>> matches_per_feature_;
-    // Lists used to recover the full camera trajectory at the end of the execution.
-    // Basically we store the reference keyframe for each frame and its relative transformation
-    list<mat4f> relative_frame_poses_;
-    list<Keyframe> reference_keyframes_;
-    list<double> frame_timestamps_;
-    list<bool> lost_flags_;
 
     void reset();
 
@@ -177,10 +171,12 @@ protected:
     // collapses (track_reference_keyframe's divergence rescue); diagnostics only.
     void dump_pose_collapse(const mat4f& seed_pose);
 
-    // Append this frame's pose (relative to its reference keyframe) to the
-    // trajectory-recovery lists; repeats the previous entry when the frame has
-    // no valid pose (tracking lost).
-    void store_trajectory_entry();
+    // Store this frame's pose relative to its reference keyframe (Tlr); composed
+    // with the keyframe's CURRENT pose it re-derives the frame's pose next frame
+    // for the pose-optimization seed, absorbing BA/loop-closure corrections.
+    // Lost frames store nothing — the seed is only consumed when the previous
+    // frame tracked OK.
+    void store_relative_pose();
 
     // Map initialization for monocular: attempt_* holds the gate logic (early
     // returns); the wrapper always finishes the frame (drawer update, and the
@@ -282,6 +278,7 @@ protected:
     // Last Frame, KeyFrame and Relocalisation Info
     Keyframe last_keyframe_;
     Frame last_frame_;
+    mat4f last_frame_relative_pose_; // Tlr of last_frame_ (see store_relative_pose)
     KeyframeId last_keyframe_id_;
     FrameId last_reloc_frame_id_;
 
