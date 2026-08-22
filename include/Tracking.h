@@ -148,8 +148,6 @@ public:
     size_t num_tracked_frames_{2};
 
     vector<FeatureType> feature_types_{};
-    int init_feature_index_{0};
-    int reloc_feature_index_{0};
 
     int get_image_width() const {return w;};
     int get_image_height() const {return h;};
@@ -174,14 +172,14 @@ protected:
     void Track();
 
     // Map initialization for monocular
-    void monocular_initialization(FeatureType feature_type);
-    void create_initial_map_monocular(FeatureType feature_type);
+    void monocular_initialization();
+    void create_initial_map_monocular();
 
     void check_replaced_in_last_frame();
     bool track_reference_keyframe(const bool& optimizePose = true);
     void UpdateLastFrame();
 
-    bool relocalize(const FeatureType& featureType);
+    bool relocalize();
 
     void UpdateLocalMap();
     void UpdateLocalPoints();

@@ -109,7 +109,7 @@ System::System(const string &vocabularyFolder,
     //thread never starts: LoopClosing's constructor leaves mbFinished=true, so Shutdown()'s
     //isFinished()/isRunningGBA() waits pass immediately.
     loopCloser =  make_shared<LoopClosing>(mpMap, mpKeyFrameDatabase, vocabulary, mSensor!=MONOCULAR,
-        featureTypes[featureLoopClosure], featureTypes,
+        vocabulary->featureType, featureTypes,
         tracker->get_image_width(), tracker->get_image_height());
     if(vocabulary->isSupported())
         mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::Run, loopCloser);

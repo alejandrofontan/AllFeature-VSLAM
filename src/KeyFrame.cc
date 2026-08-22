@@ -67,13 +67,15 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>p
         }
 }
 
-void KeyFrame::compute_bow(const FeatureType &featType)
+void KeyFrame::compute_global_descriptor()
 {
+    if(!vocabulary->is_active())
+        return;
     if(mBowVec.empty() || mFeatVec.empty())
     {
-        // Feature vector associate features with nodes in the 4th level (from leaves up)
+        // Feature vector associates features with nodes in the 4th level (from leaves up)
         // We assume the vocabulary tree has 6 levels, change the 4 otherwise
-        vocabulary->transform(descriptors.at(featType),mBowVec,mFeatVec);
+        vocabulary->transform(descriptors.at(vocabulary->featureType), mBowVec, mFeatVec);
     }
 }
 

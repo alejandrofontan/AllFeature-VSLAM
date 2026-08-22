@@ -13,10 +13,15 @@
 namespace AF_VSLAM {
     class Vocabulary {
     public:
-        Vocabulary(const string vocabularyFolder, const  FeatureType featureType);
+        Vocabulary(const string vocabularyFolder, const FeatureType featureType, const bool enabled = true);
 
         FeatureType featureType;
         const string vocabularyFolder;
+
+        // Backend on/off switch, decided at startup by System's VPR resolution
+        // (settings key `vpr:`). Distinct from has_vocabulary(): a classical feature
+        // can be deliberately disabled with `vpr: none`.
+        const bool enabled;
 
         // Vocabulary variables
         std::shared_ptr<Sift128Vocabulary> sift128Vocabulary;
@@ -26,10 +31,15 @@ namespace AF_VSLAM {
         std::shared_ptr<Akaze61Vocabulary> akaze61Vocabulary;
         std::shared_ptr<OrbVocabulary> orbVocabulary;
 
-        // Whether a DBoW2 vocabulary exists for this feature type. False for the learned
-        // features (aliked128, superpoint256): the system then runs without BoW — no loop
-        // closing and no BoW relocalization (see System's constructor gate).
+        // Whether a DBoW2 vocabulary exists for this feature type (false for the
+        // learned features aliked128/superpoint256).
+        static bool has_vocabulary(FeatureType featureType);
         bool isSupported() const;
+
+        // The single gate every BoW consumer checks: enabled AND a vocabulary exists.
+        // When false the system runs without VPR — no loop closing, no relocalization
+        // (a tracking loss is then permanent).
+        bool is_active() const;
 
         void createVocabulary();
         bool loadFromTextFile();

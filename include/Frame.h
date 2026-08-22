@@ -79,7 +79,9 @@ public:
     void ExtractFeatures(int flag, const Image & img);
 
     // Compute Bag of Words representation.
-    void compute_bow(const FeatureType& featType);
+    // Compute the global descriptor (BoW vector) with the active VPR backend's
+    // feature family; no-op when VPR is inactive.
+    void compute_global_descriptor();
 
     // Set the camera pose.
     void set_pose(const mat4f& Tcw_);

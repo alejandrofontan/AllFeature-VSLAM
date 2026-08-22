@@ -358,10 +358,12 @@ bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 }
 
 
-void Frame::compute_bow(const FeatureType& featType)
+void Frame::compute_global_descriptor()
 {
+    if(!vocabulary->is_active())
+        return;
     if(mBowVec.empty())
-        vocabulary->transform(descriptors[featType], mBowVec,mFeatVec);
+        vocabulary->transform(descriptors.at(vocabulary->featureType), mBowVec, mFeatVec);
 }
 
 void Frame::UndistortKeyPoints()

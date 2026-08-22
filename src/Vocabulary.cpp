@@ -9,8 +9,8 @@
 
 #include <atomic>
 
-AF_VSLAM::Vocabulary::Vocabulary(const string vocabularyFolder, const FeatureType featureType):
-        featureType(featureType), vocabularyFolder(vocabularyFolder)
+AF_VSLAM::Vocabulary::Vocabulary(const string vocabularyFolder, const FeatureType featureType, const bool enabled):
+        featureType(featureType), vocabularyFolder(vocabularyFolder), enabled(enabled)
 {}
 
 void AF_VSLAM::Vocabulary::createVocabulary(){
@@ -182,7 +182,7 @@ void AF_VSLAM::Vocabulary::transform(
     }
 }
 
-bool AF_VSLAM::Vocabulary::isSupported() const {
+bool AF_VSLAM::Vocabulary::has_vocabulary(const FeatureType featureType) {
     switch (featureType) {
         case FEAT_SIFT128:
         case FEAT_KAZE64:
@@ -194,5 +194,13 @@ bool AF_VSLAM::Vocabulary::isSupported() const {
         default:
             return false;
     }
+}
+
+bool AF_VSLAM::Vocabulary::isSupported() const {
+    return has_vocabulary(featureType);
+}
+
+bool AF_VSLAM::Vocabulary::is_active() const {
+    return enabled && has_vocabulary(featureType);
 }
 

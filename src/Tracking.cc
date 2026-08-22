@@ -203,7 +203,7 @@ void Tracking::Track()
 
     if(state_ == NOT_INITIALIZED)
     {
-        monocular_initialization(feature_types_[init_feature_index_]);
+        monocular_initialization();
         frame_drawer_->update(this);
 
         if(state_ != OK)
@@ -232,7 +232,7 @@ void Tracking::Track()
             ok = run_stage([this] { return track_reference_keyframe(); });
         }
         else
-            ok = relocalize(feature_types_[reloc_feature_index_]);
+            ok = relocalize();
 
         current_frame_.ref_keyframe = ref_keyframe_;
 
@@ -374,10 +374,9 @@ void Tracking::Track()
 #endif
 }
 
-void Tracking::monocular_initialization(FeatureType feature_type)
+void Tracking::monocular_initialization()
 {
-    // Every gate below pools over all feature types; feature_type only selects the
-    // BoW family for the initial keyframes (via create_initial_map_monocular).
+    // Every gate below pools over all feature types.
     const auto total_keypoints = [this](const Frame& frame) {
         size_t n = 0;
         for (const auto& ft : feature_types_)
@@ -468,19 +467,19 @@ void Tracking::monocular_initialization(FeatureType feature_type)
             Tcw.block<3,3>(0,0) = Rcw;
             Tcw.block<3,1>(0,3) = tcw;
             current_frame_.set_pose(Tcw);
-            create_initial_map_monocular(feature_type);
+            create_initial_map_monocular();
         }
     }
 }
 
-void Tracking::create_initial_map_monocular(FeatureType feature_type)
+void Tracking::create_initial_map_monocular()
 {
     // Create KeyFrames
     Keyframe keyframe_ini = make_shared<KeyFrame>(initial_frame_, map_, keyframe_db_);
     Keyframe keyframe_cur = make_shared<KeyFrame>(current_frame_, map_, keyframe_db_);
 
-    keyframe_ini->compute_bow(feature_type);
-    keyframe_cur->compute_bow(feature_type);
+    keyframe_ini->compute_global_descriptor();
+    keyframe_cur->compute_global_descriptor();
 
     // Insert KFs in the map
     map_->add_keyframe(keyframe_ini);
@@ -1128,10 +1127,17 @@ bool Tracking::track_local_map()
         }
     }
 
-bool Tracking::relocalize(const FeatureType& featureType)
+bool Tracking::relocalize()
 {
-    // Compute Bag of Words Vector
-    current_frame_.compute_bow(featureType);
+    // Without an active VPR backend there is no keyframe database to query —
+    // recovery from a tracking loss is impossible.
+    if(!vocabulary->is_active())
+        return false;
+
+    const FeatureType featureType = vocabulary->featureType;
+
+    // Compute the global descriptor (BoW vector)
+    current_frame_.compute_global_descriptor();
 
     // relocalize is performed when tracking is lost
     // Track Lost: Query KeyFrame Database for keyframe candidates for relocalisation

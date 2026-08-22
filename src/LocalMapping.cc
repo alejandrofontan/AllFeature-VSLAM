@@ -149,7 +149,7 @@ void LocalMapping::ProcessNewKeyFrame()
     }
 
     // Compute Bags of Words structures
-    mpCurrentKeyFrame->compute_bow(featureTypes[featureProcessNewKeyframe]);
+    mpCurrentKeyFrame->compute_global_descriptor();
 
     // Associate MapPoints to the new keyframe and update normal and descriptor
     for(const auto& feat: mpCurrentKeyFrame->featureTypes){

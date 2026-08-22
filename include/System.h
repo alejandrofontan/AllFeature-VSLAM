@@ -131,7 +131,6 @@ public:
     vector<double> trackingTime{};
 
     vector<FeatureType> featureTypes{};
-    int featureLoopClosure{0};
 
     void setImageSize(const int width, const int height);
     int image_width{};

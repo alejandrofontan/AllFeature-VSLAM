@@ -83,7 +83,6 @@ public:
 protected:
 
     vector<FeatureType> featureTypes{};
-    int featureProcessNewKeyframe{0};
 
     // Parameters for local mapping
     const float CHI2_2DOF{5.991f};

@@ -65,7 +65,9 @@ public:
     void getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_);
 
     // Bag of Words Representation
-    void compute_bow(const FeatureType &featType);
+    // Compute the global descriptor (BoW vector) with the active VPR backend's
+    // feature family; no-op when VPR is inactive.
+    void compute_global_descriptor();
 
     // Covisibility graph functions
     void AddConnection(Keyframe pKF, const int &weight);
