@@ -675,20 +675,22 @@ void Tracking::update_local_keyframes()
 
 void Tracking::update_local_points()
 {
+    // local_points_ = union of the map points of all local keyframes, deduplicated.
+    // Dedup before the is_bad check: points are shared across many keyframes, and
+    // is_bad locks the point's mutex — check it once per unique point.
     local_points_.clear();
-    set<PtId> ptIds{};
-    for(const auto& keyframe : local_keyframes_){
-        for(const auto& ft: feature_types_){
-            const vector<Pt> pts = keyframe->get_map_point_matches(ft);
-            for(const auto& pt : pts){
+    std::set<PtId> seen_point_ids;
+    for(const Keyframe& keyframe : local_keyframes_){
+        for(const FeatureType ft : feature_types_){
+            // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
+            const std::vector<Pt> pts = keyframe->get_map_point_matches(ft);
+            for(const Pt& pt : pts){
                 if(!pt)
                     continue;
-                if (ptIds.find(pt->ptId) != ptIds.end())
-                    continue;
-                if(!pt->is_bad()){
+                if(!seen_point_ids.insert(pt->ptId).second)
+                    continue; // already collected (or already seen and rejected as bad)
+                if(!pt->is_bad())
                     local_points_.push_back(pt);
-                    ptIds.insert(pt->ptId);
-                }
             }
         }
     }
