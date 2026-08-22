@@ -376,10 +376,19 @@ void Tracking::Track()
 
 void Tracking::monocular_initialization(FeatureType feature_type)
 {
+    // Every gate below pools over all feature types; feature_type only selects the
+    // BoW family for the initial keyframes (via create_initial_map_monocular).
+    const auto total_keypoints = [this](const Frame& frame) {
+        size_t n = 0;
+        for (const auto& ft : feature_types_)
+            n += frame.keypoints.at(ft).size();
+        return n;
+    };
+
     if(!initializer_)
     {
         // Set Reference Frame
-        if(current_frame_.keypoints.at(feature_type).size() > static_cast<size_t>(params.init_min_keypoints))
+        if(total_keypoints(current_frame_) > static_cast<size_t>(params.init_min_keypoints))
         {
             initial_frame_ = current_frame_;
             last_frame_ = current_frame_;
@@ -390,7 +399,7 @@ void Tracking::monocular_initialization(FeatureType feature_type)
     else
     {
         // Try to initialize
-        if(current_frame_.keypoints.at(feature_type).size() <= static_cast<size_t>(params.init_min_keypoints))
+        if(total_keypoints(current_frame_) <= static_cast<size_t>(params.init_min_keypoints))
         {
             initializer_ = nullptr;
             return;
@@ -415,8 +424,10 @@ void Tracking::monocular_initialization(FeatureType feature_type)
             offset2 += current_frame_.keypoints.at(ft).size();
         }
 
-        // Check if there are enough correspondences
-        const size_t num_matches = matched_pairs.at(feature_type).size();
+        // Check if there are enough correspondences (pooled over all feature types)
+        size_t num_matches = 0;
+        for (const auto& ft : feature_types_)
+            num_matches += matched_pairs.at(ft).size();
         if(num_matches < static_cast<size_t>(params.init_min_matches))
         {
             initializer_ = nullptr;
@@ -427,12 +438,14 @@ void Tracking::monocular_initialization(FeatureType feature_type)
         // initialization can only produce ill-conditioned geometry, so don't attempt it.
         // Keep the reference frame: disparity only grows once the camera starts moving.
         {
-            const auto& keypoints1 = initial_frame_.keypoints.at(feature_type);
-            const auto& keypoints2 = current_frame_.keypoints.at(feature_type);
             std::vector<float> disparities;
             disparities.reserve(num_matches);
-            for (const auto& m : matched_pairs.at(feature_type))
-                disparities.push_back(static_cast<float>(cv::norm(keypoints2[m.second].pt - keypoints1[m.first].pt)));
+            for (const auto& ft : feature_types_) {
+                const auto& keypoints1 = initial_frame_.keypoints.at(ft);
+                const auto& keypoints2 = current_frame_.keypoints.at(ft);
+                for (const auto& m : matched_pairs.at(ft))
+                    disparities.push_back(static_cast<float>(cv::norm(keypoints2[m.second].pt - keypoints1[m.first].pt)));
+            }
             const auto mid = disparities.begin() + disparities.size() / 2;
             std::nth_element(disparities.begin(), mid, disparities.end());
             if (*mid < params.init_min_median_disparity)
