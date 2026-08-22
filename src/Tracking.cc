@@ -208,137 +208,122 @@ void Tracking::Track()
 
         if(state_ != OK)
             return;
+
+        store_trajectory_entry();
+        return;
+    }
+
+    // System is initialized: track the frame. A TrackingLostException from a stage
+    // fails that stage; record why for the post-loss diagnostics.
+    const auto run_stage = [this](auto&& stage) {
+        try {
+            return stage();
+        }
+        catch(const TrackingLostException& e) {
+            last_tracking_lost_reason_ = e.what();
+            AF_WARN("Tracking lost — " << last_tracking_lost_reason_);
+            return false;
+        }
+    };
+
+    bool ok{false};
+    if(state_ == OK)
+    {
+        // Local Mapping might have changed some MapPoints tracked in last frame
+        check_replaced_in_last_frame();
+        ok = run_stage([this] { return track_reference_keyframe(); });
     }
     else
+        ok = relocalize();
+
+    current_frame_.ref_keyframe = ref_keyframe_;
+
+#ifdef PROFILING_EXHAUSTIVE
+    const auto t_after_track_ref = StageClock::now();
+#endif
+
+    // If we have an initial estimation of the camera pose and matching, track the local map.
+    if(ok)
+        ok = run_stage([this] { return track_local_map(); });
+
+#ifdef PROFILING_EXHAUSTIVE
+    ms_track_ref = stage_ms(t_lock_acquired, t_after_track_ref);
+    ms_local_map = stage_ms(t_after_track_ref, StageClock::now());
+    local_map_times[int(ms_local_map)]++;
+#endif
+
+    state_ = ok ? OK : LOST;
+
+    // Update drawer
+    frame_drawer_->update(this);
+
+    // If tracking was good, check if we insert a keyframe
+    if(ok)
     {
-        // System is initialized: track the frame. A TrackingLostException from a stage
-        // fails that stage; record why for the post-loss diagnostics.
-        const auto run_stage = [this](auto&& stage) {
-            try {
-                return stage();
-            }
-            catch(const TrackingLostException& e) {
-                last_tracking_lost_reason_ = e.what();
-                AF_WARN("Tracking lost — " << last_tracking_lost_reason_);
-                return false;
-            }
-        };
+        ++num_tracked_frames_;
 
-        bool ok{false};
-        if(state_ == OK)
+#ifdef PROFILING_EXHAUSTIVE
+        // Low-rate heartbeat so post-mortems can see the inlier/map trend leading
+        // into a tracking loss, not just the loss line itself.
+        if(current_frame_.frame_id % HEARTBEAT_PERIOD_FRAMES == 0)
         {
-            // Local Mapping might have changed some MapPoints tracked in last frame
-            check_replaced_in_last_frame();
-            ok = run_stage([this] { return track_reference_keyframe(); });
+            AF_INFO("Track heartbeat | frame=" << current_frame_.frame_id
+                    << " inliers=" << num_inlier_matches_
+                    << " localPts=" << local_points_.size()
+                    << " KFs=" << map_->keyframes_in_map()
+                    << " mapPts=" << map_->map_points_in_map());
+            std::cout.flush(); // stdout is fully buffered under the runner's redirect
         }
-        else
-            ok = relocalize();
+#endif
 
+        map_drawer_->set_current_camera_pose(current_frame_.Tcw);
+
+        // Clean VO matches: drop points no map observation backs
+        for (auto& [ft, N] : current_frame_.N) {
+            for(int i = 0; i < N; i++)
+            {
+                const Pt& map_point = current_frame_.pts.at(ft)[i];
+                if(map_point && map_point->number_of_observations() < 1)
+                {
+                    current_frame_.outliers.at(ft)[i] = false;
+                    current_frame_.pts.at(ft)[i] = nullptr;
+                }
+            }
+        }
+
+        // Check if we need to insert a new keyframe
+        if(need_new_keyframe())
+            create_new_keyframe();
+
+        // We allow points with high innovation (considered outliers by the Huber function)
+        // to pass to the new keyframe, so that bundle adjustment will finally decide
+        // if they are outliers or not. We don't want the next frame to estimate its pose
+        // with those points, so we discard them in the frame.
+        for (auto& [ft, N] : current_frame_.N) {
+            for(int i = 0; i < N; i++)
+            {
+                if(current_frame_.pts.at(ft)[i] && current_frame_.outliers.at(ft)[i])
+                    current_frame_.pts.at(ft)[i] = nullptr;
+            }
+        }
+    }
+
+    // Reset if the camera gets lost soon after initialization
+    if(state_ == LOST && map_->keyframes_in_map() <= static_cast<size_t>(params.min_keyframes_in_map))
+    {
+        AF_WARN("Track lost soon after initialisation (" << map_->keyframes_in_map() << " <= "
+                << params.min_keyframes_in_map << " keyframes in map), reason: " << last_tracking_lost_reason_
+                << " — resetting...");
+        system_->reset();
+        return;
+    }
+
+    if(!current_frame_.ref_keyframe)
         current_frame_.ref_keyframe = ref_keyframe_;
 
-#ifdef PROFILING_EXHAUSTIVE
-        const auto t_after_track_ref = StageClock::now();
-#endif
+    last_frame_ = Frame(current_frame_);
 
-        // If we have an initial estimation of the camera pose and matching, track the local map.
-        if(ok)
-            ok = run_stage([this] { return track_local_map(); });
-
-#ifdef PROFILING_EXHAUSTIVE
-        ms_track_ref = stage_ms(t_lock_acquired, t_after_track_ref);
-        ms_local_map = stage_ms(t_after_track_ref, StageClock::now());
-        local_map_times[int(ms_local_map)]++;
-#endif
-
-        state_ = ok ? OK : LOST;
-
-        // Update drawer
-        frame_drawer_->update(this);
-
-        // If tracking was good, check if we insert a keyframe
-        if(ok)
-        {
-            ++num_tracked_frames_;
-
-#ifdef PROFILING_EXHAUSTIVE
-            // Low-rate heartbeat so post-mortems can see the inlier/map trend leading
-            // into a tracking loss, not just the loss line itself.
-            if(current_frame_.frame_id % HEARTBEAT_PERIOD_FRAMES == 0)
-            {
-                AF_INFO("Track heartbeat | frame=" << current_frame_.frame_id
-                        << " inliers=" << num_inlier_matches_
-                        << " localPts=" << local_points_.size()
-                        << " KFs=" << map_->keyframes_in_map()
-                        << " mapPts=" << map_->map_points_in_map());
-                std::cout.flush(); // stdout is fully buffered under the runner's redirect
-            }
-#endif
-
-            map_drawer_->set_current_camera_pose(current_frame_.Tcw);
-
-            // Clean VO matches: drop points no map observation backs
-            for (auto& [ft, N] : current_frame_.N) {
-                for(int i = 0; i < N; i++)
-                {
-                    const Pt& map_point = current_frame_.pts.at(ft)[i];
-                    if(map_point && map_point->number_of_observations() < 1)
-                    {
-                        current_frame_.outliers.at(ft)[i] = false;
-                        current_frame_.pts.at(ft)[i] = nullptr;
-                    }
-                }
-            }
-
-            // Check if we need to insert a new keyframe
-            if(need_new_keyframe())
-                create_new_keyframe();
-
-            // We allow points with high innovation (considered outliers by the Huber function)
-            // to pass to the new keyframe, so that bundle adjustment will finally decide
-            // if they are outliers or not. We don't want the next frame to estimate its pose
-            // with those points, so we discard them in the frame.
-            for (auto& [ft, N] : current_frame_.N) {
-                for(int i = 0; i < N; i++)
-                {
-                    if(current_frame_.pts.at(ft)[i] && current_frame_.outliers.at(ft)[i])
-                        current_frame_.pts.at(ft)[i] = nullptr;
-                }
-            }
-        }
-
-        // Reset if the camera gets lost soon after initialization
-        if(state_ == LOST && map_->keyframes_in_map() <= static_cast<size_t>(params.min_keyframes_in_map))
-        {
-            AF_WARN("Track lost soon after initialisation (" << map_->keyframes_in_map() << " <= "
-                    << params.min_keyframes_in_map << " keyframes in map), reason: " << last_tracking_lost_reason_
-                    << " — resetting...");
-            system_->reset();
-            return;
-        }
-
-        if(!current_frame_.ref_keyframe)
-            current_frame_.ref_keyframe = ref_keyframe_;
-
-        last_frame_ = Frame(current_frame_);
-    }
-
-    // Store frame pose information to retrieve the complete camera trajectory afterward.
-    if(current_frame_.Tcw(3,3) == 1.0f)
-    {
-        const mat4f Tcr = current_frame_.Tcw * current_frame_.ref_keyframe->get_pose_inverse();
-        relative_frame_poses_.push_back(Tcr);
-        reference_keyframes_.push_back(current_frame_.ref_keyframe);
-        frame_timestamps_.push_back(current_frame_.timestamp);
-        lost_flags_.push_back(state_ == LOST);
-    }
-    else
-    {
-        // This can happen if tracking is lost
-        relative_frame_poses_.push_back(relative_frame_poses_.back());
-        reference_keyframes_.push_back(reference_keyframes_.back());
-        frame_timestamps_.push_back(frame_timestamps_.back());
-        lost_flags_.push_back(state_ == LOST);
-    }
+    store_trajectory_entry();
 
     // An emergency keyframe was just inserted: block until Local Mapping has processed
     // it (the trigger is already logged by need_new_keyframe, and in profiling builds the
@@ -372,6 +357,27 @@ void Tracking::Track()
                 << ") | frame=" << current_frame_.frame_id);
     }
 #endif
+}
+
+void Tracking::store_trajectory_entry()
+{
+    // Store frame pose information to retrieve the complete camera trajectory afterward.
+    if(current_frame_.Tcw(3,3) == 1.0f)
+    {
+        const mat4f Tcr = current_frame_.Tcw * current_frame_.ref_keyframe->get_pose_inverse();
+        relative_frame_poses_.push_back(Tcr);
+        reference_keyframes_.push_back(current_frame_.ref_keyframe);
+        frame_timestamps_.push_back(current_frame_.timestamp);
+        lost_flags_.push_back(state_ == LOST);
+    }
+    else
+    {
+        // This can happen if tracking is lost
+        relative_frame_poses_.push_back(relative_frame_poses_.back());
+        reference_keyframes_.push_back(reference_keyframes_.back());
+        frame_timestamps_.push_back(frame_timestamps_.back());
+        lost_flags_.push_back(state_ == LOST);
+    }
 }
 
 void Tracking::monocular_initialization()

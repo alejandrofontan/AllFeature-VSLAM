@@ -171,6 +171,11 @@ protected:
     // Main tracking function. It is independent of the input sensor.
     void Track();
 
+    // Append this frame's pose (relative to its reference keyframe) to the
+    // trajectory-recovery lists; repeats the previous entry when the frame has
+    // no valid pose (tracking lost).
+    void store_trajectory_entry();
+
     // Map initialization for monocular
     void monocular_initialization();
     void create_initial_map_monocular();
