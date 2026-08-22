@@ -176,8 +176,11 @@ protected:
     // no valid pose (tracking lost).
     void store_trajectory_entry();
 
-    // Map initialization for monocular
+    // Map initialization for monocular: attempt_* holds the gate logic (early
+    // returns); the wrapper always finishes the frame (drawer update, and the
+    // trajectory entry once initialized).
     void monocular_initialization();
+    void attempt_monocular_initialization();
     void create_initial_map_monocular();
 
     void check_replaced_in_last_frame();

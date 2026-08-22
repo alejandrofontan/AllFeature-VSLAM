@@ -204,12 +204,6 @@ void Tracking::Track()
     if(state_ == NOT_INITIALIZED)
     {
         monocular_initialization();
-        frame_drawer_->update(this);
-
-        if(state_ != OK)
-            return;
-
-        store_trajectory_entry();
         return;
     }
 
@@ -381,6 +375,14 @@ void Tracking::store_trajectory_entry()
 }
 
 void Tracking::monocular_initialization()
+{
+    attempt_monocular_initialization();
+    frame_drawer_->update(this);
+    if(state_ == OK)
+        store_trajectory_entry();
+}
+
+void Tracking::attempt_monocular_initialization()
 {
     // Every gate below pools over all feature types.
     const auto total_keypoints = [this](const Frame& frame) {
