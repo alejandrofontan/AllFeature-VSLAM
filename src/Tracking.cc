@@ -201,6 +201,8 @@ void Tracking::Track()
     double ms_track_ref = 0.0, ms_local_map = 0.0, ms_emergency_wait = 0.0;
 #endif
 
+    // No map yet: the frame goes to two-view initialization, which finishes the
+    // frame itself (drawer update, first trajectory entry once a map exists).
     if(state_ == NOT_INITIALIZED)
     {
         monocular_initialization();
