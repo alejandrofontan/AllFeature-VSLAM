@@ -698,9 +698,10 @@ void Tracking::update_local_points()
 
 void Tracking::search_local_points()
 {
-    // Do not search map points already matched
-    for (const auto& [ft, N] : current_frame_.N) {
-        for(auto& pt: current_frame_.pts.at(ft)){
+    // Mark the frame's already-matched points (visible, seen this frame, not a
+    // search candidate) so the frustum loop below skips them; drop bad ones.
+    for (auto& [ft, pts] : current_frame_.pts) {
+        for(auto& pt : pts){
             if(pt && !pt->is_bad()){
                 pt->IncreaseVisible();
                 pt->idLastFrameSeen = current_frame_.frame_id;
@@ -711,24 +712,23 @@ void Tracking::search_local_points()
         }
     }
 
-    // Project points in frame and check its visibility
-    int nToMatch=0;
-    for(auto& pt: local_points_){
+    // Project the local points into the frame and check their visibility
+    // (isInFrustum fills the MapPoint variables the matcher reads)
+    int num_to_match = 0;
+    for(const Pt& pt : local_points_){
         if(pt->idLastFrameSeen == current_frame_.frame_id)
             continue;
         if(pt->is_bad())
             continue;
 
-        // Project (this fills MapPoint variables for matching)
-        if(current_frame_.isInFrustum(pt,viewingCosLimit_slp)){
+        if(current_frame_.isInFrustum(pt, VIEWING_COS_LIMIT)){
             pt->IncreaseVisible();
-            nToMatch++;
+            num_to_match++;
         }
     }
 
-    if(nToMatch > 0){
+    if(num_to_match > 0)
         matcher_->match_map_points_to_frame(current_frame_, local_points_);
-    }
 }
 
     float Tracking::MedianFlowFromLastFrame() const

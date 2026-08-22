@@ -296,7 +296,6 @@ protected:
     const float nnratio_monoInit{0.9f};
     const float nnratio_trackRefKey{0.7f};
     const float nnratio_trackMotModel{0.9f};
-    const float nnratio_slp{0.8f};
     const float nnratio_low_reloc{0.75f};
     const float nnratio_high_reloc{0.9f};
 
@@ -305,8 +304,6 @@ protected:
     const float radiusTh_scale_trackMotModel{2.0f};
     const float radiusTh_high_reloc{10.0f};
     const float radiusTh_low_reloc{3.0f};
-
-    const float viewingCosLimit_slp{0.5f};
 
     //////////////////////////////////////////////// Constants
 
@@ -346,7 +343,7 @@ protected:
     const int minNumPoints_createNewKey{100};
 
     // search_local_points()
-    const int idSum{2};
+    static constexpr float VIEWING_COS_LIMIT{0.5f};
 
     // relocalize()
     const int minNmatches{15};
