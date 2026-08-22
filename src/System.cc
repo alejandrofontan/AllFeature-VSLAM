@@ -332,7 +332,7 @@ mat4f System::Track(Image &im, const double &timestamp)
     }
     }
 
-    mat4f Tcw = tracker->GrabImageMonocular(im,timestamp);
+    mat4f Tcw = tracker->grab_image(im, timestamp);
 
     mnFramesProcessed.fetch_add(1);
 

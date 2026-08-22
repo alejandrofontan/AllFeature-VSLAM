@@ -226,7 +226,7 @@ void Viewer::Run()
         ////////////////////////////////////////////////////////////////////////////////////
         {
             std::unique_lock<std::mutex> lock(mutexProfileStats);
-            menuTrackingTime = static_cast<float>(grabImageMonocular_time_median);
+            menuTrackingTime = static_cast<float>(grab_image_time_median_);
             menuLocalMappingTime = static_cast<float>(runLocalMapping_time_median);
         }
 

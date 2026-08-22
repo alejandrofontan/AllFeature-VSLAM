@@ -81,78 +81,37 @@ Tracking::Tracking(shared_ptr<Vocabulary> vocabulary,
     matcher_ = std::make_shared<FeatureMatcher>(w, h, featureTypes, "Tracking");
 }
 
-mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
+mat4f Tracking::grab_image(Image &im, const double timestamp)
 {
-    std::chrono::steady_clock::time_point t_start_0 = std::chrono::steady_clock::now();
-    ///////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////
+    GrabProfiler profiler{};
+
     // Convert image to grayscale and resize
     im.GetGrayImage(mbRGB);
     if(fixImageSize)
-        im.FixImageSize(w,h);
+        im.FixImageSize(w, h);
 
     mImGray = im.grayImg;
     mImMask = im.mask;
     imName = im.imageName;
+    profiler.resize_done(resize_times_);
 
-    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
-    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
-
-#ifdef PROFILING_EXHAUSTIVE
-    resize_times[int(1000 * t_duration)]++;
-#endif
-
-    ///////////////////////////////////////////////////////////////////////////////
-    // Create Frame (extract features)
-#ifdef PROFILING_EXHAUSTIVE
-    std::chrono::steady_clock::time_point t_start_1 = std::chrono::steady_clock::now();
-#endif
-
-    if(state_==NOT_INITIALIZED || state_==NO_IMAGES_YET)
-        current_frame_ = Frame(im,timestamp,initFeatureExtractor,vocabulary,mK,mDistCoef,mbf,mThDepth);
-    else
-        current_frame_ = Frame(im,timestamp,featureExtractorLeft,vocabulary,mK,mDistCoef,mbf,mThDepth);
-
-#ifdef PROFILING_EXHAUSTIVE
-    t_end = std::chrono::steady_clock::now();
-    t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_1).count();
-    frame_times[int(1000 * t_duration)]++;
-#endif
-    ///////////////////////////////////////////////////////////////////////////////
-    // Track Frame
-#ifdef PROFILING_EXHAUSTIVE
-    std::chrono::steady_clock::time_point t_start_2 = std::chrono::steady_clock::now();
-#endif
+    // Create the frame (feature extraction); initialization uses the denser extractor set
+    const auto& extractors = (state_ == NOT_INITIALIZED || state_ == NO_IMAGES_YET)
+                           ? initFeatureExtractor : featureExtractorLeft;
+    current_frame_ = Frame(im, timestamp, extractors, vocabulary, mK, mDistCoef, mbf, mThDepth);
+    profiler.frame_created(frame_times_);
 
     track();
+    profiler.tracking_done(tracking_times_, state_ == OK);
 
-#ifdef PROFILING_EXHAUSTIVE
-    t_end = std::chrono::steady_clock::now();
-    t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_2).count();
-    if(state_ == OK)
-        tracking_times[int(1000 * t_duration)]++;
-#endif
-
+    // Median excludes the current frame (updated below), matching the original order.
     if(viewer_)
-        viewer_->set_grabImageMonocular_time_median(map_median(grabImageMonocular_times));
+        viewer_->set_grab_image_time_median(map_median(grab_image_times_));
 
-#ifdef PROFILING_EXHAUSTIVE
-    AF_PROFILE_BEGIN("Tracking Profiling");
-    AF_PROFILE_FIELD(resize_times,             "Resize Image");
-    AF_PROFILE_FIELD(frame_times,              "Frame Creation");
-    AF_PROFILE_FIELD(tracking_times,           "Tracking");
-    AF_PROFILE_FIELD(track_ref_times,          "  Track Ref");
-    AF_PROFILE_FIELD(pose_opt_times,           "  Pose Optimization");
-    AF_PROFILE_FIELD(local_map_times,          "  Track Local Map");
-    AF_PROFILE_FIELD(grabImageMonocular_times, "Grab Image Monocular");
-    AF_PROFILE_END();
-#endif
-
-    t_end = std::chrono::steady_clock::now();
-    t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
+    log_profile();
 
     if(state_ == OK)
-        grabImageMonocular_times[int(1000 * t_duration)]++;
+        grab_image_times_[profiler.total_ms()]++;
 
     return current_frame_.Tcw;
 }
@@ -195,7 +154,7 @@ void Tracking::track()
     // If we have an initial estimation of the camera pose and matching, track the local map.
     if(ok)
         ok = run_tracking_stage([this] { return track_local_map(); });
-    profiler.local_map_done(local_map_times);
+    profiler.local_map_done(local_map_times_);
 
     state_ = ok ? OK : LOST;
 
@@ -538,7 +497,7 @@ bool Tracking::track_reference_keyframe(const bool& optimizePose)
 #ifdef PROFILING_EXHAUSTIVE
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    track_ref_times[int(1000 * t_duration)]++;
+    track_ref_times_[int(1000 * t_duration)]++;
     t_start = std::chrono::steady_clock::now();
 #endif
 
@@ -638,7 +597,7 @@ bool Tracking::track_reference_keyframe(const bool& optimizePose)
     #ifdef PROFILING_EXHAUSTIVE
     t_end = std::chrono::steady_clock::now();
     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-    pose_opt_times[int(1000 * t_duration)]++;
+    pose_opt_times_[int(1000 * t_duration)]++;
 #endif
 
     if(nmatchesMap < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW)
@@ -1249,13 +1208,13 @@ void Tracking::reset()
     frame_timestamps_.clear();
     lost_flags_.clear();
 
-    resize_times.clear();
-    frame_times.clear();
-    tracking_times.clear();
-    track_ref_times.clear();
-    pose_opt_times.clear();
-    local_map_times.clear();
-    grabImageMonocular_times.clear();
+    resize_times_.clear();
+    frame_times_.clear();
+    tracking_times_.clear();
+    track_ref_times_.clear();
+    pose_opt_times_.clear();
+    local_map_times_.clear();
+    grab_image_times_.clear();
 
     if(viewer_)
         viewer_->Release();

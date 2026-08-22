@@ -84,6 +84,51 @@ struct TrackProfiler
     }
 };
 
+// Stage timing for Tracking::grab_image. The per-stage histograms (resize /
+// frame creation / tracking) are PROFILING_EXHAUSTIVE-only; the total grab
+// time is always measured — its histogram feeds the viewer's median-time
+// display, so it must work in non-profiling builds too.
+struct GrabProfiler
+{
+    using Clock = std::chrono::steady_clock;
+    static int elapsed_ms(Clock::time_point a, Clock::time_point b) {
+        return int(std::chrono::duration<double, std::milli>(b - a).count());
+    }
+
+    Clock::time_point t_start{Clock::now()};
+#ifdef PROFILING_EXHAUSTIVE
+    Clock::time_point t_stage{t_start};
+#endif
+
+    void resize_done([[maybe_unused]] std::map<int, int>& histogram) {
+#ifdef PROFILING_EXHAUSTIVE
+        const auto now = Clock::now();
+        histogram[elapsed_ms(t_stage, now)]++;
+        t_stage = now;
+#endif
+    }
+
+    void frame_created([[maybe_unused]] std::map<int, int>& histogram) {
+#ifdef PROFILING_EXHAUSTIVE
+        const auto now = Clock::now();
+        histogram[elapsed_ms(t_stage, now)]++;
+        t_stage = now;
+#endif
+    }
+
+    void tracking_done([[maybe_unused]] std::map<int, int>& histogram,
+                       [[maybe_unused]] bool tracking_ok) {
+#ifdef PROFILING_EXHAUSTIVE
+        const auto now = Clock::now();
+        if (tracking_ok)
+            histogram[elapsed_ms(t_stage, now)]++;
+        t_stage = now;
+#endif
+    }
+
+    int total_ms() const { return elapsed_ms(t_start, Clock::now()); }
+};
+
 } // namespace AF_VSLAM
 
 #endif // AF_VSLAM_TRACKING_AUX_H

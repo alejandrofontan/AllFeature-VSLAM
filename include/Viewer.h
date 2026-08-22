@@ -67,9 +67,9 @@ public:
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Profiling
     std::mutex mutexProfileStats;
-    void set_grabImageMonocular_time_median(double time){
+    void set_grab_image_time_median(double time){
         std::unique_lock<std::mutex> lock(mutexProfileStats);
-        grabImageMonocular_time_median = time;
+        grab_image_time_median_ = time;
     };
 
     void set_runLocalMapping_time_median(double time){
@@ -77,7 +77,7 @@ public:
         runLocalMapping_time_median = time;
     };
 
-    double grabImageMonocular_time_median{0.0};
+    double grab_image_time_median_{0.0};
     double runLocalMapping_time_median{0.0};
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////

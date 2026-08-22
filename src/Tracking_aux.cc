@@ -28,6 +28,22 @@ void Tracking::log_heartbeat()
 #endif
 }
 
+// Cumulative per-stage timing histograms, printed through the AF_PROFILE sink.
+void Tracking::log_profile()
+{
+#ifdef PROFILING_EXHAUSTIVE
+    AF_PROFILE_BEGIN("Tracking Profiling");
+    AF_PROFILE_FIELD(resize_times_,      "Resize Image");
+    AF_PROFILE_FIELD(frame_times_,       "Frame Creation");
+    AF_PROFILE_FIELD(tracking_times_,    "Tracking");
+    AF_PROFILE_FIELD(track_ref_times_,   "  Track Ref");
+    AF_PROFILE_FIELD(pose_opt_times_,    "  Pose Optimization");
+    AF_PROFILE_FIELD(local_map_times_,   "  Track Local Map");
+    AF_PROFILE_FIELD(grab_image_times_, "Grab Image");
+    AF_PROFILE_END();
+#endif
+}
+
 bool Tracking::run_tracking_stage(const std::function<bool()>& stage)
 {
     try {

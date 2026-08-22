@@ -84,8 +84,8 @@ public:
              const vector<FeatureType>& feature_types,
              const bool& fixImageSize = false);
 
-    // Preprocess the input and call track(). Extract features and performs stereo matching.
-    mat4f GrabImageMonocular(Image &im, const double &timestamp);
+    // Preprocess the input, extract features, and run track() on the frame.
+    mat4f grab_image(Image &im, double timestamp);
 
     void set_local_mapper(std::shared_ptr<LocalMapping> local_mapper) { local_mapper_ = std::move(local_mapper); }
     void set_loop_closing(std::shared_ptr<LoopClosing> loop_closing) { loop_closing_ = std::move(loop_closing); }
@@ -149,13 +149,13 @@ public:
     ////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////
     // Profiling
-    std::map<int, int> resize_times{};
-    std::map<int, int> frame_times{};
-    std::map<int, int> tracking_times{};
-    std::map<int, int> track_ref_times{};
-    std::map<int, int> pose_opt_times{};
-    std::map<int, int> local_map_times{};
-    std::map<int, int> grabImageMonocular_times{};
+    std::map<int, int> resize_times_{};
+    std::map<int, int> frame_times_{};
+    std::map<int, int> tracking_times_{};
+    std::map<int, int> track_ref_times_{};
+    std::map<int, int> pose_opt_times_{};
+    std::map<int, int> local_map_times_{};
+    std::map<int, int> grab_image_times_{};
 
     ////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////
@@ -172,6 +172,10 @@ protected:
     // Low-rate tracking-stats heartbeat for post-mortems (PROFILING_EXHAUSTIVE
     // builds only; compiles to a no-op otherwise).
     void log_heartbeat();
+
+    // Cumulative stage-timing histograms via the AF_PROFILE sink (also
+    // PROFILING_EXHAUSTIVE-only).
+    void log_profile();
 
     // Append this frame's pose (relative to its reference keyframe) to the
     // trajectory-recovery lists; repeats the previous entry when the frame has
