@@ -32,18 +32,18 @@ void Tracking::log_heartbeat()
 }
 
 // Post-mortem dump on a pose-optimization collapse: per-match reprojection
-// residuals AT THE SEED POSE (last frame's pose, before any optimization),
+// residuals AT THE SEED POSE (before any optimization),
 // with each map point's provenance — enough to test offline whether the match
 // set is bimodal (two coherent populations with no common pose) and which
 // population (old vs freshly-created points, image region, depth) is
 // inconsistent. No-op when no exp_folder is set.
-void Tracking::dump_pose_collapse()
+void Tracking::dump_pose_collapse(const mat4f& seed_pose)
 {
     if(FrameDrawer::exp_folder.empty())
         return;
 
-    const mat3f Rcw_seed = last_frame_.Tcw.block<3,3>(0,0);
-    const vec3f tcw_seed = last_frame_.Tcw.block<3,1>(0,3);
+    const mat3f Rcw_seed = seed_pose.block<3,3>(0,0);
+    const vec3f tcw_seed = seed_pose.block<3,1>(0,3);
     const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
     const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
     std::ofstream dump(FrameDrawer::exp_folder + "/collapse_frame_"

@@ -179,7 +179,7 @@ protected:
 
     // CSV of per-match residuals at the seed pose when pose optimization
     // collapses (track_reference_keyframe's divergence rescue); diagnostics only.
-    void dump_pose_collapse();
+    void dump_pose_collapse(const mat4f& seed_pose);
 
     // Append this frame's pose (relative to its reference keyframe) to the
     // trajectory-recovery lists; repeats the previous entry when the frame has
@@ -195,7 +195,6 @@ protected:
 
     void check_replaced_in_last_frame();
     bool track_reference_keyframe();
-    void UpdateLastFrame();
 
     bool relocalize();
 

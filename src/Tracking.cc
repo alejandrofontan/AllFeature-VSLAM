@@ -491,12 +491,18 @@ bool Tracking::track_reference_keyframe()
     }
     timer.record(track_ref_times_);
 
-    // Optimize pose — seeded from the last frame's pose (constant-position). No motion
-    // prior anywhere: a prediction is only as good as its assumption, and a violated one
-    // (abrupt motion change) turns anything built on it into a failure cascade. Divergence
-    // protection comes from the optimizer itself (g2o LM monotone-acceptance fix) plus the
-    // depth-free rescue below.
-    current_frame_.set_pose(last_frame_.Tcw);
+    // Optimize pose — seeded from the last frame's pose, recomputed on the fly from its
+    // stored RELATIVE pose and the reference keyframe's CURRENT pose, so BA/loop-closure
+    // corrections since last frame are absorbed into the seed by construction (no stale
+    // stored pose to refresh). Constant-position beyond that: deliberately no motion
+    // prior — a prediction is only as good as its assumption, and a violated one (abrupt
+    // motion change) turns anything built on it into a failure cascade. Divergence
+    // protection comes from the optimizer itself (g2o LM monotone-acceptance fix) plus
+    // the depth-free rescue below.
+    // Invariant: relative_frame_poses_.back() is last_frame_'s entry — every path here
+    // had state_ == OK last frame, which stored a valid pose.
+    const mat4f seed_pose = relative_frame_poses_.back() * last_frame_.ref_keyframe->get_pose();
+    current_frame_.set_pose(seed_pose);
     Optimizer::PoseOptimization(&current_frame_);
     int num_map_inliers = current_frame_.count_inlier_map_points();
 
@@ -510,11 +516,11 @@ bool Tracking::track_reference_keyframe()
         AF_WARN("track_reference_keyframe: pose optimization collapsed (" << num_map_inliers
                 << " inliers of " << num_matches << " raw matches) — retrying without depth channel"
                 << " | frame=" << current_frame_.frame_id);
-        dump_pose_collapse();
+        dump_pose_collapse(seed_pose);
 
         for (auto& [ft, outlier_flags] : current_frame_.outliers)
             std::fill(outlier_flags.begin(), outlier_flags.end(), false);
-        current_frame_.set_pose(last_frame_.Tcw);
+        current_frame_.set_pose(seed_pose);
         Optimizer::PoseOptimization(&current_frame_, /*useDepthChannel=*/false);
         num_map_inliers = current_frame_.count_inlier_map_points();
     }
@@ -547,15 +553,6 @@ bool Tracking::track_reference_keyframe()
     }
 
     return true;
-}
-
-void Tracking::UpdateLastFrame()
-{
-    // Update pose according to reference keyframe
-    Keyframe pRef = last_frame_.ref_keyframe;
-    mat4f Tlr = relative_frame_poses_.back();
-
-    last_frame_.set_pose(Tlr * pRef->get_pose());
 }
 
 bool Tracking::track_local_map()
