@@ -27,13 +27,10 @@
 namespace AF_VSLAM
 {
 
-Initializer::Initializer(const Frame &ReferenceFrame, float sigma_, int iterations, const FeatureType& featureType_)
+Initializer::Initializer(const Frame &ReferenceFrame, float sigma_, int iterations)
 {
-    featureType = featureType_;
-
     K = Converter::toMatrix3f(ReferenceFrame.mK.clone());
 
-    //keypoints1 = ReferenceFrame.keypoints.at(featureType);
     keypoints1.clear();
     invDepth1.clear();
     for (const auto& [ft, keypoints]: ReferenceFrame.keypoints) {
@@ -54,7 +51,6 @@ bool Initializer::initialize(const Frame &CurrentFrame, const vector<int> &match
 {
     // Fill structures with current keypoints and matches with reference frame
     // Reference Frame: 1, Current Frame: 2
-    //keypoints2 = CurrentFrame.keypoints.at(featureType);
     keypoints2.clear();
     invDepth2.clear();
     for (const auto& [ft, keypoints]: CurrentFrame.keypoints) {

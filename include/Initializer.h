@@ -36,7 +36,7 @@ class Initializer
 public:
 
     // Fix the reference frame
-    Initializer(const Frame &ReferenceFrame, float sigma_, int iterations, const FeatureType& featureType);
+    Initializer(const Frame &ReferenceFrame, float sigma_, int iterations);
 
     // Computes in parallel a fundamental matrix and a homography
     // Selects a model and tries to recover the motion and the structure from motion
@@ -89,8 +89,6 @@ private:
     // between triangulated and depth-covered points to judge.
     bool IsDepthConsistent(const vector<vec3f> &pts3D_, const vector<bool> &isTriangulated_) const;
 
-
-    FeatureType featureType;
 
     // Keypoints from Reference Frame (Frame 1)
     vector<cv::KeyPoint> keypoints1;

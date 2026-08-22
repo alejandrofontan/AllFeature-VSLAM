@@ -383,7 +383,7 @@ void Tracking::monocular_initialization(FeatureType feature_type)
         {
             initial_frame_ = current_frame_;
             last_frame_ = current_frame_;
-            initializer_ = std::make_shared<Initializer>(current_frame_, params.init_sigma, params.init_ransac_iterations, feature_type);
+            initializer_ = std::make_shared<Initializer>(current_frame_, params.init_sigma, params.init_ransac_iterations);
             return;
         }
     }
