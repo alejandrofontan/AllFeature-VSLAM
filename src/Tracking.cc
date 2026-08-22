@@ -583,14 +583,14 @@ bool Tracking::track_local_map()
 
 void Tracking::update_local_map()
 {
-    // This is for visualization
+    // Publish the current local points to the map for visualization
     map_->set_reference_map_points(local_points_);
-    // Update
-    UpdateLocalKeyFrames();
-    UpdateLocalPoints();
+
+    update_local_keyframes();
+    update_local_points();
 }
 
-void Tracking::UpdateLocalKeyFrames()
+void Tracking::update_local_keyframes()
 {
     // Each map point vote for the keyframes in which it has been observed
     set<KeyframeId> keyframeIds{};
@@ -680,7 +680,7 @@ void Tracking::UpdateLocalKeyFrames()
     }
 }
 
-void Tracking::UpdateLocalPoints()
+void Tracking::update_local_points()
 {
     local_points_.clear();
     set<PtId> ptIds{};

@@ -191,8 +191,8 @@ protected:
     bool relocalize();
 
     void update_local_map();
-    void UpdateLocalPoints();
-    void UpdateLocalKeyFrames();
+    void update_local_points();
+    void update_local_keyframes();
 
     bool track_local_map();
     void search_local_points();
@@ -292,7 +292,7 @@ protected:
     // Tracking()
     const int scaleNumFeaturesMonocular{4};
 
-    // UpdateLocalKeyFrames()
+    // update_local_keyframes()
     const int _maxNumKey_{80};
     const int _bestCovKey_{10};
 
@@ -357,7 +357,7 @@ protected:
     const int numItpSolver{5}; // relocalize
 
     // Memory
-    const int scaleReserveKey{3}; // UpdateLocalKeyFrames()
+    const int scaleReserveKey{3}; // update_local_keyframes()
 
     // RANSAC
     const float ransac_probability{0.99};
