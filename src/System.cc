@@ -408,67 +408,6 @@ std::string System::GetModalityDescription() const
     return modality;
 }
 
-void System::SaveTrajectoryTUM(const string &filename)
-{
-    AF_INFO("Saving camera trajectory to " << filename << " ...");
-    if(mSensor==MONOCULAR)
-    {
-        cerr << "ERROR: SaveTrajectoryTUM cannot be used for monocular." << endl;
-        return;
-    }
-
-    vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
-    sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
-
-    // Transform all keyframes so that the first keyframe is at the origin.
-    // After a loop closure the first keyframe might not be at the origin.
-    mat4f Two = vpKFs[0]->get_pose_inverse();
-
-    ofstream f;
-    f.open(filename.c_str());
-    f << fixed;
-
-    // Frame pose is stored relative to its reference keyframe (which is optimized by BA and pose graph).
-    // We need to get first the keyframe pose and then concatenate the relative transformation.
-    // Frames not localized (tracking failure) are not saved.
-
-    // For each frame we have a reference keyframe (lRit), the timestamp (lT) and a flag
-    // which is true when tracking failed (lbL).
-    list<AF_VSLAM::Keyframe>::iterator lRit = tracker->reference_keyframes_.begin();
-    list<double>::iterator lT = tracker->frame_timestamps_.begin();
-    list<bool>::iterator lbL = tracker->lost_flags_.begin();
-    for(list<mat4f>::iterator lit=tracker->relative_frame_poses_.begin(),
-        lend=tracker->relative_frame_poses_.end();lit!=lend;lit++, lRit++, lT++, lbL++)
-    {
-        if(*lbL)
-            continue;
-
-        Keyframe pKF = *lRit;
-
-        mat4f Trw{mat4f::Identity()};
-
-        // If the reference keyframe was culled, traverse the spanning tree to get a suitable keyframe.
-        while(pKF->is_bad())
-        {
-            Trw = Trw * pKF->Tcp;
-            pKF = pKF->GetParent();
-        }
-
-        Trw = Trw*pKF->get_pose()*Two;
-
-        mat4f Tcw = (*lit) * Trw;
-        mat3f Rwc = Tcw.block<3,3>(0,0).transpose();
-        vec3f twc = -Rwc * Tcw.block<3,1>(0,3);
-        Eigen::Quaternionf q(Rwc);
-
-        f << setprecision(6) << *lT << " " <<  setprecision(9) <<
-            twc(0) << " " << twc(1) << " " << twc(2) << " " <<
-            q.x() << " " << q.y() << " " << q.z()<< " " << q.w() << endl;
-    }
-    f.close();
-    AF_INFO("Trajectory saved!");
-}
-
 
 void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 {
@@ -611,61 +550,6 @@ void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>
 }
 
 
-
-void System::SaveTrajectoryKITTI(const string &filename)
-{
-    AF_INFO("Saving camera trajectory to " << filename << " ...");
-    if(mSensor==MONOCULAR)
-    {
-        cerr << "ERROR: SaveTrajectoryKITTI cannot be used for monocular." << endl;
-        return;
-    }
-
-    vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
-    sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
-
-    // Transform all keyframes so that the first keyframe is at the origin.
-    // After a loop closure the first keyframe might not be at the origin.
-    mat4f Two = vpKFs[0]->get_pose_inverse();
-
-    ofstream f;
-    f.open(filename.c_str());
-    f << fixed;
-
-    // Frame pose is stored relative to its reference keyframe (which is optimized by BA and pose graph).
-    // We need to get first the keyframe pose and then concatenate the relative transformation.
-    // Frames not localized (tracking failure) are not saved.
-
-    // For each frame we have a reference keyframe (lRit), the timestamp (lT) and a flag
-    // which is true when tracking failed (lbL).
-    list<AF_VSLAM::Keyframe>::iterator lRit = tracker->reference_keyframes_.begin();
-    list<double>::iterator lT = tracker->frame_timestamps_.begin();
-    for(list<mat4f>::iterator lit=tracker->relative_frame_poses_.begin(), lend=tracker->relative_frame_poses_.end();lit!=lend;lit++, lRit++, lT++)
-    {
-        AF_VSLAM::Keyframe pKF = *lRit;
-
-        mat4f Trw{mat4f::Identity()};
-
-        while(pKF->is_bad())
-        {
-            Trw = Trw * pKF->Tcp;
-            pKF = pKF->GetParent();
-        }
-
-        Trw = Trw *pKF->get_pose()*Two;
-
-        mat4f Tcw = (*lit) * Trw;
-        mat3f Rwc = Tcw.block<3,3>(0,0).transpose();
-        vec3f twc = -Rwc * Tcw.block<3,1>(0,3);
-
-        f << setprecision(9) <<
-             Rwc(0,0) << " " << Rwc(0,1)  << " " << Rwc(0,2) << " "  << twc(0) << " " <<
-             Rwc(1,0) << " " << Rwc(1,1)  << " " << Rwc(1,2) << " "  << twc(1) << " " <<
-             Rwc(2,0) << " " << Rwc(2,1)  << " " << Rwc(2,2) << " "  << twc(2) << endl;
-    }
-    f.close();
-    AF_INFO("Camera trajectory saved!");
-}
 
 int System::GetTrackingState()
 {
