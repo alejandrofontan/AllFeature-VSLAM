@@ -51,23 +51,91 @@ System::System(const string &vocabularyFolder,
 
     DUtils::Random::SeedRandOnce(0);
 
-    //Load ORB Vocabulary
-    vocabulary = make_shared<Vocabulary>(vocabularyFolder, featureTypes[0]);
-    if(vocabulary->isSupported()){
+    ////////////////////////////////////////////////////////////////////////////////
+    // Visual place recognition (VPR) backend selection. Settings keys (both optional):
+    //   vpr:         backend — "bow" (default) or "none"
+    //   feature_vpr: bow only — feature family for the DBoW2 vocabulary; must be
+    //                listed in features: and have a vocabulary
+    // Missing keys default to BoW on the first feature that has a vocabulary; an
+    // explicit request that cannot be satisfied is a hard error, while a defaulted
+    // one degrades to "none" with a warning.
+    std::string vpr_method{"bow"};
+    bool vpr_key_present{false};
+    std::string feature_vpr_name{};
+    try {
+        const YAML::Node settingsNode = YAML::LoadFile(strSettingsFile);
+        if(settingsNode["vpr"]){ vpr_method = settingsNode["vpr"].as<std::string>(); vpr_key_present = true; }
+        if(settingsNode["feature_vpr"]) feature_vpr_name = settingsNode["feature_vpr"].as<std::string>();
+    } catch (const std::exception& e) {
+        AF_ERROR("[System] Failed to parse settings file '" + strSettingsFile + "': " + std::string(e.what()));
+        exit(-1);
+    }
+
+    std::string feature_list{};
+    for (const auto& ft : featureTypes)
+        feature_list += (feature_list.empty() ? "" : ", ") + featureName(ft);
+
+    bool vpr_enabled{false};
+    FeatureType vpr_feature{featureTypes[0]};
+
+    if(vpr_method == "none"){
+        AF_INFO("[System] VPR: none (disabled by settings) — no loop closing, no relocalization; a tracking loss is permanent");
+    }
+    else if(vpr_method == "bow"){
+        if(!feature_vpr_name.empty()){
+            // Explicit feature_vpr must name a configured feature with a vocabulary — hard error otherwise
+            bool found{false};
+            for (const auto& ft : featureTypes)
+                if(featureName(ft) == feature_vpr_name){ vpr_feature = ft; found = true; break; }
+            if(!found){
+                AF_ERROR("[System] feature_vpr '" + feature_vpr_name + "' is not in features: [" + feature_list + "]");
+                exit(-1);
+            }
+            if(!Vocabulary::has_vocabulary(vpr_feature)){
+                AF_ERROR("[System] feature_vpr '" + feature_vpr_name
+                         + "' has no DBoW2 vocabulary (learned feature) — pick a classical feature or set vpr: none");
+                exit(-1);
+            }
+            vpr_enabled = true;
+            AF_INFO("[System] VPR: bow | feature_vpr: " + feature_vpr_name);
+        }
+        else{
+            // Defaulted: first configured feature that has a vocabulary
+            for (const auto& ft : featureTypes)
+                if(Vocabulary::has_vocabulary(ft)){ vpr_feature = ft; vpr_enabled = true; break; }
+            if(vpr_enabled){
+                AF_INFO("[System] VPR: bow | feature_vpr: " + featureName(vpr_feature)
+                        + " (defaulted: first feature with a vocabulary)");
+            }
+            else if(vpr_key_present){
+                // The user explicitly asked for bow — refusing beats silently degrading
+                AF_ERROR("[System] vpr: bow requested but no feature in [" + feature_list
+                         + "] has a DBoW2 vocabulary — add a classical feature "
+                           "(orb32/akaze61/brisk48/surf64/kaze64/sift128) or set vpr: none");
+                exit(-1);
+            }
+            else{
+                AF_WARN("[System] No feature in [" + feature_list + "] has a DBoW2 vocabulary — running WITHOUT VPR: "
+                        "no loop closing, no relocalization, a tracking loss is permanent. "
+                        "Add a classical feature (orb32/akaze61/brisk48/surf64/kaze64/sift128) "
+                        "or silence this warning with vpr: none");
+            }
+        }
+    }
+    else{
+        AF_ERROR("[System] Unknown vpr backend '" + vpr_method + "' (options: bow, none)");
+        exit(-1);
+    }
+
+    //Load vocabulary (BoW backend)
+    vocabulary = make_shared<Vocabulary>(vocabularyFolder, vpr_feature, vpr_enabled);
+    if(vocabulary->is_active()){
         vocabulary->createVocabulary();
         bool vocabularyLoaded = vocabulary->loadFromTextFile();
         if(!vocabularyLoaded){
             AF_ERROR("[System] Vocabulary loading failed");
             terminate();
         }
-    }
-    else{
-        // No DBoW2 vocabulary exists for this feature type (learned features): run without
-        // BoW — the loop-closing thread is not started below, and BoW relocalization can
-        // never find candidates. A tracking loss is therefore unrecoverable in this mode.
-        AF_WARN("[System] No DBoW2 vocabulary for feature type '"
-                + featureName(featureTypes[0])
-                + "' — running WITHOUT loop closing and WITHOUT BoW relocalization");
     }
 
     //Create KeyFrame Database
@@ -104,14 +172,14 @@ System::System(const string &vocabularyFolder,
     localMapper = make_shared<LocalMapping>(mpMap, mSensor==MONOCULAR, featureTypes, tracker->get_image_width(), tracker->get_image_height());
     mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::Run, localMapper);
 
-    //Initialize the Loop Closing thread and launch. Without vocabulary support the object
+    //Initialize the Loop Closing thread and launch. Without an active VPR backend the object
     //is still constructed (other threads hold pointers to it and enqueue keyframes) but its
     //thread never starts: LoopClosing's constructor leaves mbFinished=true, so Shutdown()'s
     //isFinished()/isRunningGBA() waits pass immediately.
     loopCloser =  make_shared<LoopClosing>(mpMap, mpKeyFrameDatabase, vocabulary, mSensor!=MONOCULAR,
         vocabulary->featureType, featureTypes,
         tracker->get_image_width(), tracker->get_image_height());
-    if(vocabulary->isSupported())
+    if(vocabulary->is_active())
         mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::Run, loopCloser);
 
     //Initialize the Viewer thread and launch

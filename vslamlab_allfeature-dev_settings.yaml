@@ -5,6 +5,8 @@
 #--------------------------------------------------------------------------------------------
 cam_mono: rgb_0
 features: ["orb32", "aliked128"]   # aliked-only experiment: no vocabulary -> no loop closing / BoW reloc
+vpr: "bow"           # visual place recognition backend: "bow" | "none" (megaloc planned)
+feature_vpr: "orb32" # bow only: feature family for the DBoW2 vocabulary; must be in features and have a vocabulary
 debug: false
 
 #--------------------------------------------------------------------------------------------
