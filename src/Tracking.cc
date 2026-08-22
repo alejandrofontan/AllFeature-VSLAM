@@ -226,17 +226,7 @@ void Tracking::track()
         map_drawer_->set_current_camera_pose(current_frame_.Tcw);
 
         // Clean VO matches: drop points no map observation backs
-        for (auto& [ft, N] : current_frame_.N) {
-            for(int i = 0; i < N; i++)
-            {
-                const Pt& map_point = current_frame_.pts.at(ft)[i];
-                if(map_point && map_point->number_of_observations() < 1)
-                {
-                    current_frame_.outliers.at(ft)[i] = false;
-                    current_frame_.pts.at(ft)[i] = nullptr;
-                }
-            }
-        }
+        current_frame_.drop_unobserved_points();
 
         // Check if we need to insert a new keyframe
         if(need_new_keyframe())
@@ -246,13 +236,7 @@ void Tracking::track()
         // to pass to the new keyframe, so that bundle adjustment will finally decide
         // if they are outliers or not. We don't want the next frame to estimate its pose
         // with those points, so we discard them in the frame.
-        for (auto& [ft, N] : current_frame_.N) {
-            for(int i = 0; i < N; i++)
-            {
-                if(current_frame_.pts.at(ft)[i] && current_frame_.outliers.at(ft)[i])
-                    current_frame_.pts.at(ft)[i] = nullptr;
-            }
-        }
+        current_frame_.drop_outlier_points();
     }
 
     // Reset if the camera gets lost soon after initialization

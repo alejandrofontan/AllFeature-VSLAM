@@ -358,6 +358,32 @@ bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 }
 
 
+void Frame::drop_unobserved_points()
+{
+    for (auto& [ft, num_keypoints] : N) {
+        for(int i = 0; i < num_keypoints; i++)
+        {
+            const Pt& map_point = pts.at(ft)[i];
+            if(map_point && map_point->number_of_observations() < 1)
+            {
+                outliers.at(ft)[i] = false;
+                pts.at(ft)[i] = nullptr;
+            }
+        }
+    }
+}
+
+void Frame::drop_outlier_points()
+{
+    for (auto& [ft, num_keypoints] : N) {
+        for(int i = 0; i < num_keypoints; i++)
+        {
+            if(pts.at(ft)[i] && outliers.at(ft)[i])
+                pts.at(ft)[i] = nullptr;
+        }
+    }
+}
+
 void Frame::compute_global_descriptor()
 {
     if(!vocabulary->is_active())

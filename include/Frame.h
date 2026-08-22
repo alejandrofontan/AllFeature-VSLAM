@@ -83,6 +83,13 @@ public:
     // feature family; no-op when VPR is inactive.
     void compute_global_descriptor();
 
+    // Drop matches to map points that no observation backs (matched during
+    // tracking but never added to the map); clears their outlier flags.
+    void drop_unobserved_points();
+
+    // Drop matches flagged as outliers by pose optimization.
+    void drop_outlier_points();
+
     // Set the camera pose.
     void set_pose(const mat4f& Tcw_);
 
