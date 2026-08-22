@@ -189,13 +189,13 @@ System::System(const string &vocabularyFolder,
                                     strCalibrationFile, strSettingsFile,
                                     featureTypes);
         mptViewer = make_shared<thread>(&Viewer::Run, viewer);
-        tracker->SetViewer(viewer);
+        tracker->set_viewer(viewer);
         localMapper->SetViewer(viewer);
     }
 
     //Set pointers between threads
-    tracker->SetLocalMapper(localMapper);
-    tracker->SetLoopClosing(loopCloser);
+    tracker->set_local_mapper(localMapper);
+    tracker->set_loop_closing(loopCloser);
 
     localMapper->SetTracker(tracker);
     localMapper->SetLoopCloser(loopCloser);

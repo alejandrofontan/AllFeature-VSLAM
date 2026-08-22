@@ -87,9 +87,9 @@ public:
     // Preprocess the input and call track(). Extract features and performs stereo matching.
     mat4f GrabImageMonocular(Image &im, const double &timestamp);
 
-    void SetLocalMapper(std::shared_ptr<LocalMapping> local_mapper);
-    void SetLoopClosing(std::shared_ptr<LoopClosing> loopClosing_);
-    void SetViewer(shared_ptr<Viewer> viewer_);
+    void set_local_mapper(std::shared_ptr<LocalMapping> local_mapper) { local_mapper_ = std::move(local_mapper); }
+    void set_loop_closing(std::shared_ptr<LoopClosing> loop_closing) { loop_closing_ = std::move(loop_closing); }
+    void set_viewer(std::shared_ptr<Viewer> viewer) { viewer_ = std::move(viewer); }
 
     // Load new settings
     // The focal lenght should be similar or scale prediction will fail when projecting points
@@ -220,7 +220,7 @@ protected:
 
     //Other Thread Pointers
     std::shared_ptr<LocalMapping> local_mapper_;
-    std::shared_ptr<LoopClosing> loopClosing;
+    std::shared_ptr<LoopClosing> loop_closing_;
 
     // Features
     std::map<FeatureType, shared_ptr<FeatureExtractor>> featureExtractorLeft, featureExtractorRight;
@@ -239,7 +239,7 @@ protected:
     std::vector<Pt> local_points_;
 
     //Drawers
-    std::shared_ptr<Viewer> viewer;
+    std::shared_ptr<Viewer> viewer_;
     std::shared_ptr<FrameDrawer> frame_drawer_;
     std::shared_ptr<MapDrawer> map_drawer_;
 

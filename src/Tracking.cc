@@ -62,7 +62,7 @@ Tracking::Tracking(shared_ptr<Vocabulary> vocabulary,
                    const vector<FeatureType>& featureTypes,
                    const bool& fixImageSize):
     state_(NO_IMAGES_YET), mSensor(sensor), feature_types_(featureTypes), mbVO(false), vocabulary(vocabulary),
-    keyframe_db_(pKFDB), viewer(static_cast<shared_ptr<Viewer>>(nullptr)),
+    keyframe_db_(pKFDB),
     frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), lastRelocFrameId(0), fixImageSize(fixImageSize)
 {
     // Load camera parameters from settings yaml file
@@ -79,21 +79,6 @@ Tracking::Tracking(shared_ptr<Vocabulary> vocabulary,
     }
 
     matcher_ = std::make_shared<FeatureMatcher>(w, h, featureTypes, "Tracking");
-}
-
-void Tracking::SetLocalMapper(std::shared_ptr<LocalMapping> local_mapper)
-{
-    local_mapper_ = local_mapper;
-}
-
-void Tracking::SetLoopClosing(std::shared_ptr<LoopClosing> loopClosing_)
-{
-    loopClosing = loopClosing_;
-}
-
-void Tracking::SetViewer(shared_ptr<Viewer> viewer_)
-{
-    viewer = viewer_;
 }
 
 mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
@@ -148,8 +133,8 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
         tracking_times[int(1000 * t_duration)]++;
 #endif
 
-    if(viewer)
-        viewer->set_grabImageMonocular_time_median(map_median(grabImageMonocular_times));
+    if(viewer_)
+        viewer_->set_grabImageMonocular_time_median(map_median(grabImageMonocular_times));
 
 #ifdef PROFILING_EXHAUSTIVE
     AF_PROFILE_BEGIN("Tracking Profiling");
@@ -1225,10 +1210,10 @@ void Tracking::reset()
 {
 
     cout << "System Reseting" << endl;
-    if(viewer)
+    if(viewer_)
     {
-        viewer->RequestStop();
-        while(!viewer->isStopped())
+        viewer_->RequestStop();
+        while(!viewer_->isStopped())
             usleep(3000);
     }
 
@@ -1239,7 +1224,7 @@ void Tracking::reset()
 
     // Reset Loop Closing
     cout << "Reseting Loop Closing...";
-    loopClosing->RequestReset();
+    loop_closing_->RequestReset();
     cout << " done" << endl;
 
     // Clear BoW Database
@@ -1272,8 +1257,8 @@ void Tracking::reset()
     local_map_times.clear();
     grabImageMonocular_times.clear();
 
-    if(viewer)
-        viewer->Release();
+    if(viewer_)
+        viewer_->Release();
 }
 
 void Tracking::ChangeCalibration(const string &strSettingPath)
