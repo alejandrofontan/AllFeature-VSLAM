@@ -179,6 +179,7 @@ void Tracking::Track()
 
     last_processed_state_ = state_;
 
+#ifdef PROFILING_EXHAUSTIVE
     // Diagnostics cadence/thresholds (heartbeat period; visible-stall report ~3 frame periods at 20 fps)
     constexpr int HEARTBEAT_PERIOD_FRAMES = 100;
     constexpr double SLOW_FRAME_WARN_MS = 150.0;
@@ -189,12 +190,16 @@ void Tracking::Track()
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
     const auto t_track_start = StageClock::now();
+#endif
 
     // Get Map Mutex -> Map cannot be changed
     unique_lock<mutex> lock(map_->mMutexMapUpdate);
+
+#ifdef PROFILING_EXHAUSTIVE
     const auto t_lock_acquired = StageClock::now();
     const double ms_lock_wait = stage_ms(t_track_start, t_lock_acquired);
     double ms_track_ref = 0.0, ms_local_map = 0.0, ms_emergency_wait = 0.0;
+#endif
 
     if(state_ == NOT_INITIALIZED)
     {
@@ -231,23 +236,18 @@ void Tracking::Track()
 
         current_frame_.ref_keyframe = ref_keyframe_;
 
-        const auto t_after_track_ref = StageClock::now();
-
-        // If we have an initial estimation of the camera pose and matching, track the local map.
 #ifdef PROFILING_EXHAUSTIVE
-        auto t_start = std::chrono::steady_clock::now();
+        const auto t_after_track_ref = StageClock::now();
 #endif
 
+        // If we have an initial estimation of the camera pose and matching, track the local map.
         if(ok)
             ok = run_stage([this] { return track_local_map(); });
 
+#ifdef PROFILING_EXHAUSTIVE
         ms_track_ref = stage_ms(t_lock_acquired, t_after_track_ref);
         ms_local_map = stage_ms(t_after_track_ref, StageClock::now());
-
-#ifdef PROFILING_EXHAUSTIVE
-        auto t_end = std::chrono::steady_clock::now();
-        double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-        local_map_times[int(1000 * t_duration)]++;
+        local_map_times[int(ms_local_map)]++;
 #endif
 
         state_ = ok ? OK : LOST;
@@ -260,6 +260,7 @@ void Tracking::Track()
         {
             ++num_tracked_frames_;
 
+#ifdef PROFILING_EXHAUSTIVE
             // Low-rate heartbeat so post-mortems can see the inlier/map trend leading
             // into a tracking loss, not just the loss line itself.
             if(current_frame_.frame_id % HEARTBEAT_PERIOD_FRAMES == 0)
@@ -271,6 +272,7 @@ void Tracking::Track()
                         << " mapPts=" << map_->map_points_in_map());
                 std::cout.flush(); // stdout is fully buffered under the runner's redirect
             }
+#endif
 
             map_drawer_->set_current_camera_pose(current_frame_.Tcw);
 
@@ -339,18 +341,23 @@ void Tracking::Track()
     }
 
     // An emergency keyframe was just inserted: block until Local Mapping has processed
-    // it (the trigger is already logged by need_new_keyframe, and the wait shows up as
-    // emergencyWait in the slow-frame report below).
+    // it (the trigger is already logged by need_new_keyframe, and in profiling builds the
+    // wait shows up as emergencyWait in the slow-frame report below).
     if (emergency_keyframe_)
     {
+#ifdef PROFILING_EXHAUSTIVE
         const auto t_wait_start = StageClock::now();
+#endif
         lock.unlock();
         while(!local_mapper_->accepts_keyframes())
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         emergency_keyframe_ = false;
+#ifdef PROFILING_EXHAUSTIVE
         ms_emergency_wait = stage_ms(t_wait_start, StageClock::now());
+#endif
     }
 
+#ifdef PROFILING_EXHAUSTIVE
     // Hiccup diagnosis: whenever this frame stalled visibly, say where the time went.
     // "other" covers keyframe decision/creation, drawer updates, and pose bookkeeping.
     const double ms_total = stage_ms(t_track_start, StageClock::now());
@@ -364,6 +371,7 @@ void Tracking::Track()
                 << ", other=" << int(ms_total - ms_lock_wait - ms_track_ref - ms_local_map - ms_emergency_wait)
                 << ") | frame=" << current_frame_.frame_id);
     }
+#endif
 }
 
 void Tracking::monocular_initialization(FeatureType feature_type)
