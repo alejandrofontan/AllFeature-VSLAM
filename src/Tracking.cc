@@ -272,17 +272,6 @@ void Tracking::Track()
                 std::cout.flush(); // stdout is fully buffered under the runner's redirect
             }
 
-            // Update motion model
-            if(last_frame_.Tcw(3,3) == 1.0f)
-            {
-                mat4f Twc_last{mat4f::Identity()};
-                Twc_last.block<3,3>(0,0) = last_frame_.get_rotation_inverse();
-                Twc_last.block<3,1>(0,3) = last_frame_.get_camera_center();
-                velocity_ = current_frame_.Tcw * Twc_last;
-            }
-            else
-                velocity_ = mat4f::Zero();
-
             map_drawer_->set_current_camera_pose(current_frame_.Tcw);
 
             // Clean VO matches: drop points no map observation backs
@@ -632,64 +621,12 @@ bool Tracking::track_reference_keyframe(const bool& optimizePose)
     t_start = std::chrono::steady_clock::now();
 #endif
 
-    // Optimize Pose — seed with the constant-velocity prediction when the motion model
-    // is valid (velocity_ is Zero after a loss/reloc). Seeding with last_frame_.Tcw alone
-    // (constant-position) leaves every pixel residual ~one frame of motion large at the
-    // start: on fast sequences that Huber-saturates the 2D terms while the high-information
-    // RGB-D inverse-depth terms stay quadratic — and depth only constrains the z-component,
-    // so pass-1 LM could walk into a wrong rotation/lateral basin and reject everything
-    // (observed: frame 3325, 445 matches -> 0 inliers, poseDelta 1.48m/3.5deg, instantly
-    // recoverable by from-scratch PnP relocalization).
-    const mat4f posePrior = (velocity_(3,3) == 1.0f) ? mat4f(velocity_ * last_frame_.Tcw)
-                                                     : last_frame_.Tcw;
-
-    // Prior-consistency gate. match_keyframe_to_frame is GLOBAL descriptor matching — unlike
-    // stock ORB-SLAM2's projection-windowed SearchByProjection, nothing bounds how far a
-    // matched map point may project from its keypoint. A depth-seeded point born from a spiky
-    // sensor-depth reading can sit meters too close, cross the camera plane within a frame or
-    // two of vehicle motion, and project 1e3-1e6 px away while its 2D descriptor match (and
-    // its F-filter check, which never sees the 3D position) stays perfectly valid. Huber's
-    // linear tail times the fx/z Jacobian explosion then lets a handful of such edges drag
-    // the whole pose (observed: frame 17166, 10 of 469 matches at 100-654000 px dragged the
-    // pose 25 deg -> every genuine match rejected -> tracking lost). Genuine matches sit
-    // within ~11 px of the motion prior (measured across collapse dumps), so a generous gate
-    // loses nothing.
-    {
-        const mat3f Rcw_prior = posePrior.block<3,3>(0,0);
-        const vec3f tcw_prior = posePrior.block<3,1>(0,3);
-        const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
-        const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
-        int nGated = 0;
-        for (auto& [ft, N_ft] : current_frame_.N)
-        {
-            const auto& kps = current_frame_.keypoints.at(ft);
-            for(int i = 0; i < N_ft; i++)
-            {
-                const Pt& pt = current_frame_.pts.at(ft)[i];
-                if(!pt)
-                    continue;
-                const vec3f Xc = Rcw_prior * pt->get_world_pos() + tcw_prior;
-                bool bad = Xc(2) < minDepthPriorGate;
-                if(!bad)
-                {
-                    const float du = fx * Xc(0) / Xc(2) + cx - kps[i].pt.x;
-                    const float dv = fy * Xc(1) / Xc(2) + cy - kps[i].pt.y;
-                    bad = (du*du + dv*dv) > reprojPriorGate * reprojPriorGate;
-                }
-                if(bad)
-                {
-                    current_frame_.pts.at(ft)[i] = static_cast<Pt>(nullptr);
-                    nGated++;
-                    nmatches--;
-                }
-            }
-        }
-        if(nGated > 0)
-            AF_INFO("track_reference_keyframe: prior-consistency gate dropped " << nGated
-                    << " matches | frame=" << current_frame_.frame_id);
-    }
-
-    current_frame_.set_pose(posePrior);
+    // Optimize Pose — seeded from the last frame's pose (constant-position). No motion
+    // prior anywhere: a prediction is only as good as its assumption, and a violated one
+    // (abrupt motion change) turns anything built on it into a failure cascade. Divergence
+    // protection comes from the optimizer itself (g2o LM monotone-acceptance fix) plus the
+    // depth-free rescue below.
+    current_frame_.set_pose(last_frame_.Tcw);
     Optimizer::PoseOptimization(&current_frame_);
 
     const auto countMapInliers = [this]() {
@@ -716,14 +653,14 @@ bool Tracking::track_reference_keyframe(const bool& optimizePose)
                 << " inliers of " << nmatches << " raw matches) — retrying without depth channel"
                 << " | frame=" << current_frame_.frame_id);
 
-        // Post-mortem dump: per-match reprojection residuals AT THE PRIOR POSE (before any
+        // Post-mortem dump: per-match reprojection residuals AT THE SEED POSE (before any
         // optimization), with each map point's provenance — enough to test offline whether
         // the match set is bimodal (two coherent populations with no common pose) and which
         // population (old vs freshly-created points, image region, depth) is inconsistent.
         if(!FrameDrawer::exp_folder.empty())
         {
-            const mat3f Rcw_prior = posePrior.block<3,3>(0,0);
-            const vec3f tcw_prior = posePrior.block<3,1>(0,3);
+            const mat3f Rcw_seed = last_frame_.Tcw.block<3,3>(0,0);
+            const vec3f tcw_seed = last_frame_.Tcw.block<3,1>(0,3);
             const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
             const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
             std::ofstream dump(FrameDrawer::exp_folder + "/collapse_frame_"
@@ -738,7 +675,7 @@ bool Tracking::track_reference_keyframe(const bool& optimizePose)
                     const Pt& pt = current_frame_.pts.at(ft)[i];
                     if(!pt)
                         continue;
-                    const vec3f Xc = Rcw_prior * pt->get_world_pos() + tcw_prior;
+                    const vec3f Xc = Rcw_seed * pt->get_world_pos() + tcw_seed;
                     if(Xc(2) <= 0.0f)
                         continue;
                     dump << int(ft) << "," << i << ","
@@ -753,7 +690,7 @@ bool Tracking::track_reference_keyframe(const bool& optimizePose)
 
         for (auto& [ft, N_ft] : current_frame_.N)
             std::fill(current_frame_.outliers.at(ft).begin(), current_frame_.outliers.at(ft).end(), false);
-        current_frame_.set_pose(posePrior);
+        current_frame_.set_pose(last_frame_.Tcw);
         Optimizer::PoseOptimization(&current_frame_, /*useDepthChannel=*/false);
         nmatchesMap = countMapInliers();
     }
