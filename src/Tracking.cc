@@ -140,7 +140,7 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     std::chrono::steady_clock::time_point t_start_2 = std::chrono::steady_clock::now();
 #endif
 
-    Track();
+    track();
 
 #ifdef PROFILING_EXHAUSTIVE
     t_end = std::chrono::steady_clock::now();
@@ -173,7 +173,7 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     return current_frame_.Tcw;
 }
 
-void Tracking::Track()
+void Tracking::track()
 {
     if(state_ == NO_IMAGES_YET)
         state_ = NOT_INITIALIZED;
@@ -183,7 +183,7 @@ void Tracking::Track()
     TrackProfiler profiler{};
 
     // Get Map Mutex -> Map cannot be changed
-    unique_lock<mutex> lock(map_->mMutexMapUpdate);
+    std::unique_lock<std::mutex> lock(map_->mMutexMapUpdate);
     profiler.lock_acquired();
 
     // No map yet: the frame goes to two-view initialization, which finishes the
@@ -215,7 +215,6 @@ void Tracking::Track()
 
     state_ = ok ? OK : LOST;
 
-    // Update drawer
     frame_drawer_->update(this);
 
     // If tracking was good, check if we insert a keyframe
@@ -259,7 +258,7 @@ void Tracking::Track()
     // Reset if the camera gets lost soon after initialization
     if(state_ == LOST && map_->keyframes_in_map() <= static_cast<size_t>(params.min_keyframes_in_map))
     {
-        AF_WARN("Track lost soon after initialisation (" << map_->keyframes_in_map() << " <= "
+        AF_WARN("track: lost soon after initialisation (" << map_->keyframes_in_map() << " <= "
                 << params.min_keyframes_in_map << " keyframes in map), reason: " << last_tracking_lost_reason_
                 << " — resetting...");
         system_->reset();

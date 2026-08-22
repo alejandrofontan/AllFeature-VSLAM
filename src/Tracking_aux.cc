@@ -19,7 +19,7 @@ void Tracking::log_heartbeat()
     constexpr int HEARTBEAT_PERIOD_FRAMES = 100;
     if(current_frame_.frame_id % HEARTBEAT_PERIOD_FRAMES != 0)
         return;
-    AF_INFO("Track heartbeat | frame=" << current_frame_.frame_id
+    AF_INFO("track: heartbeat | frame=" << current_frame_.frame_id
             << " inliers=" << num_inlier_matches_
             << " localPts=" << local_points_.size()
             << " KFs=" << map_->keyframes_in_map()

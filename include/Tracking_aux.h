@@ -1,10 +1,10 @@
 /**
- * Auxiliary plumbing for Tracking::Track(), kept out of Tracking.cc so the
+ * Auxiliary plumbing for Tracking::track(), kept out of Tracking.cc so the
  * per-frame flow there reads uninterrupted.
  *
- * TrackProfiler: stage timing and slow-frame reporting for Track() (hiccup
+ * TrackProfiler: stage timing and slow-frame reporting for track() (hiccup
  * diagnosis; report threshold ~3 frame periods at 20 fps). All the
- * PROFILING_EXHAUSTIVE conditioning lives here, so Track() itself reads as
+ * PROFILING_EXHAUSTIVE conditioning lives here, so track() itself reads as
  * plain calls that compile to empty no-ops when profiling is off.
  */
 #ifndef AF_VSLAM_TRACKING_AUX_H
@@ -72,7 +72,7 @@ struct TrackProfiler
         const double ms_total = ms(t_start, Clock::now());
         if (ms_total > SLOW_FRAME_WARN_MS)
         {
-            AF_WARN("Track: slow frame, " << int(ms_total) << " ms"
+            AF_WARN("track: slow frame, " << int(ms_total) << " ms"
                     << " (mapMutexWait=" << int(ms_lock_wait)
                     << ", trackRef=" << int(ms_track_ref)
                     << ", localMap=" << int(ms_local_map)

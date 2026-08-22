@@ -71,7 +71,7 @@ struct TrackingParameters
     int init_min_tracked_points{100}; // min tracked map points in the current keyframe to accept the map
     int init_min_depth_samples{10};   // min sensor-depth ratio samples to prefer depth-verified scale
 
-    // Track()
+    // track()
     int min_keyframes_in_map{5}; // if lost with <= this many keyframes in map, reset instead of relocalizing
 };
 
@@ -87,7 +87,7 @@ public:
              const vector<FeatureType>& feature_types,
              const bool& fixImageSize = false);
 
-    // Preprocess the input and call Track(). Extract features and performs stereo matching.
+    // Preprocess the input and call track(). Extract features and performs stereo matching.
     mat4f GrabImageMonocular(Image &im, const double &timestamp);
 
     void SetLocalMapper(std::shared_ptr<LocalMapping> local_mapper);
@@ -143,7 +143,7 @@ public:
     void reset();
 
     // Reason (with statistics) reported by the most recent TrackingLostException, kept around so
-    // the "reset if lost soon after init" branch in Track() can reference why tracking was lost.
+    // the "reset if lost soon after init" branch in track() can reference why tracking was lost.
     std::string last_tracking_lost_reason_{};
 
     size_t num_tracked_frames_{2};
@@ -170,7 +170,7 @@ public:
 protected:
 
     // Main tracking function. It is independent of the input sensor.
-    void Track();
+    void track();
 
     // Runs one tracking stage: a TrackingLostException fails the stage and
     // records why for the post-loss diagnostics.
