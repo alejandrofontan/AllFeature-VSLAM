@@ -10,7 +10,7 @@
 #include <yaml-cpp/yaml.h>
 #include <FrameDrawer.h>
 #include "afvslam_log.hpp"
-#include "SegmentationCLI.h"
+#include "SegmentationSettings.h"
 
 #include "DebugKeyStepper.h"
 #include "StringUtils.h"
@@ -49,10 +49,6 @@ int main(int argc, char **argv)
     std::string feature{"orb32"};
     std::string path_to_vocabulary_folder("allfeature_vocabulary");
     bool fixImageSize = true;
-
-    // Online segmentation (segmentation.md): defaults, argument parsing, and
-    // the missing-model policy are shared across entry points in SegmentationCLI.h.
-    segmentation::SegmentationCLI segmentationCli{};
 
     std::cout << std::endl;
 
@@ -107,8 +103,6 @@ int main(int argc, char **argv)
             AF_CONFIG_FIELD("Path to vocabulary folder: ", path_to_vocabulary_folder);
             continue;
         }
-        if (segmentationCli.parseArg(arg))
-            continue;
     }
 
     // AllFeature-VSLAM inputs
@@ -152,6 +146,13 @@ int main(int argc, char **argv)
         featureTypes.push_back(featureType);
         AF_CONFIG_FIELD("Feature added: ", feat);
     }
+    segmentation::SegmentationSettings segmentationSettings{};
+    try {
+        segmentationSettings.load(settings);
+    } catch (const std::runtime_error& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
     AF_CONFIG_END();
 
     // Retrieve paths to images
@@ -163,10 +164,10 @@ int main(int argc, char **argv)
     size_t nImages = imageFilenames.size();
 
     // Online segmentation: build/load the TensorRT engine before the SLAM
-    // threads exist (policy and announcements in SegmentationCLI.h).
+    // threads exist (policy and announcements in SegmentationSettings.h).
     std::unique_ptr<segmentation::TensorRTSeg> segmenter{};
     try {
-        segmenter = segmentationCli.makeSegmenter();
+        segmenter = segmentationSettings.makeSegmenter();
     } catch (const std::runtime_error& e) {
         std::cerr << e.what() << std::endl;
         return 1;
