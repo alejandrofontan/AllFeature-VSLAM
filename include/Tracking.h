@@ -23,6 +23,7 @@
 #define TRACKING_H
 
 #include <opencv2/core/core.hpp>
+#include <functional>
 #include <mutex>
 #include <deque>
 
@@ -170,6 +171,10 @@ protected:
 
     // Main tracking function. It is independent of the input sensor.
     void Track();
+
+    // Runs one tracking stage: a TrackingLostException fails the stage and
+    // records why for the post-loss diagnostics.
+    bool run_tracking_stage(const std::function<bool()>& stage);
 
     // Append this frame's pose (relative to its reference keyframe) to the
     // trajectory-recovery lists; repeats the previous entry when the frame has

@@ -172,6 +172,18 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     return current_frame_.Tcw;
 }
 
+bool Tracking::run_tracking_stage(const std::function<bool()>& stage)
+{
+    try {
+        return stage();
+    }
+    catch(const TrackingLostException& e) {
+        last_tracking_lost_reason_ = e.what();
+        AF_WARN("Tracking lost — " << last_tracking_lost_reason_);
+        return false;
+    }
+}
+
 void Tracking::Track()
 {
     if(state_ == NO_IMAGES_YET)
@@ -209,25 +221,13 @@ void Tracking::Track()
         return;
     }
 
-    // System is initialized: track the frame. A TrackingLostException from a stage
-    // fails that stage; record why for the post-loss diagnostics.
-    const auto run_stage = [this](auto&& stage) {
-        try {
-            return stage();
-        }
-        catch(const TrackingLostException& e) {
-            last_tracking_lost_reason_ = e.what();
-            AF_WARN("Tracking lost — " << last_tracking_lost_reason_);
-            return false;
-        }
-    };
-
+    // System is initialized: track the frame.
     bool ok{false};
     if(state_ == OK)
     {
         // Local Mapping might have changed some MapPoints tracked in last frame
         check_replaced_in_last_frame();
-        ok = run_stage([this] { return track_reference_keyframe(); });
+        ok = run_tracking_stage([this] { return track_reference_keyframe(); });
     }
     else
         ok = relocalize();
@@ -240,7 +240,7 @@ void Tracking::Track()
 
     // If we have an initial estimation of the camera pose and matching, track the local map.
     if(ok)
-        ok = run_stage([this] { return track_local_map(); });
+        ok = run_tracking_stage([this] { return track_local_map(); });
 
 #ifdef PROFILING_EXHAUSTIVE
     ms_track_ref = stage_ms(t_lock_acquired, t_after_track_ref);
