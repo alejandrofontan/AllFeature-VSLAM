@@ -27,6 +27,7 @@ add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-overloaded-virtual>)
 set(SRCS_ALLFEATURE
         src/System.cc
         src/Tracking.cc
+        src/Tracking_aux.cc
         src/LocalMapping.cc
         src/LoopClosing.cc
         src/FeatureMatcher.cpp
