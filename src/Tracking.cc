@@ -172,6 +172,94 @@ mat4f Tracking::GrabImageMonocular(Image &im, const double &timestamp)
     return current_frame_.Tcw;
 }
 
+namespace {
+// Stage timing and slow-frame reporting for Track() (hiccup diagnosis; report
+// threshold ~3 frame periods at 20 fps). All PROFILING_EXHAUSTIVE conditioning
+// lives here so Track() itself reads as plain calls that compile to no-ops
+// when profiling is off.
+struct TrackProfiler
+{
+#ifdef PROFILING_EXHAUSTIVE
+    static constexpr double SLOW_FRAME_WARN_MS = 150.0;
+    using Clock = std::chrono::steady_clock;
+    static double ms(Clock::time_point a, Clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    }
+    Clock::time_point t_start{Clock::now()};
+    Clock::time_point t_lock{}, t_track_ref{}, t_wait_start{};
+    double ms_lock_wait{0.0}, ms_track_ref{0.0}, ms_local_map{0.0}, ms_emergency_wait{0.0};
+#endif
+
+    void lock_acquired() {
+#ifdef PROFILING_EXHAUSTIVE
+        t_lock = Clock::now();
+        ms_lock_wait = ms(t_start, t_lock);
+#endif
+    }
+
+    void track_ref_done() {
+#ifdef PROFILING_EXHAUSTIVE
+        t_track_ref = Clock::now();
+#endif
+    }
+
+    void local_map_done([[maybe_unused]] std::map<int, int>& local_map_times) {
+#ifdef PROFILING_EXHAUSTIVE
+        ms_track_ref = ms(t_lock, t_track_ref);
+        ms_local_map = ms(t_track_ref, Clock::now());
+        local_map_times[int(ms_local_map)]++;
+#endif
+    }
+
+    void emergency_wait_begin() {
+#ifdef PROFILING_EXHAUSTIVE
+        t_wait_start = Clock::now();
+#endif
+    }
+
+    void emergency_wait_end() {
+#ifdef PROFILING_EXHAUSTIVE
+        ms_emergency_wait = ms(t_wait_start, Clock::now());
+#endif
+    }
+
+    // Whenever this frame stalled visibly, say where the time went. "other"
+    // covers keyframe decision/creation, drawer updates, and pose bookkeeping.
+    void report([[maybe_unused]] FrameId frame_id) {
+#ifdef PROFILING_EXHAUSTIVE
+        const double ms_total = ms(t_start, Clock::now());
+        if (ms_total > SLOW_FRAME_WARN_MS)
+        {
+            AF_WARN("Track: slow frame, " << int(ms_total) << " ms"
+                    << " (mapMutexWait=" << int(ms_lock_wait)
+                    << ", trackRef=" << int(ms_track_ref)
+                    << ", localMap=" << int(ms_local_map)
+                    << ", emergencyWait=" << int(ms_emergency_wait)
+                    << ", other=" << int(ms_total - ms_lock_wait - ms_track_ref - ms_local_map - ms_emergency_wait)
+                    << ") | frame=" << frame_id);
+        }
+#endif
+    }
+};
+} // namespace
+
+// Low-rate heartbeat so post-mortems can see the inlier/map trend leading
+// into a tracking loss, not just the loss line itself.
+void Tracking::log_heartbeat()
+{
+#ifdef PROFILING_EXHAUSTIVE
+    constexpr int HEARTBEAT_PERIOD_FRAMES = 100;
+    if(current_frame_.frame_id % HEARTBEAT_PERIOD_FRAMES != 0)
+        return;
+    AF_INFO("Track heartbeat | frame=" << current_frame_.frame_id
+            << " inliers=" << num_inlier_matches_
+            << " localPts=" << local_points_.size()
+            << " KFs=" << map_->keyframes_in_map()
+            << " mapPts=" << map_->map_points_in_map());
+    std::cout.flush(); // stdout is fully buffered under the runner's redirect
+#endif
+}
+
 bool Tracking::run_tracking_stage(const std::function<bool()>& stage)
 {
     try {
@@ -191,27 +279,11 @@ void Tracking::Track()
 
     last_processed_state_ = state_;
 
-#ifdef PROFILING_EXHAUSTIVE
-    // Diagnostics cadence/thresholds (heartbeat period; visible-stall report ~3 frame periods at 20 fps)
-    constexpr int HEARTBEAT_PERIOD_FRAMES = 100;
-    constexpr double SLOW_FRAME_WARN_MS = 150.0;
-
-    // Stage timing: report where the time went whenever a frame stalls visibly (hiccup diagnosis).
-    using StageClock = std::chrono::steady_clock;
-    const auto stage_ms = [](StageClock::time_point a, StageClock::time_point b) {
-        return std::chrono::duration<double, std::milli>(b - a).count();
-    };
-    const auto t_track_start = StageClock::now();
-#endif
+    TrackProfiler profiler{};
 
     // Get Map Mutex -> Map cannot be changed
     unique_lock<mutex> lock(map_->mMutexMapUpdate);
-
-#ifdef PROFILING_EXHAUSTIVE
-    const auto t_lock_acquired = StageClock::now();
-    const double ms_lock_wait = stage_ms(t_track_start, t_lock_acquired);
-    double ms_track_ref = 0.0, ms_local_map = 0.0, ms_emergency_wait = 0.0;
-#endif
+    profiler.lock_acquired();
 
     // No map yet: the frame goes to two-view initialization, which finishes the
     // frame itself (drawer update, first trajectory entry once a map exists).
@@ -233,20 +305,12 @@ void Tracking::Track()
         ok = relocalize();
 
     current_frame_.ref_keyframe = ref_keyframe_;
-
-#ifdef PROFILING_EXHAUSTIVE
-    const auto t_after_track_ref = StageClock::now();
-#endif
+    profiler.track_ref_done();
 
     // If we have an initial estimation of the camera pose and matching, track the local map.
     if(ok)
         ok = run_tracking_stage([this] { return track_local_map(); });
-
-#ifdef PROFILING_EXHAUSTIVE
-    ms_track_ref = stage_ms(t_lock_acquired, t_after_track_ref);
-    ms_local_map = stage_ms(t_after_track_ref, StageClock::now());
-    local_map_times[int(ms_local_map)]++;
-#endif
+    profiler.local_map_done(local_map_times);
 
     state_ = ok ? OK : LOST;
 
@@ -257,20 +321,7 @@ void Tracking::Track()
     if(ok)
     {
         ++num_tracked_frames_;
-
-#ifdef PROFILING_EXHAUSTIVE
-        // Low-rate heartbeat so post-mortems can see the inlier/map trend leading
-        // into a tracking loss, not just the loss line itself.
-        if(current_frame_.frame_id % HEARTBEAT_PERIOD_FRAMES == 0)
-        {
-            AF_INFO("Track heartbeat | frame=" << current_frame_.frame_id
-                    << " inliers=" << num_inlier_matches_
-                    << " localPts=" << local_points_.size()
-                    << " KFs=" << map_->keyframes_in_map()
-                    << " mapPts=" << map_->map_points_in_map());
-            std::cout.flush(); // stdout is fully buffered under the runner's redirect
-        }
-#endif
+        log_heartbeat();
 
         map_drawer_->set_current_camera_pose(current_frame_.Tcw);
 
@@ -326,33 +377,15 @@ void Tracking::Track()
     // wait shows up as emergencyWait in the slow-frame report below).
     if (emergency_keyframe_)
     {
-#ifdef PROFILING_EXHAUSTIVE
-        const auto t_wait_start = StageClock::now();
-#endif
+        profiler.emergency_wait_begin();
         lock.unlock();
         while(!local_mapper_->accepts_keyframes())
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         emergency_keyframe_ = false;
-#ifdef PROFILING_EXHAUSTIVE
-        ms_emergency_wait = stage_ms(t_wait_start, StageClock::now());
-#endif
+        profiler.emergency_wait_end();
     }
 
-#ifdef PROFILING_EXHAUSTIVE
-    // Hiccup diagnosis: whenever this frame stalled visibly, say where the time went.
-    // "other" covers keyframe decision/creation, drawer updates, and pose bookkeeping.
-    const double ms_total = stage_ms(t_track_start, StageClock::now());
-    if (ms_total > SLOW_FRAME_WARN_MS)
-    {
-        AF_WARN("Track: slow frame, " << int(ms_total) << " ms"
-                << " (mapMutexWait=" << int(ms_lock_wait)
-                << ", trackRef=" << int(ms_track_ref)
-                << ", localMap=" << int(ms_local_map)
-                << ", emergencyWait=" << int(ms_emergency_wait)
-                << ", other=" << int(ms_total - ms_lock_wait - ms_track_ref - ms_local_map - ms_emergency_wait)
-                << ") | frame=" << current_frame_.frame_id);
-    }
-#endif
+    profiler.report(current_frame_.frame_id);
 }
 
 void Tracking::store_trajectory_entry()

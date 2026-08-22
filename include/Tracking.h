@@ -176,6 +176,10 @@ protected:
     // records why for the post-loss diagnostics.
     bool run_tracking_stage(const std::function<bool()>& stage);
 
+    // Low-rate tracking-stats heartbeat for post-mortems (PROFILING_EXHAUSTIVE
+    // builds only; compiles to a no-op otherwise).
+    void log_heartbeat();
+
     // Append this frame's pose (relative to its reference keyframe) to the
     // trajectory-recovery lists; repeats the previous entry when the frame has
     // no valid pose (tracking lost).
