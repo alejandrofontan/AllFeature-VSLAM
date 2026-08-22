@@ -58,19 +58,17 @@ Tracking::Tracking(shared_ptr<Vocabulary> vocabulary,
                    shared_ptr<Map> map, shared_ptr<KeyFrameDatabase> pKFDB,
                    const string &strCalibrationPath, const string &strSettingPath,
                    const std::map<FeatureType, string>& feature_settings_yaml_file,
-                   const int sensor,
                    const vector<FeatureType>& featureTypes,
                    const bool fix_image_size):
-    state_(NO_IMAGES_YET), mSensor(sensor), feature_types_(featureTypes), mbVO(false), vocabulary(vocabulary),
+    state_(NO_IMAGES_YET), feature_types_(featureTypes), mbVO(false), vocabulary(vocabulary),
     keyframe_db_(pKFDB),
-    frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), lastRelocFrameId(0), fix_image_size_(fix_image_size)
+    frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), last_reloc_frame_id_(0), fix_image_size_(fix_image_size)
 {
     // Load camera parameters from settings yaml file
     Tracking::loadCameraParameters(strCalibrationPath, strSettingPath);
 
-    // Max/Min Frames to insert keyframes and to check relocalisation
-    minFrames = 0;
-    maxFrames = size_t(fps);
+    // Frame window for the post-relocalization embargo/strictness (~1 s at the camera rate)
+    max_frames_ = size_t(fps);
 
     // Load feature parameters from settings yaml file
     for (auto& ft: featureTypes){
@@ -557,55 +555,40 @@ bool Tracking::track_reference_keyframe()
 
 bool Tracking::track_local_map()
 {
-
-    // We have an estimation of the camera pose and some map points tracked in the frame.
-    // We retrieve the local map and try to find matches to points in the local map.
-    UpdateLocalMap();
-    SearchLocalPoints();
-
-    // Optimize Pose
+    // We have a pose estimate and some map points tracked in the frame: retrieve
+    // the local map, match its points into the frame, and refine the pose.
+    update_local_map();
+    search_local_points();
     Optimizer::PoseOptimization(&current_frame_);
-    num_inlier_matches_ = 0;
 
-    // Update MapPoints Statistics
-    for (auto& [ft, pts] : current_frame_.pts) {
+    // Found-ratio statistics: every non-outlier match counts as "found"
+    // (feeds MapPointCulling's found/visible ratio).
+    for (auto& [ft, pts] : current_frame_.pts)
         for(size_t i = 0; i < pts.size(); i++)
-        {
-            if(current_frame_.pts.at(ft)[i])
-            {
-                if(!current_frame_.outliers.at(ft)[i])
-                {
-                    current_frame_.pts.at(ft)[i]->IncreaseFound();
+            if(pts[i] && !current_frame_.outliers.at(ft)[i])
+                pts[i]->IncreaseFound();
 
-                    if(current_frame_.pts.at(ft)[i]->number_of_observations() > 0)
-                        num_inlier_matches_++;
+    num_inlier_matches_ = current_frame_.count_inlier_map_points();
 
-                }
-                else if(mSensor==System::STEREO)
-                    current_frame_.pts.at(ft)[i] = static_cast<Pt>(nullptr);
-
-            }
-        }
-    }
-
-    // Decide if the tracking was succesful
-    // More restrictive if there was a relocalization recently
-    if(current_frame_.frame_id < lastRelocFrameId + maxFrames && num_inlier_matches_ < minMatches_trackLocalMap_high)
+    // Decide if tracking succeeded — more restrictive shortly after a relocalization
+    if(current_frame_.frame_id < last_reloc_frame_id_ + max_frames_
+       && num_inlier_matches_ < TRACK_LOCAL_MAP_MIN_INLIERS_HIGH)
     {
         std::ostringstream reason;
-        reason << "track_local_map: insufficient inliers shortly after relocalization (num_inlier_matches_="
-               << num_inlier_matches_ << " < " << minMatches_trackLocalMap_high << ")"
+        reason << "track_local_map: insufficient inliers shortly after relocalization (inliers="
+               << num_inlier_matches_ << " < " << TRACK_LOCAL_MAP_MIN_INLIERS_HIGH << ")"
                << " | frame=" << current_frame_.frame_id
-               << " framesSinceReloc=" << (current_frame_.frame_id - lastRelocFrameId) << " maxFrames=" << maxFrames;
+               << " framesSinceReloc=" << (current_frame_.frame_id - last_reloc_frame_id_)
+               << " max_frames_=" << max_frames_;
         throw TrackingLostException(reason.str());
     }
 
-    if(num_inlier_matches_ < minMatches_trackLocalMap_low)
+    if(num_inlier_matches_ < TRACK_LOCAL_MAP_MIN_INLIERS_LOW)
     {
         std::ostringstream reason;
-        reason << "track_local_map: insufficient inliers against local map (num_inlier_matches_="
-               << num_inlier_matches_ << " < " << minMatches_trackLocalMap_low << ")"
-               << " | frame=" << current_frame_.frame_id << " local_points_=" << local_points_.size();
+        reason << "track_local_map: insufficient inliers against local map (inliers="
+               << num_inlier_matches_ << " < " << TRACK_LOCAL_MAP_MIN_INLIERS_LOW << ")"
+               << " | frame=" << current_frame_.frame_id << " localPts=" << local_points_.size();
         throw TrackingLostException(reason.str());
     }
 
@@ -658,8 +641,8 @@ bool Tracking::track_local_map()
         // threshold): at driving speed the full embargo freezes the reference keyframe for
         // ~a second of travel, decaying its matches until tracking is lost AGAIN right after
         // a successful relocalization (observed echo losses 20-22 frames after reloc; #9).
-        if((current_frame_.frame_id < lastRelocFrameId + maxFrames) && (numKeyframesInMap > maxFrames)
-           && num_inlier_matches_ < 2 * minMatches_trackLocalMap_high)
+        if((current_frame_.frame_id < last_reloc_frame_id_ + max_frames_) && (numKeyframesInMap > max_frames_)
+           && num_inlier_matches_ < 2 * TRACK_LOCAL_MAP_MIN_INLIERS_HIGH)
             return false;
 
         // Tracked MapPoints in the reference keyframe
@@ -766,7 +749,7 @@ bool Tracking::track_local_map()
         last_keyframe_ = keyframe;
     }
 
-    void Tracking::SearchLocalPoints()
+    void Tracking::search_local_points()
     {
         // Do not search map points already matched
         for (const auto& [ft, N] : current_frame_.N) {
@@ -801,7 +784,7 @@ bool Tracking::track_local_map()
         }
     }
 
-    void Tracking::UpdateLocalMap()
+    void Tracking::update_local_map()
     {
         // This is for visualization
         map_->set_reference_map_points(local_points_);
@@ -1093,7 +1076,7 @@ bool Tracking::relocalize()
     }
     else
     {
-        lastRelocFrameId = current_frame_.frame_id;
+        last_reloc_frame_id_ = current_frame_.frame_id;
         return true;
     }
 

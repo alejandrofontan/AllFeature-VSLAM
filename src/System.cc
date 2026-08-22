@@ -166,7 +166,7 @@ System::System(const string &vocabularyFolder,
                              mpMap, mpKeyFrameDatabase,
                              strCalibrationFile, strSettingsFile,
                              feature_settings_yaml_file,
-                             mSensor, featureTypes, fixImageSize);
+                             featureTypes, fixImageSize);
 
     //Initialize the Local Mapping thread and launch
     localMapper = make_shared<LocalMapping>(mpMap, mSensor==MONOCULAR, featureTypes, tracker->get_image_width(), tracker->get_image_height());

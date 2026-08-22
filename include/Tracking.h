@@ -80,7 +80,6 @@ public:
              shared_ptr<KeyFrameDatabase> pKFDB,
              const string &strCalibrationPath, const string &strSettingPath,
              const std::map<FeatureType, string>& feature_settings_yaml_file,
-             const int sensor,
              const vector<FeatureType>& feature_types,
              const bool fix_image_size = false);
 
@@ -114,9 +113,6 @@ public:
 
     eTrackingState state_;
     eTrackingState last_processed_state_;
-
-    // Input sensor
-    int mSensor;
 
     // Current Frame
     Frame current_frame_;
@@ -198,12 +194,12 @@ protected:
 
     bool relocalize();
 
-    void UpdateLocalMap();
+    void update_local_map();
     void UpdateLocalPoints();
     void UpdateLocalKeyFrames();
 
     bool track_local_map();
-    void SearchLocalPoints();
+    void search_local_points();
 
     bool need_new_keyframe();
     void create_new_keyframe();
@@ -261,8 +257,7 @@ protected:
     int image_height_{};
 
     // New KeyFrame rules (according to fps)
-    size_t minFrames;
-    size_t maxFrames;
+    size_t max_frames_;
     float fps;
 
     // Threshold close/far points
@@ -288,7 +283,7 @@ protected:
     Keyframe last_keyframe_;
     Frame last_frame_;
     KeyframeId last_keyframe_id_;
-    FrameId lastRelocFrameId;
+    FrameId last_reloc_frame_id_;
 
     //Color order (true RGB, false BGR, ignored if grayscale)
     bool is_rgb_{true};
@@ -327,8 +322,8 @@ protected:
     static constexpr int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW{10};
 
     // track_local_map()
-    const int minMatches_trackLocalMap_high{50};
-    const int minMatches_trackLocalMap_low{30};
+    static constexpr int TRACK_LOCAL_MAP_MIN_INLIERS_HIGH{50};
+    static constexpr int TRACK_LOCAL_MAP_MIN_INLIERS_LOW{30};
 
     // need_new_keyframe()
     // Stationarity gate: median frame-to-frame flow (px) below which no keyframe is
@@ -352,7 +347,7 @@ protected:
     // create_new_keyframe()
     const int minNumPoints_createNewKey{100};
 
-    // SearchLocalPoints()
+    // search_local_points()
     const int idSum{2};
 
     // relocalize()
