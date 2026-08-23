@@ -142,17 +142,9 @@ public:
     static TrackingParameters params;
     static void LoadParameters(const cv::FileStorage &fSettings);
 
-    // Tracking states
-    enum eTrackingState{
-        SYSTEM_NOT_READY=-1,
-        NO_IMAGES_YET=0,
-        NOT_INITIALIZED=1,
-        OK=2,
-        LOST=3
-    };
-
-    eTrackingState state_{NO_IMAGES_YET};
-    eTrackingState last_processed_state_;
+    // Tracking state (TrackingState lives in Types.h)
+    TrackingState state_{TrackingState::NO_IMAGES_YET};
+    TrackingState last_processed_state_{TrackingState::NO_IMAGES_YET};
 
     // Current Frame
     Frame current_frame_;

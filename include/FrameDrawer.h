@@ -50,7 +50,7 @@ public:
 
 protected:
 
-    void DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText);
+    void DrawTextInfo(cv::Mat &im, TrackingState nState, cv::Mat &imText);
 
     // Info of the frame to be drawn
     cv::Mat mIm;
@@ -62,7 +62,7 @@ protected:
     int mnTracked, mnTrackedVO;
     std::map<FeatureType, vector<cv::KeyPoint>> mvIniKeys;
     std::map<FeatureType, std::vector<int>> matches_per_feature_;
-    int mState;
+    TrackingState mState;
 
     shared_ptr<Map> mpMap;
 

@@ -39,7 +39,7 @@ std::string FrameDrawer::exp_folder{};
 FrameDrawer::FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& featureTypes):
     mpMap(pMap), featureTypes(featureTypes)
 {
-    mState=Tracking::SYSTEM_NOT_READY;
+    mState=TrackingState::SYSTEM_NOT_READY;
     mIm = cv::Mat(480,640,CV_8UC3, cv::Scalar(0,0,0));
 }
 
@@ -51,19 +51,19 @@ cv::Mat FrameDrawer::DrawFrame()
     std::map<FeatureType, vector<int>> vMatches; // Initialization: correspondeces with reference keypoints
     std::map<FeatureType, vector<cv::KeyPoint>> vCurrentKeys; // KeyPoints in current frame
     std::map<FeatureType, vector<bool>> vbVO, vbMap; // Tracked MapPoints in current frame
-    int state; // Tracking state
+    TrackingState state; // Tracking state
 
     //Copy variables within scoped mutex
     {
         unique_lock<mutex> lock(mMutex);
         state=mState;
-        if(mState==Tracking::SYSTEM_NOT_READY)
-            mState=Tracking::NO_IMAGES_YET;
+        if(mState==TrackingState::SYSTEM_NOT_READY)
+            mState=TrackingState::NO_IMAGES_YET;
 
         mIm.copyTo(im);
         mMask.copyTo(mask);
 
-        if(mState==Tracking::NOT_INITIALIZED)
+        if(mState==TrackingState::NOT_INITIALIZED)
         {
             vCurrentKeys = mvCurrentKeys;
             vIniKeys = mvIniKeys;
@@ -71,13 +71,13 @@ cv::Mat FrameDrawer::DrawFrame()
                 vMatches[ft] = matches;
             }
         }
-        else if(mState==Tracking::OK)
+        else if(mState==TrackingState::OK)
         {
             vCurrentKeys = mvCurrentKeys;
             vbVO = mvbVO;
             vbMap = mvbMap;
         }
-        else if(mState==Tracking::LOST)
+        else if(mState==TrackingState::LOST)
         {
             vCurrentKeys = mvCurrentKeys;
         }
@@ -96,7 +96,7 @@ cv::Mat FrameDrawer::DrawFrame()
     }
 
     //Draw
-    if(state==Tracking::NOT_INITIALIZED) //INITIALIZING
+    if(state==TrackingState::NOT_INITIALIZED) //INITIALIZING
     {
 
         for (auto const& [featType, N_] : N) {
@@ -111,7 +111,7 @@ cv::Mat FrameDrawer::DrawFrame()
             }
         }
     }
-    else if(state==Tracking::OK) //TRACKING
+    else if(state==TrackingState::OK) //TRACKING
     {
         mnTracked=0;
         mnTrackedVO=0;
@@ -167,14 +167,14 @@ cv::Mat FrameDrawer::DrawFrame()
 }
 
 
-void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
+void FrameDrawer::DrawTextInfo(cv::Mat &im, TrackingState nState, cv::Mat &imText)
 {
     stringstream s;
-    if(nState==Tracking::NO_IMAGES_YET)
+    if(nState==TrackingState::NO_IMAGES_YET)
         s << " WAITING FOR IMAGES";
-    else if(nState==Tracking::NOT_INITIALIZED)
+    else if(nState==TrackingState::NOT_INITIALIZED)
         s << " TRYING TO INITIALIZE ";
-    else if(nState==Tracking::OK)
+    else if(nState==TrackingState::OK)
     {
         s << "SLAM MODE |  ";
 
@@ -184,11 +184,11 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
         if(mnTrackedVO>0)
             s << ", + VO matches: " << mnTrackedVO;
     }
-    else if(nState==Tracking::LOST)
+    else if(nState==TrackingState::LOST)
     {
         s << " TRACK LOST. TRYING TO RELOCALIZE ";
     }
-    else if(nState==Tracking::SYSTEM_NOT_READY)
+    else if(nState==TrackingState::SYSTEM_NOT_READY)
     {
         s << " LOADING ORB VOCABULARY. PLEASE WAIT...";
     }
@@ -218,12 +218,12 @@ void FrameDrawer::update(Tracking *pTracker)
     }
 
 
-    if(pTracker->last_processed_state_==Tracking::NOT_INITIALIZED)
+    if(pTracker->last_processed_state_==TrackingState::NOT_INITIALIZED)
     {
         mvIniKeys = pTracker->initial_frame_.mvKeys;
         matches_per_feature_ = pTracker->matches_per_feature_;
     }
-    else if(pTracker->last_processed_state_==Tracking::OK)
+    else if(pTracker->last_processed_state_==TrackingState::OK)
     {
         for (auto const& [featType, N_] : N) {
             for(int i = 0; i < N_; i++)
@@ -242,7 +242,7 @@ void FrameDrawer::update(Tracking *pTracker)
             }
         }
     }
-    mState=static_cast<int>(pTracker->last_processed_state_);
+    mState = pTracker->last_processed_state_;
 }
 
 } //namespace ORB_SLAM

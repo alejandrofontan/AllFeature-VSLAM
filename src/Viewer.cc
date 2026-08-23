@@ -96,16 +96,16 @@ Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
 
 namespace
 {
-std::string trackingStateName(const int state)
+std::string trackingStateName(const TrackingState state)
 {
     switch(state)
     {
-        case Tracking::SYSTEM_NOT_READY: return "NOT READY";
-        case Tracking::NO_IMAGES_YET:    return "WAITING";
-        case Tracking::NOT_INITIALIZED:  return "INITIALIZING";
-        case Tracking::OK:               return "TRACKING";
-        case Tracking::LOST:             return "LOST";
-        default:                         return "?";
+        case TrackingState::SYSTEM_NOT_READY: return "NOT READY";
+        case TrackingState::NO_IMAGES_YET:    return "WAITING";
+        case TrackingState::NOT_INITIALIZED:  return "INITIALIZING";
+        case TrackingState::OK:               return "TRACKING";
+        case TrackingState::LOST:             return "LOST";
+        default:                              return "?";
     }
 }
 }

@@ -118,13 +118,13 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     profiler.resize_done(resize_times_);
 
     // Create the frame (feature extraction); initialization uses the denser extractor set
-    const auto& extractors = (state_ == NOT_INITIALIZED || state_ == NO_IMAGES_YET)
+    const auto& extractors = (state_ == TrackingState::NOT_INITIALIZED || state_ == TrackingState::NO_IMAGES_YET)
                            ? init_feature_extractor_ : feature_extractor_left_;
     current_frame_ = Frame(im, timestamp, extractors, vocabulary_, mK, mDistCoef, mbf, mThDepth);
     profiler.frame_created(frame_times_);
 
     track();
-    profiler.tracking_done(tracking_times_, state_ == OK);
+    profiler.tracking_done(tracking_times_, state_ == TrackingState::OK);
 
     // Median excludes the current frame (updated below), matching the original order.
     if(viewer_)
@@ -132,7 +132,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
 
     log_profile();
 
-    if(state_ == OK)
+    if(state_ == TrackingState::OK)
         grab_image_times_[profiler.total_ms()]++;
 
     return current_frame_.Tcw;
@@ -140,8 +140,8 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
 
 void Tracking::track()
 {
-    if(state_ == NO_IMAGES_YET)
-        state_ = NOT_INITIALIZED;
+    if(state_ == TrackingState::NO_IMAGES_YET)
+        state_ = TrackingState::NOT_INITIALIZED;
 
     last_processed_state_ = state_;
 
@@ -153,7 +153,7 @@ void Tracking::track()
 
     // No map yet: the frame goes to two-view initialization, which finishes the
     // frame itself (drawer update, first stored relative pose once a map exists).
-    if(state_ == NOT_INITIALIZED)
+    if(state_ == TrackingState::NOT_INITIALIZED)
     {
         monocular_initialization();
         return;
@@ -161,7 +161,7 @@ void Tracking::track()
 
     // System is initialized: track the frame.
     bool ok{false};
-    if(state_ == OK)
+    if(state_ == TrackingState::OK)
     {
         // Local Mapping might have changed some MapPoints tracked in last frame
         check_replaced_in_last_frame();
@@ -178,7 +178,7 @@ void Tracking::track()
         ok = run_tracking_stage([this] { return track_local_map(); });
     profiler.local_map_done(local_map_times_);
 
-    state_ = ok ? OK : LOST;
+    state_ = ok ? TrackingState::OK : TrackingState::LOST;
 
     frame_drawer_->update(this);
 
@@ -237,7 +237,7 @@ void Tracking::monocular_initialization()
 {
     attempt_monocular_initialization();
     frame_drawer_->update(this);
-    if(state_ == OK)
+    if(state_ == TrackingState::OK)
         store_relative_pose();
 }
 
@@ -448,7 +448,7 @@ void Tracking::create_initial_map_monocular()
     map_drawer_->set_current_camera_pose(keyframe_cur->get_pose());
     map_->keyframe_origins_.push_back(keyframe_ini);
 
-    state_ = OK;
+    state_ = TrackingState::OK;
 }
 
 void Tracking::check_replaced_in_last_frame()
@@ -1067,7 +1067,7 @@ void Tracking::reset()
 
     KeyFrame::nNextId = 0;
     Frame::nNextId = 0;
-    state_ = NO_IMAGES_YET;
+    state_ = TrackingState::NO_IMAGES_YET;
     initializer_ = nullptr;
 
     // Per-run tracking state: frame ids restart at 0, so id-anchored state from

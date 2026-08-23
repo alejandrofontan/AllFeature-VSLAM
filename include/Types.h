@@ -56,6 +56,16 @@ typedef Eigen::Matrix<float,2,1> vec2f;
 typedef Eigen::Matrix<float,3,4> mat34f;
 
 
+// Tracking pipeline state (owned by AF_VSLAM::Tracking; defined here so the
+// viewer/drawer classes can hold it despite the Tracking<->FrameDrawer include cycle)
+enum class TrackingState : int {
+    SYSTEM_NOT_READY = -1,
+    NO_IMAGES_YET = 0,
+    NOT_INITIALIZED = 1,
+    OK = 2,
+    LOST = 3
+};
+
 enum VerbosityLevel{
     NONE = 0,
     LOW = 1,
