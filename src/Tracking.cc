@@ -65,15 +65,15 @@ Tracking::Tracking(shared_ptr<Vocabulary> vocabulary,
     frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), last_reloc_frame_id_(0), fix_image_size_(fix_image_size)
 {
     // Load camera parameters from settings yaml file
-    Tracking::loadCameraParameters(strCalibrationPath, strSettingPath);
+    loadCameraParameters(strCalibrationPath, strSettingPath);
 
     // Frame window for the post-relocalization embargo/strictness (~1 s at the camera rate)
     max_frames_ = size_t(fps);
 
     // Load feature parameters from settings yaml file
     for (auto& ft: featureTypes){
-        feature_extractor_left_[ft] = Tracking::getFeatureExtractor(1, feature_settings_yaml_file.at(ft), ft);
-        init_feature_extractor_[ft] = Tracking::getFeatureExtractor(scaleNumFeaturesMonocular , feature_settings_yaml_file.at(ft), ft);
+        feature_extractor_left_[ft] = get_feature_extractor(1, feature_settings_yaml_file.at(ft), ft);
+        init_feature_extractor_[ft] = get_feature_extractor(scaleNumFeaturesMonocular, feature_settings_yaml_file.at(ft), ft);
     }
 
     matcher_ = std::make_shared<FeatureMatcher>(image_width_, image_height_, featureTypes, "Tracking");
@@ -1220,34 +1220,6 @@ void Tracking::loadCameraParameters(const string &strCalibrationPath, const stri
     if(is_rgb_)        AF_CONFIG_FIELD("color order:        ", "RGB (ignored if grayscale)");
     else            AF_CONFIG_FIELD("color order:        ", "BGR (ignored if grayscale)");
     AF_CONFIG_END();
-}
-
-shared_ptr<FeatureExtractor> Tracking::getFeatureExtractor(const int& scaleNumFeaturesMonocular_,
-                                                           const string &featureSettingsYamlFile,
-                                                            const FeatureType& featureType){
-
-    shared_ptr<FeatureExtractorSettings> extractorSettings = make_shared<FeatureExtractorSettings>(featureType, featureSettingsYamlFile);
-    extractorSettings->maxNumFeatures *= scaleNumFeaturesMonocular_;
-
-    const AF_VSLAM::Feature& ft = get_feature(featureType);
-    return ft.createExtractor(extractorSettings);
-}
-
-void Tracking::getGrayImage(cv::Mat& im , const bool& rgb){
-    if(im.channels() == 3)
-    {
-        if(rgb)
-            cvtColor(im,im,CV_RGB2GRAY);
-        else
-            cvtColor(im,im,CV_BGR2GRAY);
-    }
-    else if(im.channels() == 4)
-    {
-        if(rgb)
-            cvtColor(im,im,CV_RGBA2GRAY);
-        else
-            cvtColor(im,im,CV_BGRA2GRAY);
-    }
 }
 
 } //namespace ORB_SLAM

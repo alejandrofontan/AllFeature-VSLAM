@@ -206,10 +206,11 @@ protected:
     float MedianFlowFromLastFrame() const;
 
     void loadCameraParameters(const string &strCalibrationPath, const string &strSettingPath);
-    shared_ptr<FeatureExtractor> getFeatureExtractor(const int& scaleNumFeaturesMonocular_,
-                                                     const string &featureSettingsYamlFile,
-                                                     const FeatureType& featureType);
-    static void getGrayImage(cv::Mat& im, const bool& rgb);
+    // Build a feature extractor from the per-feature settings yaml, with its
+    // maxNumFeatures scaled by scale_num_features (initialization uses a denser set).
+    static std::shared_ptr<FeatureExtractor> get_feature_extractor(int scale_num_features,
+                                                                   const std::string& feature_settings_yaml,
+                                                                   FeatureType feature_type);
 
     // In case of performing only localization, this flag is true when there are no matches to
     // points in the map. Still tracking will continue if there are enough matches with temporal points.

@@ -5,6 +5,7 @@
 #include "Tracking.h"
 
 #include <fstream>
+#include "FeatureFactory.h"
 #include "FrameDrawer.h"
 
 #include <iostream>
@@ -85,6 +86,15 @@ void Tracking::log_profile()
     AF_PROFILE_FIELD(grab_image_times_, "Grab Image");
     AF_PROFILE_END();
 #endif
+}
+
+std::shared_ptr<FeatureExtractor> Tracking::get_feature_extractor(const int scale_num_features,
+                                                                  const std::string& feature_settings_yaml,
+                                                                  const FeatureType feature_type)
+{
+    auto settings = std::make_shared<FeatureExtractorSettings>(feature_type, feature_settings_yaml);
+    settings->maxNumFeatures *= scale_num_features;
+    return get_feature(feature_type).createExtractor(settings);
 }
 
 bool Tracking::run_tracking_stage(const std::function<bool()>& stage)
