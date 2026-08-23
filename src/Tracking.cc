@@ -731,159 +731,159 @@ void Tracking::search_local_points()
         matcher_->match_map_points_to_frame(current_frame_, local_points_);
 }
 
-    float Tracking::MedianFlowFromLastFrame() const
-    {
-        // Collect pixel positions of last frame's map points, then measure how far the
-        // same points moved in the current frame. Scale-free (pure 2D), cheap (two
-        // linear passes), and needs no extra bookkeeping in the matchers.
-        std::unordered_map<const MapPoint*, cv::Point2f> lastPositions;
-        for (const auto& [ft, ptsFt] : last_frame_.pts) {
-            const auto& kpsFt = last_frame_.keypoints.at(ft);
-            for (size_t i = 0; i < ptsFt.size(); i++)
-                if (ptsFt[i])
-                    lastPositions[ptsFt[i].get()] = kpsFt[i].pt;
-        }
+bool Tracking::need_new_keyframe()
+{
+    // If Local Mapping is freezed by a Loop Closure do not insert keyframes
+    if(local_mapper_->isStopped() || local_mapper_->stopRequested())
+        return false;
 
-        std::vector<float> flows;
-        for (const auto& [ft, ptsFt] : current_frame_.pts) {
-            const auto& kpsFt = current_frame_.keypoints.at(ft);
-            for (size_t i = 0; i < ptsFt.size(); i++) {
-                if (!ptsFt[i])
-                    continue;
-                auto it = lastPositions.find(ptsFt[i].get());
-                if (it != lastPositions.end())
-                    flows.push_back(static_cast<float>(cv::norm(kpsFt[i].pt - it->second)));
-            }
-        }
+    const size_t numKeyframesInMap = map_->keyframes_in_map();
 
-        if (flows.size() < static_cast<size_t>(minSharedPtsForFlow))
-            return -1.0f;
+    // Do not insert keyframes if not enough frames have passed from last relocalisation —
+    // unless tracking is already demonstrably strong again (>=2x the track_local_map "high"
+    // threshold): at driving speed the full embargo freezes the reference keyframe for
+    // ~a second of travel, decaying its matches until tracking is lost AGAIN right after
+    // a successful relocalization (observed echo losses 20-22 frames after reloc; #9).
+    if((current_frame_.frame_id < last_reloc_frame_id_ + max_frames_) && (numKeyframesInMap > max_frames_)
+       && num_inlier_matches_ < 2 * TRACK_LOCAL_MAP_MIN_INLIERS_HIGH)
+        return false;
 
-        auto mid = flows.begin() + flows.size() / 2;
-        std::nth_element(flows.begin(), mid, flows.end());
-        return *mid;
+    // Tracked MapPoints in the reference keyframe
+    int nMinObs = nMinObs_high;
+    if(numKeyframesInMap <= size_t(minNKFs))
+        nMinObs = nMinObs_low;
+    int nRefMatches = ref_keyframe_->tracked_map_points(nMinObs);
+
+    // Local Mapping accept keyframes?
+    bool localMappingIdle = local_mapper_->accepts_keyframes();
+
+    // Check how many "close" points are being tracked and how many could be potentially created.
+    int nNonTrackedClose = 0;
+    int nTrackedClose= 0;
+
+    bool bNeedToInsertClose = (nTrackedClose < minTrackedClose) && (nNonTrackedClose > minNonTrackedClose);
+
+    // Thresholds
+    const bool c1 = ((num_inlier_matches_ < nRefMatches * refRatio_high_needNewKey || bNeedToInsertClose) && num_inlier_matches_ > minMatchesInliers);
+
+    bool c2{false};
+    #ifdef ALLFEATURE_EVALUATION
+    c2 = ((int( current_frame_.frame_id) % ALLFEATURE_EVALUATION) == 0);
+    #endif
+
+    bool c3{false};
+    #ifdef ALLFEATURE_MAX_KEYFRAMES
+    c3 = ((current_frame_.frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0);
+    #endif
+
+    float overlap = current_frame_.GetOverlap();
+    bool c4 = (overlap < 0.7f);
+
+    // Median inlier count over the recent tracked frames (reference for the
+    // emergency trigger below) — computed before pushing the current frame's
+    // count, so the current frame is compared against its predecessors.
+    int medianRecentInliers = -1;
+    if (recentInliersHistory.size() >= inliersHistorySize / 2) {
+        std::vector<int> history(recentInliersHistory.begin(), recentInliersHistory.end());
+        auto mid = history.begin() + history.size() / 2;
+        std::nth_element(history.begin(), mid, history.end());
+        medianRecentInliers = *mid;
     }
+    recentInliersHistory.push_back(num_inlier_matches_);
+    if (recentInliersHistory.size() > inliersHistorySize)
+        recentInliersHistory.pop_front();
 
-    bool Tracking::need_new_keyframe()
+    // Stationarity gate: a static camera adds no viewpoint information — new
+    // keyframes would only feed zero-baseline triangulation, which poisons the map
+    // with ill-conditioned points (see CLAUDE.md, Stop-Induced Keyframe Runaway
+    // Investigation). Evaluation-forced keyframes (c2/c3) bypass the gate.
+    const float medianFlow = MedianFlowFromLastFrame();
+    if (!c2 && !c3 && medianFlow >= 0.0f && medianFlow < minMedianFlow_needNewKey)
+        return false;
+
+    //if(c4)
+    if(c1 || c2 || c3 || c4)
     {
-        // If Local Mapping is freezed by a Loop Closure do not insert keyframes
-        if(local_mapper_->isStopped() || local_mapper_->stopRequested())
-            return false;
-
-        const size_t numKeyframesInMap = map_->keyframes_in_map();
-
-        // Do not insert keyframes if not enough frames have passed from last relocalisation —
-        // unless tracking is already demonstrably strong again (>=2x the track_local_map "high"
-        // threshold): at driving speed the full embargo freezes the reference keyframe for
-        // ~a second of travel, decaying its matches until tracking is lost AGAIN right after
-        // a successful relocalization (observed echo losses 20-22 frames after reloc; #9).
-        if((current_frame_.frame_id < last_reloc_frame_id_ + max_frames_) && (numKeyframesInMap > max_frames_)
-           && num_inlier_matches_ < 2 * TRACK_LOCAL_MAP_MIN_INLIERS_HIGH)
-            return false;
-
-        // Tracked MapPoints in the reference keyframe
-        int nMinObs = nMinObs_high;
-        if(numKeyframesInMap <= size_t(minNKFs))
-            nMinObs = nMinObs_low;
-        int nRefMatches = ref_keyframe_->tracked_map_points(nMinObs);
-
-        // Local Mapping accept keyframes?
-        bool localMappingIdle = local_mapper_->accepts_keyframes();
-
-        // Check how many "close" points are being tracked and how many could be potentially created.
-        int nNonTrackedClose = 0;
-        int nTrackedClose= 0;
-
-        bool bNeedToInsertClose = (nTrackedClose < minTrackedClose) && (nNonTrackedClose > minNonTrackedClose);
-
-        // Thresholds
-        const bool c1 = ((num_inlier_matches_ < nRefMatches * refRatio_high_needNewKey || bNeedToInsertClose) && num_inlier_matches_ > minMatchesInliers);
-
-        bool c2{false};
-        #ifdef ALLFEATURE_EVALUATION
-        c2 = ((int( current_frame_.frame_id) % ALLFEATURE_EVALUATION) == 0);
-        #endif
-
-        bool c3{false};
-        #ifdef ALLFEATURE_MAX_KEYFRAMES
-        c3 = ((current_frame_.frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0);
-        #endif
-
-        float overlap = current_frame_.GetOverlap();
-        bool c4 = (overlap < 0.7f);
-
-        // Median inlier count over the recent tracked frames (reference for the
-        // emergency trigger below) — computed before pushing the current frame's
-        // count, so the current frame is compared against its predecessors.
-        int medianRecentInliers = -1;
-        if (recentInliersHistory.size() >= inliersHistorySize / 2) {
-            std::vector<int> history(recentInliersHistory.begin(), recentInliersHistory.end());
-            auto mid = history.begin() + history.size() / 2;
-            std::nth_element(history.begin(), mid, history.end());
-            medianRecentInliers = *mid;
-        }
-        recentInliersHistory.push_back(num_inlier_matches_);
-        if (recentInliersHistory.size() > inliersHistorySize)
-            recentInliersHistory.pop_front();
-
-        // Stationarity gate: a static camera adds no viewpoint information — new
-        // keyframes would only feed zero-baseline triangulation, which poisons the map
-        // with ill-conditioned points (see CLAUDE.md, Stop-Induced Keyframe Runaway
-        // Investigation). Evaluation-forced keyframes (c2/c3) bypass the gate.
-        const float medianFlow = MedianFlowFromLastFrame();
-        if (!c2 && !c3 && medianFlow >= 0.0f && medianFlow < minMedianFlow_needNewKey)
-            return false;
-
-        //if(c4)
-        if(c1 || c2 || c3 || c4)
+        if(localMappingIdle)
         {
-            if(localMappingIdle)
-            {
-                return true;
-            }
-            else
-            {
-                // if(c2 || c3 || c4){
-                //     std::cout << "\nEmergency keyframe triggered by evaluation condition at frame " << current_frame_.frame_id << std::endl;
-                //     emergency_keyframe_ = true;
-                //     return true;
-                // }
-                // Emergency keyframe: only on a genuine drop against the *recent frames'*
-                // own inlier level (not ref_keyframe_->tracked_map_points(), which inflates
-                // after every insertion as LocalMapping triangulates new points into the
-                // keyframe, re-arming the trigger indefinitely), and with a refire
-                // cooldown so a persistent low-inlier state can't chain insertions.
-                if(medianRecentInliers > 0
-                   && num_inlier_matches_ < 0.5f * static_cast<float>(medianRecentInliers)
-                   && current_frame_.frame_id >= lastEmergencyKFId + static_cast<FrameId>(emergencyKFCooldown)){
-                    AF_WARN("need_new_keyframe: emergency keyframe (num_inlier_matches_=" << num_inlier_matches_
-                            << " < 0.5*medianRecentInliers=" << medianRecentInliers
-                            << ", medianFlow=" << medianFlow << ") | frame=" << current_frame_.frame_id);
-                    lastEmergencyKFId = current_frame_.frame_id;
-                    emergency_keyframe_ = true;
-                    return true;
-                }
-                return false;
-            }
+            return true;
         }
         else
+        {
+            // if(c2 || c3 || c4){
+            //     std::cout << "\nEmergency keyframe triggered by evaluation condition at frame " << current_frame_.frame_id << std::endl;
+            //     emergency_keyframe_ = true;
+            //     return true;
+            // }
+            // Emergency keyframe: only on a genuine drop against the *recent frames'*
+            // own inlier level (not ref_keyframe_->tracked_map_points(), which inflates
+            // after every insertion as LocalMapping triangulates new points into the
+            // keyframe, re-arming the trigger indefinitely), and with a refire
+            // cooldown so a persistent low-inlier state can't chain insertions.
+            if(medianRecentInliers > 0
+               && num_inlier_matches_ < 0.5f * static_cast<float>(medianRecentInliers)
+               && current_frame_.frame_id >= lastEmergencyKFId + static_cast<FrameId>(emergencyKFCooldown)){
+                AF_WARN("need_new_keyframe: emergency keyframe (num_inlier_matches_=" << num_inlier_matches_
+                        << " < 0.5*medianRecentInliers=" << medianRecentInliers
+                        << ", medianFlow=" << medianFlow << ") | frame=" << current_frame_.frame_id);
+                lastEmergencyKFId = current_frame_.frame_id;
+                emergency_keyframe_ = true;
+                return true;
+            }
             return false;
+        }
+    }
+    else
+        return false;
+}
+
+void Tracking::create_new_keyframe(){
+    if(!local_mapper_->SetNotStop(true))
+        return;
+
+    Keyframe keyframe = make_shared<KeyFrame>(current_frame_,map_,keyframe_db_);
+
+    ref_keyframe_ = keyframe;
+    current_frame_.ref_keyframe = keyframe;
+
+    local_mapper_->insert_keyframe(keyframe);
+    local_mapper_->SetNotStop(false);
+    last_keyframe_id_ = current_frame_.frame_id;
+    last_keyframe_ = keyframe;
+}
+
+float Tracking::MedianFlowFromLastFrame() const
+{
+    // Collect pixel positions of last frame's map points, then measure how far the
+    // same points moved in the current frame. Scale-free (pure 2D), cheap (two
+    // linear passes), and needs no extra bookkeeping in the matchers.
+    std::unordered_map<const MapPoint*, cv::Point2f> lastPositions;
+    for (const auto& [ft, ptsFt] : last_frame_.pts) {
+        const auto& kpsFt = last_frame_.keypoints.at(ft);
+        for (size_t i = 0; i < ptsFt.size(); i++)
+            if (ptsFt[i])
+                lastPositions[ptsFt[i].get()] = kpsFt[i].pt;
     }
 
-    void Tracking::create_new_keyframe(){
-        if(!local_mapper_->SetNotStop(true))
-            return;
-
-        Keyframe keyframe = make_shared<KeyFrame>(current_frame_,map_,keyframe_db_);
-
-        ref_keyframe_ = keyframe;
-        current_frame_.ref_keyframe = keyframe;
-
-        local_mapper_->insert_keyframe(keyframe);
-        local_mapper_->SetNotStop(false);
-        last_keyframe_id_ = current_frame_.frame_id;
-        last_keyframe_ = keyframe;
+    std::vector<float> flows;
+    for (const auto& [ft, ptsFt] : current_frame_.pts) {
+        const auto& kpsFt = current_frame_.keypoints.at(ft);
+        for (size_t i = 0; i < ptsFt.size(); i++) {
+            if (!ptsFt[i])
+                continue;
+            auto it = lastPositions.find(ptsFt[i].get());
+            if (it != lastPositions.end())
+                flows.push_back(static_cast<float>(cv::norm(kpsFt[i].pt - it->second)));
+        }
     }
+
+    if (flows.size() < static_cast<size_t>(minSharedPtsForFlow))
+        return -1.0f;
+
+    auto mid = flows.begin() + flows.size() / 2;
+    std::nth_element(flows.begin(), mid, flows.end());
+    return *mid;
+}
 
 bool Tracking::relocalize()
 {
