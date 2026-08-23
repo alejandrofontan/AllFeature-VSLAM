@@ -19,34 +19,38 @@
 */
 
 
-#ifndef TRACKING_H
-#define TRACKING_H
+#ifndef AF_VSLAM_TRACKING_H
+#define AF_VSLAM_TRACKING_H
+
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <optional>
 
 #include <opencv2/core/core.hpp>
-#include <functional>
-#include <optional>
-#include <mutex>
-#include <deque>
 
-#include "Viewer.h"
+#include "FeatureExtractor.h"
+#include "FeatureMatcher.h"
+#include "FeatureVocabulary.h"
+#include "Frame.h"
 #include "FrameDrawer.h"
-#include "Map.h"
+#include "Initializer.h"
+#include "KeyFrameDatabase.h"
 #include "LocalMapping.h"
 #include "LoopClosing.h"
-#include "Frame.h"
-#include "FeatureVocabulary.h"
-#include "KeyFrameDatabase.h"
-#include "FeatureExtractor.h"
-#include "Initializer.h"
+#include "Map.h"
 #include "MapDrawer.h"
 #include "System.h"
-#include"FeatureMatcher.h"
-#include "Utils.h"
 #include "TrackingLostException.h"
+#include "Utils.h"
+#include "Viewer.h"
 
 namespace AF_VSLAM
 {
 
+// Broken by the include cycles above (Tracking <-> FrameDrawer/Viewer/LocalMapping/
+// LoopClosing/System include each other); these forward declarations keep this
+// header valid while its own include is still being processed by the peer.
 class Viewer;
 class FrameDrawer;
 class Map;
@@ -163,7 +167,7 @@ public:
 
     size_t num_tracked_frames_{2};
 
-    vector<FeatureType> feature_types_{};
+    std::vector<FeatureType> feature_types_{};
 
     int get_image_width() const {return image_width_;};
     int get_image_height() const {return image_height_;};
@@ -263,10 +267,10 @@ protected:
 
     //BoW
     std::shared_ptr<Vocabulary> vocabulary_;
-    shared_ptr<KeyFrameDatabase> keyframe_db_;
+    std::shared_ptr<KeyFrameDatabase> keyframe_db_;
 
     // Initalization (only for monocular)
-    shared_ptr<Initializer> initializer_;
+    std::shared_ptr<Initializer> initializer_;
 
     //Local Map
     Keyframe ref_keyframe_;
@@ -279,7 +283,7 @@ protected:
     std::shared_ptr<MapDrawer> map_drawer_;
 
     // Map
-    shared_ptr<Map> map_;
+    std::shared_ptr<Map> map_;
 
     //Calibration matrix
     cv::Mat mK;
@@ -345,6 +349,6 @@ protected:
 
 };
 
-} //namespace ORB_SLAM
+} // namespace AF_VSLAM
 
-#endif // TRACKING_H
+#endif // AF_VSLAM_TRACKING_H
