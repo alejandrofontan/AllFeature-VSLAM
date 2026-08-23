@@ -24,6 +24,7 @@
 
 #include <opencv2/core/core.hpp>
 #include <functional>
+#include <optional>
 #include <mutex>
 #include <deque>
 
@@ -196,9 +197,9 @@ protected:
     void create_new_keyframe();
 
     // Median pixel displacement of map points shared between current_frame_ and last_frame_.
-    // Scale-free stationarity signal for need_new_keyframe; returns -1 if too few shared
-    // points to be meaningful (gate then stays inactive).
-    float MedianFlowFromLastFrame() const;
+    // Scale-free stationarity signal for need_new_keyframe; empty if too few shared
+    // points to be meaningful (the gate then stays inactive).
+    std::optional<float> median_flow_from_last_frame() const;
 
     void loadCameraParameters(const string &strCalibrationPath, const string &strSettingPath);
     // Build a feature extractor from the per-feature settings yaml, with its

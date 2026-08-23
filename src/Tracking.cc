@@ -791,8 +791,8 @@ bool Tracking::need_new_keyframe()
     // keyframes would only feed zero-baseline triangulation, which poisons the map
     // with ill-conditioned points (see CLAUDE.md, Stop-Induced Keyframe Runaway
     // Investigation). Forced keyframes bypass the gate.
-    const float median_flow = MedianFlowFromLastFrame();
-    if (!forced && median_flow >= 0.0f && median_flow < MIN_MEDIAN_FLOW)
+    const std::optional<float> median_flow = median_flow_from_last_frame();
+    if (!forced && median_flow && *median_flow < MIN_MEDIAN_FLOW)
         return false;
 
     if(!(weak_tracking || forced || low_overlap))
@@ -812,7 +812,7 @@ bool Tracking::need_new_keyframe()
     {
         AF_WARN("need_new_keyframe: emergency keyframe (inliers=" << num_inlier_matches_
                 << " < " << EMERGENCY_INLIER_DROP_RATIO << "*medianRecentInliers=" << median_recent_inliers
-                << ", medianFlow=" << median_flow << ") | frame=" << current_frame_.frame_id);
+                << ", medianFlow=" << median_flow.value_or(-1.0f) << ") | frame=" << current_frame_.frame_id);
         last_emergency_keyframe_id_ = current_frame_.frame_id;
         emergency_keyframe_ = true;
         return true;
@@ -839,35 +839,35 @@ void Tracking::create_new_keyframe()
     last_keyframe_id_ = current_frame_.frame_id;
 }
 
-float Tracking::MedianFlowFromLastFrame() const
+std::optional<float> Tracking::median_flow_from_last_frame() const
 {
     // Collect pixel positions of last frame's map points, then measure how far the
     // same points moved in the current frame. Scale-free (pure 2D), cheap (two
     // linear passes), and needs no extra bookkeeping in the matchers.
-    std::unordered_map<const MapPoint*, cv::Point2f> lastPositions;
-    for (const auto& [ft, ptsFt] : last_frame_.pts) {
-        const auto& kpsFt = last_frame_.keypoints.at(ft);
-        for (size_t i = 0; i < ptsFt.size(); i++)
-            if (ptsFt[i])
-                lastPositions[ptsFt[i].get()] = kpsFt[i].pt;
+    std::unordered_map<const MapPoint*, cv::Point2f> last_positions;
+    for (const auto& [ft, points] : last_frame_.pts) {
+        const auto& keypoints = last_frame_.keypoints.at(ft);
+        for (size_t i = 0; i < points.size(); i++)
+            if (points[i])
+                last_positions[points[i].get()] = keypoints[i].pt;
     }
 
     std::vector<float> flows;
-    for (const auto& [ft, ptsFt] : current_frame_.pts) {
-        const auto& kpsFt = current_frame_.keypoints.at(ft);
-        for (size_t i = 0; i < ptsFt.size(); i++) {
-            if (!ptsFt[i])
+    for (const auto& [ft, points] : current_frame_.pts) {
+        const auto& keypoints = current_frame_.keypoints.at(ft);
+        for (size_t i = 0; i < points.size(); i++) {
+            if (!points[i])
                 continue;
-            auto it = lastPositions.find(ptsFt[i].get());
-            if (it != lastPositions.end())
-                flows.push_back(static_cast<float>(cv::norm(kpsFt[i].pt - it->second)));
+            const auto it = last_positions.find(points[i].get());
+            if (it != last_positions.end())
+                flows.push_back(static_cast<float>(cv::norm(keypoints[i].pt - it->second)));
         }
     }
 
     if (flows.size() < static_cast<size_t>(MIN_SHARED_POINTS_FOR_FLOW))
-        return -1.0f;
+        return std::nullopt;
 
-    auto mid = flows.begin() + flows.size() / 2;
+    const auto mid = flows.begin() + flows.size() / 2;
     std::nth_element(flows.begin(), mid, flows.end());
     return *mid;
 }
