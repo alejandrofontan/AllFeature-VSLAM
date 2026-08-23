@@ -260,7 +260,7 @@ protected:
     float mThDepth{0.0f};
 
     //Current matches in frame
-    int num_inlier_matches_;
+    int num_inlier_matches_{0};
 
     // Rolling inlier history (last INLIERS_HISTORY_SIZE tracked frames) — reference for the
     // emergency-keyframe trigger in need_new_keyframe(). Comparing against recent frames

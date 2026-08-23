@@ -1052,41 +1052,43 @@ bool Tracking::relocalize()
 
 void Tracking::reset()
 {
-
-    cout << "System Reseting" << endl;
+    // Each step logs before it runs and flushes (stdout is fully buffered under
+    // the runner's redirect), so a hang shows the last started step.
+    AF_INFO("reset: stopping viewer...");
+    std::cout.flush();
     if(viewer_)
     {
         viewer_->RequestStop();
         while(!viewer_->isStopped())
-            usleep(3000);
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
     }
 
-    // Reset Local Mapping
-    cout << "Reseting Local Mapper...";
+    AF_INFO("reset: resetting local mapping...");
+    std::cout.flush();
     local_mapper_->RequestReset();
-    cout << " done" << endl;
 
-    // Reset Loop Closing
-    cout << "Reseting Loop Closing...";
+    AF_INFO("reset: resetting loop closing...");
+    std::cout.flush();
     loop_closing_->RequestReset();
-    cout << " done" << endl;
 
-    // Clear BoW Database
-    cout << "Reseting Database...";
+    AF_INFO("reset: clearing keyframe database and map...");
+    std::cout.flush();
     keyframe_db_->clear();
-    cout << " done" << endl;
-
-    // Clear Map (this erase MapPoints and KeyFrames)
-    map_->clear();
+    map_->clear(); // erases all map points and keyframes
 
     KeyFrame::nNextId = 0;
     Frame::nNextId = 0;
     state_ = NO_IMAGES_YET;
+    initializer_ = nullptr;
 
-    if(initializer_)
-    {
-        initializer_ = nullptr;
-    }
+    // Per-run tracking state: frame ids restart at 0, so id-anchored state from
+    // the previous run (reloc embargo, emergency cooldown) must not leak into the
+    // next one and suppress keyframes there.
+    last_reloc_frame_id_ = 0;
+    last_emergency_keyframe_id_ = 0;
+    emergency_keyframe_ = false;
+    num_inlier_matches_ = 0;
+    recent_inliers_history_.clear();
 
     resize_times_.clear();
     frame_times_.clear();
@@ -1098,6 +1100,9 @@ void Tracking::reset()
 
     if(viewer_)
         viewer_->Release();
+
+    AF_INFO("reset: done");
+    std::cout.flush();
 }
 
 void Tracking::loadCameraParameters(const string &strCalibrationPath, const string &strSettingPath){
