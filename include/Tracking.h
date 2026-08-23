@@ -201,7 +201,10 @@ protected:
     // points to be meaningful (the gate then stays inactive).
     std::optional<float> median_flow_from_last_frame() const;
 
-    void loadCameraParameters(const string &strCalibrationPath, const string &strSettingPath);
+    // Load intrinsics/distortion/fps for the settings' cam_mono camera from the
+    // calibration yaml (hard error if the camera is missing); applies the
+    // nominal-area rescale when fix_image_size_ is set.
+    void load_camera_parameters(const std::string& calibration_yaml, const std::string& settings_yaml);
     // Build a feature extractor from the per-feature settings yaml, with its
     // maxNumFeatures scaled by scale_num_features (initialization uses a denser set).
     static std::shared_ptr<FeatureExtractor> get_feature_extractor(int scale_num_features,
@@ -253,7 +256,7 @@ protected:
 
     // New KeyFrame rules (according to fps)
     size_t max_frames_;
-    float fps;
+    float fps_{0.0f};
 
     // Close/far point threshold (depth units). Nothing sets it yet; zero-initialized
     // so Frame gets a defined value.
@@ -357,8 +360,9 @@ protected:
     const float ransac_epsilon{0.5};
     const float ransac_th2{5.991};
 
-    // loadCameraParameters()
-    const float fps0{30.0f};
+    // load_camera_parameters()
+    static constexpr float DEFAULT_FPS{30.0f};
+    static constexpr float NOMINAL_IMAGE_AREA{307200.0f}; // ~640x480, fix_image_size_ target
 
     std::shared_ptr<FeatureMatcher> matcher_;
 

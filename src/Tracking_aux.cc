@@ -4,7 +4,9 @@
  */
 #include "Tracking.h"
 
+#include <cmath>
 #include <fstream>
+#include <yaml-cpp/yaml.h>
 #include "FeatureFactory.h"
 #include "FrameDrawer.h"
 
@@ -106,6 +108,83 @@ bool Tracking::run_tracking_stage(const std::function<bool()>& stage)
         AF_WARN("Tracking lost — " << e.what());
         return false;
     }
+}
+
+void Tracking::load_camera_parameters(const std::string& calibration_yaml, const std::string& settings_yaml)
+{
+    const YAML::Node settings = YAML::LoadFile(settings_yaml);
+    const YAML::Node calibration = YAML::LoadFile(calibration_yaml);
+
+    // Find the camera the settings select
+    const std::string cam_name = settings["cam_mono"].as<std::string>();
+    YAML::Node cam{};
+    for (const YAML::Node& camera : calibration["cameras"]) {
+        if (camera["cam_name"].as<std::string>() == cam_name) {
+            cam = camera;
+            break;
+        }
+    }
+    if (!cam) {
+        AF_ERROR("[Tracking] camera '" + cam_name + "' (settings cam_mono) not found in " + calibration_yaml);
+        exit(-1);
+    }
+
+    mK = (cv::Mat_<float>(3, 3) << cam["focal_length"][0].as<float>(), 0.0f, cam["principal_point"][0].as<float>(),
+            0.0f, cam["focal_length"][1].as<float>(), cam["principal_point"][1].as<float>(),
+            0.0f, 0.0f, 1.0f);
+
+    image_width_ = cam["image_dimension"][0].as<int>();
+    image_height_ = cam["image_dimension"][1].as<int>();
+
+    if(fix_image_size_){
+        const float ratio = float(image_width_) / float(image_height_);
+        const int new_height = static_cast<int>(std::sqrt(NOMINAL_IMAGE_AREA / ratio));
+        const int new_width = static_cast<int>(float(new_height) * ratio);
+        const float scale_height = float(new_height) / float(image_height_);
+        const float scale_width = float(new_width) / float(image_width_);
+
+        image_width_ = new_width;
+        image_height_ = new_height;
+
+        mK.at<float>(0,0) *= scale_width;
+        mK.at<float>(1,1) *= scale_height;
+        mK.at<float>(0,2) *= scale_width;
+        mK.at<float>(1,2) *= scale_height;
+    }
+
+    // Distortion coefficients (zeros when the calibration declares none)
+    mDistCoef = cv::Mat::zeros(4, 1, CV_32F);
+    if (cam["distortion_type"] && cam["distortion_coefficients"]) {
+        const std::vector<float> dist_coeffs = cam["distortion_coefficients"].as<std::vector<float>>();
+        mDistCoef = cv::Mat(dist_coeffs.size(), 1, CV_32F, const_cast<float*>(dist_coeffs.data())).clone();
+    }
+
+    // Camera frequency (Hz)
+    fps_ = cam["fps"].as<float>();
+    if(fps_ <= 0.0f)
+        fps_ = DEFAULT_FPS;
+
+    // Color order (assignment to the member — a local here once shadowed it, #14)
+    is_rgb_ = cam["cam_type"].as<std::string>() != "bgr";
+
+    AF_CONFIG_BEGIN("Camera Parameters");
+    AF_CONFIG_FIELD("cam_name:           ", cam["cam_name"].as<std::string>());
+    AF_CONFIG_FIELD("cam_type:           ", cam["cam_type"].as<std::string>());
+    AF_CONFIG_FIELD("cam_model:          ", cam["cam_model"].as<std::string>());
+    if (cam["distortion_type"] && cam["distortion_coefficients"])
+        AF_CONFIG_FIELD("distortion_type:    ", cam["distortion_type"].as<std::string>());
+    AF_CONFIG_FIELD("fx:                 ", mK.at<float>(0,0));
+    AF_CONFIG_FIELD("fy:                 ", mK.at<float>(1,1));
+    AF_CONFIG_FIELD("cx:                 ", mK.at<float>(0,2));
+    AF_CONFIG_FIELD("cy:                 ", mK.at<float>(1,2));
+    if (cam["distortion_type"] && cam["distortion_coefficients"])
+        AF_CONFIG_FIELD("distortion_coefficients: ", mDistCoef.t());
+    AF_CONFIG_FIELD("fps:                ", fps_);
+    if(is_rgb_)
+        AF_CONFIG_FIELD("color order:        ", "RGB (ignored if grayscale)");
+    else
+        AF_CONFIG_FIELD("color order:        ", "BGR (ignored if grayscale)");
+    AF_CONFIG_END();
 }
 
 } // namespace AF_VSLAM

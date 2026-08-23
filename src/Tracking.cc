@@ -65,10 +65,10 @@ Tracking::Tracking(shared_ptr<Vocabulary> vocabulary,
     frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), last_reloc_frame_id_(0), fix_image_size_(fix_image_size)
 {
     // Load camera parameters from settings yaml file
-    loadCameraParameters(strCalibrationPath, strSettingPath);
+    load_camera_parameters(strCalibrationPath, strSettingPath);
 
     // Frame window for the post-relocalization embargo/strictness (~1 s at the camera rate)
-    max_frames_ = size_t(fps);
+    max_frames_ = size_t(fps_);
 
     // Load feature parameters from settings yaml file
     for (auto& ft: featureTypes){
@@ -1103,82 +1103,6 @@ void Tracking::reset()
 
     AF_INFO("reset: done");
     std::cout.flush();
-}
-
-void Tracking::loadCameraParameters(const string &strCalibrationPath, const string &strSettingPath){
-
-    YAML::Node settings = YAML::LoadFile(strSettingPath);
-    YAML::Node calibration = YAML::LoadFile(strCalibrationPath);
-    const YAML::Node& cameras = calibration["cameras"];
-
-    std::string cam_name;
-    cam_name = settings["cam_mono"].as<std::string>();
-    YAML::Node cam{};
-    for (size_t i{0}; i < cameras.size(); ++i){
-        if (cameras[i]["cam_name"].as<std::string>() == cam_name){
-            cam = cameras[i];
-            break;
-        }
-    }
-
-    mK = (cv::Mat_<float>(3, 3) << cam["focal_length"][0].as<float>(), 0.0f, cam["principal_point"][0].as<float>(),
-            0.0f, cam["focal_length"][1].as<float>(), cam["principal_point"][1].as<float>(),
-            0.0f, 0.0f, 1.0f);
-
-    image_width_ = cam["image_dimension"][0].as<int>();
-    image_height_ = cam["image_dimension"][1].as<int>();
-
-    if(fix_image_size_){
-        float ratio = float(image_width_) / float(image_height_);
-        int new_h = (int) sqrt(307200.f / ratio);
-        int new_w = (int) (float(new_h) * ratio);
-        float conv_ratio_h = float(new_h)/float(image_height_);
-        float conv_ratio_w = float(new_w)/float(image_width_);
-
-        image_width_ = new_w;
-        image_height_ = new_h;
-
-        mK.at<float>(0,0) *= conv_ratio_w;
-        mK.at<float>(1,1) *= conv_ratio_h;
-        mK.at<float>(0,2) *= conv_ratio_w;
-        mK.at<float>(1,2) *= conv_ratio_h;
-    }
-
-    // Distortion coefficients
-    mDistCoef = cv::Mat::zeros(4,1,CV_32F);
-    if (cam["distortion_type"] && cam["distortion_coefficients"]) {
-        std::vector<float> dist_coeffs_vec = cam["distortion_coefficients"].as<std::vector<float>>();
-        mDistCoef = cv::Mat(dist_coeffs_vec.size(), 1, CV_32F, dist_coeffs_vec.data()).clone();
-    }
-
-    // Camera frequence (hz)
-    fps = cam["fps"].as<float>();
-    if(fps == 0)
-        fps = fps0;
-
-    // RGB order
-    bool is_rgb_ = cam["cam_type"].as<std::string>() != "bgr";
-
-    // Load settings file
-    cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
-
-    // Print camera parameters
-    AF_CONFIG_BEGIN("Camera Parameters");
-    AF_CONFIG_FIELD("cam_name:           ", cam["cam_name"].as<std::string>());
-    AF_CONFIG_FIELD("cam_type:           ", cam["cam_type"].as<std::string>());
-    AF_CONFIG_FIELD("cam_model:          ", cam["cam_model"].as<std::string>());
-    if (cam["distortion_type"] && cam["distortion_coefficients"])
-        AF_CONFIG_FIELD("distortion_type:    ", cam["distortion_type"].as<std::string>());
-    AF_CONFIG_FIELD("fx:                 ", mK.at<float>(0,0));
-    AF_CONFIG_FIELD("fy:                 ", mK.at<float>(1,1));
-    AF_CONFIG_FIELD("cx:                 ", mK.at<float>(0,2));
-    AF_CONFIG_FIELD("cy:                 ", mK.at<float>(1,2));
-    if (cam["distortion_type"] && cam["distortion_coefficients"])
-        AF_CONFIG_FIELD("distortion_coefficients: ", mDistCoef.t());
-    AF_CONFIG_FIELD("fps:                ", cam["fps"].as<float>());
-    if(is_rgb_)        AF_CONFIG_FIELD("color order:        ", "RGB (ignored if grayscale)");
-    else            AF_CONFIG_FIELD("color order:        ", "BGR (ignored if grayscale)");
-    AF_CONFIG_END();
 }
 
 } //namespace ORB_SLAM
