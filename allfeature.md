@@ -302,6 +302,7 @@ flowchart TD
     TLM -->|lost| NF3["next frame → relocalize"]
     TLM -->|ok| KF["<b>need_new_keyframe / create_new_keyframe</b><br/>· MedianFlowFromLastFrame<br/>· insert_keyframe"]
     KF --> TE["<b>store_relative_pose</b>"]
+    TE -->|emergency_keyframe_| EW["<b>emergency keyframe wait</b><br/>· unlock map mutex<br/>· spin until local_mapper_->accepts_keyframes()"]
     MI -->|not initialized| RET[return — retry next frame]
     MI -->|map created| TE
     MI ~~~ TLM
