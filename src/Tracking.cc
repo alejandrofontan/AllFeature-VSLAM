@@ -1,33 +1,29 @@
-
-
-
+/**
+ * Tracking thread: the per-frame front-end of AllFeature-VSLAM (monocular, with
+ * an optional RGB-D depth channel). Receives images (grab_image), initializes
+ * the map via two-view monocular initialization, tracks each frame against the
+ * reference keyframe and the local map, decides keyframe insertion, and
+ * recovers from losses via relocalization. Auxiliary members (profilers,
+ * diagnostics, calibration loading) live in Tracking_aux.{h,cc}.
+ */
 #include "Tracking.h"
-#include "Tracking_aux.h"
-
-#include <opencv2/core/core.hpp>
-//#include<opencv2/features2d/features2d.hpp>
-
-#include "FrameDrawer.h"
-#include "Converter.h"
-#include "Map.h"
-#include "Initializer.h"
-#include "afvslam_log.hpp"
-
-#include "Optimizer.h"
-#include "PnPsolver.h"
-#include "Utils.h"
 
 #include <algorithm>
-#include <fstream>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <unordered_map>
 
-#include <mutex>
+#include <opencv2/core/core.hpp>
 
-#include <yaml-cpp/yaml.h>
-
-using namespace std;
+#include "Converter.h"
+#include "Initializer.h"
+#include "Map.h"
+#include "Optimizer.h"
+#include "PnPsolver.h"
+#include "Tracking_aux.h"
+#include "Utils.h"
+#include "afvslam_log.hpp"
 
 namespace AF_VSLAM
 {
@@ -36,47 +32,45 @@ TrackingParameters Tracking::params{};
 
 void Tracking::LoadParameters(const cv::FileStorage &fSettings)
 {
-    auto readIfPresent = [&fSettings](const char* key, auto& field)
+    auto read_if_present = [&fSettings](const char* key, auto& field)
     {
         const cv::FileNode node = fSettings[key];
         if(!node.empty())
             node >> field;
     };
 
-    readIfPresent("Tracking.InitMinKeypoints", params.init_min_keypoints);
-    readIfPresent("Tracking.InitSigma", params.init_sigma);
-    readIfPresent("Tracking.InitMinMatches", params.init_min_matches);
-    readIfPresent("Tracking.InitRansacIterations", params.init_ransac_iterations);
-    readIfPresent("Tracking.InitMinMedianDisparity", params.init_min_median_disparity);
-    readIfPresent("Tracking.InitGbaIterations", params.init_gba_iterations);
-    readIfPresent("Tracking.InitMinTrackedPoints", params.init_min_tracked_points);
-    readIfPresent("Tracking.InitMinDepthSamples", params.init_min_depth_samples);
+    read_if_present("Tracking.InitMinKeypoints", params.init_min_keypoints);
+    read_if_present("Tracking.InitSigma", params.init_sigma);
+    read_if_present("Tracking.InitMinMatches", params.init_min_matches);
+    read_if_present("Tracking.InitRansacIterations", params.init_ransac_iterations);
+    read_if_present("Tracking.InitMinMedianDisparity", params.init_min_median_disparity);
+    read_if_present("Tracking.InitGbaIterations", params.init_gba_iterations);
+    read_if_present("Tracking.InitMinTrackedPoints", params.init_min_tracked_points);
+    read_if_present("Tracking.InitMinDepthSamples", params.init_min_depth_samples);
 }
 
-Tracking::Tracking(shared_ptr<Vocabulary> vocabulary,
+Tracking::Tracking(std::shared_ptr<Vocabulary> vocabulary,
                    std::shared_ptr<FrameDrawer> frame_drawer, std::shared_ptr<MapDrawer> map_drawer,
-                   shared_ptr<Map> map, shared_ptr<KeyFrameDatabase> pKFDB,
-                   const string &strCalibrationPath, const string &strSettingPath,
-                   const std::map<FeatureType, string>& feature_settings_yaml_file,
-                   const vector<FeatureType>& featureTypes,
+                   std::shared_ptr<Map> map, std::shared_ptr<KeyFrameDatabase> keyframe_db,
+                   const std::string& calibration_yaml, const std::string& settings_yaml,
+                   const std::map<FeatureType, std::string>& feature_settings_yaml_file,
+                   const std::vector<FeatureType>& feature_types,
                    const bool fix_image_size):
-    state_(NO_IMAGES_YET), feature_types_(featureTypes), mbVO(false), vocabulary(vocabulary),
-    keyframe_db_(pKFDB),
-    frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), last_reloc_frame_id_(0), fix_image_size_(fix_image_size)
+    feature_types_(feature_types), vocabulary_(vocabulary), keyframe_db_(keyframe_db),
+    frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), fix_image_size_(fix_image_size)
 {
-    // Load camera parameters from settings yaml file
-    load_camera_parameters(strCalibrationPath, strSettingPath);
+    load_camera_parameters(calibration_yaml, settings_yaml);
 
     // Frame window for the post-relocalization embargo/strictness (~1 s at the camera rate)
-    max_frames_ = size_t(fps_);
+    max_frames_ = static_cast<size_t>(fps_);
 
-    // Load feature parameters from settings yaml file
-    for (auto& ft: featureTypes){
+    // One extractor pair per feature type: normal, and a denser one for initialization
+    for (const FeatureType ft : feature_types){
         feature_extractor_left_[ft] = get_feature_extractor(1, feature_settings_yaml_file.at(ft), ft);
-        init_feature_extractor_[ft] = get_feature_extractor(scaleNumFeaturesMonocular, feature_settings_yaml_file.at(ft), ft);
+        init_feature_extractor_[ft] = get_feature_extractor(INIT_EXTRACTOR_FEATURES_SCALE, feature_settings_yaml_file.at(ft), ft);
     }
 
-    matcher_ = std::make_shared<FeatureMatcher>(image_width_, image_height_, featureTypes, "Tracking");
+    matcher_ = std::make_shared<FeatureMatcher>(image_width_, image_height_, feature_types, "Tracking");
 }
 
 mat4f Tracking::grab_image(Image &im, const double timestamp)
@@ -96,7 +90,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     // Create the frame (feature extraction); initialization uses the denser extractor set
     const auto& extractors = (state_ == NOT_INITIALIZED || state_ == NO_IMAGES_YET)
                            ? init_feature_extractor_ : feature_extractor_left_;
-    current_frame_ = Frame(im, timestamp, extractors, vocabulary, mK, mDistCoef, mbf, mThDepth);
+    current_frame_ = Frame(im, timestamp, extractors, vocabulary_, mK, mDistCoef, mbf, mThDepth);
     profiler.frame_created(frame_times_);
 
     track();
@@ -318,8 +312,8 @@ void Tracking::attempt_monocular_initialization()
 void Tracking::create_initial_map_monocular()
 {
     // Create KeyFrames
-    Keyframe keyframe_ini = make_shared<KeyFrame>(initial_frame_, map_, keyframe_db_);
-    Keyframe keyframe_cur = make_shared<KeyFrame>(current_frame_, map_, keyframe_db_);
+    Keyframe keyframe_ini = std::make_shared<KeyFrame>(initial_frame_, map_, keyframe_db_);
+    Keyframe keyframe_cur = std::make_shared<KeyFrame>(current_frame_, map_, keyframe_db_);
 
     keyframe_ini->compute_global_descriptor();
     keyframe_cur->compute_global_descriptor();
@@ -367,10 +361,10 @@ void Tracking::create_initial_map_monocular()
         return;
     }
 
-    vector<float> depth_ratios;
+    std::vector<float> depth_ratios;
     for (const auto& ft : feature_types_) {
         const auto& inv_depth_kf = keyframe_ini->inv_depth.at(ft);
-        const vector<Pt> map_points = keyframe_ini->get_map_point_matches(ft);
+        const std::vector<Pt> map_points = keyframe_ini->get_map_point_matches(ft);
         for (size_t i = 0; i < map_points.size(); i++)
         {
             if (!map_points[i])
@@ -876,17 +870,17 @@ bool Tracking::relocalize()
 {
     // Without an active VPR backend there is no keyframe database to query —
     // recovery from a tracking loss is impossible.
-    if(!vocabulary->is_active())
+    if(!vocabulary_->is_active())
         return false;
 
-    const FeatureType featureType = vocabulary->featureType;
+    const FeatureType featureType = vocabulary_->featureType;
 
     // Compute the global descriptor (BoW vector)
     current_frame_.compute_global_descriptor();
 
     // relocalize is performed when tracking is lost
     // Track Lost: Query KeyFrame Database for keyframe candidates for relocalisation
-    vector<Keyframe> vpCandidateKFs = keyframe_db_->DetectRelocalizationCandidates(&current_frame_);
+    std::vector<Keyframe> vpCandidateKFs = keyframe_db_->DetectRelocalizationCandidates(&current_frame_);
 
     if(vpCandidateKFs.empty())
         return false;
@@ -896,13 +890,13 @@ bool Tracking::relocalize()
     // We perform first an ORB matching with each candidate
     // If enough matches are found we set up a PnP solver
 
-    vector<PnPsolver*> vpPnPsolvers;
+    std::vector<PnPsolver*> vpPnPsolvers;
     vpPnPsolvers.resize(nKFs);
 
     vector<std::map<FeatureType, vector<Pt>>> vvpMapPointMatches;
     vvpMapPointMatches.resize(nKFs);
 
-    vector<bool> vbDiscarded;
+    std::vector<bool> vbDiscarded;
     vbDiscarded.resize(nKFs);
 
     int nCandidates=0;
@@ -942,7 +936,7 @@ bool Tracking::relocalize()
                 continue;
 
             // Perform 5 Ransac Iterations
-            vector<bool> vbInliers;
+            std::vector<bool> vbInliers;
             int nInliers;
             bool bNoMore;
 
@@ -963,7 +957,7 @@ bool Tracking::relocalize()
             if(Tcw(3,3) == 1.0f)
             {
                 current_frame_.Tcw = Tcw;
-                set<Pt> sFound;
+                std::set<Pt> sFound;
 
                 const int np = vbInliers.size();
 
@@ -1105,4 +1099,4 @@ void Tracking::reset()
     std::cout.flush();
 }
 
-} //namespace ORB_SLAM
+} //namespace AF_VSLAM

@@ -77,11 +77,12 @@ class Tracking
 {
 
 public:
-    Tracking(shared_ptr<Vocabulary> vocabulary, std::shared_ptr<FrameDrawer> pFrameDrawer, std::shared_ptr<MapDrawer> pMapDrawer, shared_ptr<Map> pMap,
-             shared_ptr<KeyFrameDatabase> pKFDB,
-             const string &strCalibrationPath, const string &strSettingPath,
-             const std::map<FeatureType, string>& feature_settings_yaml_file,
-             const vector<FeatureType>& feature_types,
+    Tracking(std::shared_ptr<Vocabulary> vocabulary, std::shared_ptr<FrameDrawer> frame_drawer,
+             std::shared_ptr<MapDrawer> map_drawer, std::shared_ptr<Map> map,
+             std::shared_ptr<KeyFrameDatabase> keyframe_db,
+             const std::string& calibration_yaml, const std::string& settings_yaml,
+             const std::map<FeatureType, std::string>& feature_settings_yaml_file,
+             const std::vector<FeatureType>& feature_types,
              const bool fix_image_size = false);
 
     // Preprocess the input, extract features, and run track() on the frame.
@@ -107,7 +108,7 @@ public:
         LOST=3
     };
 
-    eTrackingState state_;
+    eTrackingState state_{NO_IMAGES_YET};
     eTrackingState last_processed_state_;
 
     // Current Frame
@@ -211,12 +212,6 @@ protected:
                                                                    const std::string& feature_settings_yaml,
                                                                    FeatureType feature_type);
 
-    // In case of performing only localization, this flag is true when there are no matches to
-    // points in the map. Still tracking will continue if there are enough matches with temporal points.
-    // In that case we are doing visual odometry. The system will try to do relocalization to recover
-    // "zero-drift" localization to the map.
-    bool mbVO;
-
     //Other Thread Pointers
     std::shared_ptr<LocalMapping> local_mapper_;
     std::shared_ptr<LoopClosing> loop_closing_;
@@ -226,7 +221,7 @@ protected:
     std::map<FeatureType, shared_ptr<FeatureExtractor>> init_feature_extractor_;
 
     //BoW
-    shared_ptr<Vocabulary> vocabulary;
+    std::shared_ptr<Vocabulary> vocabulary_;
     shared_ptr<KeyFrameDatabase> keyframe_db_;
 
     // Initalization (only for monocular)
@@ -278,7 +273,7 @@ protected:
     Frame last_frame_;
     mat4f last_frame_relative_pose_; // Tlr of last_frame_ (see store_relative_pose)
     KeyframeId last_keyframe_id_;
-    FrameId last_reloc_frame_id_;
+    FrameId last_reloc_frame_id_{0};
 
     //Color order (true RGB, false BGR, ignored if grayscale)
     bool is_rgb_{true};
@@ -288,7 +283,7 @@ protected:
 
     //////////////////////////////////////////////// Heuristics
     // Tracking()
-    const int scaleNumFeaturesMonocular{4};
+    static constexpr int INIT_EXTRACTOR_FEATURES_SCALE{4};
 
     // Matching
     const float nnratio_monoInit{0.9f};
