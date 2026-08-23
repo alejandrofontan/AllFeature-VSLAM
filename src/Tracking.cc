@@ -820,19 +820,23 @@ bool Tracking::need_new_keyframe()
     return false;
 }
 
-void Tracking::create_new_keyframe(){
+void Tracking::create_new_keyframe()
+{
+    // Lock Local Mapping against stopping while the keyframe is inserted;
+    // fails (and skips insertion) if a loop closure already stopped it.
     if(!local_mapper_->SetNotStop(true))
         return;
 
-    Keyframe keyframe = make_shared<KeyFrame>(current_frame_,map_,keyframe_db_);
+    const Keyframe keyframe = std::make_shared<KeyFrame>(current_frame_, map_, keyframe_db_);
 
     ref_keyframe_ = keyframe;
     current_frame_.ref_keyframe = keyframe;
 
     local_mapper_->insert_keyframe(keyframe);
     local_mapper_->SetNotStop(false);
-    last_keyframe_id_ = current_frame_.frame_id;
+
     last_keyframe_ = keyframe;
+    last_keyframe_id_ = current_frame_.frame_id;
 }
 
 float Tracking::MedianFlowFromLastFrame() const

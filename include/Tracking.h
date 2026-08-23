@@ -336,9 +336,6 @@ protected:
     // Overlap-triggered insertion (frame vs reference keyframe)
     static constexpr float MIN_REF_OVERLAP{0.7f};
 
-    // create_new_keyframe()
-    const int minNumPoints_createNewKey{100};
-
     // search_local_points()
     static constexpr float VIEWING_COS_LIMIT{0.5f};
 
