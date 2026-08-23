@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <unordered_map>
@@ -873,175 +874,140 @@ bool Tracking::relocalize()
     if(!vocabulary_->is_active())
         return false;
 
-    const FeatureType featureType = vocabulary_->featureType;
-
-    // Compute the global descriptor (BoW vector)
+    const FeatureType feature_type = vocabulary_->featureType;
     current_frame_.compute_global_descriptor();
 
-    // relocalize is performed when tracking is lost
-    // Track Lost: Query KeyFrame Database for keyframe candidates for relocalisation
-    std::vector<Keyframe> vpCandidateKFs = keyframe_db_->DetectRelocalizationCandidates(&current_frame_);
-
-    if(vpCandidateKFs.empty())
+    const std::vector<Keyframe> candidates = keyframe_db_->DetectRelocalizationCandidates(&current_frame_);
+    if(candidates.empty())
         return false;
+    const size_t num_candidates = candidates.size();
 
-    const int nKFs = vpCandidateKFs.size();
-
-    // We perform first an ORB matching with each candidate
-    // If enough matches are found we set up a PnP solver
-
-    std::vector<PnPsolver*> vpPnPsolvers;
-    vpPnPsolvers.resize(nKFs);
-
-    vector<std::map<FeatureType, vector<Pt>>> vvpMapPointMatches;
-    vvpMapPointMatches.resize(nKFs);
-
-    std::vector<bool> vbDiscarded;
-    vbDiscarded.resize(nKFs);
-
-    int nCandidates=0;
-
-    for(int i=0; i<nKFs; i++)
+    // Match each candidate against the frame; enough matches arm a PnP solver for it
+    std::vector<std::unique_ptr<PnPsolver>> solvers(num_candidates);
+    std::vector<std::map<FeatureType, std::vector<Pt>>> matches_per_candidate(num_candidates);
+    std::vector<bool> discarded(num_candidates, false);
+    int num_active = 0;
+    for(size_t i = 0; i < num_candidates; i++)
     {
-        Keyframe pKF = vpCandidateKFs[i];
-        if(pKF->is_bad())
-            vbDiscarded[i] = true;
+        Keyframe candidate = candidates[i];
+        if(candidate->is_bad())
+        {
+            discarded[i] = true;
+            continue;
+        }
+        std::map<FeatureType, int> num_matches =
+            matcher_->match_keyframe_to_frame(candidate, current_frame_, matches_per_candidate[i],
+                                              std::vector<FeatureType>{feature_type});
+        if(num_matches.at(feature_type) < RELOC_MIN_MATCHES)
+        {
+            discarded[i] = true;
+            continue;
+        }
+        solvers[i] = std::make_unique<PnPsolver>(current_frame_, matches_per_candidate[i][feature_type], feature_type);
+        solvers[i]->SetRansacParameters(RANSAC_PROBABILITY, RANSAC_MIN_INLIERS, RANSAC_MAX_ITERATIONS,
+                                        RANSAC_MIN_SET, RANSAC_EPSILON, RANSAC_TH2);
+        num_active++;
+    }
+
+    // Round-robin P4P RANSAC over the surviving candidates until one pose
+    // hypothesis is supported by enough inliers
+    while(num_active > 0)
+    {
+        for(size_t i = 0; i < num_candidates; i++)
+        {
+            if(discarded[i])
+                continue;
+
+            std::vector<bool> inliers;
+            int num_inliers = 0;
+            bool ransac_exhausted = false;
+            const cv::Mat Tcw = solvers[i]->iterate(RANSAC_ITERATIONS_PER_ROUND, ransac_exhausted, inliers, num_inliers);
+
+            if(ransac_exhausted)
+            {
+                discarded[i] = true;
+                num_active--;
+            }
+
+            if(Tcw.empty())
+                continue;
+            current_frame_.Tcw = Converter::toMatrix4f(Tcw);
+
+            if(accept_relocalization_hypothesis(candidates[i], matches_per_candidate[i].at(feature_type),
+                                                inliers, feature_type))
+            {
+                last_reloc_frame_id_ = current_frame_.frame_id;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,
+                                                const std::vector<bool>& inliers, const FeatureType feature_type)
+{
+    // Seed the frame with the hypothesis' inlier matches
+    std::set<Pt> found;
+    for(size_t j = 0; j < inliers.size(); j++)
+    {
+        if(inliers[j])
+        {
+            current_frame_.pts.at(feature_type)[j] = matches[j];
+            found.insert(matches[j]);
+        }
         else
-        {
-            std::map<FeatureType, int> nmatches_ft = matcher_->match_keyframe_to_frame(pKF, current_frame_, vvpMapPointMatches[i], std::vector<FeatureType>{featureType});
-            if(nmatches_ft[featureType] < minNmatches)
-            {
-                vbDiscarded[i] = true;
-                continue;
-            }
-            else
-            {
-                PnPsolver* pSolver = new PnPsolver(current_frame_,vvpMapPointMatches[i][featureType], featureType);
-                pSolver->SetRansacParameters(ransac_probability,ransac_minInliers,ransac_maxIterations,ransac_minSet,ransac_epsilon,ransac_th2);
-                vpPnPsolvers[i] = pSolver;
-                nCandidates++;
-            }
-        }
+            current_frame_.pts.at(feature_type)[j] = nullptr;
     }
 
-    // Alternatively perform some iterations of P4P RANSAC
-    // Until we found a camera pose supported by enough inliers
-    bool bMatch = false;
-
-    while(nCandidates>0 && !bMatch)
-    {
-        for(int i=0; i<nKFs; i++)
-        {
-            if(vbDiscarded[i])
-                continue;
-
-            // Perform 5 Ransac Iterations
-            std::vector<bool> vbInliers;
-            int nInliers;
-            bool bNoMore;
-
-            PnPsolver* pSolver = vpPnPsolvers[i];
-            cv::Mat Tcw_tmp = pSolver->iterate(numItpSolver,bNoMore,vbInliers,nInliers);
-            mat4f Tcw{mat4f::Zero()};
-            if(!Tcw_tmp.empty())
-                Tcw = Converter::toMatrix4f(Tcw_tmp);
-
-            // If Ransac reachs max. iterations discard keyframe
-            if(bNoMore)
-            {
-                vbDiscarded[i]=true;
-                nCandidates--;
-            }
-
-            // If a Camera Pose is computed, optimize
-            if(Tcw(3,3) == 1.0f)
-            {
-                current_frame_.Tcw = Tcw;
-                std::set<Pt> sFound;
-
-                const int np = vbInliers.size();
-
-                for(int j=0; j<np; j++)
-                {
-                    if(vbInliers[j])
-                    {
-                        current_frame_.pts.at(featureType)[j]=vvpMapPointMatches[i][featureType][j];
-                        sFound.insert(vvpMapPointMatches[i][featureType][j]);
-                    }
-                    else
-                        current_frame_.pts.at(featureType)[j]=nullptr;
-                }
-
-                int nGood = Optimizer::PoseOptimization(&current_frame_);
-
-                if(nGood < nGood_low)
-                    continue;
-
-                for(int io =0; io<current_frame_.N.at(featureType); io++)
-                    if(current_frame_.outliers.at(featureType)[io])
-                        current_frame_.pts.at(featureType)[io]=static_cast<Pt>(nullptr);
-
-                // If few inliers, search by projection in a coarse window and optimize again
-                if(nGood < nGood_high)
-                {
-                    int nadditional = matcher_->SearchByProjection(current_frame_,vpCandidateKFs[i],sFound,radiusTh_high_reloc, true, featureType);
-
-                    if(nadditional+nGood >= nGood_high)
-                    {
-                        nGood = Optimizer::PoseOptimization(&current_frame_);
-
-                        // If many inliers but still not enough, search by projection again in a narrower window
-                        // the camera has been already optimized with many points
-                        if(nGood > nGood_medium && nGood < nGood_high)
-                        {
-                            sFound.clear();
-                            for(int ip =0; ip<current_frame_.N.at(featureType); ip++)
-                                if(current_frame_.pts.at(featureType)[ip])
-                                    sFound.insert(current_frame_.pts.at(featureType)[ip]);
-                            nadditional =matcher_->SearchByProjection(current_frame_,vpCandidateKFs[i],sFound,radiusTh_low_reloc,false, featureType);
-
-                            // Final optimization
-                            if(nGood+nadditional >= nGood_high)
-                            {
-                                nGood = Optimizer::PoseOptimization(&current_frame_);
-
-                                for(int io =0; io < current_frame_.N.at(featureType); io++)
-                                    if(current_frame_.outliers.at(featureType)[io])
-                                        current_frame_.pts.at(featureType)[io]=nullptr;
-                            }
-                        }
-                    }
-                }
-
-
-                // If the pose is supported by enough inliers stop ransacs and continue
-                if(nGood >= nGood_high)
-                {
-                    AF_INFO("relocalize: succeeded | frame=" << current_frame_.frame_id
-                            << " feature=" << featureName(featureType)
-                            << " matchedKeyframe=" << vpCandidateKFs[i]->keyId
-                            << " inliers=" << nGood << " requiredInliers=" << nGood_high);
-                    std::cout.flush(); // AF_INFO writes to std::cout, which — unlike std::cerr's
-                                        // implicit unitbuf flush behind AF_WARN — is fully buffered
-                                        // once stdout is redirected to a file (as VSLAM-LAB's runner
-                                        // does), so without this the line can sit unflushed for a while.
-                    bMatch = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    if(!bMatch)
-    {
+    int num_good = Optimizer::PoseOptimization(&current_frame_);
+    if(num_good < RELOC_INLIERS_LOW)
         return false;
-    }
-    else
+
+    for(int j = 0; j < current_frame_.N.at(feature_type); j++)
+        if(current_frame_.outliers.at(feature_type)[j])
+            current_frame_.pts.at(feature_type)[j] = nullptr;
+
+    // Few inliers: search by projection in a coarse window and optimize again
+    if(num_good < RELOC_INLIERS_HIGH)
     {
-        last_reloc_frame_id_ = current_frame_.frame_id;
-        return true;
+        const int additional = matcher_->SearchByProjection(current_frame_, candidate, found,
+                                                            RELOC_SEARCH_RADIUS_COARSE, true, feature_type);
+        if(additional + num_good >= RELOC_INLIERS_HIGH)
+        {
+            num_good = Optimizer::PoseOptimization(&current_frame_);
+
+            // Many inliers but still not enough: the pose is already close, so search
+            // once more in a narrower window and run a final optimization
+            if(num_good > RELOC_INLIERS_MEDIUM && num_good < RELOC_INLIERS_HIGH)
+            {
+                found.clear();
+                for(int j = 0; j < current_frame_.N.at(feature_type); j++)
+                    if(current_frame_.pts.at(feature_type)[j])
+                        found.insert(current_frame_.pts.at(feature_type)[j]);
+                const int narrow_additional = matcher_->SearchByProjection(current_frame_, candidate, found,
+                                                                           RELOC_SEARCH_RADIUS_NARROW, false, feature_type);
+                if(num_good + narrow_additional >= RELOC_INLIERS_HIGH)
+                {
+                    num_good = Optimizer::PoseOptimization(&current_frame_);
+                    for(int j = 0; j < current_frame_.N.at(feature_type); j++)
+                        if(current_frame_.outliers.at(feature_type)[j])
+                            current_frame_.pts.at(feature_type)[j] = nullptr;
+                }
+            }
+        }
     }
 
+    if(num_good < RELOC_INLIERS_HIGH)
+        return false;
+
+    AF_INFO("relocalize: succeeded | frame=" << current_frame_.frame_id
+            << " feature=" << featureName(feature_type)
+            << " matchedKeyframe=" << candidate->keyId
+            << " inliers=" << num_good << " requiredInliers=" << RELOC_INLIERS_HIGH);
+    std::cout.flush(); // AF_INFO's stdout is fully buffered under the runner's redirect
+
+    return true;
 }
 
 void Tracking::reset()

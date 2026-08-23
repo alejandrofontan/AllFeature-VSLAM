@@ -186,6 +186,12 @@ protected:
     bool track_reference_keyframe();
 
     bool relocalize();
+    // One RANSAC pose hypothesis for a relocalization candidate: seed the frame
+    // with the hypothesis' inlier matches, optimize, escalate through coarse and
+    // narrow projection searches; true when RELOC_INLIERS_HIGH inliers support it.
+    // (candidate by value: the legacy matcher APIs take non-const Keyframe&)
+    bool accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,
+                                          const std::vector<bool>& inliers, FeatureType feature_type);
 
     void update_local_map();
     void update_local_points();
@@ -285,19 +291,6 @@ protected:
     // Tracking()
     static constexpr int INIT_EXTRACTOR_FEATURES_SCALE{4};
 
-    // Matching
-    const float nnratio_monoInit{0.9f};
-    const float nnratio_trackRefKey{0.7f};
-    const float nnratio_trackMotModel{0.9f};
-    const float nnratio_low_reloc{0.75f};
-    const float nnratio_high_reloc{0.9f};
-
-    const float radiusTh_high_trackMotModel{15.0f};
-    const float radiusTh_low_trackMotModel{7.0f};
-    const float radiusTh_scale_trackMotModel{2.0f};
-    const float radiusTh_high_reloc{10.0f};
-    const float radiusTh_low_reloc{3.0f};
-
     //////////////////////////////////////////////// Constants
 
     // track_reference_keyframe()
@@ -339,21 +332,20 @@ protected:
     static constexpr float VIEWING_COS_LIMIT{0.5f};
 
     // relocalize()
-    const int minNmatches{15};
-    const int nGood_high{50};
-    const int nGood_medium{30};
-    const int nGood_low{10};
-
-    // # Iterations
-    const int numItpSolver{5}; // relocalize
-
-    // RANSAC
-    const float ransac_probability{0.99};
-    const int ransac_minInliers{10};
-    const int ransac_maxIterations{3000};
-    const int ransac_minSet{4};
-    const float ransac_epsilon{0.5};
-    const float ransac_th2{5.991};
+    static constexpr int RELOC_MIN_MATCHES{15};        // per-candidate matching gate
+    static constexpr int RELOC_INLIERS_HIGH{50};       // inliers to accept a hypothesis
+    static constexpr int RELOC_INLIERS_MEDIUM{30};     // enter the narrow-window escalation
+    static constexpr int RELOC_INLIERS_LOW{10};        // below this, abandon the hypothesis
+    static constexpr int RANSAC_ITERATIONS_PER_ROUND{5};
+    static constexpr float RELOC_SEARCH_RADIUS_COARSE{10.0f};
+    static constexpr float RELOC_SEARCH_RADIUS_NARROW{3.0f};
+    // P4P RANSAC parameters (PnPsolver)
+    static constexpr float RANSAC_PROBABILITY{0.99f};
+    static constexpr int RANSAC_MIN_INLIERS{10};
+    static constexpr int RANSAC_MAX_ITERATIONS{3000};
+    static constexpr int RANSAC_MIN_SET{4};
+    static constexpr float RANSAC_EPSILON{0.5f};
+    static constexpr float RANSAC_TH2{5.991f};
 
     // load_camera_parameters()
     static constexpr float DEFAULT_FPS{30.0f};
