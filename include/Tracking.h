@@ -261,13 +261,13 @@ protected:
     //Current matches in frame
     int num_inlier_matches_;
 
-    // Rolling inlier history (last inliersHistorySize tracked frames) — reference for the
+    // Rolling inlier history (last INLIERS_HISTORY_SIZE tracked frames) — reference for the
     // emergency-keyframe trigger in need_new_keyframe(). Comparing against recent frames
     // instead of ref_keyframe_->tracked_map_points() avoids the self-inflating feedback loop
     // where every inserted keyframe grows the reference stat via post-hoc triangulation
     // (see CLAUDE.md, Stop-Induced Keyframe Runaway Investigation).
-    std::deque<int> recentInliersHistory;
-    FrameId lastEmergencyKFId{0};
+    std::deque<int> recent_inliers_history_;
+    FrameId last_emergency_keyframe_id_{0};
 
     // Last Frame, KeyFrame and Relocalisation Info
     Keyframe last_keyframe_;
@@ -317,21 +317,24 @@ protected:
     // need_new_keyframe()
     // Stationarity gate: median frame-to-frame flow (px) below which no keyframe is
     // inserted (camera considered static — new keyframes would only feed zero-baseline
-    // triangulation). Gate needs at least minSharedPtsForFlow shared points to engage.
-    const float minMedianFlow_needNewKey{1.0f};
-    const int minSharedPtsForFlow{20};
-    // Emergency keyframes: reference window and refire cooldown (frames).
-    const size_t inliersHistorySize{30};
-    const int emergencyKFCooldown{10};
-    const float refRatio_high_needNewKey{0.9f};
-    const int nMinObs_high{3};
-    const int nMinObs_low{2};
-    const int minNKFs{2};
-    const int minTrackedClose{100};
-    const int minNonTrackedClose{70};
-    const float nRefMatchesDrop{0.25f};
-    const int minMatchesInliers{15};
-    const int minKeyframesInQueue{3};
+    // triangulation). Gate needs at least MIN_SHARED_POINTS_FOR_FLOW shared points to engage.
+    static constexpr float MIN_MEDIAN_FLOW{1.0f};
+    static constexpr int MIN_SHARED_POINTS_FOR_FLOW{20};
+    // Emergency keyframes: inlier-drop trigger, reference window, refire cooldown (frames)
+    static constexpr float EMERGENCY_INLIER_DROP_RATIO{0.5f};
+    static constexpr size_t INLIERS_HISTORY_SIZE{30};
+    static constexpr FrameId EMERGENCY_KEYFRAME_COOLDOWN{10};
+    // Weak-tracking condition: inliers below this fraction of the reference
+    // keyframe's tracked points (but above the floor that suggests loss instead)
+    static constexpr float REF_MATCHES_RATIO{0.9f};
+    static constexpr int MIN_INLIERS_FOR_KEYFRAME{15};
+    // Reference-keyframe match counting: min observations per point, relaxed
+    // while the map is young
+    static constexpr int MIN_OBSERVATIONS_HIGH{3};
+    static constexpr int MIN_OBSERVATIONS_LOW{2};
+    static constexpr size_t YOUNG_MAP_KEYFRAMES{2};
+    // Overlap-triggered insertion (frame vs reference keyframe)
+    static constexpr float MIN_REF_OVERLAP{0.7f};
 
     // create_new_keyframe()
     const int minNumPoints_createNewKey{100};
