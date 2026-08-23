@@ -189,7 +189,7 @@ vector<Keyframe> KeyFrame::GetVectorCovisibleKeyFrames()
     return orderedConnectedKeyFrames;
 }
 
-vector<Keyframe> KeyFrame::GetBestCovisibilityKeyFrames(const int &N)
+vector<Keyframe> KeyFrame::get_best_covisibility_keyframes(const int &N)
 {
     unique_lock<mutex> lock(mMutexConnections);
     if((int)orderedConnectedKeyFrames.size()<N)
@@ -357,7 +357,7 @@ void KeyFrame::update_connections()
             if(pt->is_bad())
                 continue;
 
-            map<KeyframeId , Obs> observations = pt->GetObservations();
+            map<KeyframeId , Obs> observations = pt->get_observations();
 
             for(auto& obs: observations)
             {
@@ -447,13 +447,13 @@ void KeyFrame::ChangeParent(Keyframe pKF)
     pKF->AddChild(thisKeyframe());
 }
 
-set<Keyframe> KeyFrame::GetChilds()
+set<Keyframe> KeyFrame::get_children()
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     return mspChildrens;
 }
 
-Keyframe KeyFrame::GetParent()
+Keyframe KeyFrame::get_parent()
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     return mpParent;

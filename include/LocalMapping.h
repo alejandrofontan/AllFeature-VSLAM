@@ -36,15 +36,15 @@ public:
     void insert_keyframe(Keyframe pKF);
 
     // Thread Synch
-    void RequestStop();
-    void RequestReset();
+    void request_stop();
+    void request_reset();
     bool Stop();
-    void Release();
-    bool isStopped();
-    bool stopRequested();
+    void release();
+    bool is_stopped();
+    bool is_stop_requested();
     bool accepts_keyframes();
     void SetAcceptKeyFrames(bool flag);
-    bool SetNotStop(bool flag);
+    bool set_insertion_lock(bool flag);
     void InterruptBA();
     void RequestFinish();
     bool isFinished();

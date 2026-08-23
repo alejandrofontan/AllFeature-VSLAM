@@ -106,7 +106,7 @@ PnPsolver::PnPsolver(const Frame &F, const vector<Pt> &vpMapPointMatches, const 
     uc = F.cx;
     vc = F.cy;
 
-    SetRansacParameters();
+    set_ransac_parameters();
 }
 
 PnPsolver::~PnPsolver()
@@ -118,7 +118,7 @@ PnPsolver::~PnPsolver()
 }
 
 
-void PnPsolver::SetRansacParameters(double probability, int minInliers, int maxIterations, int minSet, float epsilon, float th2)
+void PnPsolver::set_ransac_parameters(double probability, int minInliers, int maxIterations, int minSet, float epsilon, float th2)
 {
     mRansacProb = probability;
     mRansacMinInliers = minInliers;

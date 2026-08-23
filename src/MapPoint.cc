@@ -176,7 +176,7 @@ void MapPoint::EraseObservation(Keyframe projKeyframe)
         ComputeDistinctiveDescriptors()->UpdateNormalAndDepth();
 }
 
-map<KeyframeId, Obs> MapPoint::GetObservations()
+map<KeyframeId, Obs> MapPoint::get_observations()
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return observations;
@@ -207,7 +207,7 @@ void MapPoint::SetBadFlag()
     mpMap->EraseMapPoint(thisPt());
 }
 
-Pt MapPoint::GetReplaced()
+Pt MapPoint::get_replaced()
 {
     unique_lock<mutex> lock1(mMutexFeatures);
     unique_lock<mutex> lock2(mMutexPos);
@@ -248,8 +248,8 @@ void MapPoint::replace(Pt pMP)
             keyframe->EraseMapPointMatch(obs.second->projIndex, featureType);
         }
     }
-    pMP->IncreaseFound(nfound);
-    pMP->IncreaseVisible(nvisible);
+    pMP->increase_found(nfound);
+    pMP->increase_visible(nvisible);
     pMP->ComputeDistinctiveDescriptors();
 
     mpMap->EraseMapPoint(thisPt());
@@ -262,13 +262,13 @@ bool MapPoint::is_bad()
     return mbBad;
 }
 
-void MapPoint::IncreaseVisible(int n)
+void MapPoint::increase_visible(int n)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     mnVisible+=n;
 }
 
-void MapPoint::IncreaseFound(int n)
+void MapPoint::increase_found(int n)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     mnFound+=n;
@@ -290,7 +290,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
             return thisPt();
     }
 
-    observations_tmp = GetObservations();
+    observations_tmp = get_observations();
     if(observations_tmp.empty())
         return thisPt();
 
@@ -377,7 +377,7 @@ bool MapPoint::is_in_keyframe(Keyframe keyframe)
 
 void MapPoint::UpdateNormalAndDepth()
 {
-    map<KeyframeId , Obs> observations_tmp = GetObservations();
+    map<KeyframeId , Obs> observations_tmp = get_observations();
     if(observations_tmp.empty())
         return;
 

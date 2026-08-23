@@ -38,7 +38,7 @@ public:
 
     Sim3Solver(Keyframe pKF1, Keyframe pKF2, const std::vector<Pt> &vpMatched12, const FeatureType& featureType, const bool bFixScale = true);
 
-    void SetRansacParameters(double probability = 0.99, int minInliers = 6 , int maxIterations = 300);
+    void set_ransac_parameters(double probability = 0.99, int minInliers = 6 , int maxIterations = 300);
 
     cv::Mat find(std::vector<bool> &vbInliers12, int &nInliers);
 

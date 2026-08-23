@@ -29,7 +29,7 @@ namespace AF_VSLAM
 
 Initializer::Initializer(const Frame &ReferenceFrame, float sigma_, int iterations)
 {
-    K = Converter::toMatrix3f(ReferenceFrame.mK.clone());
+    K = Converter::to_matrix3f(ReferenceFrame.mK.clone());
 
     keypoints1.clear();
     invDepth1.clear();

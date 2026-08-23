@@ -224,7 +224,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
         vPoint->setMarginalized(true);
         optimizer.addVertex(vPoint);
 
-       const map<KeyframeId ,Obs> observations = pMP->GetObservations();
+       const map<KeyframeId ,Obs> observations = pMP->get_observations();
 
         int nEdges = 0;
         //SET EDGES
@@ -301,11 +301,11 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 
         if(nLoopKF==0)
         {
-            pKF->set_pose(Converter::toMatrix4f(SE3quat));
+            pKF->set_pose(Converter::to_matrix4f(SE3quat));
         }
         else
         {
-            pKF->TcwGBA = Converter::toMatrix4f(SE3quat);
+            pKF->TcwGBA = Converter::to_matrix4f(SE3quat);
             pKF->mnBAGlobalForKF = nLoopKF;
         }
     }
@@ -338,7 +338,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 }
 
 // Builds and registers a unary pose-only g2o edge shared by the mono/stereo/RGBD
-// PoseOptimization() branches: sets the frame vertex, measurement, information,
+// pose_optimization() branches: sets the frame vertex, measurement, information,
 // robust kernel, camera intrinsics and the (fixed) map point position, then adds it
 // to the optimizer. Edge-type-specific extras (e.g. EdgeStereoSE3ProjectXYZOnlyPose::bf)
 // are set by the caller on the returned pointer.
@@ -369,7 +369,7 @@ static EdgeT* CreatePoseOnlyEdge(g2o::SparseOptimizer& optimizer, const MeasT& m
 }
 
 // Classifies every edge of one type as inlier/outlier against its chi-square threshold
-// for the current optimization round -- the logic PoseOptimization() previously
+// for the current optimization round -- the logic pose_optimization() previously
 // repeated once per edge type (mono/stereo/RGBD).
 template<typename EdgeT>
 static void ClassifyPoseOnlyEdges(const std::map<FeatureType, vector<EdgeT*>>& edgesByFeature,
@@ -402,7 +402,7 @@ static void ClassifyPoseOnlyEdges(const std::map<FeatureType, vector<EdgeT*>>& e
     }
 }
 
-int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
+int Optimizer::pose_optimization(Frame *pFrame, const bool useDepthChannel)
 {
     g2o::SparseOptimizer optimizer;
     g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
@@ -597,7 +597,7 @@ int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
         const double dTrans = delta.translation().norm();
         const double dRotDeg = 2.0 * std::asin(std::min(1.0, delta.rotation().vec().norm())) * 180.0 / M_PI;
 
-        AF_WARN("PoseOptimization: rejected " << nBad << "/" << nInitialCorrespondences
+        AF_WARN("pose_optimization: rejected " << nBad << "/" << nInitialCorrespondences
                 << " (mono " << nMonoBad << "/" << nMono
                 << ", stereo " << nStereoBad << "/" << nStereo
                 << ", rgbd " << nRGBDBad << "/" << nRGBD << ")"
@@ -614,7 +614,7 @@ int Optimizer::PoseOptimization(Frame *pFrame, const bool useDepthChannel)
     // Recover optimized pose and return number of inliers
     g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
     g2o::SE3Quat SE3quat_recov = vSE3_recov->estimate();
-    pFrame->set_pose(Converter::toMatrix4f(SE3quat_recov));
+    pFrame->set_pose(Converter::to_matrix4f(SE3quat_recov));
 
     return nInitialCorrespondences-nBad;
 }
@@ -629,7 +629,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
     pKF->mnBALocalForKF = pKF->keyId;
 
     #ifdef ALLFEATURE_REAL_TIME
-    vector<Keyframe> vNeighKFs = pKF->GetBestCovisibilityKeyFrames(10);
+    vector<Keyframe> vNeighKFs = pKF->get_best_covisibility_keyframes(10);
     //vector<Keyframe> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
     #else
     vector<Keyframe> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
@@ -667,7 +667,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
     list<Keyframe> lFixedCameras;
     for(list<Pt>::iterator lit=llocalPts.begin(), lend=llocalPts.end(); lit!=lend; lit++)
     {
-        map<KeyframeId , Obs> observations = (*lit)->GetObservations();
+        map<KeyframeId , Obs> observations = (*lit)->get_observations();
         for(auto& obs :observations)
         {
             Keyframe pKFi = obs.second->projKeyframe;
@@ -746,7 +746,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
         vPoint->setMarginalized(true);
         optimizer.addVertex(vPoint);
 
-        map<KeyframeId , Obs> observations = pMP->GetObservations();
+        map<KeyframeId , Obs> observations = pMP->get_observations();
 
         //Set edges
         for(auto& obs: observations)
@@ -858,7 +858,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
         Keyframe pKF = *lit;
         g2o::VertexSE3Expmap* vSE3 = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(pKF->keyId));
         g2o::SE3Quat SE3quat = vSE3->estimate();
-        pKF->set_pose(Converter::toMatrix4f(SE3quat));
+        pKF->set_pose(Converter::to_matrix4f(SE3quat));
     }
 
     //Points
@@ -987,7 +987,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         else
             Swi = vScw[nIDi].inverse();
 
-        Keyframe pParentKF = pKF->GetParent();
+        Keyframe pParentKF = pKF->get_parent();
 
         // Spanning tree edge
         if(pParentKF)
@@ -1096,7 +1096,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
 
         eigt *=(1./s); //[R t/s;0 1]
 
-        mat4f Tiw = Converter::toMatrix4f(eigR,eigt);
+        mat4f Tiw = Converter::to_matrix4f(eigR,eigt);
 
         pKFi->set_pose(Tiw);
     }

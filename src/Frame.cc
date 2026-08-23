@@ -238,7 +238,7 @@ void Frame::UpdatePoseMatrices()
     twc = -Rwc * tcw;
 }
 
-bool Frame::isInFrustum(Pt pMP, float viewingCosLimit)
+bool Frame::is_in_frustum(Pt pMP, float viewingCosLimit)
 {
     pMP->mbTrackInView = false;
 
@@ -572,7 +572,7 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
         return infMatrix;
     }
 
-    float Frame::GetOverlap()
+    float Frame::get_overlap()
     {
         cv::Mat1b mask(h, w, uchar(0));
         cv::Mat1b mask_0(h, w, uchar(0));

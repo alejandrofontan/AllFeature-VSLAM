@@ -43,18 +43,18 @@ public:
     static Eigen::Matrix<double,3,1> toVector3d(const cv::Mat &cvVector);
     static Eigen::Matrix<double,3,3> toMatrix3d(const cv::Mat &cvMat3);
 
-    static Eigen::Matrix<float,4,4> toMatrix4f(const cv::Mat &cvMat4);
-    static Eigen::Matrix<float,3,3> toMatrix3f(const cv::Mat &cvMat3);
+    static Eigen::Matrix<float,4,4> to_matrix4f(const cv::Mat &cvMat4);
+    static Eigen::Matrix<float,3,3> to_matrix3f(const cv::Mat &cvMat3);
     static Eigen::Matrix<float,3,1> toVector3f(const cv::Mat &cvVector);
-    static Eigen::Matrix<float,4,4> toMatrix4f(const g2o::SE3Quat &SE3);
+    static Eigen::Matrix<float,4,4> to_matrix4f(const g2o::SE3Quat &SE3);
 
     static cv::Mat toCvMat(const Eigen::Matrix4f &m);
     static cv::Mat toCvMat(const Eigen::Matrix3f &m);
     static cv::Mat toCvMat(const Eigen::Vector3f &m);
 
-    static mat4f toMatrix4f(const mat3 &R, const vec3 &t);
+    static mat4f to_matrix4f(const mat3 &R, const vec3 &t);
     static g2o::SE3Quat toSE3Quat(const mat4f &m);
-    static mat4f toMatrix4f(const g2o::Sim3 &Sim3);
+    static mat4f to_matrix4f(const g2o::Sim3 &Sim3);
 
 
 };

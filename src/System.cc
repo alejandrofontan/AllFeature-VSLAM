@@ -73,7 +73,7 @@ System::System(const string &vocabularyFolder,
 
     std::string feature_list{};
     for (const auto& ft : featureTypes)
-        feature_list += (feature_list.empty() ? "" : ", ") + featureName(ft);
+        feature_list += (feature_list.empty() ? "" : ", ") + feature_name(ft);
 
     bool vpr_enabled{false};
     FeatureType vpr_feature{featureTypes[0]};
@@ -86,7 +86,7 @@ System::System(const string &vocabularyFolder,
             // Explicit feature_vpr must name a configured feature with a vocabulary — hard error otherwise
             bool found{false};
             for (const auto& ft : featureTypes)
-                if(featureName(ft) == feature_vpr_name){ vpr_feature = ft; found = true; break; }
+                if(feature_name(ft) == feature_vpr_name){ vpr_feature = ft; found = true; break; }
             if(!found){
                 AF_ERROR("[System] feature_vpr '" + feature_vpr_name + "' is not in features: [" + feature_list + "]");
                 exit(-1);
@@ -104,7 +104,7 @@ System::System(const string &vocabularyFolder,
             for (const auto& ft : featureTypes)
                 if(Vocabulary::has_vocabulary(ft)){ vpr_feature = ft; vpr_enabled = true; break; }
             if(vpr_enabled){
-                AF_INFO("[System] VPR: bow | feature_vpr: " + featureName(vpr_feature)
+                AF_INFO("[System] VPR: bow | feature_vpr: " + feature_name(vpr_feature)
                         + " (defaulted: first feature with a vocabulary)");
             }
             else if(vpr_key_present){
@@ -221,10 +221,10 @@ mat4f System::TrackStereo(const cv::Mat &, const cv::Mat &, const double &)
     //     unique_lock<mutex> lock(mMutexMode);
     //     if(mbActivateLocalizationMode)
     //     {
-    //        localMapper->RequestStop();
+    //        localMapper->request_stop();
 
     //         // Wait until Local Mapping has effectively stopped
-    //         while(!localMapper->isStopped())
+    //         while(!localMapper->is_stopped())
     //         {
     //             usleep(1000);
     //         }
@@ -235,7 +235,7 @@ mat4f System::TrackStereo(const cv::Mat &, const cv::Mat &, const double &)
     //     if(mbDeactivateLocalizationMode)
     //     {
     //         tracker->InformOnlyTracking(false);
-    //         localMapper->Release();
+    //         localMapper->release();
     //         mbDeactivateLocalizationMode = false;
     //     }
     // }
@@ -274,10 +274,10 @@ mat4f System::TrackRGBD(const cv::Mat &, const cv::Mat &, const double &)
     //     unique_lock<mutex> lock(mMutexMode);
     //     if(mbActivateLocalizationMode)
     //     {
-    //         localMapper->RequestStop();
+    //         localMapper->request_stop();
 
     //         // Wait until Local Mapping has effectively stopped
-    //         while(!localMapper->isStopped())
+    //         while(!localMapper->is_stopped())
     //         {
     //             usleep(1000);
     //         }
@@ -288,7 +288,7 @@ mat4f System::TrackRGBD(const cv::Mat &, const cv::Mat &, const double &)
     //     if(mbDeactivateLocalizationMode)
     //     {
     //         tracker->InformOnlyTracking(false);
-    //         localMapper->Release();
+    //         localMapper->release();
     //         mbDeactivateLocalizationMode = false;
     //     }
     // }

@@ -53,13 +53,13 @@ public:
 
     void RequestFinish();
 
-    void RequestStop();
+    void request_stop();
 
     bool isFinished();
 
-    bool isStopped();
+    bool is_stopped();
 
-    void Release();
+    void release();
 
     const std::string& GetWindowTitle() const { return windowTitle; }
 

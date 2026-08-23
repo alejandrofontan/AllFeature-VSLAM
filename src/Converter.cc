@@ -24,12 +24,12 @@
 namespace AF_VSLAM
 {
 
-mat4f Converter::toMatrix4f(const g2o::Sim3 &Sim3)
+mat4f Converter::to_matrix4f(const g2o::Sim3 &Sim3)
 {
     Eigen::Matrix3d eigR = Sim3.rotation().toRotationMatrix();
     Eigen::Vector3d eigt = Sim3.translation();
     double s = Sim3.scale();
-    return toMatrix4f(s * eigR,eigt);
+    return to_matrix4f(s * eigR,eigt);
 }
 
 Eigen::Matrix<double,3,1> Converter::toVector3d(const cv::Mat &cvVector)
@@ -51,7 +51,7 @@ Eigen::Matrix<double,3,3> Converter::toMatrix3d(const cv::Mat &cvMat3)
     return M;
 }
 
-Eigen::Matrix<float,4,4> Converter::toMatrix4f(const cv::Mat &cvMat4)
+Eigen::Matrix<float,4,4> Converter::to_matrix4f(const cv::Mat &cvMat4)
 {
     Eigen::Matrix<float,4,4> M;
 
@@ -63,7 +63,7 @@ Eigen::Matrix<float,4,4> Converter::toMatrix4f(const cv::Mat &cvMat4)
     return M;
 }
 
-Eigen::Matrix<float,3,3> Converter::toMatrix3f(const cv::Mat &cvMat3)
+Eigen::Matrix<float,3,3> Converter::to_matrix3f(const cv::Mat &cvMat3)
 {
     Eigen::Matrix<float,3,3> M;
 
@@ -118,12 +118,12 @@ g2o::SE3Quat Converter::toSE3Quat(const Eigen::Matrix<float,4,4> &m)
     return g2o::SE3Quat(R,t);
 }
 
-Eigen::Matrix<float,4,4> Converter::toMatrix4f(const g2o::SE3Quat &SE3)
+Eigen::Matrix<float,4,4> Converter::to_matrix4f(const g2o::SE3Quat &SE3)
 {
     return  SE3.to_homogeneous_matrix().cast<float>();
 }
 
-Eigen::Matrix<float,4,4> Converter::toMatrix4f(const Eigen::Matrix<double,3,3> &R, const Eigen::Matrix<double,3,1> &t)
+Eigen::Matrix<float,4,4> Converter::to_matrix4f(const Eigen::Matrix<double,3,3> &R, const Eigen::Matrix<double,3,1> &t)
 {
     Eigen::Matrix<float,4,4> M{Eigen::Matrix<float,4,4>::Identity()};
     M.block<3,3>(0,0) = R.cast<float>();

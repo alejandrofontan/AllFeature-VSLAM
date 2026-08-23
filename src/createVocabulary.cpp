@@ -163,7 +163,7 @@ void loadBinaryFeatures(vector<vector<cv::Mat>> &features, const std::vector<std
         cv::Mat descriptors;
 
         AF_VSLAM::Image im(imagePaths[i]);
-        im.GetGrayImage(true);
+        im.get_gray_image(true);
 
         (*extractor)(im,keypoints,descriptors);
         features.push_back(vector<cv::Mat>());
@@ -216,7 +216,7 @@ void loadNonBinaryFeatures(vector<vector<vector<float>>> &features, const std::v
         cv::Mat descriptors;
 
         AF_VSLAM::Image im(imagePaths[i]);
-        im.GetGrayImage(true);
+        im.get_gray_image(true);
 
         (*extractor)(im,keypoints,descriptors);
 

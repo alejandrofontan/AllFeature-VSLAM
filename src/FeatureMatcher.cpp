@@ -836,7 +836,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f&
 
 // Projects map points from a keyframe into a current frame for relocalization.
 // Applies rotation histogram filtering to reject orientation-inconsistent matches.
-int FeatureMatcher::SearchByProjection(Frame &CurrentFrame, Keyframe pKF, const set<Pt> &sAlreadyFound, const float& radiusTh,
+int FeatureMatcher::search_by_projection(Frame &CurrentFrame, Keyframe pKF, const set<Pt> &sAlreadyFound, const float& radiusTh,
      const bool& useHighMatchingThreshold, const FeatureType& featType)
 {
     Descriptor_Distance_Type descDistanceTh = descDistTh_low_reloc[featType];
@@ -959,7 +959,7 @@ void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_setti
 
 vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, const int& histLength){
     // Reused thread-local buffer: the old per-call construction allocated histLength
-    // vectors (each reserve(500)) on every SearchByProjection invocation.
+    // vectors (each reserve(500)) on every search_by_projection invocation.
     static thread_local vector<vector<int>> rotHist;
     rotHist.resize(histLength);
     for(auto& bin : rotHist)

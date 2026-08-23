@@ -65,7 +65,7 @@ class PnPsolver {
 
   ~PnPsolver();
 
-  void SetRansacParameters(double probability = 0.99, int minInliers = 8 , int maxIterations = 300, int minSet = 4, float epsilon = 0.4,
+  void set_ransac_parameters(double probability = 0.99, int minInliers = 8 , int maxIterations = 300, int minSet = 4, float epsilon = 0.4,
                            float th2 = 5.991);
 
   cv::Mat find(vector<bool> &vbInliers, int &nInliers);

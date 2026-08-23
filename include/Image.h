@@ -27,8 +27,8 @@ namespace AF_VSLAM {
         // (e.g. 5000 for TUM/ETH-style datasets storing depth at 1/5000 m resolution). Defaults to 1
         // (no scaling, i.e. the depth image is assumed to already be metric).
         void LoadDepth(const std::string& depthPath, const float& depthFactor = 1.0f);
-        void GetGrayImage(const bool& rgb);
-        void FixImageSize(const int& new_width, const int& new_height);
+        void get_gray_image(const bool& rgb);
+        void fix_image_size(const int& new_width, const int& new_height);
     };
 
 }

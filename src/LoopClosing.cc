@@ -304,7 +304,7 @@ bool LoopClosing::ComputeSim3()
         else
         {
             Sim3Solver* pSolver = new Sim3Solver(mpCurrentKF,pKF,vvpMapPointMatches[i],featureType, mbFixScale);
-            pSolver->SetRansacParameters(0.99,20,300);
+            pSolver->set_ransac_parameters(0.99,20,300);
             vpSim3Solvers[i] = pSolver;
         }
 
@@ -363,7 +363,7 @@ bool LoopClosing::ComputeSim3()
                     mpMatchedKF = pKF;
                     g2o::Sim3 gSmw(pKF->get_rotation().cast<double>(),pKF->get_translation().cast<double>(),1.0);
                     mg2oScw = gScm*gSmw;
-                    mScw = Converter::toMatrix4f(mg2oScw);
+                    mScw = Converter::to_matrix4f(mg2oScw);
 
                     mvpCurrentMatchedPoints = vpMapPointMatches;
                     break;
@@ -441,7 +441,7 @@ void LoopClosing::CorrectLoop()
 
     // Send a stop signal to Local Mapping
     // Avoid new keyframes are inserted while correcting the loop
-    localMapper->RequestStop();
+    localMapper->request_stop();
 
     // If a Global Bundle Adjustment is running, abort it
     if(isRunningGBA())
@@ -459,7 +459,7 @@ void LoopClosing::CorrectLoop()
     }
 
     // Wait until Local Mapping has effectively stopped
-    while(!localMapper->isStopped())
+    while(!localMapper->is_stopped())
     {
         usleep(1000);
     }
@@ -542,7 +542,7 @@ void LoopClosing::CorrectLoop()
 
             eigt *=(1./s); //[R t/s;0 1]
 
-            mat4f correctedTiw = Converter::toMatrix4f(eigR,eigt);
+            mat4f correctedTiw = Converter::to_matrix4f(eigR,eigt);
 
             pKFi->set_pose(correctedTiw);
 
@@ -612,8 +612,8 @@ void LoopClosing::CorrectLoop()
     mbStopGBA = false;
     mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this,mpCurrentKF->keyId);
 
-    // Loop closed. Release Local Mapping.
-    localMapper->Release();
+    // Loop closed. release Local Mapping.
+    localMapper->release();
 
     mLastLoopKFid = mpCurrentKF->keyId;
 }
@@ -626,7 +626,7 @@ void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap)
         Keyframe pKF = mit->first;
 
         g2o::Sim3 g2oScw = mit->second;
-        mat4f cvScw = Converter::toMatrix4f(g2oScw);
+        mat4f cvScw = Converter::to_matrix4f(g2oScw);
 
         vector<Pt> vpReplacePoints(mvpLoopMapPoints.size(),static_cast<Pt>(NULL));
         matcher->fuse_map_points_to_keyframe(pKF,cvScw,mvpLoopMapPoints,4.0f,vpReplacePoints, featureType);
@@ -646,7 +646,7 @@ void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap)
 }
 
 
-void LoopClosing::RequestReset()
+void LoopClosing::request_reset()
 {
     {
         unique_lock<mutex> lock(mMutexReset);
@@ -695,10 +695,10 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
         {
             cout << "Global Bundle Adjustment finished" << endl;
             cout << "Updating map ..." << endl;
-            localMapper->RequestStop();
+            localMapper->request_stop();
             // Wait until Local Mapping has effectively stopped
 
-            while(!localMapper->isStopped() && !localMapper->isFinished())
+            while(!localMapper->is_stopped() && !localMapper->isFinished())
             {
                 usleep(1000);
             }
@@ -712,7 +712,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
             while(!lpKFtoCheck.empty())
             {
                 Keyframe pKF = lpKFtoCheck.front();
-                const set<Keyframe> sChilds = pKF->GetChilds();
+                const set<Keyframe> sChilds = pKF->get_children();
                 mat4f Twc = pKF->get_pose_inverse();
                 for(set<Keyframe>::const_iterator sit=sChilds.begin();sit!=sChilds.end();sit++)
                 {
@@ -771,7 +771,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
 
             mpMap->InformNewBigChange();
 
-            localMapper->Release();
+            localMapper->release();
 
             cout << "Map updated!" << endl;
         }

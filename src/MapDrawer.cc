@@ -210,7 +210,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
             }
 
             // Spanning tree
-            Keyframe pParent = vpKFs[i]->GetParent();
+            Keyframe pParent = vpKFs[i]->get_parent();
             if(pParent)
             {
                 vec3f Owp = pParent->get_camera_center();

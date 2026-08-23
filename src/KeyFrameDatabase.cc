@@ -148,7 +148,7 @@ vector<Keyframe> KeyFrameDatabase::DetectLoopCandidates(Keyframe pKF, float minS
     for(list<pair<float,Keyframe> >::iterator it=lScoreAndMatch.begin(), itend=lScoreAndMatch.end(); it!=itend; it++)
     {
         Keyframe pKFi = it->second;
-        vector<Keyframe> vpNeighs = pKFi->GetBestCovisibilityKeyFrames(10);
+        vector<Keyframe> vpNeighs = pKFi->get_best_covisibility_keyframes(10);
 
         float bestScore = it->first;
         float accScore = it->first;
@@ -196,7 +196,7 @@ vector<Keyframe> KeyFrameDatabase::DetectLoopCandidates(Keyframe pKF, float minS
     return vpLoopCandidates;
 }
 
-vector<Keyframe> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
+vector<Keyframe> KeyFrameDatabase::detect_relocalization_candidates(Frame *F)
 {
     list<Keyframe> lKFsSharingWords;
 
@@ -262,7 +262,7 @@ vector<Keyframe> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
     for(list<pair<float,Keyframe> >::iterator it=lScoreAndMatch.begin(), itend=lScoreAndMatch.end(); it!=itend; it++)
     {
         Keyframe pKFi = it->second;
-        vector<Keyframe> vpNeighs = pKFi->GetBestCovisibilityKeyFrames(10);
+        vector<Keyframe> vpNeighs = pKFi->get_best_covisibility_keyframes(10);
 
         float bestScore = it->first;
         float accScore = bestScore;

@@ -78,7 +78,7 @@ public:
 
     void insert_keyframe(Keyframe pKF);
 
-    void RequestReset();
+    void request_reset();
 
     // This function will run in a separate thread
     void RunGlobalBundleAdjustment(unsigned long nLoopKF);

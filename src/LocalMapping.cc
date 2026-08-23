@@ -68,7 +68,7 @@ void LocalMapping::Run()
                 searchInNeighbors_times[int(1000 * t_duration)]++;
             }
             mbAbortBA = false;
-            //if(!CheckNewKeyFrames() && !stopRequested())
+            //if(!CheckNewKeyFrames() && !is_stop_requested())
             if(!CheckNewKeyFrames())
             {
                 // Local BA
@@ -105,7 +105,7 @@ void LocalMapping::Run()
         else if(Stop())
         {
             // Safe area to stop
-            while(isStopped() && !CheckFinish())
+            while(is_stopped() && !CheckFinish())
             {
                 usleep(3000);
             }
@@ -238,13 +238,13 @@ mat3f LocalMapping::ComputeF12(Keyframe &pKF1, Keyframe &pKF2)
     const cv::Mat &K2 = pKF2->mK;
 
 
-    return Converter::toMatrix3f(K1.t().inv()) * t12x * R12 * Converter::toMatrix3f(K2.inv());
+    return Converter::to_matrix3f(K1.t().inv()) * t12x * R12 * Converter::to_matrix3f(K2.inv());
 }
 
 void LocalMapping::CreateNewMapPoints()
 {
     // Retrieve neighbor keyframes in covisibility graph
-    const vector <Keyframe> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES);
+    const vector <Keyframe> vpNeighKFs = mpCurrentKeyFrame->get_best_covisibility_keyframes(CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES);
 
     // Init Current Keyframe
     mat4f Twc1, Tcw1;
@@ -556,7 +556,7 @@ void LocalMapping::CreateNewMapPoints()
 void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
 {
     // Retrieve neighbor keyframes
-    const vector<Keyframe > vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES);
+    const vector<Keyframe > vpNeighKFs = mpCurrentKeyFrame->get_best_covisibility_keyframes(SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES);
     vector<Keyframe > vpTargetKFs;
     for(vector<Keyframe >::const_iterator vit=vpNeighKFs.begin(), vend=vpNeighKFs.end(); vit!=vend; vit++)
     {
@@ -567,7 +567,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
         pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->keyId;
 
         // Extend to some second neighbors
-        const vector<Keyframe > vpSecondNeighKFs = pKFi->GetBestCovisibilityKeyFrames(SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES_SECOND);
+        const vector<Keyframe > vpSecondNeighKFs = pKFi->get_best_covisibility_keyframes(SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES_SECOND);
         for(vector<Keyframe >::const_iterator vit2=vpSecondNeighKFs.begin(), vend2=vpSecondNeighKFs.end(); vit2!=vend2; vit2++)
         {
             Keyframe  pKFi2 = *vit2;
@@ -628,7 +628,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
     mpCurrentKeyFrame->update_connections();
 }
 
-void LocalMapping::RequestStop()
+void LocalMapping::request_stop()
 {
     unique_lock<mutex> lock(mMutexStop);
     mbStopRequested = true;
@@ -649,19 +649,19 @@ bool LocalMapping::Stop()
     return false;
 }
 
-bool LocalMapping::isStopped()
+bool LocalMapping::is_stopped()
 {
     unique_lock<mutex> lock(mMutexStop);
     return mbStopped;
 }
 
-bool LocalMapping::stopRequested()
+bool LocalMapping::is_stop_requested()
 {
     unique_lock<mutex> lock(mMutexStop);
     return mbStopRequested;
 }
 
-void LocalMapping::Release()
+void LocalMapping::release()
 {
     unique_lock<mutex> lock(mMutexStop);
     unique_lock<mutex> lock2(mMutexFinish);
@@ -686,7 +686,7 @@ void LocalMapping::SetAcceptKeyFrames(bool flag)
     mbAcceptKeyFrames=flag;
 }
 
-bool LocalMapping::SetNotStop(bool flag)
+bool LocalMapping::set_insertion_lock(bool flag)
 {
     unique_lock<mutex> lock(mMutexStop);
 
@@ -752,7 +752,7 @@ void LocalMapping::KeyFrameCulling()
                         nMPs++;
                         if(pMP->number_of_observations() > thObs)
                         {
-                            const map<KeyframeId , Obs> observations = pMP->GetObservations();
+                            const map<KeyframeId , Obs> observations = pMP->get_observations();
                             int nObs=0;
                             for(auto& obs: observations)
                             {
@@ -791,7 +791,7 @@ void LocalMapping::KeyFrameCulling()
     }
 }
 
-void LocalMapping::RequestReset()
+void LocalMapping::request_reset()
 {
     {
         unique_lock<mutex> lock(mMutexReset);

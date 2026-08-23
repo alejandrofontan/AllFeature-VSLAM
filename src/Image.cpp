@@ -54,7 +54,7 @@ void AF_VSLAM::Image::LoadDepth(const std::string &depthPath, const float& depth
     }
 }
 
-void AF_VSLAM::Image::GetGrayImage(const bool& rgb) {
+void AF_VSLAM::Image::get_gray_image(const bool& rgb) {
     if (img.channels() == 3) {
         cvtColor(img, grayImg, rgb ? cv::COLOR_RGB2GRAY : cv::COLOR_BGR2GRAY);
     } else if (img.channels() == 4) {
@@ -64,9 +64,9 @@ void AF_VSLAM::Image::GetGrayImage(const bool& rgb) {
     }
 }
 
-void AF_VSLAM::Image::FixImageSize(const int& new_width, const int& new_height){
+void AF_VSLAM::Image::fix_image_size(const int& new_width, const int& new_height){
     if (grayImg.empty()) {
-        throw std::runtime_error("FixImageSize: grayImg is empty — call GetGrayImage() first");
+        throw std::runtime_error("fix_image_size: grayImg is empty — call get_gray_image() first");
     }
 
     cv::Size new_size(new_width, new_height);

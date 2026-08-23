@@ -86,7 +86,7 @@ Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
 
     windowTitle = "VSLAM-LAB | AllFeature-VSLAM (";
     for(size_t i=0; i<featureTypes.size(); i++){
-        windowTitle += " " + featureName(featureTypes[i]);
+        windowTitle += " " + feature_name(featureTypes[i]);
         if (i != featureTypes.size() - 1){
             windowTitle += ",";
         }
@@ -307,7 +307,7 @@ void Viewer::Run()
 
         if(Stop())
         {
-            while(isStopped())
+            while(is_stopped())
             {
                 usleep(3000);
             }
@@ -344,14 +344,14 @@ bool Viewer::isFinished()
     return mbFinished;
 }
 
-void Viewer::RequestStop()
+void Viewer::request_stop()
 {
     unique_lock<mutex> lock(mMutexStop);
     if(!mbStopped)
         mbStopRequested = true;
 }
 
-bool Viewer::isStopped()
+bool Viewer::is_stopped()
 {
     unique_lock<mutex> lock(mMutexStop);
     return mbStopped;
@@ -375,7 +375,7 @@ bool Viewer::Stop()
 
 }
 
-void Viewer::Release()
+void Viewer::release()
 {
     unique_lock<mutex> lock(mMutexStop);
     mbStopped = false;

@@ -56,7 +56,7 @@ public:
     vec3f get_normal();
     Keyframe GetReferenceKeyFrame();
 
-    std::map<KeyframeId,shared_ptr<Observation>> GetObservations();
+    std::map<KeyframeId,shared_ptr<Observation>> get_observations();
     int number_of_observations();
     int Getnumber_of_observations();
     void increasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex);
@@ -75,10 +75,10 @@ public:
     bool is_bad();
 
     void replace(Pt pMP);
-    Pt GetReplaced();
+    Pt get_replaced();
 
-    void IncreaseVisible(int n=1);
-    void IncreaseFound(int n=1);
+    void increase_visible(int n=1);
+    void increase_found(int n=1);
     float GetFoundRatio();
     inline int GetFound(){
         return mnFound;

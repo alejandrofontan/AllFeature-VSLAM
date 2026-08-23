@@ -106,10 +106,10 @@ Sim3Solver::Sim3Solver(Keyframe pKF1, Keyframe pKF2, const vector<Pt> &vpMatched
     FromCameraToImage(mvX3Dc1,mvP1im1,mK1);
     FromCameraToImage(mvX3Dc2,mvP2im2,mK2);
 
-    SetRansacParameters();
+    set_ransac_parameters();
 }
 
-void Sim3Solver::SetRansacParameters(double probability, int minInliers, int maxIterations)
+void Sim3Solver::set_ransac_parameters(double probability, int minInliers, int maxIterations)
 {
     mRansacProb = probability;
     mRansacMinInliers = minInliers;
@@ -274,7 +274,7 @@ void Sim3Solver::ComputeSim3(mat3f &P1, mat3f &P2)
     cv::Mat mR12i_tmp;
     mR12i_tmp.create(3,3,CV_32F);
     cv::Rodrigues(Converter::toCvMat(vec).clone(),mR12i_tmp); // computes the rotation matrix from angle-axis
-    R12i = Converter::toMatrix3f(mR12i_tmp);
+    R12i = Converter::to_matrix3f(mR12i_tmp);
 
     // Step 5: Rotate set 2
     mat3f P3 =  R12i * Pr2;

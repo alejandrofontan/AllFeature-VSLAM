@@ -22,7 +22,7 @@ void AF_VSLAM::printError(const std::string& function, const std::string& messag
     std::cout << "\x1b[91m" << "[" << function << "] : " <<  message << "\x1b[0m"<< std::endl;
 }
 
-std::string AF_VSLAM::featureName(const FeatureType& featureType){
+std::string AF_VSLAM::feature_name(const FeatureType& featureType){
     const AF_VSLAM::Feature& ft = get_feature(featureType);
     return ft.getFeatureName();
 }

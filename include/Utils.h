@@ -18,7 +18,7 @@ namespace AF_VSLAM{
                    std::string color = "\x1b[0m");
     void printError(const std::string& function, const std::string& message);
 
-    std::string featureName(const FeatureType& featureType);
+    std::string feature_name(const FeatureType& featureType);
 
     std::string matType(const int& matTypeIndex);
     cv::Scalar getFeatureColor(const FeatureType& featureType, const int& format, const bool& normalize = false);

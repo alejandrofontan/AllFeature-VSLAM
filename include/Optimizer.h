@@ -49,7 +49,7 @@ struct OptimizerParameters
     // RGB-D depth-channel measurement information (1/variance) for the inverse-depth residual
     double invDepthInfo{20000.0};
 
-    // PoseOptimization()
+    // pose_optimization()
     int numItPoseOpt{10};
 
     // OptimizeEssentialGraph()
@@ -75,7 +75,7 @@ public:
     void static LocalBundleAdjustment(Keyframe pKF, bool *pbStopFlag, shared_ptr<Map>pMap);
     // useDepthChannel=false books RGB-D observations as plain 2D reprojection edges —
     // used by track_reference_keyframe's divergence rescue (see Tracking.cc).
-    int static PoseOptimization(Frame* pFrame, const bool useDepthChannel = true);
+    int static pose_optimization(Frame* pFrame, const bool useDepthChannel = true);
 
     // if bFixScale is true, 6DoF optimization (stereo,rgbd), 7DoF otherwise (mono)
     void static OptimizeEssentialGraph(shared_ptr<Map>pMap, Keyframe pLoopKF, Keyframe pCurKF,

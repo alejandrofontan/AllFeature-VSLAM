@@ -76,7 +76,7 @@ public:
     void UpdateBestCovisibles();
     map<KeyframeId,Keyframe> GetConnectedKeyFrames();
     std::vector<Keyframe > GetVectorCovisibleKeyFrames();
-    std::vector<Keyframe> GetBestCovisibilityKeyFrames(const int &N);
+    std::vector<Keyframe> get_best_covisibility_keyframes(const int &N);
     std::vector<Keyframe> GetCovisiblesByWeight(const int &w);
     int GetWeight(Keyframe pKF);
 
@@ -84,8 +84,8 @@ public:
     void AddChild(Keyframe pKF);
     void EraseChild(Keyframe pKF);
     void ChangeParent(Keyframe pKF);
-    std::set<Keyframe> GetChilds();
-    Keyframe GetParent();
+    std::set<Keyframe> get_children();
+    Keyframe get_parent();
     bool hasChild(Keyframe pKF);
 
     // Loop Edges

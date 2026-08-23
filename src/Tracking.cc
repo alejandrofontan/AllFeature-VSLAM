@@ -79,9 +79,9 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     GrabProfiler profiler{};
 
     // Convert image to grayscale and resize
-    im.GetGrayImage(is_rgb_);
+    im.get_gray_image(is_rgb_);
     if(fix_image_size_)
-        im.FixImageSize(image_width_, image_height_);
+        im.fix_image_size(image_width_, image_height_);
 
     gray_image_ = im.grayImg;
     mask_image_ = im.mask;
@@ -431,7 +431,7 @@ void Tracking::check_replaced_in_last_frame()
 
             if(pMP)
             {
-                Pt pRep = pMP->GetReplaced();
+                Pt pRep = pMP->get_replaced();
                 if(pRep)
                 {
                     last_frame_.pts.at(ft)[i] = pRep;
@@ -481,7 +481,7 @@ bool Tracking::track_reference_keyframe()
     // had state_ == OK last frame, which stored it.
     const mat4f seed_pose = last_frame_relative_pose_ * last_frame_.ref_keyframe->get_pose();
     current_frame_.set_pose(seed_pose);
-    Optimizer::PoseOptimization(&current_frame_);
+    Optimizer::pose_optimization(&current_frame_);
     int num_map_inliers = current_frame_.count_inlier_map_points();
 
     // Divergence rescue: a collapse to (almost) zero inliers despite plentiful raw matches
@@ -499,7 +499,7 @@ bool Tracking::track_reference_keyframe()
         for (auto& [ft, outlier_flags] : current_frame_.outliers)
             std::fill(outlier_flags.begin(), outlier_flags.end(), false);
         current_frame_.set_pose(seed_pose);
-        Optimizer::PoseOptimization(&current_frame_, /*useDepthChannel=*/false);
+        Optimizer::pose_optimization(&current_frame_, /*useDepthChannel=*/false);
         num_map_inliers = current_frame_.count_inlier_map_points();
     }
 
@@ -539,14 +539,14 @@ bool Tracking::track_local_map()
     // the local map, match its points into the frame, and refine the pose.
     update_local_map();
     search_local_points();
-    Optimizer::PoseOptimization(&current_frame_);
+    Optimizer::pose_optimization(&current_frame_);
 
     // Found-ratio statistics: every non-outlier match counts as "found"
     // (feeds MapPointCulling's found/visible ratio).
     for (auto& [ft, pts] : current_frame_.pts)
         for(size_t i = 0; i < pts.size(); i++)
             if(pts[i] && !current_frame_.outliers.at(ft)[i])
-                pts[i]->IncreaseFound();
+                pts[i]->increase_found();
 
     num_inlier_matches_ = current_frame_.count_inlier_map_points();
 
@@ -599,8 +599,8 @@ void Tracking::update_local_keyframes()
                 pt = nullptr;
                 continue;
             }
-            // By-value snapshot: GetObservations copies under the point's mutex
-            const std::map<KeyframeId, Obs> observations = pt->GetObservations();
+            // By-value snapshot: get_observations copies under the point's mutex
+            const std::map<KeyframeId, Obs> observations = pt->get_observations();
             for (const auto& [key_id, obs] : observations) {
                 shared_points_per_keyframe[key_id]++;
                 keyframe_by_id[key_id] = obs->projKeyframe;
@@ -646,21 +646,21 @@ void Tracking::update_local_keyframes()
             break;
         const Keyframe keyframe = local_keyframes_[i]; // copy: push_back may reallocate
 
-        for(const Keyframe& neighbor : keyframe->GetBestCovisibilityKeyFrames(BEST_COVISIBLE_KEYFRAMES)){
+        for(const Keyframe& neighbor : keyframe->get_best_covisibility_keyframes(BEST_COVISIBLE_KEYFRAMES)){
             if(!neighbor->is_bad() && seen_keyframe_ids.insert(neighbor->keyId).second){
                 local_keyframes_.push_back(neighbor);
                 break;
             }
         }
 
-        for(const Keyframe& child : keyframe->GetChilds()){
+        for(const Keyframe& child : keyframe->get_children()){
             if(!child->is_bad() && seen_keyframe_ids.insert(child->keyId).second){
                 local_keyframes_.push_back(child);
                 break;
             }
         }
 
-        const Keyframe parent = keyframe->GetParent();
+        const Keyframe parent = keyframe->get_parent();
         if(parent && !parent->is_bad() && seen_keyframe_ids.insert(parent->keyId).second){
             local_keyframes_.push_back(parent);
             break;
@@ -698,7 +698,7 @@ void Tracking::search_local_points()
     for (auto& [ft, pts] : current_frame_.pts) {
         for(auto& pt : pts){
             if(pt && !pt->is_bad()){
-                pt->IncreaseVisible();
+                pt->increase_visible();
                 pt->idLastFrameSeen = current_frame_.frame_id;
                 pt->mbTrackInView = false;
             }
@@ -708,7 +708,7 @@ void Tracking::search_local_points()
     }
 
     // Project the local points into the frame and check their visibility
-    // (isInFrustum fills the MapPoint variables the matcher reads)
+    // (is_in_frustum fills the MapPoint variables the matcher reads)
     int num_to_match = 0;
     for(const Pt& pt : local_points_){
         if(pt->idLastFrameSeen == current_frame_.frame_id)
@@ -716,8 +716,8 @@ void Tracking::search_local_points()
         if(pt->is_bad())
             continue;
 
-        if(current_frame_.isInFrustum(pt, VIEWING_COS_LIMIT)){
-            pt->IncreaseVisible();
+        if(current_frame_.is_in_frustum(pt, VIEWING_COS_LIMIT)){
+            pt->increase_visible();
             num_to_match++;
         }
     }
@@ -729,7 +729,7 @@ void Tracking::search_local_points()
 bool Tracking::need_new_keyframe()
 {
     // If Local Mapping is frozen by a loop closure do not insert keyframes
-    if(local_mapper_->isStopped() || local_mapper_->stopRequested())
+    if(local_mapper_->is_stopped() || local_mapper_->is_stop_requested())
         return false;
 
     const size_t num_keyframes_in_map = map_->keyframes_in_map();
@@ -765,7 +765,7 @@ bool Tracking::need_new_keyframe()
     forced_by_cadence = (current_frame_.frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0;
 #endif
 
-    const bool low_overlap = current_frame_.GetOverlap() < MIN_REF_OVERLAP;
+    const bool low_overlap = current_frame_.get_overlap() < MIN_REF_OVERLAP;
     const bool forced = forced_by_evaluation || forced_by_cadence;
 
     // Median inlier count over the recent tracked frames (reference for the
@@ -819,7 +819,7 @@ void Tracking::create_new_keyframe()
 {
     // Lock Local Mapping against stopping while the keyframe is inserted;
     // fails (and skips insertion) if a loop closure already stopped it.
-    if(!local_mapper_->SetNotStop(true))
+    if(!local_mapper_->set_insertion_lock(true))
         return;
 
     const Keyframe keyframe = std::make_shared<KeyFrame>(current_frame_, map_, keyframe_db_);
@@ -828,7 +828,7 @@ void Tracking::create_new_keyframe()
     current_frame_.ref_keyframe = keyframe;
 
     local_mapper_->insert_keyframe(keyframe);
-    local_mapper_->SetNotStop(false);
+    local_mapper_->set_insertion_lock(false);
 
     last_keyframe_ = keyframe;
     last_keyframe_id_ = current_frame_.frame_id;
@@ -877,7 +877,7 @@ bool Tracking::relocalize()
     const FeatureType feature_type = vocabulary_->featureType;
     current_frame_.compute_global_descriptor();
 
-    const std::vector<Keyframe> candidates = keyframe_db_->DetectRelocalizationCandidates(&current_frame_);
+    const std::vector<Keyframe> candidates = keyframe_db_->detect_relocalization_candidates(&current_frame_);
     if(candidates.empty())
         return false;
     const size_t num_candidates = candidates.size();
@@ -904,7 +904,7 @@ bool Tracking::relocalize()
             continue;
         }
         solvers[i] = std::make_unique<PnPsolver>(current_frame_, matches_per_candidate[i][feature_type], feature_type);
-        solvers[i]->SetRansacParameters(RANSAC_PROBABILITY, RANSAC_MIN_INLIERS, RANSAC_MAX_ITERATIONS,
+        solvers[i]->set_ransac_parameters(RANSAC_PROBABILITY, RANSAC_MIN_INLIERS, RANSAC_MAX_ITERATIONS,
                                         RANSAC_MIN_SET, RANSAC_EPSILON, RANSAC_TH2);
         num_active++;
     }
@@ -931,7 +931,7 @@ bool Tracking::relocalize()
 
             if(Tcw.empty())
                 continue;
-            current_frame_.Tcw = Converter::toMatrix4f(Tcw);
+            current_frame_.Tcw = Converter::to_matrix4f(Tcw);
 
             if(accept_relocalization_hypothesis(candidates[i], matches_per_candidate[i].at(feature_type),
                                                 inliers, feature_type))
@@ -960,7 +960,7 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
             current_frame_.pts.at(feature_type)[j] = nullptr;
     }
 
-    int num_good = Optimizer::PoseOptimization(&current_frame_);
+    int num_good = Optimizer::pose_optimization(&current_frame_);
     if(num_good < RELOC_INLIERS_LOW)
         return false;
 
@@ -971,11 +971,11 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
     // Few inliers: search by projection in a coarse window and optimize again
     if(num_good < RELOC_INLIERS_HIGH)
     {
-        const int additional = matcher_->SearchByProjection(current_frame_, candidate, found,
+        const int additional = matcher_->search_by_projection(current_frame_, candidate, found,
                                                             RELOC_SEARCH_RADIUS_COARSE, true, feature_type);
         if(additional + num_good >= RELOC_INLIERS_HIGH)
         {
-            num_good = Optimizer::PoseOptimization(&current_frame_);
+            num_good = Optimizer::pose_optimization(&current_frame_);
 
             // Many inliers but still not enough: the pose is already close, so search
             // once more in a narrower window and run a final optimization
@@ -985,11 +985,11 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
                 for(int j = 0; j < current_frame_.N.at(feature_type); j++)
                     if(current_frame_.pts.at(feature_type)[j])
                         found.insert(current_frame_.pts.at(feature_type)[j]);
-                const int narrow_additional = matcher_->SearchByProjection(current_frame_, candidate, found,
+                const int narrow_additional = matcher_->search_by_projection(current_frame_, candidate, found,
                                                                            RELOC_SEARCH_RADIUS_NARROW, false, feature_type);
                 if(num_good + narrow_additional >= RELOC_INLIERS_HIGH)
                 {
-                    num_good = Optimizer::PoseOptimization(&current_frame_);
+                    num_good = Optimizer::pose_optimization(&current_frame_);
                     for(int j = 0; j < current_frame_.N.at(feature_type); j++)
                         if(current_frame_.outliers.at(feature_type)[j])
                             current_frame_.pts.at(feature_type)[j] = nullptr;
@@ -1002,7 +1002,7 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
         return false;
 
     AF_INFO("relocalize: succeeded | frame=" << current_frame_.frame_id
-            << " feature=" << featureName(feature_type)
+            << " feature=" << feature_name(feature_type)
             << " matchedKeyframe=" << candidate->keyId
             << " inliers=" << num_good << " requiredInliers=" << RELOC_INLIERS_HIGH);
     std::cout.flush(); // AF_INFO's stdout is fully buffered under the runner's redirect
@@ -1018,18 +1018,18 @@ void Tracking::reset()
     std::cout.flush();
     if(viewer_)
     {
-        viewer_->RequestStop();
-        while(!viewer_->isStopped())
+        viewer_->request_stop();
+        while(!viewer_->is_stopped())
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
     }
 
     AF_INFO("reset: resetting local mapping...");
     std::cout.flush();
-    local_mapper_->RequestReset();
+    local_mapper_->request_reset();
 
     AF_INFO("reset: resetting loop closing...");
     std::cout.flush();
-    loop_closing_->RequestReset();
+    loop_closing_->request_reset();
 
     AF_INFO("reset: clearing keyframe database and map...");
     std::cout.flush();
@@ -1059,7 +1059,7 @@ void Tracking::reset()
     grab_image_times_.clear();
 
     if(viewer_)
-        viewer_->Release();
+        viewer_->release();
 
     AF_INFO("reset: done");
     std::cout.flush();
