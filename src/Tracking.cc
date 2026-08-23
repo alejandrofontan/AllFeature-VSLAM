@@ -369,27 +369,12 @@ void Tracking::create_initial_map()
         }
     }
 
-    keyframe_ini->update_connections();
-    keyframe_cur->update_connections();
-
-    Optimizer::global_bundle_adjustment(map_, params.init_gba_iterations);
-
-    const float median_depth = keyframe_ini->compute_scene_median_depth(2);
-    const int tracked_map_points = keyframe_cur->tracked_map_points(1);
-
-    if (median_depth < 0 || tracked_map_points < params.init_min_tracked_points)
-    {
-        AF_WARN("create_initial_map: degenerate initialization (median_depth=" << median_depth
-                << ", tracked map points=" << tracked_map_points << " < " << params.init_min_tracked_points
-                << ") — resetting...");
-        reset();
-        return;
-    }
-
-    // Set the initial map's scale: prefer a depth-verified metric scale (median of
-    // sensor-depth / triangulated-depth over the geometrically verified matches) over
-    // the arbitrary monocular "median depth = 1" convention, when enough points carry
-    // valid sensor depth.
+    // Depth-verified metric scale, decided from the raw triangulations (median of
+    // sensor-depth / triangulated-depth over the geometrically verified matches;
+    // keyframe_ini sits at the origin, so a point's z IS its depth there). Decided
+    // BEFORE global BA so that depth-completed matches can join the map and be
+    // refined by the BA — whose RGB-D inverse-depth edges then anchor the metric
+    // scale during the optimization itself.
     std::vector<float> depth_ratios;
     for (const auto& ft : feature_types_) {
         const auto& inv_depth_kf = keyframe_ini->inv_depth.at(ft);
@@ -407,36 +392,30 @@ void Tracking::create_initial_map()
             depth_ratios.push_back((1.0f / sensor_inv_depth) / triangulated_depth);
         }
     }
-
     const bool metric_scale = depth_ratios.size() >= static_cast<size_t>(params.init_min_depth_samples);
-    float inv_median_depth = 1.0f / median_depth;
+
+    int num_depth_completed = 0;
     if (metric_scale)
     {
         const auto mid = depth_ratios.begin() + depth_ratios.size() / 2;
         std::nth_element(depth_ratios.begin(), mid, depth_ratios.end());
-        inv_median_depth = *mid;
-    }
+        const float scale = *mid;
 
-    // Scale the initial baseline and every triangulated point
-    mat4f Tc2w = keyframe_cur->get_pose();
-    Tc2w.block<3,1>(0,3) *= inv_median_depth;
-    keyframe_cur->set_pose(Tc2w);
+        // Rescale the baseline and the triangulated points to metric now, so that
+        // metric depth back-projections below are scale-consistent with them
+        mat4f Tc2w = keyframe_cur->get_pose();
+        Tc2w.block<3,1>(0,3) *= scale;
+        keyframe_cur->set_pose(Tc2w);
+        for (const auto& ft : feature_types_)
+            for (const Pt& map_point : keyframe_ini->get_map_point_matches(ft))
+                if (map_point)
+                    map_point->set_world_pos(map_point->get_world_pos() * scale);
 
-    for (const auto& ft : feature_types_) {
-        for (const Pt& map_point : keyframe_ini->get_map_point_matches(ft))
-            if (map_point)
-                map_point->set_world_pos(map_point->get_world_pos() * inv_median_depth);
-    }
-
-    // Depth-seeded completion (RGB-D): back-projected sensor depth is metric, so these
-    // points may only enter the map when the depth-verified scale above was actually
-    // applied — mixing them into a monocular-convention map would be scale-inconsistent.
-    // With little or no sensor depth this whole block is skipped and initialization
-    // behaves exactly as pure monocular.
-    int num_depth_completed = 0;
-    int num_depth_only = 0;
-    if (metric_scale)
-    {
+        // Matched pairs the initializer could not triangulate (low parallax,
+        // degenerate geometry): back-project from sensor depth — reference frame
+        // preferred (origin), current frame as fallback — and keep BOTH
+        // observations, exactly like a triangulated point. Added before BA, so
+        // they are refined together with everything else.
         const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
         const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
         const float invfx = 1.0f / fx, invfy = 1.0f / fy;
@@ -444,9 +423,6 @@ void Tracking::create_initial_map()
         const mat3f Rwc_cur = Twc_cur.block<3,3>(0,0);
         const vec3f twc_cur = Twc_cur.block<3,1>(0,3);
 
-        // 1) Matched pairs the initializer could not triangulate: back-project from
-        //    sensor depth (reference frame preferred — it sits at the origin) and keep
-        //    BOTH observations, exactly like a triangulated point.
         flat_index = 0;
         for (const auto& ft : feature_types_) {
             const auto& matches = matches_per_feature_.at(ft);
@@ -481,11 +457,54 @@ void Tracking::create_initial_map()
                 num_depth_completed++;
             }
         }
+    }
 
-        // 3) Unmatched keypoints of the current keyframe with valid depth: single-
-        //    observation points, same trust policy as LocalMapping's depth-seeded pass
-        //    (any inv_depth > 0). The reference frame's unmatched keypoints are left
-        //    out: without an association they would duplicate the same surfaces.
+    keyframe_ini->update_connections();
+    keyframe_cur->update_connections();
+
+    Optimizer::global_bundle_adjustment(map_, params.init_gba_iterations);
+
+    const float median_depth = keyframe_ini->compute_scene_median_depth(2);
+    const int tracked_map_points = keyframe_cur->tracked_map_points(1);
+
+    if (median_depth < 0 || tracked_map_points < params.init_min_tracked_points)
+    {
+        AF_WARN("create_initial_map: degenerate initialization (median_depth=" << median_depth
+                << ", tracked map points=" << tracked_map_points << " < " << params.init_min_tracked_points
+                << ") — resetting...");
+        reset();
+        return;
+    }
+
+    // Monocular fallback (no usable depth): normalize to the arbitrary
+    // "median scene depth = 1" convention, from the BA-refined map as before
+    if (!metric_scale)
+    {
+        const float inv_median_depth = 1.0f / median_depth;
+        mat4f Tc2w = keyframe_cur->get_pose();
+        Tc2w.block<3,1>(0,3) *= inv_median_depth;
+        keyframe_cur->set_pose(Tc2w);
+        for (const auto& ft : feature_types_)
+            for (const Pt& map_point : keyframe_ini->get_map_point_matches(ft))
+                if (map_point)
+                    map_point->set_world_pos(map_point->get_world_pos() * inv_median_depth);
+    }
+
+    // Unmatched keypoints of the current keyframe with valid depth: single-
+    // observation points added AFTER the BA (nothing to refine against yet), same
+    // any-inv_depth>0 trust policy as LocalMapping's depth-seeded pass. Metric map
+    // only. The reference frame's unmatched keypoints are deliberately left out:
+    // without an association they would duplicate the same surfaces.
+    int num_depth_only = 0;
+    if (metric_scale)
+    {
+        const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
+        const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
+        const float invfx = 1.0f / fx, invfy = 1.0f / fy;
+        const mat4f Twc_cur = keyframe_cur->get_pose_inverse();
+        const mat3f Rwc_cur = Twc_cur.block<3,3>(0,0);
+        const vec3f twc_cur = Twc_cur.block<3,1>(0,3);
+
         for (const auto& ft : feature_types_) {
             const auto& inv_depth_cur = keyframe_cur->inv_depth.at(ft);
             const auto& keypoints_cur = keyframe_cur->keypoints.at(ft);
@@ -501,10 +520,6 @@ void Tracking::create_initial_map()
                 num_depth_only++;
             }
         }
-
-        // The dual-observation completions changed covisibility
-        keyframe_ini->update_connections();
-        keyframe_cur->update_connections();
     }
 
     AF_INFO("create_initial_map: " << map_->map_points_in_map() << " points ("
