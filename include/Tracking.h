@@ -71,7 +71,7 @@ struct TrackingParameters
     int init_ransac_iterations{200}; // initializer RANSAC iteration budget
     float init_min_median_disparity{10.0f}; // px; below this (static camera) skip the init attempt
 
-    // create_initial_map_monocular()
+    // create_initial_map()
     int init_gba_iterations{20};      // global-BA iteration budget on the initial map
     int init_min_tracked_points{100}; // min tracked map points in the current keyframe to accept the map
     int init_min_depth_samples{10};   // min sensor-depth ratio samples to prefer depth-verified scale
@@ -219,7 +219,7 @@ protected:
     // trajectory entry once initialized).
     void monocular_initialization();
     void attempt_monocular_initialization();
-    void create_initial_map_monocular();
+    void create_initial_map();
 
     void check_replaced_in_last_frame();
     bool track_reference_keyframe();

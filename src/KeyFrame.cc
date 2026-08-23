@@ -242,7 +242,7 @@ Pt KeyFrame::create_monocular_map_point(const vec3f& worldPos,
     return pt;
 }
 
-Pt KeyFrame::CreateMapPoint(const vec3f& worldPos, const KeypointIndex& refIndex, const FeatureType& featureType){
+Pt KeyFrame::create_map_point(const vec3f& worldPos, const KeypointIndex& refIndex, const FeatureType& featureType){
         auto pt = make_shared<MapPoint>(worldPos,thisKeyframe(),mpMap,featureType);
 
         add_map_point(pt,refIndex);

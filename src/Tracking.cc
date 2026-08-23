@@ -274,7 +274,7 @@ void Tracking::attempt_monocular_initialization()
         // Find correspondences
         const auto matched_pairs = matcher_->match_frames_for_initialization(initial_frame_, current_frame_, feature_types_);
 
-        // Fill matches_per_feature_ (used later in create_initial_map_monocular) and
+        // Fill matches_per_feature_ (used later in create_initial_map) and
         // init_matches_ (flat over all feature types, the structure the initializer uses).
         init_matches_.clear();
         size_t offset2 = 0;
@@ -334,25 +334,26 @@ void Tracking::attempt_monocular_initialization()
             Tcw.block<3,3>(0,0) = Rcw;
             Tcw.block<3,1>(0,3) = tcw;
             current_frame_.set_pose(Tcw);
-            create_initial_map_monocular();
+            create_initial_map();
         }
     }
 }
 
-void Tracking::create_initial_map_monocular()
+void Tracking::create_initial_map()
 {
-    // Create KeyFrames
+    // Create the two founding keyframes
     Keyframe keyframe_ini = std::make_shared<KeyFrame>(initial_frame_, map_, keyframe_db_);
     Keyframe keyframe_cur = std::make_shared<KeyFrame>(current_frame_, map_, keyframe_db_);
 
     keyframe_ini->compute_global_descriptor();
     keyframe_cur->compute_global_descriptor();
 
-    // Insert KFs in the map
     map_->add_keyframe(keyframe_ini);
     map_->add_keyframe(keyframe_cur);
 
-    // Create MapPoints and associate to keyframes
+    // Triangulated matches become map points observed by both keyframes
+    // (create_monocular_map_point registers them in the map)
+    int num_triangulated = 0;
     size_t flat_index = 0; // runs over init_matches_, flattened across feature types
     for (const auto& ft : feature_types_) {
         const auto& matches = matches_per_feature_.at(ft);
@@ -362,35 +363,33 @@ void Tracking::create_initial_map_monocular()
 
             Pt map_point = keyframe_cur->create_monocular_map_point(init_points3d_[flat_index], KeypointIndex(matches[i]),
                                                                  keyframe_ini, KeypointIndex(i), ft);
-            // Fill current frame structure
             current_frame_.pts.at(ft)[matches[i]] = map_point;
             current_frame_.outliers.at(ft)[matches[i]] = false;
-
-            map_->add_map_point(map_point);
+            num_triangulated++;
         }
     }
 
-    // Update Connections
     keyframe_ini->update_connections();
     keyframe_cur->update_connections();
 
-    // Bundle Adjustment
-    AF_INFO("New Map created with " << map_->map_points_in_map() << " points");
     Optimizer::global_bundle_adjustment(map_, params.init_gba_iterations);
 
-    // Set the initial map's scale: prefer a depth-verified scale over the arbitrary
-    // monocular "median depth = 1" convention, when enough points have valid sensor depth.
     const float median_depth = keyframe_ini->compute_scene_median_depth(2);
     const int tracked_map_points = keyframe_cur->tracked_map_points(1);
 
     if (median_depth < 0 || tracked_map_points < params.init_min_tracked_points)
     {
-        AF_WARN("Wrong initialization (median_depth=" << median_depth << ", tracked map points="
-                << tracked_map_points << " < " << params.init_min_tracked_points << ") — resetting...");
+        AF_WARN("create_initial_map: degenerate initialization (median_depth=" << median_depth
+                << ", tracked map points=" << tracked_map_points << " < " << params.init_min_tracked_points
+                << ") — resetting...");
         reset();
         return;
     }
 
+    // Set the initial map's scale: prefer a depth-verified metric scale (median of
+    // sensor-depth / triangulated-depth over the geometrically verified matches) over
+    // the arbitrary monocular "median depth = 1" convention, when enough points carry
+    // valid sensor depth.
     std::vector<float> depth_ratios;
     for (const auto& ft : feature_types_) {
         const auto& inv_depth_kf = keyframe_ini->inv_depth.at(ft);
@@ -409,25 +408,109 @@ void Tracking::create_initial_map_monocular()
         }
     }
 
+    const bool metric_scale = depth_ratios.size() >= static_cast<size_t>(params.init_min_depth_samples);
     float inv_median_depth = 1.0f / median_depth;
-    if (depth_ratios.size() >= static_cast<size_t>(params.init_min_depth_samples))
+    if (metric_scale)
     {
         const auto mid = depth_ratios.begin() + depth_ratios.size() / 2;
         std::nth_element(depth_ratios.begin(), mid, depth_ratios.end());
         inv_median_depth = *mid;
     }
 
-    // Scale initial baseline
+    // Scale the initial baseline and every triangulated point
     mat4f Tc2w = keyframe_cur->get_pose();
     Tc2w.block<3,1>(0,3) *= inv_median_depth;
     keyframe_cur->set_pose(Tc2w);
 
-    // Scale points
     for (const auto& ft : feature_types_) {
         for (const Pt& map_point : keyframe_ini->get_map_point_matches(ft))
             if (map_point)
                 map_point->set_world_pos(map_point->get_world_pos() * inv_median_depth);
     }
+
+    // Depth-seeded completion (RGB-D): back-projected sensor depth is metric, so these
+    // points may only enter the map when the depth-verified scale above was actually
+    // applied — mixing them into a monocular-convention map would be scale-inconsistent.
+    // With little or no sensor depth this whole block is skipped and initialization
+    // behaves exactly as pure monocular.
+    int num_depth_completed = 0;
+    int num_depth_only = 0;
+    if (metric_scale)
+    {
+        const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
+        const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
+        const float invfx = 1.0f / fx, invfy = 1.0f / fy;
+        const mat4f Twc_cur = keyframe_cur->get_pose_inverse();
+        const mat3f Rwc_cur = Twc_cur.block<3,3>(0,0);
+        const vec3f twc_cur = Twc_cur.block<3,1>(0,3);
+
+        // 1) Matched pairs the initializer could not triangulate: back-project from
+        //    sensor depth (reference frame preferred — it sits at the origin) and keep
+        //    BOTH observations, exactly like a triangulated point.
+        flat_index = 0;
+        for (const auto& ft : feature_types_) {
+            const auto& matches = matches_per_feature_.at(ft);
+            const auto& inv_depth_ini = keyframe_ini->inv_depth.at(ft);
+            const auto& inv_depth_cur = keyframe_cur->inv_depth.at(ft);
+            const auto& keypoints_ini = keyframe_ini->keypoints.at(ft);
+            const auto& keypoints_cur = keyframe_cur->keypoints.at(ft);
+            for (size_t i = 0; i < matches.size(); i++, flat_index++) {
+                if (matches[i] < 0 || init_matches_[flat_index] >= 0)
+                    continue; // no match, or already triangulated
+                const int j = matches[i];
+
+                vec3f world_pos;
+                if (inv_depth_ini[i] > 0.0f)
+                {
+                    const cv::KeyPoint& kp = keypoints_ini[i]; // keyframe_ini is the origin
+                    world_pos = vec3f{(kp.pt.x - cx) * invfx, (kp.pt.y - cy) * invfy, 1.0f} / inv_depth_ini[i];
+                }
+                else if (inv_depth_cur[j] > 0.0f)
+                {
+                    const cv::KeyPoint& kp = keypoints_cur[j];
+                    const vec3f xn{(kp.pt.x - cx) * invfx, (kp.pt.y - cy) * invfy, 1.0f};
+                    world_pos = Rwc_cur * (xn / inv_depth_cur[j]) + twc_cur;
+                }
+                else
+                    continue; // matched, but neither frame has depth here
+
+                Pt map_point = keyframe_cur->create_monocular_map_point(world_pos, KeypointIndex(j),
+                                                                        keyframe_ini, KeypointIndex(i), ft);
+                current_frame_.pts.at(ft)[j] = map_point;
+                current_frame_.outliers.at(ft)[j] = false;
+                num_depth_completed++;
+            }
+        }
+
+        // 3) Unmatched keypoints of the current keyframe with valid depth: single-
+        //    observation points, same trust policy as LocalMapping's depth-seeded pass
+        //    (any inv_depth > 0). The reference frame's unmatched keypoints are left
+        //    out: without an association they would duplicate the same surfaces.
+        for (const auto& ft : feature_types_) {
+            const auto& inv_depth_cur = keyframe_cur->inv_depth.at(ft);
+            const auto& keypoints_cur = keyframe_cur->keypoints.at(ft);
+            for (size_t j = 0; j < inv_depth_cur.size(); j++) {
+                if (inv_depth_cur[j] <= 0.0f || keyframe_cur->get_map_point(j, ft))
+                    continue;
+                const cv::KeyPoint& kp = keypoints_cur[j];
+                const vec3f xn{(kp.pt.x - cx) * invfx, (kp.pt.y - cy) * invfy, 1.0f};
+                Pt map_point = keyframe_cur->create_map_point(Rwc_cur * (xn / inv_depth_cur[j]) + twc_cur,
+                                                              KeypointIndex(j), ft);
+                current_frame_.pts.at(ft)[j] = map_point;
+                current_frame_.outliers.at(ft)[j] = false;
+                num_depth_only++;
+            }
+        }
+
+        // The dual-observation completions changed covisibility
+        keyframe_ini->update_connections();
+        keyframe_cur->update_connections();
+    }
+
+    AF_INFO("create_initial_map: " << map_->map_points_in_map() << " points ("
+            << num_triangulated << " triangulated, " << num_depth_completed
+            << " depth-completed matches, " << num_depth_only << " depth-only), scale: "
+            << (metric_scale ? "metric (depth-verified)" : "monocular convention"));
 
     local_mapper_->insert_keyframe(keyframe_ini);
     local_mapper_->insert_keyframe(keyframe_cur);

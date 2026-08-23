@@ -97,7 +97,7 @@ public:
                              const KeypointIndex& refIndex,
                              Keyframe projKeyframe, const KeypointIndex& projIndex,
                              const FeatureType& featureType);
-    Pt CreateMapPoint(const vec3f& worldPos,
+    Pt create_map_point(const vec3f& worldPos,
                       const KeypointIndex& refIndex,
                       const FeatureType& featureType);
 

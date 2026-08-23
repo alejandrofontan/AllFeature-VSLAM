@@ -544,7 +544,7 @@ void LocalMapping::CreateNewMapPoints()
 
             newMapPoints[featureType]++;
             nFromSensor++;
-            Pt pMP = mpCurrentKeyFrame->CreateMapPoint(x3D, KeypointIndex(idx), featureType);
+            Pt pMP = mpCurrentKeyFrame->create_map_point(x3D, KeypointIndex(idx), featureType);
             mlpRecentAddedMapPoints.push_back(pMP);
         }
     }
