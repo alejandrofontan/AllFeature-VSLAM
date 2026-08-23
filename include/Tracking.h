@@ -90,11 +90,6 @@ public:
     void set_loop_closing(std::shared_ptr<LoopClosing> loop_closing) { loop_closing_ = std::move(loop_closing); }
     void set_viewer(std::shared_ptr<Viewer> viewer) { viewer_ = std::move(viewer); }
 
-    // Load new settings
-    // The focal lenght should be similar or scale prediction will fail when projecting points
-    // TODO: Modify MapPoint::PredictScale to take into account focal lenght
-    void ChangeCalibration(const string &strSettingPath);
-
 public:
     VerbosityLevel verbosity{LOW};
 
@@ -249,7 +244,9 @@ protected:
     //Calibration matrix
     cv::Mat mK;
     cv::Mat mDistCoef;
-    float mbf;
+    // Stereo baseline x fx. Nothing sets it yet (its only writer was the dead
+    // ChangeCalibration); zero-initialized so Frame gets a defined value.
+    float mbf{0.0f};
     int image_width_{};
     int image_height_{};
 
@@ -257,13 +254,9 @@ protected:
     size_t max_frames_;
     float fps;
 
-    // Threshold close/far points
-    // Points seen as close by the stereo/RGBD sensor are considered reliable
-    // and inserted from just one frame. Far points requiere a match in two keyframes.
-    float mThDepth;
-
-    // For RGB-D inputs only. For some datasets (e.g. TUM) the depthmap values are scaled.
-    float mDepthMapFactor;
+    // Close/far point threshold (depth units). Nothing sets it yet; zero-initialized
+    // so Frame gets a defined value.
+    float mThDepth{0.0f};
 
     //Current matches in frame
     int num_inlier_matches_;
@@ -365,10 +358,6 @@ protected:
 
     // loadCameraParameters()
     const float fps0{30.0f};
-    const int numFeatures0{1000};
-
-    // GrabImageRGBD()
-    const float mDepthMapFactor_th{1e-5};
 
     std::shared_ptr<FeatureMatcher> matcher_;
 
