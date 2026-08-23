@@ -51,3 +51,54 @@ Optimizer.Sim3Iterations: 5
 Optimizer.Sim3MoreIterationsHigh: 10
 Optimizer.Sim3MoreIterationsLow: 5
 Optimizer.Sim3MinCorrespondences: 10
+
+#--------------------------------------------------------------------------------------------
+# Tracking parameters (values shown are the compiled-in defaults; every key is optional —
+# a missing key keeps the default, so this section is safe to trim or edit per dataset)
+#--------------------------------------------------------------------------------------------
+# Two-view monocular initialization
+Tracking.InitMinKeypoints: 100          # min keypoints to accept a frame for init
+Tracking.InitSigma: 1.0                 # measurement sigma of the two-view initializer
+Tracking.InitMinMatches: 100            # min correspondences (all features pooled) to attempt init
+Tracking.InitRansacIterations: 200      # initializer RANSAC budget
+Tracking.InitMinMedianDisparity: 10.0   # px; below this (static camera) skip the init attempt
+Tracking.InitGbaIterations: 20          # global-BA iterations on the initial map
+Tracking.InitMinTrackedPoints: 100      # min tracked points to accept the initial map
+Tracking.InitMinDepthSamples: 10        # min sensor-depth samples to prefer metric scale
+Tracking.InitExtractorFeaturesScale: 4  # init extractor keeps this x more keypoints
+
+# Frame-to-frame tracking
+Tracking.TrackRefMinMatches: 15                 # raw matches to the reference keyframe below this -> lost
+Tracking.TrackRefMinInliers: 10                 # pose-optimization inliers below this -> lost
+Tracking.TrackLocalMapMinInliers: 30            # inliers against the local map below this -> lost
+Tracking.TrackLocalMapMinInliersAfterReloc: 50  # stricter bar shortly after a relocalization
+
+# Local map
+Tracking.MaxLocalKeyframes: 80        # stop expanding the local map beyond this many keyframes
+Tracking.BestCovisibleKeyframes: 10   # covisible neighbors considered per keyframe
+Tracking.ViewingCosLimit: 0.5         # frustum viewing-angle limit for local-point candidates
+
+# Keyframe policy
+Tracking.MinMedianFlow: 1.0           # px; below this the camera counts as static (no keyframes)
+Tracking.MinSharedPointsForFlow: 20   # the flow gate needs at least this many shared points
+Tracking.RefMatchesRatio: 0.9         # weak tracking: inliers < ratio x reference-KF tracked points
+Tracking.MinInliersForKeyframe: 15    # floor below which a keyframe is not inserted
+Tracking.MinObservationsHigh: 3       # reference-KF match counting: min observations per point
+Tracking.MinObservationsLow: 2        #   relaxed bar while the map is young
+Tracking.YoungMapKeyframes: 2         #   map considered young at <= this many keyframes
+Tracking.MinRefOverlap: 0.7           # insert when frame/reference-KF overlap drops below this
+Tracking.EmergencyInlierDropRatio: 0.5 # emergency keyframe: inliers < ratio x recent median
+Tracking.InliersHistorySize: 30       # recent-inlier reference window (frames)
+Tracking.EmergencyKeyframeCooldown: 10 # min frames between emergency keyframes
+
+# Relocalization
+Tracking.RelocMinMatches: 15          # per-candidate matching gate
+Tracking.RelocInliersHigh: 50         # inliers to accept a pose hypothesis
+Tracking.RelocInliersMedium: 30       # enter the narrow-window escalation
+Tracking.RelocInliersLow: 10          # below this, abandon the hypothesis
+Tracking.RelocSearchRadiusCoarse: 10.0 # first projection-search window
+Tracking.RelocSearchRadiusNarrow: 3.0  # second, near-converged window
+Tracking.RelocRansacProbability: 0.99  # P4P RANSAC (PnPsolver)
+Tracking.RelocRansacMinInliers: 10
+Tracking.RelocRansacMaxIterations: 3000
+Tracking.RelocRansacEpsilon: 0.5

@@ -71,6 +71,49 @@ struct TrackingParameters
     int init_gba_iterations{20};      // global-BA iteration budget on the initial map
     int init_min_tracked_points{100}; // min tracked map points in the current keyframe to accept the map
     int init_min_depth_samples{10};   // min sensor-depth ratio samples to prefer depth-verified scale
+
+    // grab_image()
+    int init_extractor_features_scale{4}; // the init extractor keeps this x more keypoints
+
+    // track_reference_keyframe()
+    int track_ref_min_matches{15}; // raw matches to the reference keyframe below this -> lost
+    int track_ref_min_inliers{10}; // pose-optimization inliers below this -> lost
+
+    // track_local_map()
+    int track_local_map_min_inliers{30};             // inliers against the local map below this -> lost
+    int track_local_map_min_inliers_after_reloc{50}; // stricter bar shortly after a relocalization
+
+    // update_local_keyframes()
+    int max_local_keyframes{80};      // stop expanding the local map beyond this many keyframes
+    int best_covisible_keyframes{10}; // covisible neighbors considered per keyframe during expansion
+
+    // search_local_points()
+    float viewing_cos_limit{0.5f}; // frustum viewing-angle limit for local-point candidates
+
+    // need_new_keyframe()
+    float min_median_flow{1.0f};        // px; below this the camera counts as static (no keyframes)
+    int min_shared_points_for_flow{20}; // the flow gate needs at least this many shared points
+    float ref_matches_ratio{0.9f};      // weak tracking: inliers < ratio x reference-KF tracked points...
+    int min_inliers_for_keyframe{15};   // ...but above this floor (below it suggests loss, not a keyframe)
+    int min_observations_high{3};       // reference-KF match counting: min observations per point
+    int min_observations_low{2};        //   relaxed bar while the map is young
+    int young_map_keyframes{2};         //   map considered young at <= this many keyframes
+    float min_ref_overlap{0.7f};        // insert when frame/reference-keyframe overlap drops below this
+    float emergency_inlier_drop_ratio{0.5f}; // emergency keyframe: inliers < ratio x recent median
+    int inliers_history_size{30};       // recent-inlier reference window (frames)
+    int emergency_keyframe_cooldown{10}; // min frames between emergency keyframes
+
+    // relocalize()
+    int reloc_min_matches{15};    // per-candidate matching gate
+    int reloc_inliers_high{50};   // inliers to accept a pose hypothesis
+    int reloc_inliers_medium{30}; // enter the narrow-window escalation
+    int reloc_inliers_low{10};    // below this, abandon the hypothesis
+    float reloc_search_radius_coarse{10.0f}; // first projection-search window
+    float reloc_search_radius_narrow{3.0f};  // second, near-converged window
+    float reloc_ransac_probability{0.99f};   // P4P RANSAC (PnPsolver)
+    int reloc_ransac_min_inliers{10};
+    int reloc_ransac_max_iterations{3000};
+    float reloc_ransac_epsilon{0.5f};
 };
 
 class Tracking
@@ -188,7 +231,7 @@ protected:
     bool relocalize();
     // One RANSAC pose hypothesis for a relocalization candidate: seed the frame
     // with the hypothesis' inlier matches, optimize, escalate through coarse and
-    // narrow projection searches; true when RELOC_INLIERS_HIGH inliers support it.
+    // narrow projection searches; true when params.reloc_inliers_high inliers support it.
     // (candidate by value: the legacy matcher APIs take non-const Keyframe&)
     bool accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,
                                           const std::vector<bool>& inliers, FeatureType feature_type);
@@ -266,7 +309,7 @@ protected:
     //Current matches in frame
     int num_inlier_matches_{0};
 
-    // Rolling inlier history (last INLIERS_HISTORY_SIZE tracked frames) — reference for the
+    // Rolling inlier history (last params.inliers_history_size tracked frames) — reference for the
     // emergency-keyframe trigger in need_new_keyframe(). Comparing against recent frames
     // instead of ref_keyframe_->tracked_map_points() avoids the self-inflating feedback loop
     // where every inserted keyframe grows the reference stat via post-hoc triangulation
@@ -287,65 +330,18 @@ protected:
     // Fix image size to nominal size 307200 pixels
     bool fix_image_size_{false};
 
-    //////////////////////////////////////////////// Heuristics
-    // Tracking()
-    static constexpr int INIT_EXTRACTOR_FEATURES_SCALE{4};
-
     //////////////////////////////////////////////// Constants
 
-    // track_reference_keyframe()
-    static constexpr int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH{15};
-    static constexpr int TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW{10};
-
-    // track_local_map()
-    static constexpr int TRACK_LOCAL_MAP_MIN_INLIERS_HIGH{50};
-    static constexpr int TRACK_LOCAL_MAP_MIN_INLIERS_LOW{30};
+    //////////////////////////////////////////////// Compile-time constants
+    // (tunable heuristics live in TrackingParameters above)
 
     // update_local_keyframes()
-    static constexpr size_t MAX_LOCAL_KEYFRAMES{80};
-    static constexpr int BEST_COVISIBLE_KEYFRAMES{10};
     static constexpr size_t LOCAL_KEYFRAMES_RESERVE_SCALE{3};
 
-    // need_new_keyframe()
-    // Stationarity gate: median frame-to-frame flow (px) below which no keyframe is
-    // inserted (camera considered static — new keyframes would only feed zero-baseline
-    // triangulation). Gate needs at least MIN_SHARED_POINTS_FOR_FLOW shared points to engage.
-    static constexpr float MIN_MEDIAN_FLOW{1.0f};
-    static constexpr int MIN_SHARED_POINTS_FOR_FLOW{20};
-    // Emergency keyframes: inlier-drop trigger, reference window, refire cooldown (frames)
-    static constexpr float EMERGENCY_INLIER_DROP_RATIO{0.5f};
-    static constexpr size_t INLIERS_HISTORY_SIZE{30};
-    static constexpr FrameId EMERGENCY_KEYFRAME_COOLDOWN{10};
-    // Weak-tracking condition: inliers below this fraction of the reference
-    // keyframe's tracked points (but above the floor that suggests loss instead)
-    static constexpr float REF_MATCHES_RATIO{0.9f};
-    static constexpr int MIN_INLIERS_FOR_KEYFRAME{15};
-    // Reference-keyframe match counting: min observations per point, relaxed
-    // while the map is young
-    static constexpr int MIN_OBSERVATIONS_HIGH{3};
-    static constexpr int MIN_OBSERVATIONS_LOW{2};
-    static constexpr size_t YOUNG_MAP_KEYFRAMES{2};
-    // Overlap-triggered insertion (frame vs reference keyframe)
-    static constexpr float MIN_REF_OVERLAP{0.7f};
-
-    // search_local_points()
-    static constexpr float VIEWING_COS_LIMIT{0.5f};
-
-    // relocalize()
-    static constexpr int RELOC_MIN_MATCHES{15};        // per-candidate matching gate
-    static constexpr int RELOC_INLIERS_HIGH{50};       // inliers to accept a hypothesis
-    static constexpr int RELOC_INLIERS_MEDIUM{30};     // enter the narrow-window escalation
-    static constexpr int RELOC_INLIERS_LOW{10};        // below this, abandon the hypothesis
-    static constexpr int RANSAC_ITERATIONS_PER_ROUND{5};
-    static constexpr float RELOC_SEARCH_RADIUS_COARSE{10.0f};
-    static constexpr float RELOC_SEARCH_RADIUS_NARROW{3.0f};
-    // P4P RANSAC parameters (PnPsolver)
-    static constexpr float RANSAC_PROBABILITY{0.99f};
-    static constexpr int RANSAC_MIN_INLIERS{10};
-    static constexpr int RANSAC_MAX_ITERATIONS{3000};
+    // relocalize(): P4P protocol size, chi2(0.95, 2 dof), RANSAC round scheduling
     static constexpr int RANSAC_MIN_SET{4};
-    static constexpr float RANSAC_EPSILON{0.5f};
     static constexpr float RANSAC_TH2{5.991f};
+    static constexpr int RANSAC_ITERATIONS_PER_ROUND{5};
 
     // load_camera_parameters()
     static constexpr float DEFAULT_FPS{30.0f};

@@ -48,6 +48,35 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.InitGbaIterations", params.init_gba_iterations);
     read_if_present("Tracking.InitMinTrackedPoints", params.init_min_tracked_points);
     read_if_present("Tracking.InitMinDepthSamples", params.init_min_depth_samples);
+    read_if_present("Tracking.InitExtractorFeaturesScale", params.init_extractor_features_scale);
+    read_if_present("Tracking.TrackRefMinMatches", params.track_ref_min_matches);
+    read_if_present("Tracking.TrackRefMinInliers", params.track_ref_min_inliers);
+    read_if_present("Tracking.TrackLocalMapMinInliers", params.track_local_map_min_inliers);
+    read_if_present("Tracking.TrackLocalMapMinInliersAfterReloc", params.track_local_map_min_inliers_after_reloc);
+    read_if_present("Tracking.MaxLocalKeyframes", params.max_local_keyframes);
+    read_if_present("Tracking.BestCovisibleKeyframes", params.best_covisible_keyframes);
+    read_if_present("Tracking.ViewingCosLimit", params.viewing_cos_limit);
+    read_if_present("Tracking.MinMedianFlow", params.min_median_flow);
+    read_if_present("Tracking.MinSharedPointsForFlow", params.min_shared_points_for_flow);
+    read_if_present("Tracking.RefMatchesRatio", params.ref_matches_ratio);
+    read_if_present("Tracking.MinInliersForKeyframe", params.min_inliers_for_keyframe);
+    read_if_present("Tracking.MinObservationsHigh", params.min_observations_high);
+    read_if_present("Tracking.MinObservationsLow", params.min_observations_low);
+    read_if_present("Tracking.YoungMapKeyframes", params.young_map_keyframes);
+    read_if_present("Tracking.MinRefOverlap", params.min_ref_overlap);
+    read_if_present("Tracking.EmergencyInlierDropRatio", params.emergency_inlier_drop_ratio);
+    read_if_present("Tracking.InliersHistorySize", params.inliers_history_size);
+    read_if_present("Tracking.EmergencyKeyframeCooldown", params.emergency_keyframe_cooldown);
+    read_if_present("Tracking.RelocMinMatches", params.reloc_min_matches);
+    read_if_present("Tracking.RelocInliersHigh", params.reloc_inliers_high);
+    read_if_present("Tracking.RelocInliersMedium", params.reloc_inliers_medium);
+    read_if_present("Tracking.RelocInliersLow", params.reloc_inliers_low);
+    read_if_present("Tracking.RelocSearchRadiusCoarse", params.reloc_search_radius_coarse);
+    read_if_present("Tracking.RelocSearchRadiusNarrow", params.reloc_search_radius_narrow);
+    read_if_present("Tracking.RelocRansacProbability", params.reloc_ransac_probability);
+    read_if_present("Tracking.RelocRansacMinInliers", params.reloc_ransac_min_inliers);
+    read_if_present("Tracking.RelocRansacMaxIterations", params.reloc_ransac_max_iterations);
+    read_if_present("Tracking.RelocRansacEpsilon", params.reloc_ransac_epsilon);
 }
 
 Tracking::Tracking(std::shared_ptr<Vocabulary> vocabulary,
@@ -68,7 +97,7 @@ Tracking::Tracking(std::shared_ptr<Vocabulary> vocabulary,
     // One extractor pair per feature type: normal, and a denser one for initialization
     for (const FeatureType ft : feature_types){
         feature_extractor_left_[ft] = get_feature_extractor(1, feature_settings_yaml_file.at(ft), ft);
-        init_feature_extractor_[ft] = get_feature_extractor(INIT_EXTRACTOR_FEATURES_SCALE, feature_settings_yaml_file.at(ft), ft);
+        init_feature_extractor_[ft] = get_feature_extractor(params.init_extractor_features_scale, feature_settings_yaml_file.at(ft), ft);
     }
 
     matcher_ = std::make_shared<FeatureMatcher>(image_width_, image_height_, feature_types, "Tracking");
@@ -459,11 +488,11 @@ bool Tracking::track_reference_keyframe()
         num_matches += num_matches_per_feature.at(ft);
     }
 
-    if(num_matches < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
+    if(num_matches < params.track_ref_min_matches)
     {
         std::ostringstream reason;
         reason << "track_reference_keyframe: insufficient matches to reference keyframe (num_matches="
-               << num_matches << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH << ")"
+               << num_matches << " < " << params.track_ref_min_matches << ")"
                << " | frame=" << current_frame_.frame_id << " ref_keyframe_=" << ref_keyframe_->keyId;
         throw TrackingLostException(reason.str());
     }
@@ -488,8 +517,8 @@ bool Tracking::track_reference_keyframe()
     // means the optimizer left the basin, not that the matches are bad. Re-seed and
     // re-optimize once with the RGB-D depth channel disabled — pure 2D reprojection, the
     // configuration the 4-pass scheme was originally tuned for.
-    if(num_map_inliers < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW
-       && num_matches >= 3 * TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_HIGH)
+    if(num_map_inliers < params.track_ref_min_inliers
+       && num_matches >= 3 * params.track_ref_min_matches)
     {
         AF_WARN("track_reference_keyframe: pose optimization collapsed (" << num_map_inliers
                 << " inliers of " << num_matches << " raw matches) — retrying without depth channel"
@@ -521,11 +550,11 @@ bool Tracking::track_reference_keyframe()
     }
     timer.record(pose_opt_times_);
 
-    if(num_map_inliers < TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW)
+    if(num_map_inliers < params.track_ref_min_inliers)
     {
         std::ostringstream reason;
         reason << "track_reference_keyframe: insufficient inlier matches after pose optimization (num_map_inliers="
-               << num_map_inliers << " < " << TRACK_REFERENCE_KEYFRAME_MIN_MATCHES_LOW << ")"
+               << num_map_inliers << " < " << params.track_ref_min_inliers << ")"
                << " | frame=" << current_frame_.frame_id << " raw_matches=" << num_matches;
         throw TrackingLostException(reason.str());
     }
@@ -552,22 +581,22 @@ bool Tracking::track_local_map()
 
     // Decide if tracking succeeded — more restrictive shortly after a relocalization
     if(current_frame_.frame_id < last_reloc_frame_id_ + max_frames_
-       && num_inlier_matches_ < TRACK_LOCAL_MAP_MIN_INLIERS_HIGH)
+       && num_inlier_matches_ < params.track_local_map_min_inliers_after_reloc)
     {
         std::ostringstream reason;
         reason << "track_local_map: insufficient inliers shortly after relocalization (inliers="
-               << num_inlier_matches_ << " < " << TRACK_LOCAL_MAP_MIN_INLIERS_HIGH << ")"
+               << num_inlier_matches_ << " < " << params.track_local_map_min_inliers_after_reloc << ")"
                << " | frame=" << current_frame_.frame_id
                << " framesSinceReloc=" << (current_frame_.frame_id - last_reloc_frame_id_)
                << " max_frames_=" << max_frames_;
         throw TrackingLostException(reason.str());
     }
 
-    if(num_inlier_matches_ < TRACK_LOCAL_MAP_MIN_INLIERS_LOW)
+    if(num_inlier_matches_ < params.track_local_map_min_inliers)
     {
         std::ostringstream reason;
         reason << "track_local_map: insufficient inliers against local map (inliers="
-               << num_inlier_matches_ << " < " << TRACK_LOCAL_MAP_MIN_INLIERS_LOW << ")"
+               << num_inlier_matches_ << " < " << params.track_local_map_min_inliers << ")"
                << " | frame=" << current_frame_.frame_id << " localPts=" << local_points_.size();
         throw TrackingLostException(reason.str());
     }
@@ -642,11 +671,11 @@ void Tracking::update_local_keyframes()
     // reallocation). Semantics match stock ORB-SLAM2, including the outer-loop
     // break after the first parent insertion.
     for(size_t i = 0; i < local_keyframes_.size(); i++){
-        if(local_keyframes_.size() > MAX_LOCAL_KEYFRAMES)
+        if(local_keyframes_.size() > static_cast<size_t>(params.max_local_keyframes))
             break;
         const Keyframe keyframe = local_keyframes_[i]; // copy: push_back may reallocate
 
-        for(const Keyframe& neighbor : keyframe->get_best_covisibility_keyframes(BEST_COVISIBLE_KEYFRAMES)){
+        for(const Keyframe& neighbor : keyframe->get_best_covisibility_keyframes(params.best_covisible_keyframes)){
             if(!neighbor->is_bad() && seen_keyframe_ids.insert(neighbor->keyId).second){
                 local_keyframes_.push_back(neighbor);
                 break;
@@ -716,7 +745,7 @@ void Tracking::search_local_points()
         if(pt->is_bad())
             continue;
 
-        if(current_frame_.is_in_frustum(pt, VIEWING_COS_LIMIT)){
+        if(current_frame_.is_in_frustum(pt, params.viewing_cos_limit)){
             pt->increase_visible();
             num_to_match++;
         }
@@ -741,19 +770,19 @@ bool Tracking::need_new_keyframe()
     // a successful relocalization (observed echo losses 20-22 frames after reloc; #9).
     if(current_frame_.frame_id < last_reloc_frame_id_ + max_frames_
        && num_keyframes_in_map > max_frames_
-       && num_inlier_matches_ < 2 * TRACK_LOCAL_MAP_MIN_INLIERS_HIGH)
+       && num_inlier_matches_ < 2 * params.track_local_map_min_inliers_after_reloc)
         return false;
 
     // Tracked map points in the reference keyframe (observation bar relaxed while the map is young)
-    const int min_observations = (num_keyframes_in_map <= YOUNG_MAP_KEYFRAMES) ? MIN_OBSERVATIONS_LOW
-                                                                               : MIN_OBSERVATIONS_HIGH;
+    const int min_observations = (num_keyframes_in_map <= static_cast<size_t>(params.young_map_keyframes)) ? params.min_observations_low
+                                                                               : params.min_observations_high;
     const int num_ref_matches = ref_keyframe_->tracked_map_points(min_observations);
 
     // Insertion conditions. (A close-point condition — insert when too few nearby
     // RGB-D points are tracked but many could be created — belongs here once depth
     // populates per-point close/far classification; see CLAUDE.md depth table row 8.)
-    const bool weak_tracking = num_inlier_matches_ < num_ref_matches * REF_MATCHES_RATIO
-                               && num_inlier_matches_ > MIN_INLIERS_FOR_KEYFRAME;
+    const bool weak_tracking = num_inlier_matches_ < num_ref_matches * params.ref_matches_ratio
+                               && num_inlier_matches_ > params.min_inliers_for_keyframe;
 
     bool forced_by_evaluation{false};
 #ifdef ALLFEATURE_EVALUATION
@@ -765,21 +794,21 @@ bool Tracking::need_new_keyframe()
     forced_by_cadence = (current_frame_.frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0;
 #endif
 
-    const bool low_overlap = current_frame_.get_overlap() < MIN_REF_OVERLAP;
+    const bool low_overlap = current_frame_.get_overlap() < params.min_ref_overlap;
     const bool forced = forced_by_evaluation || forced_by_cadence;
 
     // Median inlier count over the recent tracked frames (reference for the
     // emergency trigger below) — computed before pushing the current frame's
     // count, so the current frame is compared against its predecessors.
     int median_recent_inliers = -1;
-    if (recent_inliers_history_.size() >= INLIERS_HISTORY_SIZE / 2) {
+    if (recent_inliers_history_.size() >= static_cast<size_t>(params.inliers_history_size) / 2) {
         std::vector<int> history(recent_inliers_history_.begin(), recent_inliers_history_.end());
         const auto mid = history.begin() + history.size() / 2;
         std::nth_element(history.begin(), mid, history.end());
         median_recent_inliers = *mid;
     }
     recent_inliers_history_.push_back(num_inlier_matches_);
-    if (recent_inliers_history_.size() > INLIERS_HISTORY_SIZE)
+    if (recent_inliers_history_.size() > static_cast<size_t>(params.inliers_history_size))
         recent_inliers_history_.pop_front();
 
     // Stationarity gate: a static camera adds no viewpoint information — new
@@ -787,7 +816,7 @@ bool Tracking::need_new_keyframe()
     // with ill-conditioned points (see CLAUDE.md, Stop-Induced Keyframe Runaway
     // Investigation). Forced keyframes bypass the gate.
     const std::optional<float> median_flow = median_flow_from_last_frame();
-    if (!forced && median_flow && *median_flow < MIN_MEDIAN_FLOW)
+    if (!forced && median_flow && *median_flow < params.min_median_flow)
         return false;
 
     if(!(weak_tracking || forced || low_overlap))
@@ -802,11 +831,11 @@ bool Tracking::need_new_keyframe()
     // into the keyframe, re-arming the trigger indefinitely), and with a refire
     // cooldown so a persistent low-inlier state can't chain insertions.
     if(median_recent_inliers > 0
-       && num_inlier_matches_ < EMERGENCY_INLIER_DROP_RATIO * static_cast<float>(median_recent_inliers)
-       && current_frame_.frame_id >= last_emergency_keyframe_id_ + EMERGENCY_KEYFRAME_COOLDOWN)
+       && num_inlier_matches_ < params.emergency_inlier_drop_ratio * static_cast<float>(median_recent_inliers)
+       && current_frame_.frame_id >= last_emergency_keyframe_id_ + static_cast<FrameId>(params.emergency_keyframe_cooldown))
     {
         AF_WARN("need_new_keyframe: emergency keyframe (inliers=" << num_inlier_matches_
-                << " < " << EMERGENCY_INLIER_DROP_RATIO << "*medianRecentInliers=" << median_recent_inliers
+                << " < " << params.emergency_inlier_drop_ratio << "*medianRecentInliers=" << median_recent_inliers
                 << ", medianFlow=" << median_flow.value_or(-1.0f) << ") | frame=" << current_frame_.frame_id);
         last_emergency_keyframe_id_ = current_frame_.frame_id;
         emergency_keyframe_ = true;
@@ -859,7 +888,7 @@ std::optional<float> Tracking::median_flow_from_last_frame() const
         }
     }
 
-    if (flows.size() < static_cast<size_t>(MIN_SHARED_POINTS_FOR_FLOW))
+    if (flows.size() < static_cast<size_t>(params.min_shared_points_for_flow))
         return std::nullopt;
 
     const auto mid = flows.begin() + flows.size() / 2;
@@ -898,14 +927,14 @@ bool Tracking::relocalize()
         std::map<FeatureType, int> num_matches =
             matcher_->match_keyframe_to_frame(candidate, current_frame_, matches_per_candidate[i],
                                               std::vector<FeatureType>{feature_type});
-        if(num_matches.at(feature_type) < RELOC_MIN_MATCHES)
+        if(num_matches.at(feature_type) < params.reloc_min_matches)
         {
             discarded[i] = true;
             continue;
         }
         solvers[i] = std::make_unique<PnPsolver>(current_frame_, matches_per_candidate[i][feature_type], feature_type);
-        solvers[i]->set_ransac_parameters(RANSAC_PROBABILITY, RANSAC_MIN_INLIERS, RANSAC_MAX_ITERATIONS,
-                                        RANSAC_MIN_SET, RANSAC_EPSILON, RANSAC_TH2);
+        solvers[i]->set_ransac_parameters(params.reloc_ransac_probability, params.reloc_ransac_min_inliers, params.reloc_ransac_max_iterations,
+                                        RANSAC_MIN_SET, params.reloc_ransac_epsilon, RANSAC_TH2);
         num_active++;
     }
 
@@ -961,7 +990,7 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
     }
 
     int num_good = Optimizer::pose_optimization(&current_frame_);
-    if(num_good < RELOC_INLIERS_LOW)
+    if(num_good < params.reloc_inliers_low)
         return false;
 
     for(int j = 0; j < current_frame_.N.at(feature_type); j++)
@@ -969,25 +998,25 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
             current_frame_.pts.at(feature_type)[j] = nullptr;
 
     // Few inliers: search by projection in a coarse window and optimize again
-    if(num_good < RELOC_INLIERS_HIGH)
+    if(num_good < params.reloc_inliers_high)
     {
         const int additional = matcher_->search_by_projection(current_frame_, candidate, found,
-                                                            RELOC_SEARCH_RADIUS_COARSE, true, feature_type);
-        if(additional + num_good >= RELOC_INLIERS_HIGH)
+                                                            params.reloc_search_radius_coarse, true, feature_type);
+        if(additional + num_good >= params.reloc_inliers_high)
         {
             num_good = Optimizer::pose_optimization(&current_frame_);
 
             // Many inliers but still not enough: the pose is already close, so search
             // once more in a narrower window and run a final optimization
-            if(num_good > RELOC_INLIERS_MEDIUM && num_good < RELOC_INLIERS_HIGH)
+            if(num_good > params.reloc_inliers_medium && num_good < params.reloc_inliers_high)
             {
                 found.clear();
                 for(int j = 0; j < current_frame_.N.at(feature_type); j++)
                     if(current_frame_.pts.at(feature_type)[j])
                         found.insert(current_frame_.pts.at(feature_type)[j]);
                 const int narrow_additional = matcher_->search_by_projection(current_frame_, candidate, found,
-                                                                           RELOC_SEARCH_RADIUS_NARROW, false, feature_type);
-                if(num_good + narrow_additional >= RELOC_INLIERS_HIGH)
+                                                                           params.reloc_search_radius_narrow, false, feature_type);
+                if(num_good + narrow_additional >= params.reloc_inliers_high)
                 {
                     num_good = Optimizer::pose_optimization(&current_frame_);
                     for(int j = 0; j < current_frame_.N.at(feature_type); j++)
@@ -998,13 +1027,13 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
         }
     }
 
-    if(num_good < RELOC_INLIERS_HIGH)
+    if(num_good < params.reloc_inliers_high)
         return false;
 
     AF_INFO("relocalize: succeeded | frame=" << current_frame_.frame_id
             << " feature=" << feature_name(feature_type)
             << " matchedKeyframe=" << candidate->keyId
-            << " inliers=" << num_good << " requiredInliers=" << RELOC_INLIERS_HIGH);
+            << " inliers=" << num_good << " requiredInliers=" << params.reloc_inliers_high);
     std::cout.flush(); // AF_INFO's stdout is fully buffered under the runner's redirect
 
     return true;
