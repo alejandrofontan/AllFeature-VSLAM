@@ -1,6 +1,6 @@
 # AllFeature-VSLAM — `src/Tracking.cc`
 
-Every function in `src/Tracking.cc`, grouped by role. (`run_tracking_stage`, `log_heartbeat`, `log_profile`, `dump_pose_collapse` live in `src/Tracking_aux.cc` and are referenced where called.)
+Every function in `src/Tracking.cc`, grouped by role. (`run_tracking_stage`, `log_heartbeat`, `log_profile`, `dump_pose_collapse`, `get_feature_extractor` live in `src/Tracking_aux.cc` and are referenced where called.)
 
 ---
 
@@ -22,8 +22,8 @@ Tracking(vocabulary, drawers, map, keyframe_db, calibration, settings, feature_s
 ├── loadCameraParameters(calibration, settings)
 ├── minFrames = 0; maxFrames = fps          # keyframe/reloc frame windows
 ├── for each feature type ft:
-│   ├── feature_extractor_left_[ft] = getFeatureExtractor(1, ...)                        # normal
-│   └── init_feature_extractor_[ft] = getFeatureExtractor(scaleNumFeaturesMonocular, ...) # denser, for init
+│   ├── feature_extractor_left_[ft] = get_feature_extractor(1, ...)                        # normal
+│   └── init_feature_extractor_[ft] = get_feature_extractor(scaleNumFeaturesMonocular, ...) # denser, for init
 └── matcher_ = FeatureMatcher(image size, featureTypes)
 ```
 
@@ -41,11 +41,8 @@ loadCameraParameters()
 ### `ChangeCalibration(settingsPath)`
 Legacy ORB-SLAM2-style reload of `mK`/`mDistCoef`/`mbf` from flat `Camera.*` keys; sets `Frame::mbInitialComputations = true` so the next frame recomputes the undistortion grid.
 
-### `getFeatureExtractor(scale, settingsYaml, featureType)` — static
+### `get_feature_extractor(scale, settingsYaml, featureType)` — static
 Builds `FeatureExtractorSettings` from the per-feature yaml, multiplies `maxNumFeatures` by `scale`, and asks the `Feature` singleton (via `get_feature`) to `createExtractor`.
-
-### `getGrayImage(im, rgb)` — static
-3-channel → `RGB2GRAY`/`BGR2GRAY`, 4-channel → `RGBA2GRAY`/`BGRA2GRAY`, by the `rgb` flag.
 
 ---
 
