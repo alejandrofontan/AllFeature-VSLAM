@@ -2,7 +2,14 @@
 
 ## Call graph
 
-[`LoadParameters`](src/Tracking.cc#L37), [`Tracking`](src/Tracking.cc#L56), [`loadCameraParameters`](src/Tracking.cc#L1149), [`ChangeCalibration`](src/Tracking.cc#L1116), [`get_feature_extractor`](src/Tracking_aux.cc#L91), [`grab_image`](src/Tracking.cc#L82), [`track`](src/Tracking.cc#L117), [`store_relative_pose`](src/Tracking.cc#L206), [`monocular_initialization`](src/Tracking.cc#L212), [`attempt_monocular_initialization`](src/Tracking.cc#L220), [`create_initial_map_monocular`](src/Tracking.cc#L318), [`check_replaced_in_last_frame`](src/Tracking.cc#L430), [`track_reference_keyframe`](src/Tracking.cc#L450), [`track_local_map`](src/Tracking.cc#L541), [`search_local_points`](src/Tracking.cc#L699), [`update_local_map`](src/Tracking.cc#L584), [`update_local_keyframes`](src/Tracking.cc#L593), [`update_local_points`](src/Tracking.cc#L676), [`MedianFlowFromLastFrame`](src/Tracking.cc#L855), [`need_new_keyframe`](src/Tracking.cc#L734), [`create_new_keyframe`](src/Tracking.cc#L840), [`relocalize`](src/Tracking.cc#L888), [`reset`](src/Tracking.cc#L1066)
+- **[`track`](src/Tracking.cc#L117)** — [`check_replaced_in_last_frame`](src/Tracking.cc#L430)
+- **[`relocalize`](src/Tracking.cc#L888)**
+- **[`track_reference_keyframe`](src/Tracking.cc#L450)**
+- **[`monocular_initialization`](src/Tracking.cc#L212)** — [`attempt_monocular_initialization`](src/Tracking.cc#L220), [`create_initial_map_monocular`](src/Tracking.cc#L318)
+- **[`track_local_map`](src/Tracking.cc#L541)** — [`update_local_map`](src/Tracking.cc#L584), [`update_local_keyframes`](src/Tracking.cc#L593), [`update_local_points`](src/Tracking.cc#L676), [`search_local_points`](src/Tracking.cc#L699)
+- **[`need_new_keyframe`](src/Tracking.cc#L734) / [`create_new_keyframe`](src/Tracking.cc#L840)** — [`MedianFlowFromLastFrame`](src/Tracking.cc#L855)
+- **[`store_relative_pose`](src/Tracking.cc#L206)**
+- Not in the graph (setup / recovery): [`LoadParameters`](src/Tracking.cc#L37), [`Tracking`](src/Tracking.cc#L56), [`loadCameraParameters`](src/Tracking.cc#L1149), [`ChangeCalibration`](src/Tracking.cc#L1116), [`get_feature_extractor`](src/Tracking_aux.cc#L91), [`grab_image`](src/Tracking.cc#L82), [`reset`](src/Tracking.cc#L1066)
 
 ```mermaid
 flowchart TD
