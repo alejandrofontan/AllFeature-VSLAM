@@ -203,7 +203,11 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
     auto& it1 = keyframe->cache_matched_pairs_feat_type[frame.frame_id];
     auto& it2 = frame.cache_matched_pairs_feat_type[keyframe->frame_id];
 
+    // One entry per requested feature type, zero for types with no match: callers index this
+    // with .at(ft) (a type with zero matches used to be a missing key -> std::out_of_range)
     map<FeatureType, int> matches_count;
+    for (const auto& ft : feat_types)
+        matches_count[ft] = 0;
     for (const auto& m : robust_matches) {
         const int query_idx = kps1_indexes[m.queryIdx];
         const int train_idx = kps2_indexes[m.trainIdx];
