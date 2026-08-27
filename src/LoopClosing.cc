@@ -144,7 +144,7 @@ bool LoopClosing::DetectLoop()
     // Compute reference BoW similarity score
     // This is the lowest score to a connected keyframe in the covisibility graph
     // We will impose loop candidates to have a higher similarity than this
-    const vector<Keyframe> vpConnectedKeyFrames = mpCurrentKF->GetVectorCovisibleKeyFrames();
+    const vector<Keyframe> vpConnectedKeyFrames = mpCurrentKF->get_covisible_keyframes();
     const DBoW2::BowVector &CurrentBowVec = mpCurrentKF->mBowVec;
     float minScore = 1;
     for(size_t i=0; i<vpConnectedKeyFrames.size(); i++)
@@ -381,7 +381,7 @@ bool LoopClosing::ComputeSim3()
     }
 
     // Retrieve MapPoints seen in Loop Keyframe and neighbors
-    vector<Keyframe> vpLoopConnectedKFs = mpMatchedKF->GetVectorCovisibleKeyFrames();
+    vector<Keyframe> vpLoopConnectedKFs = mpMatchedKF->get_covisible_keyframes();
     vpLoopConnectedKFs.push_back(mpMatchedKF);
     mvpLoopMapPoints.clear();
     map<PtId, Keyframe> pt_to_keyframe_id;
@@ -468,7 +468,7 @@ void LoopClosing::CorrectLoop()
     mpCurrentKF->update_connections();
 
     // Retrive keyframes connected to the current keyframe and compute corrected Sim3 pose by propagation
-    mvpCurrentConnectedKFs = mpCurrentKF->GetVectorCovisibleKeyFrames();
+    mvpCurrentConnectedKFs = mpCurrentKF->get_covisible_keyframes();
     mvpCurrentConnectedKFs.push_back(mpCurrentKF);
 
     KeyFrameAndPose CorrectedSim3, NonCorrectedSim3;
@@ -581,7 +581,7 @@ void LoopClosing::CorrectLoop()
 
     for(const auto& pKFi: mvpCurrentConnectedKFs)
     {
-        vector<Keyframe> vpPreviousNeighbors = pKFi->GetVectorCovisibleKeyFrames();
+        vector<Keyframe> vpPreviousNeighbors = pKFi->get_covisible_keyframes();
 
         // Update connections. Detect new links.
         pKFi->update_connections();

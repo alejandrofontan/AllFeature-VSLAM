@@ -71,7 +71,7 @@ public:
     int GetIndexInKeyFrame(Keyframe pKF);
     bool is_in_keyframe(Keyframe keyframe);
 
-    void SetBadFlag();
+    void set_bad_flag();
     bool is_bad();
 
     void replace(Pt pMP);

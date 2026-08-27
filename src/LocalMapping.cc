@@ -13,6 +13,21 @@
 namespace AF_VSLAM
 {
 
+LocalMappingParameters LocalMapping::params{};
+
+void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
+{
+    auto read_if_present = [&fSettings](const char* key, auto& field)
+    {
+        const cv::FileNode node = fSettings[key];
+        if(!node.empty())
+            node >> field;
+    };
+
+    read_if_present("LocalMapping.KeyframeCullingRedundancyRatio", params.keyframe_culling_redundancy_ratio);
+    read_if_present("LocalMapping.KeyframeCullingMinObservations", params.keyframe_culling_min_observations);
+}
+
 LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& image_width, const int& image_height):
     featureTypes(featureTypes), mpMap(pMap),
     mbAbortBA(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), mbAcceptKeyFrames(true),
@@ -60,7 +75,7 @@ void LocalMapping::Run()
             {
                 // Find more matches in neighbor keyframes and fuse point duplications
                 t_start = std::chrono::steady_clock::now();
-                for (const auto& [feat, N_] : mpCurrentKeyFrame->N) {
+                for (const auto& [feat, N_] : current_keyframe_->N) {
                     SearchInNeighbors(feat);
                 }
                 t_end = std::chrono::steady_clock::now();
@@ -74,15 +89,15 @@ void LocalMapping::Run()
                 // Local BA
                 if(mpMap->keyframes_in_map()>2){
                     t_start = std::chrono::steady_clock::now();
-                    Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);
+                    Optimizer::LocalBundleAdjustment(current_keyframe_,&mbAbortBA, mpMap);
                     t_end = std::chrono::steady_clock::now();
                     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
                     localbundleadjustment_times[int(1000 * t_duration)]++;
                 }
                 // Check redundant local Keyframes
-                KeyFrameCulling();
+                cull_keyframes();
             }
-            loopCloser->insert_keyframe(mpCurrentKeyFrame);
+            loopCloser->insert_keyframe(current_keyframe_);
 
             if(viewer)
                 viewer->set_runLocalMapping_time_median(map_median(localMapping_times));
@@ -144,16 +159,16 @@ void LocalMapping::ProcessNewKeyFrame()
 {
     {
         unique_lock<mutex> lock(mMutexNewKFs);
-        mpCurrentKeyFrame = mlNewKeyFrames.front();
+        current_keyframe_ = mlNewKeyFrames.front();
         mlNewKeyFrames.pop_front();
     }
 
     // Compute Bags of Words structures
-    mpCurrentKeyFrame->compute_global_descriptor();
+    current_keyframe_->compute_global_descriptor();
 
     // Associate MapPoints to the new keyframe and update normal and descriptor
-    for(const auto& feat: mpCurrentKeyFrame->featureTypes){
-        const vector<Pt> vpMapPointMatches = mpCurrentKeyFrame->get_map_point_matches(feat);
+    for(const auto& feat: current_keyframe_->featureTypes){
+        const vector<Pt> vpMapPointMatches = current_keyframe_->get_map_point_matches(feat);
 
         for(size_t i=0; i<vpMapPointMatches.size(); i++)
         {
@@ -162,9 +177,9 @@ void LocalMapping::ProcessNewKeyFrame()
             {
                 if(!pMP->is_bad())
                 {
-                    if(!pMP->is_in_keyframe(mpCurrentKeyFrame))
+                    if(!pMP->is_in_keyframe(current_keyframe_))
                     {
-                        pMP->add_observation(mpCurrentKeyFrame, i);
+                        pMP->add_observation(current_keyframe_, i);
                     }
                     else // this can only happen for new stereo points inserted by the Tracking
                     {
@@ -175,10 +190,10 @@ void LocalMapping::ProcessNewKeyFrame()
         }
     }
     // Update links in the Covisibility Graph
-    mpCurrentKeyFrame->update_connections();
+    current_keyframe_->update_connections();
 
     // Insert Keyframe in Map
-    mpMap->add_keyframe(mpCurrentKeyFrame);
+    mpMap->add_keyframe(current_keyframe_);
 
 }
 
@@ -186,7 +201,7 @@ void LocalMapping::MapPointCulling()
 {
     // Check Recent Added MapPoints
     list<Pt>::iterator lit = mlpRecentAddedMapPoints.begin();
-    const unsigned long int nCurrentKFid = mpCurrentKeyFrame->keyId;
+    const unsigned long int nCurrentKFid = current_keyframe_->keyId;
 
     while(lit!=mlpRecentAddedMapPoints.end())
     {
@@ -195,14 +210,14 @@ void LocalMapping::MapPointCulling()
         {
             lit = mlpRecentAddedMapPoints.erase(lit);
         }
-        else if((pMP->GetFoundRatio() < 0.25f ) && (pMP->featureType == mpCurrentKeyFrame->featureTypes[0]))
+        else if((pMP->GetFoundRatio() < 0.25f ) && (pMP->featureType == current_keyframe_->featureTypes[0]))
         {
-            pMP->SetBadFlag();
+            pMP->set_bad_flag();
             lit = mlpRecentAddedMapPoints.erase(lit);
         }
         else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=2 && pMP->number_of_observations() <= MAP_POINT_CULLING_MIN_NUM_OBSERVATIONS)
         {
-            pMP->SetBadFlag();
+            pMP->set_bad_flag();
             lit = mlpRecentAddedMapPoints.erase(lit);
         }
         else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=3)
@@ -244,20 +259,20 @@ mat3f LocalMapping::ComputeF12(Keyframe &pKF1, Keyframe &pKF2)
 void LocalMapping::CreateNewMapPoints()
 {
     // Retrieve neighbor keyframes in covisibility graph
-    const vector <Keyframe> vpNeighKFs = mpCurrentKeyFrame->get_best_covisibility_keyframes(CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES);
+    const vector <Keyframe> vpNeighKFs = current_keyframe_->get_best_covisibility_keyframes(CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES);
 
     // Init Current Keyframe
     mat4f Twc1, Tcw1;
     mat3f Rwc1, Rcw1;
     vec3f twc1, tcw1;
-    mpCurrentKeyFrame->getFullPose(Twc1, Rwc1, twc1, Tcw1, Rcw1, tcw1);
+    current_keyframe_->getFullPose(Twc1, Rwc1, twc1, Tcw1, Rcw1, tcw1);
 
     float fx1, fy1, cx1, cy1, invfx1, invfy1;
-    mpCurrentKeyFrame->getFullIntrinsics(fx1, fy1, cx1, cy1, invfx1, invfy1);
+    current_keyframe_->getFullIntrinsics(fx1, fy1, cx1, cy1, invfx1, invfy1);
 
     //////////////////////////////////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////////////////////////////
-    const auto& fts = mpCurrentKeyFrame->featureTypes;
+    const auto& fts = current_keyframe_->featureTypes;
     const int NK = (int)vpNeighKFs.size();
     const int NF = (int)fts.size();
 
@@ -268,8 +283,8 @@ void LocalMapping::CreateNewMapPoints()
     for (int k = 0; k < NK; ++k) {
         auto pKF2 = vpNeighKFs[k];
 
-        auto it = mpCurrentKeyFrame->cache_matched_pairs.find(pKF2->frame_id);
-        if (it != mpCurrentKeyFrame->cache_matched_pairs.end() && !it->second.empty()) {
+        auto it = current_keyframe_->cache_matched_pairs.find(pKF2->frame_id);
+        if (it != current_keyframe_->cache_matched_pairs.end() && !it->second.empty()) {
             skipK[k] = 1;
         }
     }
@@ -288,8 +303,8 @@ void LocalMapping::CreateNewMapPoints()
 
             // If some ft might be missing, you'd want find() guards here instead of at()
             out[k][i] = matcher->serialFeatureMatching(
-                mpCurrentKeyFrame->descriptors.at(ft), pKF2->descriptors.at(ft),
-                mpCurrentKeyFrame->keypoints.at(ft),     pKF2->keypoints.at(ft),
+                current_keyframe_->descriptors.at(ft), pKF2->descriptors.at(ft),
+                current_keyframe_->keypoints.at(ft),     pKF2->keypoints.at(ft),
                 ft
             );
         }
@@ -305,13 +320,13 @@ void LocalMapping::CreateNewMapPoints()
         int queryOffset = 0;
         int trainOffset = 0;
 
-        auto& it1 = mpCurrentKeyFrame->cache_matched_pairs_feat_type[pKF2->frame_id];
-        auto& it2 = pKF2->cache_matched_pairs_feat_type[mpCurrentKeyFrame->frame_id];
+        auto& it1 = current_keyframe_->cache_matched_pairs_feat_type[pKF2->frame_id];
+        auto& it2 = pKF2->cache_matched_pairs_feat_type[current_keyframe_->frame_id];
 
         for (int i = 0; i < NF; ++i) {
             FeatureType ft = fts[i];
 
-            const int nq = (int)mpCurrentKeyFrame->keypoints.at(ft).size();
+            const int nq = (int)current_keyframe_->keypoints.at(ft).size();
             const int nt = (int)pKF2->keypoints.at(ft).size();
 
             auto& m = out[k][i];
@@ -330,8 +345,8 @@ void LocalMapping::CreateNewMapPoints()
             trainOffset += nt;
         }
 
-        pKF2->cache_matched_pairs.insert_or_assign(mpCurrentKeyFrame->frame_id, FeatureMatcher::swap_match_direction(allMatches));
-        mpCurrentKeyFrame->cache_matched_pairs.insert_or_assign(pKF2->frame_id, std::move(allMatches));
+        pKF2->cache_matched_pairs.insert_or_assign(current_keyframe_->frame_id, FeatureMatcher::swap_match_direction(allMatches));
+        current_keyframe_->cache_matched_pairs.insert_or_assign(pKF2->frame_id, std::move(allMatches));
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////
@@ -371,10 +386,10 @@ void LocalMapping::CreateNewMapPoints()
 
         #ifdef ALLFEATURE_REAL_TIME
         if ((j <= 1) || (t_duration < 10.05))
-            matcher->match_keyframes_for_triangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
+            matcher->match_keyframes_for_triangulation(current_keyframe_, pKF2, vMatchedIndices, current_keyframe_->featureTypes);
         ++j;
         #else
-        matcher->match_keyframes_for_triangulation(mpCurrentKeyFrame, pKF2, vMatchedIndices, mpCurrentKeyFrame->featureTypes);
+        matcher->match_keyframes_for_triangulation(current_keyframe_, pKF2, vMatchedIndices, current_keyframe_->featureTypes);
         #endif
 
         for(auto& [featureType, N_]: pKF2->N){
@@ -388,7 +403,7 @@ void LocalMapping::CreateNewMapPoints()
                 const int &idx1 = vMatchedIndices.at(featureType)[ikp].first;
                 const int &idx2 = vMatchedIndices.at(featureType)[ikp].second;
 
-                const cv::KeyPoint &kp1 = mpCurrentKeyFrame->keypoints.at(featureType)[idx1];
+                const cv::KeyPoint &kp1 = current_keyframe_->keypoints.at(featureType)[idx1];
                 const cv::KeyPoint &kp2 = pKF2->keypoints.at(featureType)[idx2];
 
                 // Check parallax between rays
@@ -402,7 +417,7 @@ void LocalMapping::CreateNewMapPoints()
 
                 vec3f x3D;
                 bool fromSensorDepth = false;
-                const float invDepth1 = mpCurrentKeyFrame->inv_depth.at(featureType)[idx1];
+                const float invDepth1 = current_keyframe_->inv_depth.at(featureType)[idx1];
                 const float invDepth2 = pKF2->inv_depth.at(featureType)[idx2];
                 const bool haveDepth1 = invDepth1 > 0.0f;
                 const bool haveDepth2 = invDepth2 > 0.0f;
@@ -466,7 +481,7 @@ void LocalMapping::CreateNewMapPoints()
                     continue;
 
                 //Check reprojection error in first keyframe
-                const float &sigmaSquare1 = mpCurrentKeyFrame->GetKeyPt1DSigma2(idx1, featureType);
+                const float &sigmaSquare1 = current_keyframe_->GetKeyPt1DSigma2(idx1, featureType);
                 const float x1 = Rcw1.row(0).dot(x3D) + tcw1(0);
                 const float y1 = Rcw1.row(1).dot(x3D) + tcw1(1);
                 const float invz1 = 1.0f / z1;
@@ -508,7 +523,7 @@ void LocalMapping::CreateNewMapPoints()
                     nFromSensor++;
                 else
                     nFromTriangulation++;
-                Pt pMP = mpCurrentKeyFrame->create_monocular_map_point(x3D, KeypointIndex(idx1),
+                Pt pMP = current_keyframe_->create_monocular_map_point(x3D, KeypointIndex(idx1),
                                                                     pKF2,  KeypointIndex(idx2),
                                                                     featureType);
                 mlpRecentAddedMapPoints.push_back(pMP);
@@ -518,7 +533,7 @@ void LocalMapping::CreateNewMapPoints()
 
     //////////////////////////////////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////////////////////////////
-    // Back-project close, still-unmatched keypoints straight from mpCurrentKeyFrame's own depth
+    // Back-project close, still-unmatched keypoints straight from current_keyframe_'s own depth
     // reading. The loop above only creates points for keypoints that found a 2D feature match
     // against a covisible neighbor (match_keyframes_for_triangulation) -- a keypoint with a
     // perfectly good sensor-depth reading but no such match (textureless region, repeated
@@ -527,15 +542,15 @@ void LocalMapping::CreateNewMapPoints()
     // haveDepth2 branch above: any inv_depth>0 is trusted, no mThDepth range gate.
     for(const auto& featureType : fts)
     {
-        const auto& invDepthFt = mpCurrentKeyFrame->inv_depth.at(featureType);
-        const auto& keypointsFt = mpCurrentKeyFrame->keypoints.at(featureType);
+        const auto& invDepthFt = current_keyframe_->inv_depth.at(featureType);
+        const auto& keypointsFt = current_keyframe_->keypoints.at(featureType);
 
         for(size_t idx = 0; idx < invDepthFt.size(); idx++)
         {
             if(invDepthFt[idx] <= 0.0f)
                 continue; // no valid sensor depth at this keypoint
 
-            if(mpCurrentKeyFrame->get_map_point(idx, featureType))
+            if(current_keyframe_->get_map_point(idx, featureType))
                 continue; // already has a map point (from tracking, or the matched-pairs loop above)
 
             const cv::KeyPoint& kp1 = keypointsFt[idx];
@@ -544,7 +559,7 @@ void LocalMapping::CreateNewMapPoints()
 
             newMapPoints[featureType]++;
             nFromSensor++;
-            Pt pMP = mpCurrentKeyFrame->create_map_point(x3D, KeypointIndex(idx), featureType);
+            Pt pMP = current_keyframe_->create_map_point(x3D, KeypointIndex(idx), featureType);
             mlpRecentAddedMapPoints.push_back(pMP);
         }
     }
@@ -556,22 +571,22 @@ void LocalMapping::CreateNewMapPoints()
 void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
 {
     // Retrieve neighbor keyframes
-    const vector<Keyframe > vpNeighKFs = mpCurrentKeyFrame->get_best_covisibility_keyframes(SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES);
+    const vector<Keyframe > vpNeighKFs = current_keyframe_->get_best_covisibility_keyframes(SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES);
     vector<Keyframe > vpTargetKFs;
     for(vector<Keyframe >::const_iterator vit=vpNeighKFs.begin(), vend=vpNeighKFs.end(); vit!=vend; vit++)
     {
         Keyframe  pKFi = *vit;
-        if(pKFi->is_bad() || pKFi->mnFuseTargetForKF == mpCurrentKeyFrame->keyId)
+        if(pKFi->is_bad() || pKFi->mnFuseTargetForKF == current_keyframe_->keyId)
             continue;
         vpTargetKFs.push_back(pKFi);
-        pKFi->mnFuseTargetForKF = mpCurrentKeyFrame->keyId;
+        pKFi->mnFuseTargetForKF = current_keyframe_->keyId;
 
         // Extend to some second neighbors
         const vector<Keyframe > vpSecondNeighKFs = pKFi->get_best_covisibility_keyframes(SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES_SECOND);
         for(vector<Keyframe >::const_iterator vit2=vpSecondNeighKFs.begin(), vend2=vpSecondNeighKFs.end(); vit2!=vend2; vit2++)
         {
             Keyframe  pKFi2 = *vit2;
-            if(pKFi2->is_bad() || pKFi2->mnFuseTargetForKF==mpCurrentKeyFrame->keyId || pKFi2->keyId == mpCurrentKeyFrame->keyId)
+            if(pKFi2->is_bad() || pKFi2->mnFuseTargetForKF==current_keyframe_->keyId || pKFi2->keyId == current_keyframe_->keyId)
                 continue;
             vpTargetKFs.push_back(pKFi2);
         }
@@ -579,7 +594,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
 
     // Search matches by projection from current KF in target KFs
     //FeatureMatcher matcher;
-    vector<Pt> vpMapPointMatches = mpCurrentKeyFrame->get_map_point_matches(featureType);
+    vector<Pt> vpMapPointMatches = current_keyframe_->get_map_point_matches(featureType);
     for(vector<Keyframe >::iterator vit=vpTargetKFs.begin(), vend=vpTargetKFs.end(); vit!=vend; vit++)
     {
         Keyframe  pKFi = *vit;
@@ -601,17 +616,17 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
             Pt pMP = *vitMP;
             if(!pMP)
                 continue;
-            if(pMP->is_bad() || pMP->mnFuseCandidateForKF == mpCurrentKeyFrame->keyId)
+            if(pMP->is_bad() || pMP->mnFuseCandidateForKF == current_keyframe_->keyId)
                 continue;
-            pMP->mnFuseCandidateForKF = mpCurrentKeyFrame->keyId;
+            pMP->mnFuseCandidateForKF = current_keyframe_->keyId;
             vpFuseCandidates.push_back(pMP);
         }
     }
 
-    matcher->fuse_map_points_to_keyframe(mpCurrentKeyFrame,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
+    matcher->fuse_map_points_to_keyframe(current_keyframe_,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
 
     // Update points
-    vpMapPointMatches = mpCurrentKeyFrame->get_map_point_matches(featureType);
+    vpMapPointMatches = current_keyframe_->get_map_point_matches(featureType);
     for(size_t i=0, iend=vpMapPointMatches.size(); i<iend; i++)
     {
         Pt pMP=vpMapPointMatches[i];
@@ -625,7 +640,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
         }
     }
     // Update connections in covisibility graph
-    mpCurrentKeyFrame->update_connections();
+    current_keyframe_->update_connections();
 }
 
 void LocalMapping::request_stop()
@@ -703,91 +718,61 @@ void LocalMapping::InterruptBA()
     mbAbortBA = true;
 }
 
-void LocalMapping::KeyFrameCulling()
+void LocalMapping::cull_keyframes()
 {
+    // A covisible keyframe is redundant when more than
+    // params.keyframe_culling_redundancy_ratio of its (non-bad) map points are each
+    // observed by at least params.keyframe_culling_min_observations OTHER non-bad
+    // keyframes. The test runs per feature type, and a keyframe redundant for ANY
+    // of its feature types is culled. (Stock ORB-SLAM2's extra requirement that the
+    // other observations be at the same or a finer scale level is not applied.)
 
-    // vector<Keyframe > vpLocalKeyFrames = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
-    // for(vector<Keyframe >::iterator vit=vpLocalKeyFrames.begin(), vend=vpLocalKeyFrames.end(); vit!=vend; vit++)
-    // {
-    //     Keyframe  pKF = *vit;
-    //     if(pKF->keyId == 0)
-    //         continue;
-    //     if ((int(pKF->frame_id) % ALLFEATURE_EVALUATION) == 0)
-    //         continue;
-    //     if ((int(pKF->frame_id) % ALLFEATURE_KEYFRAMES) == 0)
-    //         continue;
-    //     if(mpCurrentKeyFrame->keyId - pKF->keyId < 3)
-    //         continue;
-    //     pKF->SetBadFlag();
-    // }
+    // By-value snapshot: get_covisible_keyframes copies under the keyframe's mutex
+    const std::vector<Keyframe> local_keyframes = current_keyframe_->get_covisible_keyframes();
+    for(const Keyframe& keyframe : local_keyframes){
+        if(keyframe->keyId == 0)
+            continue; // the first keyframe anchors the map and is never culled
 
+        for(const FeatureType ft : keyframe->featureTypes){
+            // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
+            const std::vector<Pt> map_points = keyframe->get_map_point_matches(ft);
 
-    // Check redundant keyframes (only local keyframes)
-    // A keyframe is considered redundant if the 90% of the MapPoints it sees, are seen
-    // in at least other 3 keyframes (in the same or finer scale)
-    // We only consider close stereo points
+            int num_points = 0;
+            int num_redundant = 0;
+            for(const Pt& pt : map_points){
+                if(!pt || pt->is_bad())
+                    continue;
+                num_points++;
 
-    vector<Keyframe > vpLocalKeyFrames = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
+                // number_of_observations counts depth-verified observations twice
+                if(pt->number_of_observations() <= params.keyframe_culling_min_observations)
+                    continue;
 
-    for(vector<Keyframe >::iterator vit=vpLocalKeyFrames.begin(), vend=vpLocalKeyFrames.end(); vit!=vend; vit++)
-    {
-        Keyframe  pKF = *vit;
-        for(const auto feat: pKF->featureTypes){
-            if(pKF->keyId == 0)
-                continue;
-            const vector<Pt> vpMapPoints = pKF->get_map_point_matches(feat);
-
-            int nObs = KEYFRAME_CULLING_MIN_NUM_OBSERVATIONS;
-            const int thObs=nObs;
-            int nRedundantObservations=0;
-            int nMPs=0;
-            for(size_t i=0, iend=vpMapPoints.size(); i<iend; i++)
-            {
-                Pt pMP = vpMapPoints[i];
-
-                if(pMP)
-                {
-                    if(!pMP->is_bad())
-                    {
-                        nMPs++;
-                        if(pMP->number_of_observations() > thObs)
-                        {
-                            const map<KeyframeId , Obs> observations = pMP->get_observations();
-                            int nObs=0;
-                            for(auto& obs: observations)
-                            {
-                                Keyframe keyframe_i = obs.second->projKeyframe;
-                                if(keyframe_i->keyId == pKF->keyId)
-                                    continue;
-                                if(keyframe_i->is_bad())
-                                    continue;
-
-                                nObs++;
-                                if(nObs>=thObs)
-                                    break;
-                            }
-                            if(nObs>=thObs)
-                            {
-                                nRedundantObservations++;
-                            }
-                        }
-                    }
+                // By-value snapshot: get_observations copies under the point's mutex
+                const std::map<KeyframeId, Obs> observations = pt->get_observations();
+                int num_other_observers = 0;
+                for(const auto& [key_id, obs] : observations){
+                    if(key_id == keyframe->keyId || obs->projKeyframe->is_bad())
+                        continue;
+                    if(++num_other_observers >= params.keyframe_culling_min_observations)
+                        break;
                 }
+                if(num_other_observers >= params.keyframe_culling_min_observations)
+                    num_redundant++;
             }
 
-            if(nRedundantObservations > KEYFRAME_CULLING_COVISIBILITY_THRESHOLD * nMPs){
-                #ifdef ALLFEATURE_EVALUATION
+            if(num_redundant <= params.keyframe_culling_redundancy_ratio * static_cast<float>(num_points))
+                continue;
 
-                    if ((int(pKF->frame_id) % ALLFEATURE_EVALUATION) != 0){
-                        if ((int(pKF->frame_id) % ALLFEATURE_MAX_KEYFRAMES) != 0)
-                            pKF->SetBadFlag();
-                    }
-                #else
-                    pKF->SetBadFlag();
-                #endif
-
-            }
-    }
+            bool protected_keyframe{false};
+#ifdef ALLFEATURE_EVALUATION
+            // Evaluation builds keep the evaluation-sampled and the cadence keyframes
+            protected_keyframe = (keyframe->frame_id % ALLFEATURE_EVALUATION) == 0
+                              || (keyframe->frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0;
+#endif
+            if(!protected_keyframe)
+                keyframe->set_bad_flag();
+        }
     }
 }
 

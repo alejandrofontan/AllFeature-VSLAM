@@ -102,3 +102,11 @@ Tracking.RelocRansacProbability: 0.99  # P4P RANSAC (PnPsolver)
 Tracking.RelocRansacMinInliers: 10
 Tracking.RelocRansacMaxIterations: 3000
 Tracking.RelocRansacEpsilon: 0.5
+
+#--------------------------------------------------------------------------------------------
+# Local Mapping parameters (values shown are the compiled-in defaults; every key is optional —
+# a missing key keeps the default, so this section is safe to trim or edit per dataset)
+#--------------------------------------------------------------------------------------------
+# Keyframe culling
+LocalMapping.KeyframeCullingRedundancyRatio: 0.9 # cull when more than this fraction of a keyframe's points is redundant
+LocalMapping.KeyframeCullingMinObservations: 3   # a point is redundant when this many OTHER keyframes observe it

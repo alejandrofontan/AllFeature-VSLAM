@@ -183,7 +183,7 @@ map<KeyframeId,Keyframe> KeyFrame::GetConnectedKeyFrames()
     return connectedKeyFrames_tmp;
 }
 
-vector<Keyframe> KeyFrame::GetVectorCovisibleKeyFrames()
+vector<Keyframe> KeyFrame::get_covisible_keyframes()
 {
     unique_lock<mutex> lock(mMutexConnections);
     return orderedConnectedKeyFrames;
@@ -496,11 +496,11 @@ void KeyFrame::SetErase()
 
     if(mbToBeErased)
     {
-        SetBadFlag();
+        set_bad_flag();
     }
 }
 
-void KeyFrame::SetBadFlag()
+void KeyFrame::set_bad_flag()
 {
     {
         unique_lock<mutex> lock(mMutexConnections);
@@ -558,7 +558,7 @@ void KeyFrame::SetBadFlag()
                     continue;
 
                 // Check if a parent candidate is connected to the keyframe
-                vector<Keyframe> vpConnected = pKF->GetVectorCovisibleKeyFrames();
+                vector<Keyframe> vpConnected = pKF->get_covisible_keyframes();
                 for(size_t i=0, iend=vpConnected.size(); i<iend; i++)
                 {
                     for(set<Keyframe>::iterator spcit=sParentCandidates.begin(), spcend=sParentCandidates.end(); spcit!=spcend; spcit++)

@@ -630,9 +630,9 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
 
     #ifdef ALLFEATURE_REAL_TIME
     vector<Keyframe> vNeighKFs = pKF->get_best_covisibility_keyframes(10);
-    //vector<Keyframe> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
+    //vector<Keyframe> vNeighKFs = pKF->get_covisible_keyframes();
     #else
-    vector<Keyframe> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
+    vector<Keyframe> vNeighKFs = pKF->get_covisible_keyframes();
     #endif
 
     for(int i=0, iend=vNeighKFs.size(); i<iend; i++)

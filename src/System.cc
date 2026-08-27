@@ -48,6 +48,7 @@ System::System(const string &vocabularyFolder,
 
     Optimizer::LoadParameters(fsSettings);
     Tracking::LoadParameters(fsSettings);
+    LocalMapping::LoadParameters(fsSettings);
 
     DUtils::Random::SeedRandOnce(0);
 

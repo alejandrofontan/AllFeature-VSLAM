@@ -75,7 +75,7 @@ public:
     void update_connections();
     void UpdateBestCovisibles();
     map<KeyframeId,Keyframe> GetConnectedKeyFrames();
-    std::vector<Keyframe > GetVectorCovisibleKeyFrames();
+    std::vector<Keyframe > get_covisible_keyframes();
     std::vector<Keyframe> get_best_covisibility_keyframes(const int &N);
     std::vector<Keyframe> GetCovisiblesByWeight(const int &w);
     int GetWeight(Keyframe pKF);
@@ -122,7 +122,7 @@ public:
     void SetErase();
 
     // Set/check bad flag
-    void SetBadFlag();
+    void set_bad_flag();
     bool is_bad();
 
     // Compute Scene Depth (q=2 median). Used in monocular.

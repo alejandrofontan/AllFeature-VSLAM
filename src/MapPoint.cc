@@ -161,7 +161,7 @@ void MapPoint::EraseObservation(Keyframe projKeyframe)
             // copying a shared_ptr out of garbage memory, i.e. a refcount increment through a
             // wild pointer. That was the source of non-deterministic heap corruption and the
             // GPF segfaults inside EraseObservation itself. When empty, mpRefKF is left as-is:
-            // the point is discarded via SetBadFlag below (size 0 <= 2) and never used again.
+            // the point is discarded via set_bad_flag below (size 0 <= 2) and never used again.
             if(mpRefKF->keyId == projKeyframe->keyId && !observations.empty())
                 mpRefKF = observations.begin()->second->projKeyframe;
 
@@ -171,7 +171,7 @@ void MapPoint::EraseObservation(Keyframe projKeyframe)
     }
 
     if(removePoint)
-        SetBadFlag();
+        set_bad_flag();
     else
         ComputeDistinctiveDescriptors()->UpdateNormalAndDepth();
 }
@@ -188,7 +188,7 @@ int MapPoint::number_of_observations()
     return nObs;
 }
 
-void MapPoint::SetBadFlag()
+void MapPoint::set_bad_flag()
 {
     map<KeyframeId,Obs> observations_tmp;
     {
