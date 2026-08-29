@@ -29,7 +29,7 @@
 #include "MapDrawer.h"
 #include "FeatureMatcher.h"
 
-#include "KeyFrameDatabase.h"
+#include "PlaceRecognition.h"
 
 #include <thread>
 #include <mutex>
@@ -41,7 +41,6 @@ namespace AF_VSLAM
 
 class Tracking;
 class LocalMapping;
-class KeyFrameDatabase;
 class MapDrawer;
 
 class LoopConnections{
@@ -63,8 +62,10 @@ public:
 
 public:
 
-    LoopClosing(shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase> pDB, shared_ptr<Vocabulary> vocabulary,const bool bFixScale,
-        const FeatureType& featureType, const std::vector<FeatureType>& feat_types,
+    // featureType (geometric verification of loop candidates) is the backend's
+    // verification_feature(); the backend also owns the keyframe database.
+    LoopClosing(shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> place_recognition, const bool bFixScale,
+        const std::vector<FeatureType>& feat_types,
         int image_width, int image_height);
 
     void SetTracker(std::shared_ptr<Tracking> tracker);
@@ -130,8 +131,7 @@ protected:
     std::shared_ptr<Tracking> tracker;
     std::shared_ptr<MapDrawer> mapDrawer;
 
-    shared_ptr<KeyFrameDatabase> mpKeyFrameDB;
-    shared_ptr<Vocabulary> vocabulary;
+    shared_ptr<PlaceRecognition> place_recognition;
 
     std::shared_ptr<LocalMapping> localMapper;
 

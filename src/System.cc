@@ -2,8 +2,12 @@
 #include "Converter.h"
 #include "FeatureMatcher.h"
 #include "Optimizer.h"
+#include "PlaceRecognitionBoW.h"
+#include "PlaceRecognitionMegaLoc.h"
 
 #include "DBoW2/Random.h"
+
+#include <fstream>
 
 #include <thread>
 #include <pangolin/pangolin.h>
@@ -53,20 +57,35 @@ System::System(const string &vocabularyFolder,
     DUtils::Random::SeedRandOnce(0);
 
     ////////////////////////////////////////////////////////////////////////////////
-    // Visual place recognition (VPR) backend selection. Settings keys (both optional):
-    //   vpr:         backend — "bow" (default) or "none"
-    //   feature_vpr: bow only — feature family for the DBoW2 vocabulary; must be
-    //                listed in features: and have a vocabulary
-    // Missing keys default to BoW on the first feature that has a vocabulary; an
-    // explicit request that cannot be satisfied is a hard error, while a defaulted
-    // one degrades to "none" with a warning.
+    // Visual place recognition (VPR) backend selection (PlaceRecognition.h). Settings
+    // keys (all optional):
+    //   vpr:               "bow" (default) | "megaloc" | "none"
+    //   feature_vpr:       local feature that geometrically verifies retrieved candidates
+    //                      (reloc PnP, loop Sim3); must be listed in features:. For bow it
+    //                      is also the DBoW2 vocabulary feature (must have a vocabulary);
+    //                      for megaloc it defaults to the first feature.
+    //   megaloc_onnx:      MegaLoc model (default PlaceRecognitionMegaLoc::kDefaultOnnx)
+    //   megaloc_precision: "fp16" (default) | "fp32"
+    //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:
+    //                      see PlaceRecognitionMegaLocParameters
+    // An explicit request that cannot be satisfied is a hard error; a defaulted bow
+    // without any vocabulary-capable feature degrades to "none" with a warning.
     std::string vpr_method{"bow"};
     bool vpr_key_present{false};
     std::string feature_vpr_name{};
+    std::string megaloc_onnx{PlaceRecognitionMegaLoc::kDefaultOnnx};
+    std::string megaloc_precision{"fp16"};
+    PlaceRecognitionMegaLocParameters megaloc_params{};
     try {
         const YAML::Node settingsNode = YAML::LoadFile(strSettingsFile);
         if(settingsNode["vpr"]){ vpr_method = settingsNode["vpr"].as<std::string>(); vpr_key_present = true; }
         if(settingsNode["feature_vpr"]) feature_vpr_name = settingsNode["feature_vpr"].as<std::string>();
+        if(settingsNode["megaloc_onnx"]) megaloc_onnx = settingsNode["megaloc_onnx"].as<std::string>();
+        if(settingsNode["megaloc_precision"]) megaloc_precision = settingsNode["megaloc_precision"].as<std::string>();
+        if(settingsNode["PlaceRecognition.MegaLocMinSimilarity"])
+            megaloc_params.min_similarity = settingsNode["PlaceRecognition.MegaLocMinSimilarity"].as<float>();
+        if(settingsNode["PlaceRecognition.MaxCandidates"])
+            megaloc_params.max_candidates = settingsNode["PlaceRecognition.MaxCandidates"].as<int>();
     } catch (const std::exception& e) {
         AF_ERROR("[System] Failed to parse settings file '" + strSettingsFile + "': " + std::string(e.what()));
         exit(-1);
@@ -76,25 +95,29 @@ System::System(const string &vocabularyFolder,
     for (const auto& ft : featureTypes)
         feature_list += (feature_list.empty() ? "" : ", ") + feature_name(ft);
 
-    bool vpr_enabled{false};
+    // Explicit feature_vpr must name a configured feature — hard error otherwise
     FeatureType vpr_feature{featureTypes[0]};
+    if(!feature_vpr_name.empty()){
+        bool found{false};
+        for (const auto& ft : featureTypes)
+            if(feature_name(ft) == feature_vpr_name){ vpr_feature = ft; found = true; break; }
+        if(!found){
+            AF_ERROR("[System] feature_vpr '" + feature_vpr_name + "' is not in features: [" + feature_list + "]");
+            exit(-1);
+        }
+    }
 
     if(vpr_method == "none"){
         AF_INFO("[System] VPR: none (disabled by settings) — no loop closing, no relocalization; a tracking loss is permanent");
+        place_recognition = make_shared<PlaceRecognitionNone>(vpr_feature);
     }
     else if(vpr_method == "bow"){
+        bool vpr_enabled{false};
         if(!feature_vpr_name.empty()){
-            // Explicit feature_vpr must name a configured feature with a vocabulary — hard error otherwise
-            bool found{false};
-            for (const auto& ft : featureTypes)
-                if(feature_name(ft) == feature_vpr_name){ vpr_feature = ft; found = true; break; }
-            if(!found){
-                AF_ERROR("[System] feature_vpr '" + feature_vpr_name + "' is not in features: [" + feature_list + "]");
-                exit(-1);
-            }
             if(!Vocabulary::has_vocabulary(vpr_feature)){
                 AF_ERROR("[System] feature_vpr '" + feature_vpr_name
-                         + "' has no DBoW2 vocabulary (learned feature) — pick a classical feature or set vpr: none");
+                         + "' has no DBoW2 vocabulary (learned feature) — pick a classical feature, "
+                           "set vpr: megaloc, or set vpr: none");
                 exit(-1);
             }
             vpr_enabled = true;
@@ -112,35 +135,64 @@ System::System(const string &vocabularyFolder,
                 // The user explicitly asked for bow — refusing beats silently degrading
                 AF_ERROR("[System] vpr: bow requested but no feature in [" + feature_list
                          + "] has a DBoW2 vocabulary — add a classical feature "
-                           "(orb32/akaze61/brisk48/surf64/kaze64/sift128) or set vpr: none");
+                           "(orb32/akaze61/brisk48/surf64/kaze64/sift128), set vpr: megaloc, or set vpr: none");
                 exit(-1);
             }
             else{
                 AF_WARN("[System] No feature in [" + feature_list + "] has a DBoW2 vocabulary — running WITHOUT VPR: "
                         "no loop closing, no relocalization, a tracking loss is permanent. "
-                        "Add a classical feature (orb32/akaze61/brisk48/surf64/kaze64/sift128) "
-                        "or silence this warning with vpr: none");
+                        "Add a classical feature (orb32/akaze61/brisk48/surf64/kaze64/sift128), "
+                        "set vpr: megaloc, or silence this warning with vpr: none");
             }
         }
+
+        //Load vocabulary (BoW backend)
+        auto vocabulary = make_shared<Vocabulary>(vocabularyFolder, vpr_feature, vpr_enabled);
+        if(vocabulary->is_active()){
+            vocabulary->createVocabulary();
+            bool vocabularyLoaded = vocabulary->loadFromTextFile();
+            if(!vocabularyLoaded){
+                AF_ERROR("[System] Vocabulary loading failed");
+                terminate();
+            }
+            place_recognition = make_shared<PlaceRecognitionBoW>(vocabulary);
+        }
+        else
+            place_recognition = make_shared<PlaceRecognitionNone>(vpr_feature);
+    }
+    else if(vpr_method == "megaloc"){
+        if(!std::ifstream(megaloc_onnx).good()){
+            AF_ERROR("[System] vpr: megaloc requested but the model is missing ('" + megaloc_onnx
+                     + "') — let the VSLAM-LAB wrapper download it, generate it with "
+                       "Thirdparty/MegaLoc-TensorRT/convert2onnx/export_megaloc.py, "
+                       "or set megaloc_onnx: to an existing export");
+            exit(-1);
+        }
+        // stdout is fully buffered when redirected to a log file: flush so the
+        // announcement is visible during a 1-2 min engine build.
+        const bool engineCached = std::ifstream(megaloc_onnx + "." + megaloc_precision + ".engine").good();
+        AF_INFO("[System] VPR: megaloc | feature_vpr: " + feature_name(vpr_feature)
+                + (feature_vpr_name.empty() ? " (defaulted: first feature)" : "")
+                + " | " + (engineCached ? "loading cached TensorRT engine for " : "building TensorRT engine (1-2 min) for ")
+                + megaloc_onnx + " ...");
+        std::cout.flush();
+        try {
+            place_recognition = make_shared<PlaceRecognitionMegaLoc>(megaloc_onnx, megaloc_precision, vpr_feature, megaloc_params);
+        } catch (const std::exception& e) {
+            AF_ERROR("[System] MegaLoc backend setup failed: " + std::string(e.what()));
+            exit(-1);
+        }
+        const auto& megaloc = static_cast<const PlaceRecognitionMegaLoc&>(*place_recognition);
+        AF_INFO("[System] VPR: megaloc ready (engine " << (megaloc.engine().loadedFromCache() ? "cached" : "built")
+                << ": " << megaloc.engine().enginePath() << ", " << megaloc.engine().descriptorDim()
+                << "-d, min similarity " << megaloc_params.min_similarity
+                << ", max candidates " << megaloc_params.max_candidates << ")");
+        std::cout.flush();
     }
     else{
-        AF_ERROR("[System] Unknown vpr backend '" + vpr_method + "' (options: bow, none)");
+        AF_ERROR("[System] Unknown vpr backend '" + vpr_method + "' (options: bow, megaloc, none)");
         exit(-1);
     }
-
-    //Load vocabulary (BoW backend)
-    vocabulary = make_shared<Vocabulary>(vocabularyFolder, vpr_feature, vpr_enabled);
-    if(vocabulary->is_active()){
-        vocabulary->createVocabulary();
-        bool vocabularyLoaded = vocabulary->loadFromTextFile();
-        if(!vocabularyLoaded){
-            AF_ERROR("[System] Vocabulary loading failed");
-            terminate();
-        }
-    }
-
-    //Create KeyFrame Database
-    mpKeyFrameDatabase = make_shared<KeyFrameDatabase>(vocabulary);
 
     //Create the Map
     mpMap = make_shared<Map>();
@@ -163,8 +215,8 @@ System::System(const string &vocabularyFolder,
 
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
-    tracker = make_shared<Tracking>(vocabulary, frameDrawer, mapDrawer,
-                             mpMap, mpKeyFrameDatabase,
+    tracker = make_shared<Tracking>(place_recognition, frameDrawer, mapDrawer,
+                             mpMap,
                              strCalibrationFile, strSettingsFile,
                              feature_settings_yaml_file,
                              featureTypes, fixImageSize);
@@ -177,10 +229,10 @@ System::System(const string &vocabularyFolder,
     //is still constructed (other threads hold pointers to it and enqueue keyframes) but its
     //thread never starts: LoopClosing's constructor leaves mbFinished=true, so Shutdown()'s
     //isFinished()/isRunningGBA() waits pass immediately.
-    loopCloser =  make_shared<LoopClosing>(mpMap, mpKeyFrameDatabase, vocabulary, mSensor!=MONOCULAR,
-        vocabulary->featureType, featureTypes,
+    loopCloser =  make_shared<LoopClosing>(mpMap, place_recognition, mSensor!=MONOCULAR,
+        featureTypes,
         tracker->get_image_width(), tracker->get_image_height());
-    if(vocabulary->is_active())
+    if(place_recognition->is_active())
         mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::Run, loopCloser);
 
     //Initialize the Viewer thread and launch

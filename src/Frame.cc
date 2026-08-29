@@ -49,7 +49,8 @@ Frame::Frame()
 
 //Copy Constructor
 Frame::Frame(const Frame &frame)
-    :featureTypes(frame.featureTypes), vocabulary(frame.vocabulary), featureExtractorLeft(frame.featureExtractorLeft), featureExtractorRight(frame.featureExtractorRight),
+    :featureTypes(frame.featureTypes), place_recognition(frame.place_recognition), image(frame.image), global_descriptor(frame.global_descriptor),
+     featureExtractorLeft(frame.featureExtractorLeft), featureExtractorRight(frame.featureExtractorRight),
      timestamp(frame.timestamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()), w(frame.w), h(frame.h),
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
      mvKeysRight(frame.mvKeysRight), keypoints(frame.keypoints),  mvuRight(frame.mvuRight),
@@ -94,8 +95,8 @@ Frame& Frame::operator=(const Frame &frame)
 
 Frame::Frame(const Image & img, const double &timeStamp,
              const std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
-             shared_ptr<Vocabulary> vocabulary, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth)
-    :vocabulary(vocabulary),
+             shared_ptr<PlaceRecognition> place_recognition, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth)
+    :place_recognition(place_recognition),
     featureExtractorLeft(extractor), featureExtractorRight(),
     timestamp(timeStamp), mK(K.clone()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
 {
@@ -103,6 +104,11 @@ Frame::Frame(const Image & img, const double &timeStamp,
     frame_id = nNextId++;
     w = img.img.cols;
     h = img.img.rows;
+
+    // Image-embedding VPR backends (MegaLoc) embed keyframes after creation, off the
+    // tracking thread: keep a shared header of the image (no copy) for that purpose.
+    if(place_recognition && place_recognition->needs_image())
+        image = img.img;
 
     // Scale Level Info (assumes every feature type shares the same pyramid scale factor)
     sizeTolerance = featureExtractorLeft.begin()->second->GetScaleFactor();
@@ -399,10 +405,8 @@ void Frame::drop_outlier_points()
 
 void Frame::compute_global_descriptor()
 {
-    if(!vocabulary->is_active())
-        return;
-    if(mBowVec.empty())
-        vocabulary->transform(descriptors.at(vocabulary->featureType), mBowVec, mFeatVec);
+    if(place_recognition)
+        place_recognition->compute(*this);
 }
 
 void Frame::UndistortKeyPoints()

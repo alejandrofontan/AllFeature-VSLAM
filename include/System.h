@@ -34,10 +34,8 @@
 #include "Map.h"
 #include "LocalMapping.h"
 #include "LoopClosing.h"
-#include "KeyFrameDatabase.h"
-#include "FeatureVocabulary.h"
+#include "PlaceRecognition.h"
 #include "Viewer.h"
-#include "DBoW2/TemplatedVocabulary.h"
 #include "Utils.h"
 
 namespace AF_VSLAM
@@ -140,11 +138,9 @@ private:
     // Input sensor
     eSensor mSensor;
 
-    // Feature vocabulary used for place recognition and feature matching.
-    std::shared_ptr<Vocabulary> vocabulary{};
-
-    // KeyFrame database for place recognition (relocalization and loop detection).
-    shared_ptr<KeyFrameDatabase> mpKeyFrameDatabase;
+    // Visual place recognition backend (bow | megaloc | none): global descriptors,
+    // keyframe database, relocalization and loop-detection candidates.
+    std::shared_ptr<PlaceRecognition> place_recognition{};
 
     // Map structure that stores the pointers to all KeyFrames and MapPoints.
     shared_ptr<Map> mpMap;

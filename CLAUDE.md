@@ -536,6 +536,47 @@ Note for reruns: the parent framework's swap watchdog measures absolute system s
 - `PoseOptimization`: on >50% rejection — per-channel breakdown (mono/stereo/rgbd), per-pass inlier counts, initial→final pose delta, rejected-edge medians (pixel error, inverse-depth error, sensor depth). The pixel-vs-depth split attributes a burst to 2D geometry vs the depth channel in one line.
 - `Tracking::Track`: 100-frame heartbeat (inliers / localPts / KFs / mapPts) so post-mortems see the trend leading into a loss.
 
+## Visual Place Recognition: `PlaceRecognition` interface + MegaLoc backend (2026-08-28)
+
+Issue #17 stages 2+3, on branch `cleanup` (uncommitted at the time of writing). Retrieval for
+relocalization and loop detection now goes through one backend interface
+(`include/PlaceRecognition.h`) selected by the settings key `vpr:`:
+
+| `vpr:` | Class | Descriptor | Retrieval |
+|---|---|---|---|
+| `bow` (default) | `PlaceRecognitionBoW` | DBoW2 BoW vector of the `feature_vpr` local descriptors | the unchanged `KeyFrameDatabase` inverted file |
+| `megaloc` | `PlaceRecognitionMegaLoc` | MegaLoc 8448-d image embedding (TensorRT, `Thirdparty/MegaLoc-TensorRT`) | brute-force cosine over all keyframe descriptors + the same covisibility accumulation / 0.75-of-best pruning as BoW, capped by `PlaceRecognition.MaxCandidates` and floored by `PlaceRecognition.MegaLocMinSimilarity` |
+| `none` | `PlaceRecognitionNone` | — | nothing (no loop closing, no relocalization) |
+
+- `feature_vpr` now means "the local feature that geometrically verifies retrieved candidates"
+  (reloc PnP, loop Sim3) for every backend; for `bow` it is still the vocabulary feature. When
+  omitted: bow = first feature with a vocabulary, megaloc = first feature.
+- Data flow for image-embedding backends (`needs_image()`): `Frame` keeps a shared header of its
+  resized image (`Frame::image`, BGR), the `KeyFrame` inherits it, and
+  `LocalMapping::ProcessNewKeyFrame` → `KeyFrame::compute_global_descriptor()` embeds it off the
+  tracking thread and releases the image. The relocalization query (`Tracking::relocalize`) embeds
+  the lost frame on the tracking thread. The engine is shared behind a mutex.
+- `KeyFrame::vpr_similarity(other)` exposes the backend similarity (cosine for MegaLoc, NaN when
+  VPR is inactive) — the hook for appearance-based keyframe culling (the shelved VPR-matrix work).
+- Model pipeline (reproducible): `Thirdparty/MegaLoc-TensorRT/convert2onnx/export_megaloc.py`
+  clones `gmberton/MegaLoc` (pinned commit), downloads the HF weights into
+  `megaloc_models/.cache`, exports `megaloc_models/megaloc_322x322.onnx` + sidecar yaml, and
+  self-checks against the PyTorch reference; `bin/test_megaloc` validates the TensorRT engine + C++ preprocessing against that
+  reference. `megaloc_models/` is gitignored; the VSLAM-LAB wrapper downloads the two files from
+  HF `vslamlab/allfeature-vslamlab` on install (upload them there after exporting).
+- Export fidelity measured on ETH table_3 frames: export wrapper vs upstream forward max|diff| ≈ 2e-7;
+  ONNX vs wrapper cos 0.999998; ONNX vs README-preprocessed (torchvision antialiased resize)
+  reference cos ≈ 0.995 — the residual is the cv2 `INTER_AREA` vs torchvision resampling filter.
+  TensorRT fp16 engine (mixed: fp16 backbone, fp32 aggregator) reproduces the fp32 numbers
+  (worst cos 0.994) at 4.0 ms/image.
+- **TensorRT 10.3 gotcha (bit us):** the upstream attention pattern
+  `qkv.reshape(B,N,3,heads,hd).permute(2,0,3,1,4)[0..2]` is *miscompiled* by TensorRT's Myelin
+  fuser — the full-graph engine returned descriptors with cos 0.05 vs ORT while every isolated
+  sub-graph looked fine (exposing the intermediates changes the fusion). Diagnosed by bisecting with
+  `trtexec --loadInputs=input:x.bin --exportOutput` against ORT stage by stage; fixed at export time
+  by slicing q/k/v from the projection output (`ExportWrapper.attention`). Uniform fp16 was a
+  separate, smaller loss (cos 0.93) fixed by pinning the aggregator to fp32.
+
 ## Notes
 
 - License: GPLv3 (inherited from ORB-SLAM2)

@@ -35,7 +35,7 @@
 #include "Frame.h"
 #include "FrameDrawer.h"
 #include "Initializer.h"
-#include "KeyFrameDatabase.h"
+#include "PlaceRecognition.h"
 #include "LocalMapping.h"
 #include "LoopClosing.h"
 #include "Map.h"
@@ -124,9 +124,8 @@ class Tracking
 {
 
 public:
-    Tracking(std::shared_ptr<Vocabulary> vocabulary, std::shared_ptr<FrameDrawer> frame_drawer,
+    Tracking(std::shared_ptr<PlaceRecognition> place_recognition, std::shared_ptr<FrameDrawer> frame_drawer,
              std::shared_ptr<MapDrawer> map_drawer, std::shared_ptr<Map> map,
-             std::shared_ptr<KeyFrameDatabase> keyframe_db,
              const std::string& calibration_yaml, const std::string& settings_yaml,
              const std::map<FeatureType, std::string>& feature_settings_yaml_file,
              const std::vector<FeatureType>& feature_types,
@@ -265,9 +264,9 @@ protected:
     std::map<FeatureType, shared_ptr<FeatureExtractor>> feature_extractor_left_;
     std::map<FeatureType, shared_ptr<FeatureExtractor>> init_feature_extractor_;
 
-    //BoW
-    std::shared_ptr<Vocabulary> vocabulary_;
-    std::shared_ptr<KeyFrameDatabase> keyframe_db_;
+    // Visual place recognition backend (relocalization queries; keyframes register
+    // themselves in its database)
+    std::shared_ptr<PlaceRecognition> place_recognition_;
 
     // Initalization (only for monocular)
     std::shared_ptr<Initializer> initializer_;

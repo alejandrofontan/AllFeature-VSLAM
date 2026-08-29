@@ -32,7 +32,7 @@
 #include "KeyFrame.h"
 #include "FeatureExtractor.h"
 #include "FeatureFactory.h"
-#include "Vocabulary.h"
+#include "PlaceRecognition.h"
 #include <opencv2/opencv.hpp>
 
 namespace AF_VSLAM
@@ -60,27 +60,16 @@ public:
     // in a second implementation that could silently drift out of sync with it.
     Frame& operator=(const Frame &frame);
 
-    // Constructor for stereo cameras.
-    // Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeStamp,
-    //       shared_ptr<FeatureExtractor>& extractorLeft, shared_ptr<FeatureExtractor>& extractorRight,
-    //       shared_ptr<Vocabulary> vocabulary, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth);
-
-    // Constructor for RGB-D cameras.
-    // Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeStamp,
-    //       shared_ptr<FeatureExtractor>& extractor,
-    //       shared_ptr<Vocabulary> vocabulary, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth);
-
     // Constructor for mono cameras.
     Frame(const Image & img, const double &timeStamp,
           const std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
-          shared_ptr<Vocabulary> vocabulary, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth);
+          shared_ptr<PlaceRecognition> place_recognition, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth);
 
     // Extract ORB on the image. 0 for left image and 1 for right image.
     void ExtractFeatures(int flag, const Image & img);
 
-    // Compute Bag of Words representation.
-    // Compute the global descriptor (BoW vector) with the active VPR backend's
-    // feature family; no-op when VPR is inactive.
+    // Compute the global descriptor with the active VPR backend (BoW vector, or a
+    // MegaLoc image embedding); no-op when VPR is inactive.
     void compute_global_descriptor();
 
     // Drop matches to map points that no observation backs (matched during
@@ -145,8 +134,17 @@ public:
     std::map<FrameId, std::vector<cv::DMatch>> cache_matched_pairs{};
     std::map<FrameId, std::map<FeatureType, std::vector<cv::DMatch>>> cache_matched_pairs_feat_type{};
 
-    // Vocabulary used for relocalization.
-    shared_ptr<Vocabulary> vocabulary;
+    // Visual place recognition backend (relocalization queries, keyframe descriptors).
+    shared_ptr<PlaceRecognition> place_recognition;
+
+    // The frame's image (OpenCV-native BGR, after the tracking resize/crop) — shared
+    // header, kept only when the VPR backend embeds images (needs_image()) so a
+    // keyframe made from this frame can be embedded later; empty otherwise.
+    cv::Mat image;
+
+    // Backend-neutral global descriptor (MegaLoc: 8448-d unit vector; empty for BoW,
+    // which uses mBowVec/mFeatVec below).
+    std::vector<float> global_descriptor;
 
     // Feature extractor. The right is used only in the stereo case.
     std::map<FeatureType, shared_ptr<FeatureExtractor>> featureExtractorLeft, featureExtractorRight;

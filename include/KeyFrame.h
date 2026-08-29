@@ -27,7 +27,7 @@
 #include "FeatureVocabulary.h"
 #include "FeatureExtractor.h"
 #include "Frame.h"
-#include "KeyFrameDatabase.h"
+#include "PlaceRecognition.h"
 #include "FeatureFactory.h"
 
 #include <mutex>
@@ -38,7 +38,6 @@ namespace AF_VSLAM
 
 class Map;
 class Frame;
-class KeyFrameDatabase;
 
 class KeyFrame;
 typedef shared_ptr<AF_VSLAM::KeyFrame> Keyframe;
@@ -48,7 +47,7 @@ typedef shared_ptr<AF_VSLAM::MapPoint> Pt;
 class KeyFrame : public std::enable_shared_from_this<KeyFrame>
 {
 public:
-    KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase> pKFDB);
+    KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> place_recognition);
     std::shared_ptr<KeyFrame> thisKeyframe() {
         return shared_from_this();
     }
@@ -64,10 +63,14 @@ public:
     void getFullIntrinsics(float &fx, float &fy, float &cx, float &cy, float& invfx, float& invfy) const;
     void getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_);
 
-    // Bag of Words Representation
-    // Compute the global descriptor (BoW vector) with the active VPR backend's
-    // feature family; no-op when VPR is inactive.
+    // Compute the global descriptor with the active VPR backend (BoW vector, or a
+    // MegaLoc image embedding — which then releases `image`); no-op when VPR is inactive.
     void compute_global_descriptor();
+
+    // Similarity of the two keyframes' global descriptors through the VPR backend
+    // (MegaLoc: cosine; BoW: DBoW2 score). NaN when VPR is inactive. Hook for
+    // appearance-based keyframe culling.
+    float vpr_similarity(const Keyframe& other) const;
 
     // Covisibility graph functions
     void AddConnection(Keyframe pKF, const int &weight);
@@ -203,6 +206,12 @@ public:
     DBoW2::BowVector mBowVec;
     DBoW2::FeatureVector mFeatVec;
 
+    // Image-embedding VPR (MegaLoc): the keyframe's image (OpenCV-native BGR, shared
+    // header from the Frame) lives only until compute_global_descriptor() has embedded
+    // it into global_descriptor; empty for BoW/none.
+    cv::Mat image;
+    std::vector<float> global_descriptor;
+
     // Pose relative to parent (this is computed when bad flag is activated)
     mat4f Tcp;
 
@@ -236,9 +245,9 @@ protected:
     // MapPoints associated to keypoints
     std::map<FeatureType, std::vector<Pt>> mvpMapPoints;
 
-    // BoW
-    shared_ptr<KeyFrameDatabase> mpKeyFrameDB;
-    shared_ptr<Vocabulary> vocabulary;
+    // Visual place recognition backend (owns the keyframe database this keyframe is
+    // registered in; erased from it in set_bad_flag)
+    shared_ptr<PlaceRecognition> place_recognition_;
 
     // Grid over the image to speed up feature matching
     std::map<FeatureType, std::vector< std::vector <std::vector<size_t>>>> mGrid;

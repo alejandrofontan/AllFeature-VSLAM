@@ -22,6 +22,7 @@
 #include "Converter.h"
 #include<mutex>
 #include <memory>
+#include <limits>
 
 namespace AF_VSLAM
 {
@@ -32,7 +33,7 @@ static bool KeyframeComparison(pair<int , Keyframe> a, pair<int , Keyframe> b){
 
 long unsigned int KeyFrame::nNextId=0;
 
-KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>pKFDB):
+KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> place_recognition):
     featureTypes(F.featureTypes), cache_matched_pairs(F.cache_matched_pairs), cache_matched_pairs_feat_type(F.cache_matched_pairs_feat_type),
     frame_id(F.frame_id),  timestamp(F.timestamp), mnGridCols(FRAME_GRID_COLS), mnGridRows(FRAME_GRID_ROWS),
     mfGridElementWidthInv(F.mfGridElementWidthInv), mfGridElementHeightInv(F.mfGridElementHeightInv),
@@ -41,12 +42,12 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>p
     fx(F.fx), fy(F.fy), cx(F.cx), cy(F.cy), invfx(F.invfx), invfy(F.invfy),
     mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), mvKeys(F.mvKeys), keypoints(F.keypoints),
     mvuRight(F.mvuRight), mvDepth(F.mvDepth), inv_depth(F.inv_depth), sigma2invDepth(F.sigma2invDepth),
-    mBowVec(F.mBowVec), mFeatVec(F.mFeatVec),  sizeTolerance(F.sizeTolerance),
+    mBowVec(F.mBowVec), mFeatVec(F.mFeatVec), image(F.image), global_descriptor(F.global_descriptor), sizeTolerance(F.sizeTolerance),
     keyPtsSigma2(F.keyPtsSigma2),keyPtsInf(F.keyPtsInf),keyPtsSize(F.keyPtsSize),
     maxKeyPtSize(F.maxKeyPtSize),maxKeyPtSigma(F.maxKeyPtSigma),
     mnMinX(F.mnMinX), mnMinY(F.mnMinY), mnMaxX(F.mnMaxX), mnMaxY(F.mnMaxY),
-    mK(F.mK), mvpMapPoints(F.pts), mpKeyFrameDB(pKFDB),
-    vocabulary(F.vocabulary), mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
+    mK(F.mK), mvpMapPoints(F.pts), place_recognition_(std::move(place_recognition)),
+    mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
     mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap)
 {
     keyId = nNextId++;
@@ -69,14 +70,15 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<KeyFrameDatabase>p
 
 void KeyFrame::compute_global_descriptor()
 {
-    if(!vocabulary->is_active())
-        return;
-    if(mBowVec.empty() || mFeatVec.empty())
-    {
-        // Feature vector associates features with nodes in the 4th level (from leaves up)
-        // We assume the vocabulary tree has 6 levels, change the 4 otherwise
-        vocabulary->transform(descriptors.at(vocabulary->featureType), mBowVec, mFeatVec);
-    }
+    if(place_recognition_)
+        place_recognition_->compute(*this);
+}
+
+float KeyFrame::vpr_similarity(const Keyframe& other) const
+{
+    if(!place_recognition_ || !place_recognition_->is_active() || !other)
+        return std::numeric_limits<float>::quiet_NaN();
+    return place_recognition_->score(*this, *other);
 }
 
 void KeyFrame::set_pose(const mat4f &Tcw_)
@@ -601,7 +603,7 @@ void KeyFrame::set_bad_flag()
     }
 
     mpMap->EraseKeyFrame(thisKeyframe());
-    mpKeyFrameDB->erase(thisKeyframe());
+    place_recognition_->erase(thisKeyframe());
 }
 
 bool KeyFrame::is_bad()

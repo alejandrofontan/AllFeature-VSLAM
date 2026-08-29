@@ -38,12 +38,12 @@ namespace AF_VSLAM
     LoopConnections::LoopConnections(const KeyframeId & keyframeId, const Keyframe& keyframe, const map<KeyframeId,Keyframe>& connections):
             keyframeId(keyframeId), keyframe(keyframe), connections(connections){}
 
-LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<KeyFrameDatabase>pDB, shared_ptr<Vocabulary> vocabulary,
+LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<PlaceRecognition> place_recognition,
     const bool bFixScale,
-    const FeatureType& featureType, const std::vector<FeatureType>& feat_types,
+    const std::vector<FeatureType>& feat_types,
     int image_width, int image_height):
-    mbResetRequested(false), mbFinishRequested(false), mbFinished(true), featureType(featureType), feat_types(feat_types), mpMap(pMap),
-    mpKeyFrameDB(pDB), vocabulary(vocabulary), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
+    mbResetRequested(false), mbFinishRequested(false), mbFinished(true), featureType(place_recognition->verification_feature()), feat_types(feat_types), mpMap(pMap),
+    place_recognition(std::move(place_recognition)), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
     mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), mnFullBAIdx(0),
     image_width(image_width), image_height(image_height)
 {
@@ -136,37 +136,35 @@ bool LoopClosing::DetectLoop()
     //If the map contains less than 10 KF or less than 10 KF have passed from last loop detection
     if(mpCurrentKF->keyId < mLastLoopKFid+10)
     {
-        mpKeyFrameDB->add(mpCurrentKF);
+        place_recognition->add(mpCurrentKF);
         mpCurrentKF->SetErase();
         return false;
     }
 
-    // Compute reference BoW similarity score
-    // This is the lowest score to a connected keyframe in the covisibility graph
-    // We will impose loop candidates to have a higher similarity than this
+    // Compute the reference similarity score (backend-specific: BoW score or MegaLoc
+    // cosine). This is the lowest score to a connected keyframe in the covisibility
+    // graph; loop candidates must be at least this similar to the current keyframe.
     const vector<Keyframe> vpConnectedKeyFrames = mpCurrentKF->get_covisible_keyframes();
-    const DBoW2::BowVector &CurrentBowVec = mpCurrentKF->mBowVec;
     float minScore = 1;
     for(size_t i=0; i<vpConnectedKeyFrames.size(); i++)
     {
         Keyframe pKF = vpConnectedKeyFrames[i];
         if(pKF->is_bad())
             continue;
-        const DBoW2::BowVector &BowVec = pKF->mBowVec;
 
-        float score = vocabulary->score(CurrentBowVec, BowVec);
+        const float score = place_recognition->score(*mpCurrentKF, *pKF);
 
         if(score<minScore)
             minScore = score;
     }
 
     // Query the database imposing the minimum score
-    vector<Keyframe> vpCandidateKFs = mpKeyFrameDB->DetectLoopCandidates(mpCurrentKF, minScore);
+    vector<Keyframe> vpCandidateKFs = place_recognition->detect_loop_candidates(mpCurrentKF, minScore);
 
     // If there are no loop candidates, just add new keyframe and return false
     if(vpCandidateKFs.empty())
     {
-        mpKeyFrameDB->add(mpCurrentKF);
+        place_recognition->add(mpCurrentKF);
         mvConsistentGroups.clear();
         mpCurrentKF->SetErase();
         return false;
@@ -235,7 +233,7 @@ bool LoopClosing::DetectLoop()
 
 
     // Add Current Keyframe to database
-    mpKeyFrameDB->add(mpCurrentKF);
+    place_recognition->add(mpCurrentKF);
 
     if(mvpEnoughConsistentCandidates.empty())
     {

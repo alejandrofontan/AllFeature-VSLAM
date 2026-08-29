@@ -49,6 +49,8 @@ set(SRCS_ALLFEATURE
         src/FeatureExtractor.cpp
         src/Utils.cpp
         src/Vocabulary.cpp
+        src/PlaceRecognitionBoW.cc
+        src/PlaceRecognitionMegaLoc.cc
         src/Image.cpp
         src/Feature.cpp
         src/Feature_orb32.cpp
@@ -107,6 +109,11 @@ target_compile_options(PoseLib PRIVATE -w)
 # Only the CLI entry points consume it; the SLAM library itself stays unaware
 # of how Image::mask gets filled.
 add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/Segmentation-TensorRT ${CMAKE_BINARY_DIR}/segmentation_tensorrt)
+
+# ---- MegaLoc-TensorRT (visual place recognition backend `vpr: megaloc`) ----
+# First-party module (not vendored). Unlike segmentation, the SLAM library itself
+# consumes it: PlaceRecognitionMegaLoc owns the engine, so the library links it.
+add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/MegaLoc-TensorRT ${CMAKE_BINARY_DIR}/megaloc_tensorrt)
 
 # ---- mimalloc (drop-in allocator, issue #13 addendum M1) ----
 # Must be the SHARED library, linked FIRST into each executable: libmimalloc.so then appears
@@ -172,6 +179,7 @@ target_link_libraries(${PROJECT_NAME}
         superpoint_lightglue_lib
         SiftGPU::sift_gpu
         PoseLib::PoseLib
+        tensorrt_megaloc
 )
 
 

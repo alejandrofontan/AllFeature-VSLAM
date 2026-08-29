@@ -79,14 +79,14 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.RelocRansacEpsilon", params.reloc_ransac_epsilon);
 }
 
-Tracking::Tracking(std::shared_ptr<Vocabulary> vocabulary,
+Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
                    std::shared_ptr<FrameDrawer> frame_drawer, std::shared_ptr<MapDrawer> map_drawer,
-                   std::shared_ptr<Map> map, std::shared_ptr<KeyFrameDatabase> keyframe_db,
+                   std::shared_ptr<Map> map,
                    const std::string& calibration_yaml, const std::string& settings_yaml,
                    const std::map<FeatureType, std::string>& feature_settings_yaml_file,
                    const std::vector<FeatureType>& feature_types,
                    const bool fix_image_size):
-    feature_types_(feature_types), vocabulary_(vocabulary), keyframe_db_(keyframe_db),
+    feature_types_(feature_types), place_recognition_(std::move(place_recognition)),
     frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), fix_image_size_(fix_image_size)
 {
     load_camera_parameters(calibration_yaml, settings_yaml);
@@ -120,7 +120,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     // Create the frame (feature extraction); initialization uses the denser extractor set
     const auto& extractors = (state_ == TrackingState::NOT_INITIALIZED || state_ == TrackingState::NO_IMAGES_YET)
                            ? init_feature_extractor_ : feature_extractor_left_;
-    current_frame_ = Frame(im, timestamp, extractors, vocabulary_, mK, mDistCoef, mbf, mThDepth);
+    current_frame_ = Frame(im, timestamp, extractors, place_recognition_, mK, mDistCoef, mbf, mThDepth);
     profiler.frame_created(frame_times_);
 
     track();
@@ -342,8 +342,8 @@ void Tracking::attempt_monocular_initialization()
 void Tracking::create_initial_map()
 {
     // Create the two founding keyframes
-    Keyframe keyframe_ini = std::make_shared<KeyFrame>(initial_frame_, map_, keyframe_db_);
-    Keyframe keyframe_cur = std::make_shared<KeyFrame>(current_frame_, map_, keyframe_db_);
+    Keyframe keyframe_ini = std::make_shared<KeyFrame>(initial_frame_, map_, place_recognition_);
+    Keyframe keyframe_cur = std::make_shared<KeyFrame>(current_frame_, map_, place_recognition_);
 
     keyframe_ini->compute_global_descriptor();
     keyframe_cur->compute_global_descriptor();
@@ -949,7 +949,7 @@ void Tracking::create_new_keyframe()
     if(!local_mapper_->set_insertion_lock(true))
         return;
 
-    const Keyframe keyframe = std::make_shared<KeyFrame>(current_frame_, map_, keyframe_db_);
+    const Keyframe keyframe = std::make_shared<KeyFrame>(current_frame_, map_, place_recognition_);
 
     ref_keyframe_ = keyframe;
     current_frame_.ref_keyframe = keyframe;
@@ -998,13 +998,13 @@ bool Tracking::relocalize()
 {
     // Without an active VPR backend there is no keyframe database to query —
     // recovery from a tracking loss is impossible.
-    if(!vocabulary_->is_active())
+    if(!place_recognition_->is_active())
         return false;
 
-    const FeatureType feature_type = vocabulary_->featureType;
+    const FeatureType feature_type = place_recognition_->verification_feature();
     current_frame_.compute_global_descriptor();
 
-    const std::vector<Keyframe> candidates = keyframe_db_->detect_relocalization_candidates(&current_frame_);
+    const std::vector<Keyframe> candidates = place_recognition_->detect_relocalization_candidates(current_frame_);
     if(candidates.empty())
         return false;
     const size_t num_candidates = candidates.size();
@@ -1160,7 +1160,7 @@ void Tracking::reset()
 
     AF_INFO("reset: clearing keyframe database and map...");
     std::cout.flush();
-    keyframe_db_->clear();
+    place_recognition_->clear();
     map_->clear(); // erases all map points and keyframes
 
     KeyFrame::nNextId = 0;
