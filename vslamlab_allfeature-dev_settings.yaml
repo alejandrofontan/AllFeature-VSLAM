@@ -116,6 +116,19 @@ PlaceRecognition.MaxCandidates: 10          # cap on candidates per query (each 
 # Local Mapping parameters (values shown are the compiled-in defaults; every key is optional —
 # a missing key keeps the default, so this section is safe to trim or edit per dataset)
 #--------------------------------------------------------------------------------------------
-# Keyframe culling
+# Keyframe culling method: "heuristic" (default; ORB-SLAM2-style point redundancy) or "information"
+# (joint information on the online MegaLoc similarity kernel; needs vpr: megaloc, otherwise falls
+# back to heuristic with a warning)
+LocalMapping.KeyframeCullingMethod: information
+
+# heuristic
 LocalMapping.KeyframeCullingRedundancyRatio: 0.9 # cull when more than this fraction of a keyframe's points is redundant
 LocalMapping.KeyframeCullingMinObservations: 3   # a point is redundant when this many OTHER keyframes observe it
+
+# information (compiled-in defaults: MaxUnexplained 0.3, MinAge 5, MinKeyframes 5, Scope map, MaxPerCall 5, Centred 1)
+LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # every keyframe ever inserted must stay at least (1 - this) explained by the alive keyframes (Viewer slider "Cull Max Unexplained")
+LocalMapping.KeyframeCullingMinAge: 0            # keyframes younger than this many keyframes are never culled
+LocalMapping.KeyframeCullingMinKeyframes: 5      # never cull below this many alive keyframes
+LocalMapping.KeyframeCullingScope: map           # marginalise over "map" (all alive keyframes) or "local" (current keyframe + its covisible keyframes)
+LocalMapping.KeyframeCullingMaxPerCall: 5        # at most this many culls per call (0 = unlimited): a raised threshold thins the map gradually instead of in one burst
+LocalMapping.KeyframeCullingCentred: 1           # 1 = correlation of mean-centred descriptors (recommended: removes MegaLoc's ~0.37 common-mode floor), 0 = raw cosine

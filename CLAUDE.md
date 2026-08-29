@@ -557,7 +557,20 @@ relocalization and loop detection now goes through one backend interface
   tracking thread and releases the image. The relocalization query (`Tracking::relocalize`) embeds
   the lost frame on the tracking thread. The engine is shared behind a mutex.
 - `KeyFrame::vpr_similarity(other)` exposes the backend similarity (cosine for MegaLoc, NaN when
-  VPR is inactive) — the hook for appearance-based keyframe culling (the shelved VPR-matrix work).
+  VPR is inactive).
+- **Keyframe culling (2026-08-30)** — `LocalMapping.KeyframeCullingMethod: heuristic | information`
+  (compiled default `heuristic`; the dev YAML sets `information`). `cull_keyframes()` dispatches to
+  `cull_keyframes_heuristic()` (ORB-SLAM2-style point redundancy, keys `KeyframeCullingRedundancyRatio`/
+  `MinObservations`) or `cull_keyframes_information()` — the joint-information rule from the shelved
+  VPR-matrix session (`git stash@{0}`), now on the **online** keyframe kernel: `ProcessNewKeyFrame` →
+  `grow_keyframe_vpr_matrix()` appends the new keyframe's MegaLoc descriptor dot products (raw cosine,
+  rows never removed — culled keyframes stay as history), and at each call the kernel is optionally
+  double-centred over every keyframe inserted so far (`KeyframeCullingCentred`, default on = Pearson
+  correlation of mean-centred descriptors, removes MegaLoc's ~0.37 common-mode floor). Keys
+  `KeyframeCullingMaxUnexplained` (tau; live Viewer slider "Cull Max Unexplained"), `MinAge`,
+  `MinKeyframes`, `Scope: map|local`, `MaxPerCall`. Needs `vpr: megaloc`; with bow/none it falls back to
+  heuristic with a one-time warning. The offline `VPRMatrix`/`vpr_matrix:` CLI path is gone for good;
+  the maths/design history lives in `/home/alejandro/cull_keyframes_math.pdf` (rev. 5, outside the repo).
 - Model pipeline (reproducible): `Thirdparty/MegaLoc-TensorRT/convert2onnx/export_megaloc.py`
   clones `gmberton/MegaLoc` (pinned commit), downloads the HF weights into
   `megaloc_models/.cache`, exports `megaloc_models/megaloc_322x322.onnx` + sidecar yaml, and

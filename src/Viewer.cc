@@ -164,6 +164,14 @@ void Viewer::Run()
     pangolin::Var<float> menuTrackingTime("menu.Tracking (ms)", 0.0f, 0.0f, 100.0f, false);
     pangolin::Var<float> menuLocalMappingTime("menu.Local Mapping (ms)", 0.0f, 0.0f, 400.0f, false);
 
+    pangolin::Var<std::string> headerLocalMapping("menu.LOCAL MAPPING", "");
+
+    // Keyframe culling threshold (LocalMapping.KeyframeCullingMaxUnexplained, information
+    // method), editable online: seeded from the loaded parameter, written back every frame
+    // (atomic; LocalMapping reads it at each cull_keyframes call). 0 = never cull, 1 = cull anything.
+    pangolin::Var<float> menuCullMaxUnexplained("menu.Cull Max Unexplained",
+                                                LocalMapping::params.keyframe_culling_max_unexplained.load(), 0.0f, 1.0f);
+
     pangolin::Var<std::string> headerVisualization("menu.VISUALIZATION", "");
 
     // View
@@ -229,6 +237,9 @@ void Viewer::Run()
             menuTrackingTime = static_cast<float>(grab_image_time_median_);
             menuLocalMappingTime = static_cast<float>(runLocalMapping_time_median);
         }
+
+        // Live parameters
+        LocalMapping::params.keyframe_culling_max_unexplained.store(static_cast<float>(menuCullMaxUnexplained));
 
         // Status panel (map-size query locks the map, so refresh it sparingly)
         menuState = trackingStateName(tracker->state_);
