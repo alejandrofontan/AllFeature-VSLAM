@@ -54,8 +54,8 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
 
 LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& image_width, const int& image_height):
     featureTypes(featureTypes), mpMap(pMap),
-    abort_ba_(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), accept_keyframes_(true),
-    mbMonocular(bMonocular), mbResetRequested(false), mbFinishRequested(false), mbFinished(true),
+    abort_ba_(false), stopped_(false), stop_requested_(false), insertion_locked_(false), accept_keyframes_(true),
+    mbMonocular(bMonocular), mbResetRequested(false), mbFinishRequested(false), finished_(true),
     image_width(image_width), image_height(image_height)
 {
     matcher = std::make_shared<FeatureMatcher>(image_width, image_height, featureTypes, "LocalMapping");
@@ -64,7 +64,7 @@ LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const v
 void LocalMapping::Run()
 {
 
-    mbFinished = false;
+    finished_ = false;
 
     while(1)
     {
@@ -141,7 +141,7 @@ void LocalMapping::Run()
             AF_PROFILE_END();
             #endif
         }
-        else if(Stop())
+        else if(stop_if_requested())
         {
             // Safe area to stop
             while(is_stopped() && !CheckFinish())
@@ -749,48 +749,52 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
 
 void LocalMapping::request_stop()
 {
-    unique_lock<mutex> lock(mMutexStop);
-    mbStopRequested = true;
-    unique_lock<mutex> lock2(new_keyframes_mutex_);
+    std::lock_guard<std::mutex> lock(stop_mutex_);
+    stop_requested_ = true;
+    std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
     abort_ba_ = true;
 }
 
-bool LocalMapping::Stop()
+bool LocalMapping::stop_if_requested()
 {
-    unique_lock<mutex> lock(mMutexStop);
-    if(mbStopRequested && !mbNotStop)
-    {
-        mbStopped = true;
-        cout << "Local Mapping STOP" << endl;
-        return true;
-    }
+    std::lock_guard<std::mutex> lock(stop_mutex_);
+    if(!stop_requested_ || insertion_locked_)
+        return false;
 
-    return false;
+    stopped_ = true;
+    AF_INFO("[LocalMapping] stopped");
+    std::cout.flush(); // AF_INFO's stdout is fully buffered under the runner's redirect
+    return true;
 }
 
-bool LocalMapping::is_stopped()
+bool LocalMapping::is_stopped() const
 {
-    unique_lock<mutex> lock(mMutexStop);
-    return mbStopped;
+    std::lock_guard<std::mutex> lock(stop_mutex_);
+    return stopped_;
 }
 
-bool LocalMapping::is_stop_requested()
+bool LocalMapping::is_stop_requested() const
 {
-    unique_lock<mutex> lock(mMutexStop);
-    return mbStopRequested;
+    std::lock_guard<std::mutex> lock(stop_mutex_);
+    return stop_requested_;
 }
 
 void LocalMapping::release()
 {
-    unique_lock<mutex> lock(mMutexStop);
-    unique_lock<mutex> lock2(mMutexFinish);
-    if(mbFinished)
+    // scoped_lock (deadlock-free acquisition): SetFinish takes the same two mutexes in
+    // the opposite order from the Local Mapping thread.
+    std::scoped_lock lock(stop_mutex_, finish_mutex_);
+    if(finished_)
         return;
-    mbStopped = false;
-    mbStopRequested = false;
-    new_keyframes_.clear();
 
-    cout << "Local Mapping RELEASE" << endl;
+    stopped_ = false;
+    stop_requested_ = false;
+    {
+        std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
+        new_keyframes_.clear();
+    }
+    AF_INFO("[LocalMapping] released");
+    std::cout.flush();
 }
 
 bool LocalMapping::accepts_keyframes() const
@@ -805,15 +809,13 @@ void LocalMapping::set_accept_keyframes(const bool accept)
     accept_keyframes_ = accept;
 }
 
-bool LocalMapping::set_insertion_lock(bool flag)
+bool LocalMapping::set_insertion_lock(const bool locked)
 {
-    unique_lock<mutex> lock(mMutexStop);
-
-    if(flag && mbStopped)
+    std::lock_guard<std::mutex> lock(stop_mutex_);
+    if(locked && stopped_)
         return false;
 
-    mbNotStop = flag;
-
+    insertion_locked_ = locked;
     return true;
 }
 
@@ -1187,28 +1189,28 @@ void LocalMapping::ResetIfRequested()
 
 void LocalMapping::RequestFinish()
 {
-    unique_lock<mutex> lock(mMutexFinish);
+    unique_lock<mutex> lock(finish_mutex_);
     mbFinishRequested = true;
 }
 
 bool LocalMapping::CheckFinish()
 {
-    unique_lock<mutex> lock(mMutexFinish);
+    unique_lock<mutex> lock(finish_mutex_);
     return mbFinishRequested;
 }
 
 void LocalMapping::SetFinish()
 {
-    unique_lock<mutex> lock(mMutexFinish);
-    mbFinished = true;
-    unique_lock<mutex> lock2(mMutexStop);
-    mbStopped = true;
+    unique_lock<mutex> lock(finish_mutex_);
+    finished_ = true;
+    unique_lock<mutex> lock2(stop_mutex_);
+    stopped_ = true;
 }
 
 bool LocalMapping::isFinished()
 {
-    unique_lock<mutex> lock(mMutexFinish);
-    return mbFinished;
+    unique_lock<mutex> lock(finish_mutex_);
+    return finished_;
 }
 
 } //namespace ORB_SLAM

@@ -104,14 +104,21 @@ public:
     bool accepts_keyframes() const;
     void set_accept_keyframes(bool accept);
 
-    // Thread Synch
+    // Stop protocol, used by Loop Closing while it corrects the map: request_stop()
+    // asks the thread to pause at its next safe point (and aborts any local BA in
+    // progress); Run() pauses there via stop_if_requested() and idles until release(),
+    // which also drops the keyframes queued meanwhile. Tracking wraps each keyframe
+    // insertion in set_insertion_lock(true/false), which defers a pending stop until
+    // the insertion is done; it returns false if the thread is already stopped, in
+    // which case the caller must not insert.
     void request_stop();
-    void request_reset();
-    bool Stop();
+    bool is_stopped() const;
+    bool is_stop_requested() const;
     void release();
-    bool is_stopped();
-    bool is_stop_requested();
-    bool set_insertion_lock(bool flag);
+    bool set_insertion_lock(bool locked);
+
+    // Thread Synch
+    void request_reset();
     void InterruptBA();
     void RequestFinish();
     bool isFinished();
@@ -181,14 +188,15 @@ protected:
     // "information": joint-information culling on the online keyframe VPR matrix; see
     // the definition for the exact rule.
     void cull_keyframes_information();
+    bool stop_if_requested();   // called by Run() at its safe point; true once stopped
     void ResetIfRequested();
     bool CheckFinish();
     void SetFinish();
 
-    std::mutex mMutexFinish;
+    std::mutex finish_mutex_;                  // guards mbFinishRequested and finished_
     std::mutex mMutexReset;
     mutable std::mutex new_keyframes_mutex_;   // guards new_keyframes_ and abort_ba_
-    std::mutex mMutexStop;
+    mutable std::mutex stop_mutex_;            // guards stopped_, stop_requested_ and insertion_locked_
     mutable std::mutex accept_mutex_;          // guards accept_keyframes_
 
     std::shared_ptr<Map> mpMap;
@@ -209,14 +217,14 @@ protected:
     std::list<Pt> mlpRecentAddedMapPoints;
 
     bool abort_ba_;
-    bool mbStopped;
-    bool mbStopRequested;
-    bool mbNotStop;
+    bool stopped_;
+    bool stop_requested_;
+    bool insertion_locked_;
     bool accept_keyframes_;
     bool mbMonocular;
     bool mbResetRequested;
     bool mbFinishRequested;
-    bool mbFinished;
+    bool finished_;
 
     const int image_width;
     const int image_height;
