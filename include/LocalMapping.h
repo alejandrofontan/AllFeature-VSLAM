@@ -94,7 +94,15 @@ public:
     // Main function
     void Run();
 
-    void insert_keyframe(Keyframe pKF);
+    // Keyframe queue, fed by Tracking and drained by Run() (ProcessNewKeyFrame).
+    // Inserting also aborts any local BA in progress so the new keyframe is picked up promptly.
+    void insert_keyframe(const Keyframe& keyframe);
+    bool has_new_keyframes() const;
+
+    // Busy flag published by Run(): false while a keyframe is being processed. Tracking
+    // reads it to decide between a normal and an emergency keyframe insertion.
+    bool accepts_keyframes() const;
+    void set_accept_keyframes(bool accept);
 
     // Thread Synch
     void request_stop();
@@ -103,15 +111,13 @@ public:
     void release();
     bool is_stopped();
     bool is_stop_requested();
-    bool accepts_keyframes();
-    void SetAcceptKeyFrames(bool flag);
     bool set_insertion_lock(bool flag);
     void InterruptBA();
     void RequestFinish();
     bool isFinished();
-    int KeyframesInQueue(){
-        unique_lock<std::mutex> lock(mMutexNewKFs);
-        return mlNewKeyFrames.size();
+    int KeyframesInQueue() const {
+        std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
+        return new_keyframes_.size();
     }
 
     std::map<int, int> localMapping_times{};
@@ -161,7 +167,6 @@ protected:
     const int SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES_SECOND{5};
     const float SEARCH_IN_NEIGHBORS_RADIUS_TH{5.f};
 
-    bool CheckNewKeyFrames();
     void ProcessNewKeyFrame();
     void CreateNewMapPoints();
     mat3f ComputeF12(Keyframe &pKF1, Keyframe &pKF2);
@@ -182,9 +187,9 @@ protected:
 
     std::mutex mMutexFinish;
     std::mutex mMutexReset;
-    std::mutex mMutexNewKFs;
+    mutable std::mutex new_keyframes_mutex_;   // guards new_keyframes_ and abort_ba_
     std::mutex mMutexStop;
-    std::mutex mMutexAccept;
+    mutable std::mutex accept_mutex_;          // guards accept_keyframes_
 
     std::shared_ptr<Map> mpMap;
     std::shared_ptr<LoopClosing> loopCloser;
@@ -192,7 +197,7 @@ protected:
     std::shared_ptr<FeatureMatcher> matcher;
     std::shared_ptr<Viewer> viewer;
 
-    std::list<Keyframe> mlNewKeyFrames;
+    std::list<Keyframe> new_keyframes_;
     Keyframe current_keyframe_;
 
     // Online keyframe VPR matrix (see keyframe_vpr_matrix())
@@ -203,11 +208,11 @@ protected:
     void print_keyframe_vpr_matrix() const;
     std::list<Pt> mlpRecentAddedMapPoints;
 
-    bool mbAbortBA;
+    bool abort_ba_;
     bool mbStopped;
     bool mbStopRequested;
     bool mbNotStop;
-    bool mbAcceptKeyFrames;
+    bool accept_keyframes_;
     bool mbMonocular;
     bool mbResetRequested;
     bool mbFinishRequested;

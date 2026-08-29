@@ -54,7 +54,7 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
 
 LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& image_width, const int& image_height):
     featureTypes(featureTypes), mpMap(pMap),
-    mbAbortBA(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), mbAcceptKeyFrames(true),
+    abort_ba_(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), accept_keyframes_(true),
     mbMonocular(bMonocular), mbResetRequested(false), mbFinishRequested(false), mbFinished(true),
     image_width(image_width), image_height(image_height)
 {
@@ -69,10 +69,10 @@ void LocalMapping::Run()
     while(1)
     {
         // Tracking will see that Local Mapping is busy
-        SetAcceptKeyFrames(false);
+        set_accept_keyframes(false);
 
         // Check if there are keyframes in the queue
-        if(CheckNewKeyFrames())
+        if(has_new_keyframes())
         {
 
             std::chrono::steady_clock::time_point t_start_0 = std::chrono::steady_clock::now();
@@ -95,7 +95,7 @@ void LocalMapping::Run()
             createNewMapPoints_times[int(1000 * t_duration)]++;
             //////////////////////////////////////////////////////////////////////////////////////////////////////
 
-            if(!CheckNewKeyFrames())
+            if(!has_new_keyframes())
             {
                 // Find more matches in neighbor keyframes and fuse point duplications
                 t_start = std::chrono::steady_clock::now();
@@ -106,14 +106,14 @@ void LocalMapping::Run()
                 t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
                 searchInNeighbors_times[int(1000 * t_duration)]++;
             }
-            mbAbortBA = false;
-            //if(!CheckNewKeyFrames() && !is_stop_requested())
-            if(!CheckNewKeyFrames())
+            abort_ba_ = false;
+            //if(!has_new_keyframes() && !is_stop_requested())
+            if(!has_new_keyframes())
             {
                 // Local BA
                 if(mpMap->keyframes_in_map()>2){
                     t_start = std::chrono::steady_clock::now();
-                    Optimizer::LocalBundleAdjustment(current_keyframe_,&mbAbortBA, mpMap);
+                    Optimizer::LocalBundleAdjustment(current_keyframe_,&abort_ba_, mpMap);
                     t_end = std::chrono::steady_clock::now();
                     t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
                     localbundleadjustment_times[int(1000 * t_duration)]++;
@@ -154,7 +154,7 @@ void LocalMapping::Run()
         ResetIfRequested();
 
         // Tracking will see that Local Mapping is busy
-        SetAcceptKeyFrames(true);
+        set_accept_keyframes(true);
 
         if(CheckFinish())
             break;
@@ -165,26 +165,25 @@ void LocalMapping::Run()
     SetFinish();
 }
 
-void LocalMapping::insert_keyframe(Keyframe pKF)
+void LocalMapping::insert_keyframe(const Keyframe& keyframe)
 {
-    unique_lock<mutex> lock(mMutexNewKFs);
-    mlNewKeyFrames.push_back(pKF);
-    mbAbortBA=true;
+    std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
+    new_keyframes_.push_back(keyframe);
+    abort_ba_ = true;
 }
 
-
-bool LocalMapping::CheckNewKeyFrames()
+bool LocalMapping::has_new_keyframes() const
 {
-    unique_lock<mutex> lock(mMutexNewKFs);
-    return(!mlNewKeyFrames.empty());
+    std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
+    return !new_keyframes_.empty();
 }
 
 void LocalMapping::ProcessNewKeyFrame()
 {
     {
-        unique_lock<mutex> lock(mMutexNewKFs);
-        current_keyframe_ = mlNewKeyFrames.front();
-        mlNewKeyFrames.pop_front();
+        unique_lock<mutex> lock(new_keyframes_mutex_);
+        current_keyframe_ = new_keyframes_.front();
+        new_keyframes_.pop_front();
     }
 
     // Compute Bags of Words structures
@@ -752,8 +751,8 @@ void LocalMapping::request_stop()
 {
     unique_lock<mutex> lock(mMutexStop);
     mbStopRequested = true;
-    unique_lock<mutex> lock2(mMutexNewKFs);
-    mbAbortBA = true;
+    unique_lock<mutex> lock2(new_keyframes_mutex_);
+    abort_ba_ = true;
 }
 
 bool LocalMapping::Stop()
@@ -789,21 +788,21 @@ void LocalMapping::release()
         return;
     mbStopped = false;
     mbStopRequested = false;
-    mlNewKeyFrames.clear();
+    new_keyframes_.clear();
 
     cout << "Local Mapping RELEASE" << endl;
 }
 
-bool LocalMapping::accepts_keyframes()
+bool LocalMapping::accepts_keyframes() const
 {
-    unique_lock<mutex> lock(mMutexAccept);
-    return mbAcceptKeyFrames;
+    std::lock_guard<std::mutex> lock(accept_mutex_);
+    return accept_keyframes_;
 }
 
-void LocalMapping::SetAcceptKeyFrames(bool flag)
+void LocalMapping::set_accept_keyframes(const bool accept)
 {
-    unique_lock<mutex> lock(mMutexAccept);
-    mbAcceptKeyFrames=flag;
+    std::lock_guard<std::mutex> lock(accept_mutex_);
+    accept_keyframes_ = accept;
 }
 
 bool LocalMapping::set_insertion_lock(bool flag)
@@ -820,7 +819,7 @@ bool LocalMapping::set_insertion_lock(bool flag)
 
 void LocalMapping::InterruptBA()
 {
-    mbAbortBA = true;
+    abort_ba_ = true;
 }
 
 void LocalMapping::cull_keyframes()
@@ -1170,7 +1169,7 @@ void LocalMapping::ResetIfRequested()
     unique_lock<mutex> lock(mMutexReset);
     if(mbResetRequested)
     {
-        mlNewKeyFrames.clear();
+        new_keyframes_.clear();
         mlpRecentAddedMapPoints.clear();
         mbResetRequested=false;
         {
