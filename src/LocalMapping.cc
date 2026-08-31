@@ -7,11 +7,13 @@
 #include "afvslam_log.hpp"
 
 #include <mutex>
+#include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <thread>
 #include <unordered_set>
 #include <Eigen/Core>
 #include <Eigen/Dense>
@@ -55,7 +57,7 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
 LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& image_width, const int& image_height):
     featureTypes(featureTypes), mpMap(pMap),
     abort_ba_(false), stopped_(false), stop_requested_(false), insertion_locked_(false), accept_keyframes_(true),
-    mbMonocular(bMonocular), mbResetRequested(false), mbFinishRequested(false), finished_(true),
+    mbMonocular(bMonocular), reset_requested_(false), finish_requested_(false), finished_(true),
     image_width(image_width), image_height(image_height)
 {
     matcher = std::make_shared<FeatureMatcher>(image_width, image_height, featureTypes, "LocalMapping");
@@ -144,25 +146,25 @@ void LocalMapping::Run()
         else if(stop_if_requested())
         {
             // Safe area to stop
-            while(is_stopped() && !CheckFinish())
+            while(is_stopped() && !is_finish_requested())
             {
                 usleep(3000);
             }
-            if(CheckFinish())
+            if(is_finish_requested())
                 break;
         }
-        ResetIfRequested();
+        reset_if_requested();
 
         // Tracking will see that Local Mapping is busy
         set_accept_keyframes(true);
 
-        if(CheckFinish())
+        if(is_finish_requested())
             break;
 
         usleep(3000);
     }
 
-    SetFinish();
+    set_finished();
 }
 
 void LocalMapping::insert_keyframe(const Keyframe& keyframe)
@@ -781,7 +783,7 @@ bool LocalMapping::is_stop_requested() const
 
 void LocalMapping::release()
 {
-    // scoped_lock (deadlock-free acquisition): SetFinish takes the same two mutexes in
+    // scoped_lock (deadlock-free acquisition): set_finished takes the same two mutexes in
     // the opposite order from the Local Mapping thread.
     std::scoped_lock lock(stop_mutex_, finish_mutex_);
     if(finished_)
@@ -1151,65 +1153,68 @@ void LocalMapping::cull_keyframes_information()
 void LocalMapping::request_reset()
 {
     {
-        unique_lock<mutex> lock(mMutexReset);
-        mbResetRequested = true;
+        std::lock_guard<std::mutex> lock(reset_mutex_);
+        reset_requested_ = true;
     }
-
-    while(1)
-    {
-        {
-            unique_lock<mutex> lock2(mMutexReset);
-            if(!mbResetRequested)
-                break;
-        }
-        usleep(3000);
-    }
+    // Block until the Local Mapping thread has performed the reset (reset_if_requested)
+    while(is_reset_requested())
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
 }
 
-void LocalMapping::ResetIfRequested()
+bool LocalMapping::is_reset_requested() const
 {
-    unique_lock<mutex> lock(mMutexReset);
-    if(mbResetRequested)
+    std::lock_guard<std::mutex> lock(reset_mutex_);
+    return reset_requested_;
+}
+
+void LocalMapping::reset_if_requested()
+{
+    std::lock_guard<std::mutex> lock(reset_mutex_);
+    if(!reset_requested_)
+        return;
+
     {
+        std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
         new_keyframes_.clear();
-        mlpRecentAddedMapPoints.clear();
-        mbResetRequested=false;
-        {
-            unique_lock<mutex> lockVpr(vpr_mutex_);
-            vpr_keyframes_.clear();
-            keyframe_vpr_matrix_.resize(0, 0);
-        }
-
-        localMapping_times.clear();
-        createNewMapPoints_times.clear();
-        searchInNeighbors_times.clear();
-        localbundleadjustment_times.clear();
     }
+    mlpRecentAddedMapPoints.clear();
+    {
+        std::lock_guard<std::mutex> vpr_lock(vpr_mutex_);
+        vpr_keyframes_.clear();
+        keyframe_vpr_matrix_.resize(0, 0);
+    }
+
+    localMapping_times.clear();
+    createNewMapPoints_times.clear();
+    searchInNeighbors_times.clear();
+    localbundleadjustment_times.clear();
+
+    reset_requested_ = false;
 }
 
-void LocalMapping::RequestFinish()
+void LocalMapping::request_finish()
 {
-    unique_lock<mutex> lock(finish_mutex_);
-    mbFinishRequested = true;
+    std::lock_guard<std::mutex> lock(finish_mutex_);
+    finish_requested_ = true;
 }
 
-bool LocalMapping::CheckFinish()
+bool LocalMapping::is_finish_requested() const
 {
-    unique_lock<mutex> lock(finish_mutex_);
-    return mbFinishRequested;
+    std::lock_guard<std::mutex> lock(finish_mutex_);
+    return finish_requested_;
 }
 
-void LocalMapping::SetFinish()
+void LocalMapping::set_finished()
 {
-    unique_lock<mutex> lock(finish_mutex_);
+    // Same two mutexes as release(), acquired deadlock-free
+    std::scoped_lock lock(finish_mutex_, stop_mutex_);
     finished_ = true;
-    unique_lock<mutex> lock2(stop_mutex_);
-    stopped_ = true;
+    stopped_ = true; // releases anyone waiting on is_stopped()
 }
 
-bool LocalMapping::isFinished()
+bool LocalMapping::is_finished() const
 {
-    unique_lock<mutex> lock(finish_mutex_);
+    std::lock_guard<std::mutex> lock(finish_mutex_);
     return finished_;
 }
 

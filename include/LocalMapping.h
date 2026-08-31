@@ -117,11 +117,18 @@ public:
     void release();
     bool set_insertion_lock(bool locked);
 
-    // Thread Synch
+    // Reset protocol, used by Tracking::reset: request_reset() blocks the caller until
+    // the Local Mapping thread has dropped its keyframe queue, recent map points and
+    // VPR matrix (reset_if_requested, at the end of each Run() iteration).
     void request_reset();
+
+    // Finish protocol, used by System::Shutdown: request_finish() makes Run() return at
+    // its next check; is_finished() turns true once it has (set_finished also marks the
+    // thread stopped, so waiters on is_stopped() are released).
+    void request_finish();
+    bool is_finished() const;
+
     void InterruptBA();
-    void RequestFinish();
-    bool isFinished();
     int KeyframesInQueue() const {
         std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
         return new_keyframes_.size();
@@ -188,13 +195,16 @@ protected:
     // "information": joint-information culling on the online keyframe VPR matrix; see
     // the definition for the exact rule.
     void cull_keyframes_information();
-    bool stop_if_requested();   // called by Run() at its safe point; true once stopped
-    void ResetIfRequested();
-    bool CheckFinish();
-    void SetFinish();
+    // Called by Run(): pause at its safe point (true once stopped) / perform a pending
+    // reset / exit when asked / publish the exit
+    bool stop_if_requested();
+    void reset_if_requested();
+    bool is_reset_requested() const;
+    bool is_finish_requested() const;
+    void set_finished();
 
-    std::mutex finish_mutex_;                  // guards mbFinishRequested and finished_
-    std::mutex mMutexReset;
+    mutable std::mutex finish_mutex_;          // guards finish_requested_ and finished_
+    mutable std::mutex reset_mutex_;           // guards reset_requested_
     mutable std::mutex new_keyframes_mutex_;   // guards new_keyframes_ and abort_ba_
     mutable std::mutex stop_mutex_;            // guards stopped_, stop_requested_ and insertion_locked_
     mutable std::mutex accept_mutex_;          // guards accept_keyframes_
@@ -222,8 +232,8 @@ protected:
     bool insertion_locked_;
     bool accept_keyframes_;
     bool mbMonocular;
-    bool mbResetRequested;
-    bool mbFinishRequested;
+    bool reset_requested_;
+    bool finish_requested_;
     bool finished_;
 
     const int image_width;

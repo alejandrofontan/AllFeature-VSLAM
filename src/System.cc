@@ -422,7 +422,7 @@ void System::reset()
 
 void System::Shutdown()
 {
-    localMapper->RequestFinish();
+    localMapper->request_finish();
     loopCloser->RequestFinish();
     if(viewer)
     {
@@ -432,7 +432,7 @@ void System::Shutdown()
     }
 
     // Wait until all thread have effectively stopped
-    while(!localMapper->isFinished() || !loopCloser->isFinished() || loopCloser->isRunningGBA())
+    while(!localMapper->is_finished() || !loopCloser->isFinished() || loopCloser->isRunningGBA())
     {
         usleep(5000);
     }

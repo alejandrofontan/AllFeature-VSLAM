@@ -696,7 +696,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
             localMapper->request_stop();
             // Wait until Local Mapping has effectively stopped
 
-            while(!localMapper->is_stopped() && !localMapper->isFinished())
+            while(!localMapper->is_stopped() && !localMapper->is_finished())
             {
                 usleep(1000);
             }
