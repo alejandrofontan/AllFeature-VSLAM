@@ -36,6 +36,11 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     if(params.keyframe_culling_method != "heuristic" && params.keyframe_culling_method != "information")
         AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingMethod '" + params.keyframe_culling_method + "' (options: heuristic, information)");
 
+    read_if_present("LocalMapping.MapPointCullingMinFoundRatio", params.map_point_culling_min_found_ratio);
+    read_if_present("LocalMapping.MapPointCullingMinObservations", params.map_point_culling_min_observations);
+    read_if_present("LocalMapping.MapPointCullingObservationTestAge", params.map_point_culling_observation_test_age);
+    read_if_present("LocalMapping.MapPointCullingProbationAge", params.map_point_culling_probation_age);
+
     read_if_present("LocalMapping.KeyframeCullingRedundancyRatio", params.keyframe_culling_redundancy_ratio);
     read_if_present("LocalMapping.KeyframeCullingMinObservations", params.keyframe_culling_min_observations);
 

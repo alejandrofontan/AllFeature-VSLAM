@@ -38,6 +38,12 @@ struct LocalMappingParameters
     // vpr: megaloc — falls back to heuristic with a one-time warning otherwise)
     std::string keyframe_culling_method{"heuristic"};
 
+    // cull_map_points()
+    float map_point_culling_min_found_ratio{0.25f}; // cull when found/visible drops below this
+    int map_point_culling_min_observations{2};      // cull when, observation_test_age keyframes after creation, a point has at most this many observations (depth-verified ones count twice)
+    int map_point_culling_observation_test_age{2};  // keyframes after creation at which the observation test applies
+    int map_point_culling_probation_age{3};         // keyframes after creation at which a surviving point graduates out of the probation list
+
     // cull_keyframes_heuristic()
     float keyframe_culling_redundancy_ratio{0.9f}; // cull when more than this fraction of a keyframe's points is redundant
     int keyframe_culling_min_observations{3};      // a point is redundant when this many OTHER keyframes observe it
@@ -56,6 +62,10 @@ struct LocalMappingParameters
     LocalMappingParameters& operator=(const LocalMappingParameters& o)
     {
         keyframe_culling_method = o.keyframe_culling_method;
+        map_point_culling_min_found_ratio = o.map_point_culling_min_found_ratio;
+        map_point_culling_min_observations = o.map_point_culling_min_observations;
+        map_point_culling_observation_test_age = o.map_point_culling_observation_test_age;
+        map_point_culling_probation_age = o.map_point_culling_probation_age;
         keyframe_culling_redundancy_ratio = o.keyframe_culling_redundancy_ratio;
         keyframe_culling_min_observations = o.keyframe_culling_min_observations;
         keyframe_culling_max_unexplained.store(o.keyframe_culling_max_unexplained.load());
@@ -143,9 +153,6 @@ protected:
     const int CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES{5};
     const float CREATE_NEW_MAP_POINTS_RATIO_BASELINE_DEPTH{0.01f};
     const float CREATE_NEW_MAP_POINTS_MIN_COS{0.9998f};
-
-    // cull_map_points()
-    const int MAP_POINT_CULLING_MIN_NUM_OBSERVATIONS{2};
 
     // search_in_neighbors()
     const int SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES{20};

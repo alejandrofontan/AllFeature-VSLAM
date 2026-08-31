@@ -274,7 +274,7 @@ void MapPoint::increase_found(int n)
     mnFound+=n;
 }
 
-float MapPoint::GetFoundRatio()
+float MapPoint::get_found_ratio()
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return static_cast<float>(mnFound)/mnVisible;

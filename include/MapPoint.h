@@ -79,7 +79,7 @@ public:
 
     void increase_visible(int n=1);
     void increase_found(int n=1);
-    float GetFoundRatio();
+    float get_found_ratio();
     inline int GetFound(){
         return mnFound;
     }

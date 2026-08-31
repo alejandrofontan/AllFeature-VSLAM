@@ -119,6 +119,11 @@ PlaceRecognition.MaxCandidates: 10          # cap on candidates per query (each 
 # Keyframe culling method: "heuristic" (default; ORB-SLAM2-style point redundancy) or "information"
 # (joint information on the online MegaLoc similarity kernel; needs vpr: megaloc, otherwise falls
 # back to heuristic with a warning)
+LocalMapping.MapPointCullingMinFoundRatio: 0.25   # cull a recent map point when found/visible drops below this (all feature types)
+LocalMapping.MapPointCullingMinObservations: 2    # cull when, ObservationTestAge keyframes after creation, it has at most this many observations (depth-verified ones count twice)
+LocalMapping.MapPointCullingObservationTestAge: 2 # keyframes after creation at which the observation test applies
+LocalMapping.MapPointCullingProbationAge: 3       # keyframes after creation at which a surviving point graduates out of probation
+
 LocalMapping.KeyframeCullingMethod: information
 
 # heuristic

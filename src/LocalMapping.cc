@@ -170,32 +170,37 @@ void LocalMapping::process_new_keyframe()
 
 void LocalMapping::cull_map_points()
 {
-    // Check Recent Added MapPoints
-    list<Pt>::iterator lit = recent_map_points_.begin();
-    const unsigned long int nCurrentKFid = current_keyframe_->keyId;
+    // Probation for recently added map points: cull the ones that fail their quality
+    // checks, and graduate survivors out of the probation list after
+    // map_point_culling_probation_age keyframes (they stay in the map for good).
+    const int current_id = int(current_keyframe_->keyId);
 
-    while(lit!=recent_map_points_.end())
+    recent_map_points_.remove_if([&](const Pt& map_point)
     {
-        Pt pMP = *lit;
-        if(pMP->is_bad())
+        if(map_point->is_bad())
+            return true; // already culled elsewhere: just drop it from the list
+
+        // Visible (in frustum) often but actually matched rarely: unreliable point.
+        // Applies to every feature type uniformly (issue #11: an earlier version
+        // exempted all but featureTypes[0]).
+        if(map_point->get_found_ratio() < params.map_point_culling_min_found_ratio)
         {
-            lit = recent_map_points_.erase(lit);
+            map_point->set_bad_flag();
+            return true;
         }
-        else if((pMP->GetFoundRatio() < 0.25f ) && (pMP->featureType == current_keyframe_->featureTypes[0]))
+
+        // Old enough to have been re-observed, but wasn't
+        // (number_of_observations counts depth-verified observations twice)
+        const int age = current_id - int(map_point->mnFirstKFid);
+        if(age >= params.map_point_culling_observation_test_age
+           && map_point->number_of_observations() <= params.map_point_culling_min_observations)
         {
-            pMP->set_bad_flag();
-            lit = recent_map_points_.erase(lit);
+            map_point->set_bad_flag();
+            return true;
         }
-        else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=2 && pMP->number_of_observations() <= MAP_POINT_CULLING_MIN_NUM_OBSERVATIONS)
-        {
-            pMP->set_bad_flag();
-            lit = recent_map_points_.erase(lit);
-        }
-        else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=3)
-            lit = recent_map_points_.erase(lit);
-        else
-            lit++;
-    }
+
+        return age >= params.map_point_culling_probation_age;
+    });
 }
 
 void LocalMapping::create_new_map_points()
