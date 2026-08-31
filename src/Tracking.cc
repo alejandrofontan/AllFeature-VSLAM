@@ -40,6 +40,10 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
             node >> field;
     };
 
+    int sequential = params.sequential ? 1 : 0;   // cv::FileStorage has no bool reader
+    read_if_present("Tracking.Sequential", sequential);
+    params.sequential = (sequential != 0);
+
     read_if_present("Tracking.InitMinKeypoints", params.init_min_keypoints);
     read_if_present("Tracking.InitSigma", params.init_sigma);
     read_if_present("Tracking.InitMinMatches", params.init_min_matches);
@@ -156,6 +160,12 @@ void Tracking::track()
     if(state_ == TrackingState::NOT_INITIALIZED)
     {
         monocular_initialization();
+        if(params.sequential)
+        {
+            // The two founding keyframes must be fully mapped before the next frame
+            lock.unlock();
+            wait_for_idle_local_mapper();
+        }
         return;
     }
 
@@ -211,10 +221,17 @@ void Tracking::track()
 
     store_relative_pose();
 
+    // Sequential (deterministic) mode: every frame ends with Local Mapping idle and the
+    // map fully updated, so the next frame always sees the same map state (issue #16).
+    if (params.sequential)
+    {
+        lock.unlock();
+        wait_for_idle_local_mapper();
+    }
     // An emergency keyframe was just inserted: block until Local Mapping has processed
     // it (the trigger is already logged by need_new_keyframe, and in profiling builds the
     // wait shows up as emergencyWait in the slow-frame report below).
-    if (emergency_keyframe_)
+    else if (emergency_keyframe_)
     {
         profiler.emergency_wait_begin();
         lock.unlock();
@@ -909,6 +926,12 @@ bool Tracking::need_new_keyframe()
     if(!(weak_tracking || forced || low_overlap))
         return false;
 
+    // Sequential mode: the end-of-frame wait guarantees Local Mapping is idle, so do
+    // not consult the live busy flag — run() toggles it once per idle cycle, and
+    // sampling that flicker would make the insertion decision timing-dependent.
+    if(params.sequential)
+        return true;
+
     if(local_mapper_->accepts_keyframes())
         return true;
 
@@ -948,6 +971,12 @@ void Tracking::create_new_keyframe()
 
     last_keyframe_ = keyframe;
     last_keyframe_id_ = current_frame_.frame_id;
+}
+
+void Tracking::wait_for_idle_local_mapper() const
+{
+    while(local_mapper_->has_new_keyframes() || !local_mapper_->accepts_keyframes())
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
 }
 
 std::optional<float> Tracking::median_flow_from_last_frame() const

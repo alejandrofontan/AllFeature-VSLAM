@@ -64,6 +64,14 @@ class System;
 // working unchanged.
 struct TrackingParameters
 {
+    // track(): sequential (deterministic) mode — after any keyframe insertion the
+    // tracking thread blocks until Local Mapping has fully processed it, and the
+    // keyframe decision skips the live busy-flag check (issue #16). Local Mapping
+    // work is thereby serialized into the tracking timeline; combined with the
+    // determinism fixes (octree sort, id-ordered sets, sorted GBA input) and an
+    // orb32-only / vpr:none / verbose:0 configuration, runs become repeatable.
+    bool sequential{false};
+
     // monocular_initialization()
     int init_min_keypoints{100};     // min keypoints to accept a frame for two-view init
     float init_sigma{1.0f};          // measurement sigma for the two-view initializer
@@ -236,6 +244,11 @@ protected:
 
     bool need_new_keyframe();
     void create_new_keyframe();
+    // Sequential mode: spin until Local Mapping has drained its queue and is idle.
+    // Queue-empty closes the pickup race (a just-inserted keyframe may not have been
+    // dequeued yet); the busy flag covers processing in progress. Call with the map
+    // mutex RELEASED — Local Mapping needs it.
+    void wait_for_idle_local_mapper() const;
 
     // Median pixel displacement of map points shared between current_frame_ and last_frame_.
     // Scale-free stationarity signal for need_new_keyframe; empty if too few shared
