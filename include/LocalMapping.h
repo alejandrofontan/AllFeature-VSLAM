@@ -1,15 +1,30 @@
-#ifndef LOCALMAPPING_H
-#define LOCALMAPPING_H
+/**
+* This file is part of ORB-SLAM2.
+*
+* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
+* For more information see <https://github.com/raulmur/ORB_SLAM2>
+*
+* ORB-SLAM2 is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* ORB-SLAM2 is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
+*/
 
-#include "KeyFrame.h"
-#include "Map.h"
-#include "LoopClosing.h"
-#include "Tracking.h"
-#include "KeyFrameDatabase.h"
-#include "FeatureMatcher.h"
-#include "Viewer.h"
+#ifndef AF_VSLAM_LOCALMAPPING_H
+#define AF_VSLAM_LOCALMAPPING_H
 
 #include <atomic>
+#include <list>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -17,11 +32,18 @@
 #include <Eigen/Core>
 #include <opencv2/core/core.hpp>
 
+#include "FeatureMatcher.h"
+#include "KeyFrame.h"
+#include "LoopClosing.h"
+#include "Map.h"
+#include "Viewer.h"
 
 namespace AF_VSLAM
 {
 
-class Tracking;
+// Broken by the include cycles above (LoopClosing <-> LocalMapping include each
+// other; Viewer and Map reach back too); these forward declarations keep this
+// header valid while its own include is still being processed by the peer.
 class LoopClosing;
 class Map;
 class Viewer;
@@ -104,8 +126,8 @@ public:
     static LocalMappingParameters params;
     static void LoadParameters(const cv::FileStorage &fSettings);
 
-    void SetLoopCloser(std::shared_ptr<LoopClosing> loop_closer){loop_closer_ = std::move(loop_closer);}
-    void SetViewer(std::shared_ptr<Viewer> viewer){viewer_ = std::move(viewer);}
+    void set_loop_closer(std::shared_ptr<LoopClosing> loop_closer) { loop_closer_ = std::move(loop_closer); }
+    void set_viewer(std::shared_ptr<Viewer> viewer) { viewer_ = std::move(viewer); }
 
     // Online keyframe x keyframe VPR similarity matrix (cosine of the keyframes' MegaLoc global
     // descriptors), grown in process_new_keyframe: row/col k = k-th keyframe with a descriptor
@@ -155,7 +177,6 @@ public:
     // thread stopped, so waiters on is_stopped() are released).
     void request_finish();
     bool is_finished() const;
-
 
 protected:
 
@@ -223,17 +244,17 @@ protected:
     bool finish_requested_{false};
     bool finished_{true};
 
-    // Per-iteration timing histograms (ms buckets). local_mapping_times_ is always
-    // recorded -- it feeds the viewer's median-time display; the per-stage histograms
-    // are PROFILING_EXHAUSTIVE-only (LocalMapping_aux.h: LocalMappingProfiler/StageTimer).
+    // Per-iteration timing histograms (ms buckets), printed by log_profile() through
+    // the AF_PROFILE sink. local_mapping_times_ is always recorded -- it feeds the
+    // viewer's median-time display; the per-stage histograms are PROFILING_EXHAUSTIVE-
+    // only (LocalMapping_aux.h: LocalMappingProfiler / StageTimer).
+    void log_profile();
     std::map<int, int> local_mapping_times_{};
     std::map<int, int> create_new_map_points_times_{};
     std::map<int, int> search_in_neighbors_times_{};
     std::map<int, int> local_ba_times_{};
-    void log_profile();
-
 };
 
-} //namespace ORB_SLAM
+} // namespace AF_VSLAM
 
-#endif // LOCALMAPPING_H
+#endif // AF_VSLAM_LOCALMAPPING_H

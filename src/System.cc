@@ -243,14 +243,14 @@ System::System(const string &vocabularyFolder,
                                     featureTypes);
         mptViewer = make_shared<thread>(&Viewer::Run, viewer);
         tracker->set_viewer(viewer);
-        localMapper->SetViewer(viewer);
+        localMapper->set_viewer(viewer);
     }
 
     //Set pointers between threads
     tracker->set_local_mapper(localMapper);
     tracker->set_loop_closing(loopCloser);
 
-    localMapper->SetLoopCloser(loopCloser);
+    localMapper->set_loop_closer(loopCloser);
 
     loopCloser->SetTracker(tracker);
     loopCloser->SetLocalMapper(localMapper);
