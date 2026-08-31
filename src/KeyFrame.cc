@@ -449,7 +449,7 @@ void KeyFrame::ChangeParent(Keyframe pKF)
     pKF->AddChild(thisKeyframe());
 }
 
-set<Keyframe> KeyFrame::get_children()
+KeyframeIdSet KeyFrame::get_children()
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     return mspChildrens;
@@ -474,7 +474,7 @@ void KeyFrame::AddLoopEdge(Keyframe pKF)
     mspLoopEdges.insert(pKF);
 }
 
-set<Keyframe> KeyFrame::GetLoopEdges()
+KeyframeIdSet KeyFrame::GetLoopEdges()
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     return mspLoopEdges;
@@ -540,7 +540,7 @@ void KeyFrame::set_bad_flag()
         orderedWeights.clear();
 
         // Update Spanning Tree
-        set<Keyframe> sParentCandidates;
+        KeyframeIdSet sParentCandidates;
         sParentCandidates.insert(mpParent);
 
         // Assign at each iteration one children with a parent (the pair with highest covisibility weight)
@@ -553,7 +553,7 @@ void KeyFrame::set_bad_flag()
             Keyframe pC;
             Keyframe pP;
 
-            for(set<Keyframe>::iterator sit=mspChildrens.begin(), send=mspChildrens.end(); sit!=send; sit++)
+            for(auto sit=mspChildrens.begin(), send=mspChildrens.end(); sit!=send; sit++)
             {
                 Keyframe pKF = *sit;
                 if(pKF->is_bad())
@@ -563,7 +563,7 @@ void KeyFrame::set_bad_flag()
                 vector<Keyframe> vpConnected = pKF->get_covisible_keyframes();
                 for(size_t i=0, iend=vpConnected.size(); i<iend; i++)
                 {
-                    for(set<Keyframe>::iterator spcit=sParentCandidates.begin(), spcend=sParentCandidates.end(); spcit!=spcend; spcit++)
+                    for(auto spcit=sParentCandidates.begin(), spcend=sParentCandidates.end(); spcit!=spcend; spcit++)
                     {
                         if(vpConnected[i]->keyId == (*spcit)->keyId)
                         {
@@ -592,7 +592,7 @@ void KeyFrame::set_bad_flag()
 
         // If a children has no covisibility links with any parent candidate, assign to the original parent of this KF
         if(!mspChildrens.empty())
-            for(set<Keyframe>::iterator sit=mspChildrens.begin(); sit!=mspChildrens.end(); sit++)
+            for(auto sit=mspChildrens.begin(); sit!=mspChildrens.end(); sit++)
             {
                 (*sit)->ChangeParent(mpParent);
             }

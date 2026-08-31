@@ -44,6 +44,16 @@ typedef shared_ptr<AF_VSLAM::KeyFrame> Keyframe;
 class MapPoint;
 typedef shared_ptr<AF_VSLAM::MapPoint> Pt;
 
+// Keyframe set ordered by keyId instead of the shared_ptr's pointer value: pointer
+// order differs between runs (allocator/ASLR), which made iteration order — and
+// every tie broken by it (spanning-tree reassignment, local-map expansion) —
+// nondeterministic (issue #16). Defined out-of-line below the class (needs keyId).
+struct KeyframeIdLess
+{
+    bool operator()(const Keyframe& a, const Keyframe& b) const;
+};
+using KeyframeIdSet = std::set<Keyframe, KeyframeIdLess>;
+
 class KeyFrame : public std::enable_shared_from_this<KeyFrame>
 {
 public:
@@ -87,13 +97,13 @@ public:
     void AddChild(Keyframe pKF);
     void EraseChild(Keyframe pKF);
     void ChangeParent(Keyframe pKF);
-    std::set<Keyframe> get_children();
+    KeyframeIdSet get_children();
     Keyframe get_parent();
     bool hasChild(Keyframe pKF);
 
     // Loop Edges
     void AddLoopEdge(Keyframe pKF);
-    std::set<Keyframe> GetLoopEdges();
+    KeyframeIdSet GetLoopEdges();
 
     // MapPoint observation functions
     Pt create_monocular_map_point(const vec3f& worldPos,
@@ -260,8 +270,8 @@ protected:
     // Spanning Tree and Loop Edges
     bool mbFirstConnection;
     Keyframe mpParent;
-    std::set<Keyframe> mspChildrens;
-    std::set<Keyframe> mspLoopEdges;
+    KeyframeIdSet mspChildrens;
+    KeyframeIdSet mspLoopEdges;
 
     // Bad flags
     bool mbNotErase;
@@ -276,6 +286,11 @@ protected:
     std::mutex mMutexConnections;
     std::mutex mMutexFeatures;
 };
+
+inline bool KeyframeIdLess::operator()(const Keyframe& a, const Keyframe& b) const
+{
+    return a->keyId < b->keyId;
+}
 
 //typedef AF_VSLAM::Keyframe Keyframe;
 

@@ -710,9 +710,9 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
             while(!lpKFtoCheck.empty())
             {
                 Keyframe pKF = lpKFtoCheck.front();
-                const set<Keyframe> sChilds = pKF->get_children();
+                const KeyframeIdSet sChilds = pKF->get_children();
                 mat4f Twc = pKF->get_pose_inverse();
-                for(set<Keyframe>::const_iterator sit=sChilds.begin();sit!=sChilds.end();sit++)
+                for(auto sit=sChilds.begin();sit!=sChilds.end();sit++)
                 {
                     Keyframe pChild = *sit;
                     if(pChild->mnBAGlobalForKF!=nLoopKF)

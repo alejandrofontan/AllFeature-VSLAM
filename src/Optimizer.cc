@@ -1004,8 +1004,8 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         }
 
         // Loop edges
-        const set<Keyframe> sLoopEdges = pKF->GetLoopEdges();
-        for(set<Keyframe>::const_iterator sit=sLoopEdges.begin(), send=sLoopEdges.end(); sit!=send; sit++)
+        const KeyframeIdSet sLoopEdges = pKF->GetLoopEdges();
+        for(auto sit=sLoopEdges.begin(), send=sLoopEdges.end(); sit!=send; sit++)
         {
             Keyframe pLKF = *sit;
             if(pLKF->keyId < pKF->keyId)

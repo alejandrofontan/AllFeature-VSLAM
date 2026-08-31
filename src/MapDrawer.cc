@@ -219,8 +219,8 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
             }
 
             // Loops
-            set<Keyframe > sLoopKFs = vpKFs[i]->GetLoopEdges();
-            for(set<Keyframe>::iterator sit=sLoopKFs.begin(), send=sLoopKFs.end(); sit!=send; sit++)
+            const KeyframeIdSet sLoopKFs = vpKFs[i]->GetLoopEdges();
+            for(auto sit=sLoopKFs.begin(), send=sLoopKFs.end(); sit!=send; sit++)
             {
                 if((*sit)->keyId < vpKFs[i]->keyId)
                     continue;
