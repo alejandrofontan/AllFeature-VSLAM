@@ -87,6 +87,17 @@ void AF_VSLAM::FeatureExtractor::computeSigma(std::vector<mat2f>& keyPtsSigma2, 
     }
 }
 
+// Deterministic ordering for the node-expansion queue: the default pair
+// comparison broke size ties by ExtractorNode POINTER value, which differs
+// between runs (allocator/ASLR) and made the selected keypoints run-dependent
+// (issue #16; same fix as ORB_SLAM2_Deterministic). Size first (the loop pops
+// largest-first from the back), node x-coordinate on ties.
+static bool node_comparison(const std::pair<int, AF_VSLAM::ExtractorNode*>& a,
+                            const std::pair<int, AF_VSLAM::ExtractorNode*>& b)
+{
+    return (a.first != b.first) ? (a.first < b.first) : (a.second->UL.x < b.second->UL.x);
+}
+
 std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::DistributeOctTree(std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
                                        const int &maxX, const int &minY, const int &maxY, const int &N, const int &)
 {
@@ -234,7 +245,7 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::DistributeOctTree(std::vec
                 std::vector<std::pair<int,ExtractorNode*> > vPrevSizeAndPointerToNode = vSizeAndPointerToNode;
                 vSizeAndPointerToNode.clear();
 
-                sort(vPrevSizeAndPointerToNode.begin(),vPrevSizeAndPointerToNode.end());
+                sort(vPrevSizeAndPointerToNode.begin(),vPrevSizeAndPointerToNode.end(), node_comparison);
                 for(int j=vPrevSizeAndPointerToNode.size()-1;j>=0;j--)
                 {
                     ExtractorNode n1,n2,n3,n4;
