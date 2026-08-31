@@ -124,6 +124,10 @@ LocalMapping.MapPointCullingMinObservations: 2    # cull when, ObservationTestAg
 LocalMapping.MapPointCullingObservationTestAge: 2 # keyframes after creation at which the observation test applies
 LocalMapping.MapPointCullingProbationAge: 3       # keyframes after creation at which a surviving point graduates out of probation
 
+LocalMapping.SearchInNeighborsKeyframes: 20       # covisible keyframes fused with each new keyframe
+LocalMapping.SearchInNeighborsSecondKeyframes: 5  # second-degree neighbors added per covisible keyframe
+LocalMapping.SearchInNeighborsRadius: 5.0         # projection search radius (pixels) for fusion
+
 LocalMapping.KeyframeCullingMethod: information
 
 # heuristic

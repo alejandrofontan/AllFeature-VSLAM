@@ -112,7 +112,7 @@ public:
     // Used in: LocalMapping::SearchInNeighbors
     const float cos_viewing_angle_th = 0.5f;
     const float chi2_perc = 5.991f;
-    int fuse_map_points_to_keyframe(Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type);
+    int fuse_map_points_to_keyframe(const Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type);
 
     /// Projects candidate map points into a keyframe using a Sim3 and validates projections
     /// against cached matches. Writes accepted matches into @p pts_matched.

@@ -44,6 +44,11 @@ struct LocalMappingParameters
     int map_point_culling_observation_test_age{2};  // keyframes after creation at which the observation test applies
     int map_point_culling_probation_age{3};         // keyframes after creation at which a surviving point graduates out of the probation list
 
+    // search_in_neighbors()
+    int search_in_neighbors_keyframes{20};       // covisible keyframes fused with the new keyframe
+    int search_in_neighbors_second_keyframes{5}; // second-degree neighbors added per covisible keyframe
+    float search_in_neighbors_radius{5.0f};      // projection search radius (pixels) for fusion
+
     // cull_keyframes_heuristic()
     float keyframe_culling_redundancy_ratio{0.9f}; // cull when more than this fraction of a keyframe's points is redundant
     int keyframe_culling_min_observations{3};      // a point is redundant when this many OTHER keyframes observe it
@@ -66,6 +71,9 @@ struct LocalMappingParameters
         map_point_culling_min_observations = o.map_point_culling_min_observations;
         map_point_culling_observation_test_age = o.map_point_culling_observation_test_age;
         map_point_culling_probation_age = o.map_point_culling_probation_age;
+        search_in_neighbors_keyframes = o.search_in_neighbors_keyframes;
+        search_in_neighbors_second_keyframes = o.search_in_neighbors_second_keyframes;
+        search_in_neighbors_radius = o.search_in_neighbors_radius;
         keyframe_culling_redundancy_ratio = o.keyframe_culling_redundancy_ratio;
         keyframe_culling_min_observations = o.keyframe_culling_min_observations;
         keyframe_culling_max_unexplained.store(o.keyframe_culling_max_unexplained.load());
@@ -154,17 +162,12 @@ protected:
     const float CREATE_NEW_MAP_POINTS_RATIO_BASELINE_DEPTH{0.01f};
     const float CREATE_NEW_MAP_POINTS_MIN_COS{0.9998f};
 
-    // search_in_neighbors()
-    const int SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES{20};
-    const int SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES_SECOND{5};
-    const float SEARCH_IN_NEIGHBORS_RADIUS_TH{5.f};
-
     // One full mapping iteration for the keyframe at the head of the queue (see run())
     void process_keyframe();
     void process_new_keyframe();
     void cull_map_points();
     void create_new_map_points();
-    void search_in_neighbors(const FeatureType& featureType);
+    void search_in_neighbors();
     // Keyframe culling: dispatches on params.keyframe_culling_method.
     void cull_keyframes();
     // "heuristic": mark as bad the covisible keyframes whose map points are (mostly)

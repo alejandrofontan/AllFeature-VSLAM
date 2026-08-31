@@ -438,7 +438,7 @@ void FeatureMatcher::match_keyframes_for_compute_sim3(const Keyframe& keyframe1,
 // If a match is found: replaces the weaker map point if one already exists, or adds a new observation.
 // Returns the number of fused map points.
 // Used in: LocalMapping::SearchInNeighbors
-int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type)
+int FeatureMatcher::fuse_map_points_to_keyframe(const Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type)
 {
     const mat3f Rcw = keyframe->get_rotation();
     const vec3f tcw = keyframe->get_translation();

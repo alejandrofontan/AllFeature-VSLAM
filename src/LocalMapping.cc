@@ -99,8 +99,7 @@ void LocalMapping::process_keyframe()
     {
         // Find more matches in neighbor keyframes and fuse point duplications
         StageTimer timer{};
-        for(const FeatureType feature_type : current_keyframe_->featureTypes)
-            search_in_neighbors(feature_type);
+        search_in_neighbors();
         timer.record(search_in_neighbors_times_);
     }
 
@@ -511,77 +510,68 @@ void LocalMapping::create_new_map_points()
          //<< " (sensor: " << nFromSensor << ", triangulation: " << nFromTriangulation << ")" << endl;
 }
 
-void LocalMapping::search_in_neighbors(const FeatureType& featureType)
+void LocalMapping::search_in_neighbors()
 {
-    // Retrieve neighbor keyframes
-    const vector<Keyframe > vpNeighKFs = current_keyframe_->get_best_covisibility_keyframes(SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES);
-    vector<Keyframe > vpTargetKFs;
-    for(vector<Keyframe >::const_iterator vit=vpNeighKFs.begin(), vend=vpNeighKFs.end(); vit!=vend; vit++)
+    // Fuse target set: the best covisible keyframes plus a few of THEIR best covisible
+    // keyframes, deduplicated via the fuse-target mark. Collected ONCE for all feature
+    // types: an earlier per-feature-type version re-ran this collection each call, and
+    // the mark made every call after the first come up empty -- silently fusing only
+    // the first feature type. (Second neighbors are marked too, so a keyframe reachable
+    // through two different neighbors is fused once, not twice.)
+    std::vector<Keyframe> targets;
+    for(const Keyframe& neighbor : current_keyframe_->get_best_covisibility_keyframes(params.search_in_neighbors_keyframes))
     {
-        Keyframe  pKFi = *vit;
-        if(pKFi->is_bad() || pKFi->mnFuseTargetForKF == current_keyframe_->keyId)
+        if(neighbor->is_bad() || neighbor->mnFuseTargetForKF == current_keyframe_->keyId)
             continue;
-        vpTargetKFs.push_back(pKFi);
-        pKFi->mnFuseTargetForKF = current_keyframe_->keyId;
+        neighbor->mnFuseTargetForKF = current_keyframe_->keyId;
+        targets.push_back(neighbor);
 
-        // Extend to some second neighbors
-        const vector<Keyframe > vpSecondNeighKFs = pKFi->get_best_covisibility_keyframes(SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES_SECOND);
-        for(vector<Keyframe >::const_iterator vit2=vpSecondNeighKFs.begin(), vend2=vpSecondNeighKFs.end(); vit2!=vend2; vit2++)
+        for(const Keyframe& second : neighbor->get_best_covisibility_keyframes(params.search_in_neighbors_second_keyframes))
         {
-            Keyframe  pKFi2 = *vit2;
-            if(pKFi2->is_bad() || pKFi2->mnFuseTargetForKF==current_keyframe_->keyId || pKFi2->keyId == current_keyframe_->keyId)
+            if(second->is_bad() || second->mnFuseTargetForKF == current_keyframe_->keyId
+               || second->keyId == current_keyframe_->keyId)
                 continue;
-            vpTargetKFs.push_back(pKFi2);
+            second->mnFuseTargetForKF = current_keyframe_->keyId;
+            targets.push_back(second);
         }
     }
 
-    // Search matches by projection from current KF in target KFs
-    vector<Pt> vpMapPointMatches = current_keyframe_->get_map_point_matches(featureType);
-    for(vector<Keyframe >::iterator vit=vpTargetKFs.begin(), vend=vpTargetKFs.end(); vit!=vend; vit++)
+    for(const FeatureType feature_type : current_keyframe_->featureTypes)
     {
-        Keyframe  pKFi = *vit;
-        matcher_->fuse_map_points_to_keyframe(pKFi,vpMapPointMatches, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
-    }
+        // Project this keyframe's map points into each target and fuse duplicates.
+        // By-value snapshot: get_map_point_matches copies under the keyframe's mutex.
+        const std::vector<Pt> map_points = current_keyframe_->get_map_point_matches(feature_type);
+        for(const Keyframe& target : targets)
+            matcher_->fuse_map_points_to_keyframe(target, map_points, params.search_in_neighbors_radius, feature_type);
 
-    // Search matches by projection from target KFs in current KF
-    vector<Pt> vpFuseCandidates;
-    vpFuseCandidates.reserve(vpTargetKFs.size()*vpMapPointMatches.size());
-
-    for(vector<Keyframe >::iterator vitKF=vpTargetKFs.begin(), vendKF=vpTargetKFs.end(); vitKF!=vendKF; vitKF++)
-    {
-        Keyframe  pKFi = *vitKF;
-
-        vector<Pt> vpMapPointsKFi = pKFi->get_map_point_matches(featureType);
-
-        for(vector<Pt>::iterator vitMP=vpMapPointsKFi.begin(), vendMP=vpMapPointsKFi.end(); vitMP!=vendMP; vitMP++)
+        // Project the targets' map points into this keyframe and fuse duplicates
+        std::vector<Pt> candidates;
+        candidates.reserve(targets.size() * map_points.size());
+        for(const Keyframe& target : targets)
         {
-            Pt pMP = *vitMP;
-            if(!pMP)
-                continue;
-            if(pMP->is_bad() || pMP->mnFuseCandidateForKF == current_keyframe_->keyId)
-                continue;
-            pMP->mnFuseCandidateForKF = current_keyframe_->keyId;
-            vpFuseCandidates.push_back(pMP);
-        }
-    }
-
-    matcher_->fuse_map_points_to_keyframe(current_keyframe_,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
-
-    // Update points
-    vpMapPointMatches = current_keyframe_->get_map_point_matches(featureType);
-    for(size_t i=0, iend=vpMapPointMatches.size(); i<iend; i++)
-    {
-        Pt pMP=vpMapPointMatches[i];
-        if(pMP)
-        {
-            if(!pMP->is_bad())
+            for(const Pt& candidate : target->get_map_point_matches(feature_type))
             {
-                pMP->ComputeDistinctiveDescriptors();
-                pMP->UpdateNormalAndDepth();
+                if(!candidate || candidate->is_bad()
+                   || candidate->mnFuseCandidateForKF == current_keyframe_->keyId)
+                    continue;
+                candidate->mnFuseCandidateForKF = current_keyframe_->keyId;
+                candidates.push_back(candidate);
+            }
+        }
+        matcher_->fuse_map_points_to_keyframe(current_keyframe_, candidates, params.search_in_neighbors_radius, feature_type);
+
+        // Refresh the surviving matches (fusion may have replaced points)
+        for(const Pt& map_point : current_keyframe_->get_map_point_matches(feature_type))
+        {
+            if(map_point && !map_point->is_bad())
+            {
+                map_point->ComputeDistinctiveDescriptors();
+                map_point->UpdateNormalAndDepth();
             }
         }
     }
-    // Update connections in covisibility graph
+
+    // Update links in the covisibility graph
     current_keyframe_->update_connections();
 }
 
