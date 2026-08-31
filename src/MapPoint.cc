@@ -117,7 +117,7 @@ void MapPoint::add_observation(Keyframe projKeyframe,  const KeypointIndex& proj
     ComputeDistinctiveDescriptors()->UpdateNormalAndDepth();
 }
 
-int MapPoint::Getnumber_of_observations()
+int MapPoint::num_observing_keyframes()
 {
     return int(observations.size());
 }
@@ -166,7 +166,7 @@ void MapPoint::EraseObservation(Keyframe projKeyframe)
                 mpRefKF = observations.begin()->second->projKeyframe;
 
             // If only 2 observations or less, discard point
-            removePoint = (Getnumber_of_observations() <= 2);
+            removePoint = (num_observing_keyframes() <= 2);
         }
     }
 

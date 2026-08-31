@@ -58,7 +58,7 @@ public:
 
     std::map<KeyframeId,shared_ptr<Observation>> get_observations();
     int number_of_observations();
-    int Getnumber_of_observations();
+    int num_observing_keyframes();
     void increasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex);
     void decreasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex);
 

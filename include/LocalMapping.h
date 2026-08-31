@@ -51,8 +51,7 @@ class Viewer;
 // Tunable local-mapping heuristics, loaded from the settings YAML at System startup.
 // Same pattern as TrackingParameters/OptimizerParameters: compiled-in defaults,
 // overridden only by keys present in the file, so settings YAMLs without a
-// LocalMapping.* block keep working unchanged. The remaining LocalMapping
-// constants below migrate here as their functions get cleaned (issue #15 N2).
+// LocalMapping.* block keep working unchanged.
 struct LocalMappingParameters
 {
     // cull_keyframes(): "heuristic" (ORB-SLAM2-style point redundancy, default) or
@@ -89,31 +88,6 @@ struct LocalMappingParameters
     int keyframe_culling_max_per_call{5};          // at most this many culls per cull_keyframes() call (0 = unlimited); spreads the response to a raised threshold over several keyframes
     bool keyframe_culling_centred{true};           // double-centre the kernel (Pearson correlation of mean-centred descriptors) instead of raw cosine
 
-    LocalMappingParameters() = default;
-    LocalMappingParameters(const LocalMappingParameters& o) { *this = o; }
-    LocalMappingParameters& operator=(const LocalMappingParameters& o)
-    {
-        keyframe_culling_method = o.keyframe_culling_method;
-        map_point_culling_min_found_ratio = o.map_point_culling_min_found_ratio;
-        map_point_culling_min_observations = o.map_point_culling_min_observations;
-        map_point_culling_observation_test_age = o.map_point_culling_observation_test_age;
-        map_point_culling_probation_age = o.map_point_culling_probation_age;
-        create_new_map_points_keyframes = o.create_new_map_points_keyframes;
-        create_new_map_points_min_baseline_depth_ratio = o.create_new_map_points_min_baseline_depth_ratio;
-        create_new_map_points_max_parallax_cos = o.create_new_map_points_max_parallax_cos;
-        search_in_neighbors_keyframes = o.search_in_neighbors_keyframes;
-        search_in_neighbors_second_keyframes = o.search_in_neighbors_second_keyframes;
-        search_in_neighbors_radius = o.search_in_neighbors_radius;
-        keyframe_culling_redundancy_ratio = o.keyframe_culling_redundancy_ratio;
-        keyframe_culling_min_observations = o.keyframe_culling_min_observations;
-        keyframe_culling_max_unexplained.store(o.keyframe_culling_max_unexplained.load());
-        keyframe_culling_min_age = o.keyframe_culling_min_age;
-        keyframe_culling_min_keyframes = o.keyframe_culling_min_keyframes;
-        keyframe_culling_scope = o.keyframe_culling_scope;
-        keyframe_culling_max_per_call = o.keyframe_culling_max_per_call;
-        keyframe_culling_centred = o.keyframe_culling_centred;
-        return *this;
-    }
 };
 
 class LocalMapping
@@ -128,16 +102,6 @@ public:
 
     void set_loop_closer(std::shared_ptr<LoopClosing> loop_closer) { loop_closer_ = std::move(loop_closer); }
     void set_viewer(std::shared_ptr<Viewer> viewer) { viewer_ = std::move(viewer); }
-
-    // Online keyframe x keyframe VPR similarity matrix (cosine of the keyframes' MegaLoc global
-    // descriptors), grown in process_new_keyframe: row/col k = k-th keyframe with a descriptor
-    // processed by LocalMapping (insertion order, see keyframe_vpr_order()); rows/cols are never
-    // removed when a keyframe is culled (culled keyframes stay as culling "history"). Empty
-    // when the VPR backend does not produce global descriptors (vpr: bow / none). Both return
-    // copies taken under the matrix mutex.
-    Eigen::MatrixXf keyframe_vpr_matrix() const;
-    std::vector<Keyframe> keyframe_vpr_order() const;
-    bool has_keyframe_vpr_matrix() const;
 
     // Main function: runs on the Local Mapping thread. One process_keyframe() per
     // queued keyframe; the stop/reset/finish protocols are honored between iterations.
@@ -156,8 +120,8 @@ public:
 
     // Stop protocol, used by Loop Closing while it corrects the map: request_stop()
     // asks the thread to pause at its next safe point; run() pauses there via
-    // stop_if_requested() and idles until release(),
-    // which also drops the keyframes queued meanwhile. Tracking wraps each keyframe
+    // stop_if_requested() and idles until release(), which also drops the keyframes
+    // queued meanwhile. Tracking wraps each keyframe
     // insertion in set_insertion_lock(true/false), which defers a pending stop until
     // the insertion is done; it returns false if the thread is already stopped, in
     // which case the caller must not insert.
@@ -228,12 +192,16 @@ protected:
     std::list<Keyframe> new_keyframes_;
     Keyframe current_keyframe_;
 
-    // Online keyframe VPR matrix (see keyframe_vpr_matrix())
+    // Online keyframe x keyframe VPR similarity matrix (cosine of the keyframes' MegaLoc
+    // global descriptors), grown once per processed keyframe: row/col k = k-th keyframe
+    // with a descriptor, in insertion order; rows/cols are never removed when a keyframe
+    // is culled (culled keyframes stay as the culling "history"). Empty when the VPR
+    // backend does not produce global descriptors (vpr: bow / none).
     mutable std::mutex vpr_mutex_;
-    std::vector<Keyframe> vpr_keyframes_{};       // k -> keyframe
-    Eigen::MatrixXf keyframe_vpr_matrix_{};        // k x k, raw cosine
-    void grow_keyframe_vpr_matrix(const Keyframe& keyframe);  // called once per processed keyframe
-    void print_keyframe_vpr_matrix() const;
+    std::vector<Keyframe> vpr_keyframes_{};   // k -> keyframe
+    Eigen::MatrixXf keyframe_vpr_matrix_{};   // k x k, raw cosine
+    void grow_keyframe_vpr_matrix(const Keyframe& keyframe);
+    bool has_keyframe_vpr_matrix() const;
     std::list<Pt> recent_map_points_;
 
     bool stopped_{false};

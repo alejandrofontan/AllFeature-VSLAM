@@ -202,10 +202,6 @@ protected:
     // PROFILING_EXHAUSTIVE-only).
     void log_profile();
 
-    // CSV of per-match residuals at the seed pose when pose optimization
-    // collapses (track_reference_keyframe's divergence rescue); diagnostics only.
-    void dump_pose_collapse(const mat4f& seed_pose);
-
     // Store this frame's pose relative to its reference keyframe (Tlr); composed
     // with the keyframe's CURRENT pose it re-derives the frame's pose next frame
     // for the pose-optimization seed, absorbing BA/loop-closure corrections.
@@ -261,14 +257,14 @@ protected:
     std::shared_ptr<LoopClosing> loop_closing_;
 
     // Features
-    std::map<FeatureType, shared_ptr<FeatureExtractor>> feature_extractor_left_;
-    std::map<FeatureType, shared_ptr<FeatureExtractor>> init_feature_extractor_;
+    std::map<FeatureType, std::shared_ptr<FeatureExtractor>> feature_extractor_left_;
+    std::map<FeatureType, std::shared_ptr<FeatureExtractor>> init_feature_extractor_;
 
     // Visual place recognition backend (relocalization queries; keyframes register
     // themselves in its database)
     std::shared_ptr<PlaceRecognition> place_recognition_;
 
-    // Initalization (only for monocular)
+    // Initialization (only for monocular)
     std::shared_ptr<Initializer> initializer_;
 
     //Local Map
@@ -284,6 +280,8 @@ protected:
     // Map
     std::shared_ptr<Map> map_;
 
+    std::shared_ptr<FeatureMatcher> matcher_;
+
     //Calibration matrix
     cv::Mat mK;
     cv::Mat mDistCoef;
@@ -294,7 +292,7 @@ protected:
     int image_height_{};
 
     // New KeyFrame rules (according to fps)
-    size_t max_frames_;
+    size_t max_frames_{0};
     float fps_{0.0f};
 
     // Close/far point threshold (depth units). Nothing sets it yet; zero-initialized
@@ -303,6 +301,8 @@ protected:
 
     //Current matches in frame
     int num_inlier_matches_{0};
+
+    bool emergency_keyframe_{false};
 
     // Rolling inlier history (last params.inliers_history_size tracked frames) — reference for the
     // emergency-keyframe trigger in need_new_keyframe(). Comparing against recent frames
@@ -316,7 +316,7 @@ protected:
     Keyframe last_keyframe_;
     Frame last_frame_;
     mat4f last_frame_relative_pose_; // Tlr of last_frame_ (see store_relative_pose)
-    KeyframeId last_keyframe_id_;
+    KeyframeId last_keyframe_id_{0};
     FrameId last_reloc_frame_id_{0};
 
     //Color order (true RGB, false BGR, ignored if grayscale)
@@ -341,11 +341,6 @@ protected:
     // load_camera_parameters()
     static constexpr float DEFAULT_FPS{30.0f};
     static constexpr float NOMINAL_IMAGE_AREA{307200.0f}; // ~640x480, fix_image_size_ target
-
-    std::shared_ptr<FeatureMatcher> matcher_;
-
-    bool emergency_keyframe_{false};
-
 };
 
 } // namespace AF_VSLAM

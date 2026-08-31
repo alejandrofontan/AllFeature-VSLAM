@@ -720,7 +720,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
     // Set MapPoint vertices
     int nExpectedSize = 0;
     for(const Pt& pMP : llocalPts)
-        nExpectedSize += pMP->Getnumber_of_observations();
+        nExpectedSize += pMP->num_observing_keyframes();
 
     vector<BAObservation<g2o::EdgeSE3ProjectXYZ>> obsMono;
     obsMono.reserve(nExpectedSize);

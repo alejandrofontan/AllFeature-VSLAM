@@ -9,24 +9,23 @@
  */
 #include "LocalMapping.h"
 #include "LocalMapping_aux.h"
-#include "LoopClosing.h"
-#include "FeatureMatcher.h"
-#include "Optimizer.h"
-#include "Converter.h"
-#include "Utils.h"
-#include "afvslam_log.hpp"
 
-#include <mutex>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #include <unordered_set>
-#include <Eigen/Core>
+
 #include <Eigen/Dense>
-#include <Eigen/SVD>
+
+#include "FeatureMatcher.h"
+#include "LoopClosing.h"
+#include "Optimizer.h"
+#include "Utils.h"
+#include "afvslam_log.hpp"
 
 namespace AF_VSLAM
 {
@@ -69,7 +68,9 @@ void LocalMapping::run()
         if(is_finish_requested())
             break;
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+        // Yield only when idle: a queued keyframe is processed immediately
+        if(!has_new_keyframes())
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
     }
 
     set_finished();
@@ -589,9 +590,6 @@ void LocalMapping::cull_keyframes_heuristic()
 
 void LocalMapping::cull_keyframes_information()
 {
-    // Show the online keyframe VPR matrix as it grows (debugging aid)
-    // print_keyframe_vpr_matrix();
-
     // Joint-information culling. Let K be the (cosine, PSD) similarity kernel over keyframes,
     // A the alive keyframes and H the keyframes culled earlier (rows kept in the online matrix).
     // Under a Gaussian model the information of keyframe x NOT explained by the alive set is its

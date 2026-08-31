@@ -7,7 +7,6 @@
 #include "LocalMapping.h"
 
 #include <chrono>
-#include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -224,18 +223,6 @@ bool LocalMapping::is_finished() const
 // Online keyframe VPR similarity matrix
 // ------------------------------------------------------------------------------------------
 
-Eigen::MatrixXf LocalMapping::keyframe_vpr_matrix() const
-{
-    std::lock_guard<std::mutex> lock(vpr_mutex_);
-    return keyframe_vpr_matrix_;
-}
-
-std::vector<Keyframe> LocalMapping::keyframe_vpr_order() const
-{
-    std::lock_guard<std::mutex> lock(vpr_mutex_);
-    return vpr_keyframes_;
-}
-
 bool LocalMapping::has_keyframe_vpr_matrix() const
 {
     std::lock_guard<std::mutex> lock(vpr_mutex_);
@@ -266,37 +253,6 @@ void LocalMapping::grow_keyframe_vpr_matrix(const Keyframe& keyframe)
     }
     keyframe_vpr_matrix_(k, k) = 1.0f;
     vpr_keyframes_.push_back(keyframe);
-}
-
-void LocalMapping::print_keyframe_vpr_matrix() const
-{
-    std::vector<Keyframe> keyframes;
-    Eigen::MatrixXf matrix;
-    {
-        std::lock_guard<std::mutex> lock(vpr_mutex_);
-        keyframes = vpr_keyframes_;
-        matrix = keyframe_vpr_matrix_;
-    }
-    const int k = int(keyframes.size());
-    if(k == 0)
-        return;
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(2);
-    out << "[VPR] keyframe similarity matrix (cosine): " << k << " keyframes (rows/cols in insertion order, * = culled keyframe)\n";
-    out << "        ";
-    for(int j = 0; j < k; j++)
-        out << std::setw(7) << (std::string(keyframes[j]->is_bad() ? "*" : "") + std::to_string(keyframes[j]->keyId));
-    out << "\n";
-    for(int i = 0; i < k; i++){
-        out << std::setw(7) << (std::string(keyframes[i]->is_bad() ? "*" : "") + std::to_string(keyframes[i]->keyId)) << " ";
-        for(int j = 0; j < k; j++){
-            const float d = matrix(i, j);
-            if(std::isnan(d)) out << std::setw(7) << "nan";
-            else out << std::setw(7) << d;
-        }
-        out << "\n";
-    }
-    std::cout << out.str() << std::flush;
 }
 
 // Cumulative per-stage timing histograms, printed through the AF_PROFILE sink.

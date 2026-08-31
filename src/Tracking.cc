@@ -551,21 +551,11 @@ void Tracking::create_initial_map()
 
 void Tracking::check_replaced_in_last_frame()
 {
-    for (auto& [ft, pts] : last_frame_.pts) {
-        for(int i = 0; i<last_frame_.N.at(ft); i++)
-        {
-            Pt pMP = last_frame_.pts.at(ft)[i];
-
-            if(pMP)
-            {
-                Pt pRep = pMP->get_replaced();
-                if(pRep)
-                {
-                    last_frame_.pts.at(ft)[i] = pRep;
-                }
-            }
-        }
-    }
+    for (auto& [ft, pts] : last_frame_.pts)
+        for (Pt& map_point : pts)
+            if (map_point)
+                if (const Pt replacement = map_point->get_replaced())
+                    map_point = replacement;
 }
 
 
@@ -621,7 +611,6 @@ bool Tracking::track_reference_keyframe()
         AF_WARN("track_reference_keyframe: pose optimization collapsed (" << num_map_inliers
                 << " inliers of " << num_matches << " raw matches) — retrying without depth channel"
                 << " | frame=" << current_frame_.frame_id);
-        dump_pose_collapse(seed_pose);
 
         for (auto& [ft, outlier_flags] : current_frame_.outliers)
             std::fill(outlier_flags.begin(), outlier_flags.end(), false);
