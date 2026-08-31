@@ -170,6 +170,14 @@ void Optimizer::global_bundle_adjustment(shared_ptr<Map> pMap, int nIterations, 
 {
     vector<Keyframe> vpKFs = pMap->GetAllKeyFrames();
     vector<Pt> vpMP = pMap->get_all_map_points();
+
+    // Deterministic vertex insertion order (issue #16): the Map stores keyframes and
+    // points in pointer-ordered sets, so these vectors arrive in an order that differs
+    // between runs (allocator/ASLR) - and g2o's result depends (in float round-off) on
+    // the order vertices/edges are added. Sort by id so every run optimizes the same graph.
+    sort(vpKFs.begin(), vpKFs.end(), [](const Keyframe& a, const Keyframe& b) { return a->keyId < b->keyId; });
+    sort(vpMP.begin(), vpMP.end(), [](const Pt& a, const Pt& b) { return a->ptId < b->ptId; });
+
     BundleAdjustment(vpKFs,vpMP,nIterations,pbStopFlag, nLoopKF, bRobust);
 }
 
