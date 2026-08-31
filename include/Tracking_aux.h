@@ -14,6 +14,7 @@
 #include <map>
 
 #include "Definitions.h"
+#include "Profiling_aux.h"
 #include "Types.h"
 #include "afvslam_log.hpp"
 
@@ -80,25 +81,6 @@ struct TrackProfiler
                     << ", other=" << int(ms_total - ms_lock_wait - ms_track_ref - ms_local_map - ms_emergency_wait)
                     << ") | frame=" << frame_id);
         }
-#endif
-    }
-};
-
-// One-shot stage timer for the PROFILING_EXHAUSTIVE histograms: record()
-// buckets the milliseconds since construction (or since the previous record)
-// into the given histogram. Compiles to a no-op when profiling is off.
-struct StageTimer
-{
-#ifdef PROFILING_EXHAUSTIVE
-    using Clock = std::chrono::steady_clock;
-    Clock::time_point t_last{Clock::now()};
-#endif
-
-    void record([[maybe_unused]] std::map<int, int>& histogram) {
-#ifdef PROFILING_EXHAUSTIVE
-        const auto now = Clock::now();
-        histogram[int(std::chrono::duration<double, std::milli>(now - t_last).count())]++;
-        t_last = now;
 #endif
     }
 };
