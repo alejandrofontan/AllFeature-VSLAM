@@ -72,7 +72,7 @@ public:
                                  const bool bRobust = true);
     void static global_bundle_adjustment(shared_ptr<Map> pMap, int nIterations=5, bool *pbStopFlag=NULL,
                                        const unsigned long nLoopKF=0, const bool bRobust = true);
-    void static LocalBundleAdjustment(Keyframe pKF, bool *pbStopFlag, shared_ptr<Map>pMap);
+    void static LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap);
     // useDepthChannel=false books RGB-D observations as plain 2D reprojection edges —
     // used by track_reference_keyframe's divergence rescue (see Tracking.cc).
     int static pose_optimization(Frame* pFrame, const bool useDepthChannel = true);

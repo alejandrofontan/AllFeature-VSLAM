@@ -619,7 +619,7 @@ int Optimizer::pose_optimization(Frame *pFrame, const bool useDepthChannel)
     return nInitialCorrespondences-nBad;
 }
 
-void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbStopFlag, shared_ptr<Map> pMap)
+void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
 {
 
     // Local KeyFrames: First Breath Search from Current Keyframe
@@ -687,9 +687,6 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
     g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
     g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
     optimizer.setAlgorithm(solver);
-
-    // if(pbStopFlag)
-    //     optimizer.setForceStopFlag(pbStopFlag);
 
     unsigned long maxKFid = 0;
 
@@ -800,18 +797,10 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, [[maybe_unused]] bool* pbSto
         }
     }
 
-    // if(pbStopFlag)
-    //     if(*pbStopFlag)
-    //         return;
-
     optimizer.initializeOptimization();
     optimizer.optimize(5);
 
     bool bDoMore= true;
-
-    // if(pbStopFlag)
-    //     if(*pbStopFlag)
-    //         bDoMore = false;
 
     if(bDoMore)
     {

@@ -222,8 +222,8 @@ System::System(const string &vocabularyFolder,
                              featureTypes, fixImageSize);
 
     //Initialize the Local Mapping thread and launch
-    localMapper = make_shared<LocalMapping>(mpMap, mSensor==MONOCULAR, featureTypes, tracker->get_image_width(), tracker->get_image_height());
-    mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::Run, localMapper);
+    localMapper = make_shared<LocalMapping>(mpMap, featureTypes, tracker->get_image_width(), tracker->get_image_height());
+    mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::run, localMapper);
 
     //Initialize the Loop Closing thread and launch. Without an active VPR backend the object
     //is still constructed (other threads hold pointers to it and enqueue keyframes) but its
@@ -250,7 +250,6 @@ System::System(const string &vocabularyFolder,
     tracker->set_local_mapper(localMapper);
     tracker->set_loop_closing(loopCloser);
 
-    localMapper->SetTracker(tracker);
     localMapper->SetLoopCloser(loopCloser);
 
     loopCloser->SetTracker(tracker);

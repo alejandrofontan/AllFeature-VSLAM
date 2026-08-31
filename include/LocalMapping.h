@@ -71,18 +71,18 @@ struct LocalMappingParameters
 class LocalMapping
 {
 public:
-    LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& image_width, const int& image_height);
+    LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureType>& feature_types,
+                 int image_width, int image_height);
 
     // Tunable parameters, loaded from the settings YAML at System startup
     static LocalMappingParameters params;
     static void LoadParameters(const cv::FileStorage &fSettings);
 
-    void SetLoopCloser(std::shared_ptr<LoopClosing>  loopCloser_){loopCloser = loopCloser_;};
-    void SetTracker(std::shared_ptr<Tracking> tracker_){tracker = tracker_;};
-    void SetViewer(std::shared_ptr<Viewer> viewer_){viewer = viewer_;};
+    void SetLoopCloser(std::shared_ptr<LoopClosing> loop_closer){loop_closer_ = std::move(loop_closer);}
+    void SetViewer(std::shared_ptr<Viewer> viewer){viewer_ = std::move(viewer);}
 
     // Online keyframe x keyframe VPR similarity matrix (cosine of the keyframes' MegaLoc global
-    // descriptors), grown in ProcessNewKeyFrame: row/col k = k-th keyframe with a descriptor
+    // descriptors), grown in process_new_keyframe: row/col k = k-th keyframe with a descriptor
     // processed by LocalMapping (insertion order, see keyframe_vpr_order()); rows/cols are never
     // removed when a keyframe is culled (culled keyframes stay as culling "history"). Empty
     // when the VPR backend does not produce global descriptors (vpr: bow / none). Both return
@@ -91,22 +91,24 @@ public:
     std::vector<Keyframe> keyframe_vpr_order() const;
     bool has_keyframe_vpr_matrix() const;
 
-    // Main function
-    void Run();
+    // Main function: runs on the Local Mapping thread. One process_keyframe() per
+    // queued keyframe; the stop/reset/finish protocols are honored between iterations.
+    void run();
 
-    // Keyframe queue, fed by Tracking and drained by Run() (ProcessNewKeyFrame).
-    // Inserting also aborts any local BA in progress so the new keyframe is picked up promptly.
+    // Keyframe queue, fed by Tracking and drained by run() (process_keyframe). The
+    // refinement stages re-check it and yield to a waiting keyframe, so insertion
+    // latency stays bounded.
     void insert_keyframe(const Keyframe& keyframe);
     bool has_new_keyframes() const;
 
-    // Busy flag published by Run(): false while a keyframe is being processed. Tracking
+    // Busy flag published by run(): false while a keyframe is being processed. Tracking
     // reads it to decide between a normal and an emergency keyframe insertion.
     bool accepts_keyframes() const;
     void set_accept_keyframes(bool accept);
 
     // Stop protocol, used by Loop Closing while it corrects the map: request_stop()
-    // asks the thread to pause at its next safe point (and aborts any local BA in
-    // progress); Run() pauses there via stop_if_requested() and idles until release(),
+    // asks the thread to pause at its next safe point; run() pauses there via
+    // stop_if_requested() and idles until release(),
     // which also drops the keyframes queued meanwhile. Tracking wraps each keyframe
     // insertion in set_insertion_lock(true/false), which defers a pending stop until
     // the insertion is done; it returns false if the thread is already stopped, in
@@ -119,74 +121,43 @@ public:
 
     // Reset protocol, used by Tracking::reset: request_reset() blocks the caller until
     // the Local Mapping thread has dropped its keyframe queue, recent map points and
-    // VPR matrix (reset_if_requested, at the end of each Run() iteration).
+    // VPR matrix (reset_if_requested, at the end of each run() iteration).
     void request_reset();
 
-    // Finish protocol, used by System::Shutdown: request_finish() makes Run() return at
+    // Finish protocol, used by System::Shutdown: request_finish() makes run() return at
     // its next check; is_finished() turns true once it has (set_finished also marks the
     // thread stopped, so waiters on is_stopped() are released).
     void request_finish();
     bool is_finished() const;
 
-    void InterruptBA();
-    int KeyframesInQueue() const {
-        std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
-        return new_keyframes_.size();
-    }
 
-    std::map<int, int> localMapping_times{};
-    std::map<int, int> createNewMapPoints_times{};
-    std::map<int, int> localbundleadjustment_times{};
-    std::map<int, int> searchInNeighbors_times{};
-
-    // void medianLocalMappingTime(){
-    //     if(!localMappingTime.empty()){
-    //         std::vector<double> tmp = localMappingTime;
-    //         std::sort(tmp.begin(), tmp.end());
-    //         double median;
-    //         size_t n = tmp.size();
-    //         if(n % 2 == 1) median = tmp[n/2];
-    //         else median = 0.5*(tmp[n/2 - 1] + tmp[n/2]);
-
-    //         const double sum = std::accumulate(localMappingTime.begin(), localMappingTime.end(), 0.0);
-    //         double stddev = 0.0;
-    //         if (n >= 2) {
-    //             double sq_sum = 0.0;
-    //             for (double x : localMappingTime) {
-    //                 const double d = x - median;
-    //                 sq_sum += d * d;
-    //             }
-    //             stddev = std::sqrt(sq_sum / static_cast<double>(n - 1));
-    //         }
-    //         std::cout << std::fixed << std::setprecision(2) << "Local  median / std: " << " / " << median*1000 << " / " << stddev*1000 << " / " << " ms" << std::endl;
-    //     }
-    // }
 protected:
-
-    vector<FeatureType> featureTypes{};
 
     // Parameters for local mapping
     const float CHI2_2DOF{5.991f};
 
-    // CreateNewMapPoints()
+    // run(): local BA needs more keyframes than this in the map
+    static constexpr int LOCAL_BA_MIN_KEYFRAMES{2};
+
+    // create_new_map_points()
     const int CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES{5};
     const float CREATE_NEW_MAP_POINTS_RATIO_BASELINE_DEPTH{0.01f};
     const float CREATE_NEW_MAP_POINTS_MIN_COS{0.9998f};
 
-    // MapPointCulling()
+    // cull_map_points()
     const int MAP_POINT_CULLING_MIN_NUM_OBSERVATIONS{2};
 
-    // SearchInNeighbors()
+    // search_in_neighbors()
     const int SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES{20};
     const int SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES_SECOND{5};
     const float SEARCH_IN_NEIGHBORS_RADIUS_TH{5.f};
 
-    void ProcessNewKeyFrame();
-    void CreateNewMapPoints();
-    mat3f ComputeF12(Keyframe &pKF1, Keyframe &pKF2);
-    mat3f SkewSymmetricMatrix(const vec3f &v);
-    void MapPointCulling();
-    void SearchInNeighbors(const FeatureType& featureType);
+    // One full mapping iteration for the keyframe at the head of the queue (see run())
+    void process_keyframe();
+    void process_new_keyframe();
+    void cull_map_points();
+    void create_new_map_points();
+    void search_in_neighbors(const FeatureType& featureType);
     // Keyframe culling: dispatches on params.keyframe_culling_method.
     void cull_keyframes();
     // "heuristic": mark as bad the covisible keyframes whose map points are (mostly)
@@ -195,7 +166,7 @@ protected:
     // "information": joint-information culling on the online keyframe VPR matrix; see
     // the definition for the exact rule.
     void cull_keyframes_information();
-    // Called by Run(): pause at its safe point (true once stopped) / perform a pending
+    // Called by run(): pause at its safe point (true once stopped) / perform a pending
     // reset / exit when asked / publish the exit
     bool stop_if_requested();
     void reset_if_requested();
@@ -205,15 +176,14 @@ protected:
 
     mutable std::mutex finish_mutex_;          // guards finish_requested_ and finished_
     mutable std::mutex reset_mutex_;           // guards reset_requested_
-    mutable std::mutex new_keyframes_mutex_;   // guards new_keyframes_ and abort_ba_
+    mutable std::mutex new_keyframes_mutex_;   // guards new_keyframes_
     mutable std::mutex stop_mutex_;            // guards stopped_, stop_requested_ and insertion_locked_
     mutable std::mutex accept_mutex_;          // guards accept_keyframes_
 
-    std::shared_ptr<Map> mpMap;
-    std::shared_ptr<LoopClosing> loopCloser;
-    std::shared_ptr<Tracking> tracker;
-    std::shared_ptr<FeatureMatcher> matcher;
-    std::shared_ptr<Viewer> viewer;
+    std::shared_ptr<Map> map_;
+    std::shared_ptr<LoopClosing> loop_closer_;
+    std::shared_ptr<FeatureMatcher> matcher_;
+    std::shared_ptr<Viewer> viewer_;
 
     std::list<Keyframe> new_keyframes_;
     Keyframe current_keyframe_;
@@ -224,20 +194,24 @@ protected:
     Eigen::MatrixXf keyframe_vpr_matrix_{};        // k x k, raw cosine
     void grow_keyframe_vpr_matrix(const Keyframe& keyframe);  // called once per processed keyframe
     void print_keyframe_vpr_matrix() const;
-    std::list<Pt> mlpRecentAddedMapPoints;
+    std::list<Pt> recent_map_points_;
 
-    bool abort_ba_;
-    bool stopped_;
-    bool stop_requested_;
-    bool insertion_locked_;
-    bool accept_keyframes_;
-    bool mbMonocular;
-    bool reset_requested_;
-    bool finish_requested_;
-    bool finished_;
+    bool stopped_{false};
+    bool stop_requested_{false};
+    bool insertion_locked_{false};
+    bool accept_keyframes_{true};
+    bool reset_requested_{false};
+    bool finish_requested_{false};
+    bool finished_{true};
 
-    const int image_width;
-    const int image_height;
+    // Per-iteration timing histograms (ms buckets). local_mapping_times_ is always
+    // recorded -- it feeds the viewer's median-time display; the per-stage histograms
+    // are PROFILING_EXHAUSTIVE-only (LocalMapping_aux.h: LocalMappingProfiler/StageTimer).
+    std::map<int, int> local_mapping_times_{};
+    std::map<int, int> create_new_map_points_times_{};
+    std::map<int, int> search_in_neighbors_times_{};
+    std::map<int, int> local_ba_times_{};
+    void log_profile();
 
 };
 

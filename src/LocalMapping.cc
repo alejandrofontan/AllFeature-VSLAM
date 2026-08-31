@@ -1,4 +1,5 @@
 #include "LocalMapping.h"
+#include "LocalMapping_aux.h"
 #include "LoopClosing.h"
 #include "FeatureMatcher.h"
 #include "Optimizer.h"
@@ -22,156 +23,103 @@
 namespace AF_VSLAM
 {
 
-LocalMappingParameters LocalMapping::params{};
-
-void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
+LocalMapping::LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureType>& feature_types,
+                           const int image_width, const int image_height):
+    map_(std::move(map)),
+    matcher_(std::make_shared<FeatureMatcher>(image_width, image_height, feature_types, "LocalMapping"))
 {
-    auto read_if_present = [&fSettings](const char* key, auto& field)
-    {
-        const cv::FileNode node = fSettings[key];
-        if(!node.empty())
-            node >> field;
-    };
-
-    read_if_present("LocalMapping.KeyframeCullingMethod", params.keyframe_culling_method);
-    if(params.keyframe_culling_method != "heuristic" && params.keyframe_culling_method != "information")
-        AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingMethod '" + params.keyframe_culling_method + "' (options: heuristic, information)");
-
-    read_if_present("LocalMapping.KeyframeCullingRedundancyRatio", params.keyframe_culling_redundancy_ratio);
-    read_if_present("LocalMapping.KeyframeCullingMinObservations", params.keyframe_culling_min_observations);
-
-    float max_unexplained = params.keyframe_culling_max_unexplained.load();
-    read_if_present("LocalMapping.KeyframeCullingMaxUnexplained", max_unexplained);
-    params.keyframe_culling_max_unexplained.store(max_unexplained);
-    read_if_present("LocalMapping.KeyframeCullingMinAge", params.keyframe_culling_min_age);
-    read_if_present("LocalMapping.KeyframeCullingMinKeyframes", params.keyframe_culling_min_keyframes);
-    read_if_present("LocalMapping.KeyframeCullingScope", params.keyframe_culling_scope);
-    if(params.keyframe_culling_scope != "map" && params.keyframe_culling_scope != "local")
-        AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingScope '" + params.keyframe_culling_scope + "' (options: map, local)");
-    read_if_present("LocalMapping.KeyframeCullingMaxPerCall", params.keyframe_culling_max_per_call);
-    int centred = params.keyframe_culling_centred ? 1 : 0;   // cv::FileStorage has no bool reader
-    read_if_present("LocalMapping.KeyframeCullingCentred", centred);
-    params.keyframe_culling_centred = (centred != 0);
 }
 
-LocalMapping::LocalMapping(shared_ptr<Map> pMap, const float bMonocular, const vector<FeatureType>& featureTypes, const int& image_width, const int& image_height):
-    featureTypes(featureTypes), mpMap(pMap),
-    abort_ba_(false), stopped_(false), stop_requested_(false), insertion_locked_(false), accept_keyframes_(true),
-    mbMonocular(bMonocular), reset_requested_(false), finish_requested_(false), finished_(true),
-    image_width(image_width), image_height(image_height)
+void LocalMapping::run()
 {
-    matcher = std::make_shared<FeatureMatcher>(image_width, image_height, featureTypes, "LocalMapping");
-}
-
-void LocalMapping::Run()
-{
-
-    finished_ = false;
-
-    while(1)
     {
-        // Tracking will see that Local Mapping is busy
+        std::lock_guard<std::mutex> lock(finish_mutex_);
+        finished_ = false;
+    }
+
+    while(true)
+    {
+        // Tracking sees Local Mapping as busy until this iteration's work is done
         set_accept_keyframes(false);
 
-        // Check if there are keyframes in the queue
         if(has_new_keyframes())
-        {
-
-            std::chrono::steady_clock::time_point t_start_0 = std::chrono::steady_clock::now();
-            //////////////////////////////////////////////////////////////////////////////////////////////////////
-            //////////////////////////////////////////////////////////////////////////////////////////////////////
-
-            // BoW conversion and insertion in Map
-            ProcessNewKeyFrame();
-
-            // Check recent MapPoints
-
-            MapPointCulling();
-
-            //////////////////////////////////////////////////////////////////////////////////////////////////////
-            // Triangulate new MapPoints
-            std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
-            CreateNewMapPoints();
-            std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
-            double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-            createNewMapPoints_times[int(1000 * t_duration)]++;
-            //////////////////////////////////////////////////////////////////////////////////////////////////////
-
-            if(!has_new_keyframes())
-            {
-                // Find more matches in neighbor keyframes and fuse point duplications
-                t_start = std::chrono::steady_clock::now();
-                for (const auto& [feat, N_] : current_keyframe_->N) {
-                    SearchInNeighbors(feat);
-                }
-                t_end = std::chrono::steady_clock::now();
-                t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-                searchInNeighbors_times[int(1000 * t_duration)]++;
-            }
-            abort_ba_ = false;
-            //if(!has_new_keyframes() && !is_stop_requested())
-            if(!has_new_keyframes())
-            {
-                // Local BA
-                if(mpMap->keyframes_in_map()>2){
-                    t_start = std::chrono::steady_clock::now();
-                    Optimizer::LocalBundleAdjustment(current_keyframe_,&abort_ba_, mpMap);
-                    t_end = std::chrono::steady_clock::now();
-                    t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-                    localbundleadjustment_times[int(1000 * t_duration)]++;
-                }
-                // Check redundant local Keyframes
-                cull_keyframes();
-            }
-            loopCloser->insert_keyframe(current_keyframe_);
-
-            if(viewer)
-                viewer->set_runLocalMapping_time_median(map_median(localMapping_times));
-
-            //////////////////////////////////////////////////////////////////////////////////////////////////////
-            //////////////////////////////////////////////////////////////////////////////////////////////////////
-            t_end = std::chrono::steady_clock::now();
-            t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start_0).count();
-            localMapping_times[int(1000 * t_duration)]++;
-
-            #ifdef PROFILING_EXHAUSTIVE
-            AF_PROFILE_BEGIN("Local Mapping Profiling");
-            AF_PROFILE_FIELD(createNewMapPoints_times,          "  Create NewMap Points");
-            AF_PROFILE_FIELD(searchInNeighbors_times,          "  Search in Neighbors");
-            AF_PROFILE_FIELD(localbundleadjustment_times,          "  Local Bundle Adjustment");
-            AF_PROFILE_FIELD(localMapping_times, "Local Mapping");
-            AF_PROFILE_END();
-            #endif
-        }
+            process_keyframe();
         else if(stop_if_requested())
         {
-            // Safe area to stop
+            // Paused by a loop closure: idle until release() (or shutdown)
             while(is_stopped() && !is_finish_requested())
-            {
-                usleep(3000);
-            }
+                std::this_thread::sleep_for(std::chrono::milliseconds(3));
             if(is_finish_requested())
                 break;
         }
+
         reset_if_requested();
 
-        // Tracking will see that Local Mapping is busy
+        // Tracking sees Local Mapping as idle again
         set_accept_keyframes(true);
 
         if(is_finish_requested())
             break;
 
-        usleep(3000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
     }
 
     set_finished();
+}
+
+// One full mapping iteration for the keyframe at the head of the queue. The first
+// stages always run; the refinement stages (fuse, local BA, keyframe culling) are
+// skipped when Tracking has meanwhile queued another keyframe -- draining the queue
+// first bounds keyframe latency and returns the busy flag to Tracking sooner.
+void LocalMapping::process_keyframe()
+{
+    LocalMappingProfiler profiler{};
+
+    // Global descriptor, map-point associations, covisibility graph, map insertion
+    process_new_keyframe();
+
+    // Enforce the quality checks on recently added map points
+    cull_map_points();
+
+    {
+        StageTimer timer{};
+        create_new_map_points();
+        timer.record(create_new_map_points_times_);
+    }
+
+    if(!has_new_keyframes())
+    {
+        // Find more matches in neighbor keyframes and fuse point duplications
+        StageTimer timer{};
+        for(const FeatureType feature_type : current_keyframe_->featureTypes)
+            search_in_neighbors(feature_type);
+        timer.record(search_in_neighbors_times_);
+    }
+
+    if(!has_new_keyframes())
+    {
+        if(map_->keyframes_in_map() > LOCAL_BA_MIN_KEYFRAMES)
+        {
+            StageTimer timer{};
+            Optimizer::LocalBundleAdjustment(current_keyframe_, map_);
+            timer.record(local_ba_times_);
+        }
+        cull_keyframes();
+    }
+
+    loop_closer_->insert_keyframe(current_keyframe_);
+
+    // Median excludes the current iteration (recorded below), matching the original order
+    if(viewer_)
+        viewer_->set_runLocalMapping_time_median(map_median(local_mapping_times_));
+    profiler.iteration_done(local_mapping_times_);
+    log_profile();
 }
 
 void LocalMapping::insert_keyframe(const Keyframe& keyframe)
 {
     std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
     new_keyframes_.push_back(keyframe);
-    abort_ba_ = true;
 }
 
 bool LocalMapping::has_new_keyframes() const
@@ -180,7 +128,7 @@ bool LocalMapping::has_new_keyframes() const
     return !new_keyframes_.empty();
 }
 
-void LocalMapping::ProcessNewKeyFrame()
+void LocalMapping::process_new_keyframe()
 {
     {
         unique_lock<mutex> lock(new_keyframes_mutex_);
@@ -208,7 +156,7 @@ void LocalMapping::ProcessNewKeyFrame()
                     }
                     else // this can only happen for new stereo points inserted by the Tracking
                     {
-                        mlpRecentAddedMapPoints.push_back(pMP);
+                        recent_map_points_.push_back(pMP);
                     }
                 }
             }
@@ -218,151 +166,43 @@ void LocalMapping::ProcessNewKeyFrame()
     current_keyframe_->update_connections();
 
     // Insert Keyframe in Map
-    mpMap->add_keyframe(current_keyframe_);
+    map_->add_keyframe(current_keyframe_);
 
     // Extend the online keyframe VPR matrix with the new keyframe (no-op without a descriptor)
     grow_keyframe_vpr_matrix(current_keyframe_);
 }
 
-// ------------------------------------------------------------------------------------------
-// Online keyframe VPR similarity matrix
-// ------------------------------------------------------------------------------------------
-
-Eigen::MatrixXf LocalMapping::keyframe_vpr_matrix() const
-{
-    unique_lock<mutex> lock(vpr_mutex_);
-    return keyframe_vpr_matrix_;
-}
-
-std::vector<Keyframe> LocalMapping::keyframe_vpr_order() const
-{
-    unique_lock<mutex> lock(vpr_mutex_);
-    return vpr_keyframes_;
-}
-
-bool LocalMapping::has_keyframe_vpr_matrix() const
-{
-    unique_lock<mutex> lock(vpr_mutex_);
-    return !vpr_keyframes_.empty();
-}
-
-void LocalMapping::grow_keyframe_vpr_matrix(const Keyframe& keyframe)
-{
-    // The descriptor is computed by compute_global_descriptor() at the top of
-    // ProcessNewKeyFrame; it is empty when the VPR backend is not image-based (bow/none).
-    const std::vector<float>& descriptor = keyframe->global_descriptor;
-    if(descriptor.empty())
-        return;
-    unique_lock<mutex> lock(vpr_mutex_);
-    const int k = int(vpr_keyframes_.size());
-    keyframe_vpr_matrix_.conservativeResize(k + 1, k + 1);
-    for(int i = 0; i < k; i++){
-        const std::vector<float>& other = vpr_keyframes_[i]->global_descriptor;
-        float s = std::numeric_limits<float>::quiet_NaN();
-        if(other.size() == descriptor.size()){
-            double dot = 0.0;
-            for(size_t d = 0; d < descriptor.size(); d++)
-                dot += double(descriptor[d]) * other[d];
-            s = float(dot);   // unit descriptors: dot product == cosine
-        }
-        keyframe_vpr_matrix_(i, k) = s;
-        keyframe_vpr_matrix_(k, i) = s;
-    }
-    keyframe_vpr_matrix_(k, k) = 1.0f;
-    vpr_keyframes_.push_back(keyframe);
-}
-
-void LocalMapping::print_keyframe_vpr_matrix() const
-{
-    std::vector<Keyframe> keyframes;
-    Eigen::MatrixXf matrix;
-    {
-        unique_lock<mutex> lock(vpr_mutex_);
-        keyframes = vpr_keyframes_;
-        matrix = keyframe_vpr_matrix_;
-    }
-    const int k = int(keyframes.size());
-    if(k == 0)
-        return;
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(2);
-    out << "[VPR] keyframe similarity matrix (cosine): " << k << " keyframes (rows/cols in insertion order, * = culled keyframe)\n";
-    out << "        ";
-    for(int j = 0; j < k; j++)
-        out << std::setw(7) << (std::string(keyframes[j]->is_bad() ? "*" : "") + std::to_string(keyframes[j]->keyId));
-    out << "\n";
-    for(int i = 0; i < k; i++){
-        out << std::setw(7) << (std::string(keyframes[i]->is_bad() ? "*" : "") + std::to_string(keyframes[i]->keyId)) << " ";
-        for(int j = 0; j < k; j++){
-            const float d = matrix(i, j);
-            if(std::isnan(d)) out << std::setw(7) << "nan";
-            else out << std::setw(7) << d;
-        }
-        out << "\n";
-    }
-    std::cout << out.str() << std::flush;
-}
-
-void LocalMapping::MapPointCulling()
+void LocalMapping::cull_map_points()
 {
     // Check Recent Added MapPoints
-    list<Pt>::iterator lit = mlpRecentAddedMapPoints.begin();
+    list<Pt>::iterator lit = recent_map_points_.begin();
     const unsigned long int nCurrentKFid = current_keyframe_->keyId;
 
-    while(lit!=mlpRecentAddedMapPoints.end())
+    while(lit!=recent_map_points_.end())
     {
         Pt pMP = *lit;
         if(pMP->is_bad())
         {
-            lit = mlpRecentAddedMapPoints.erase(lit);
+            lit = recent_map_points_.erase(lit);
         }
         else if((pMP->GetFoundRatio() < 0.25f ) && (pMP->featureType == current_keyframe_->featureTypes[0]))
         {
             pMP->set_bad_flag();
-            lit = mlpRecentAddedMapPoints.erase(lit);
+            lit = recent_map_points_.erase(lit);
         }
         else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=2 && pMP->number_of_observations() <= MAP_POINT_CULLING_MIN_NUM_OBSERVATIONS)
         {
             pMP->set_bad_flag();
-            lit = mlpRecentAddedMapPoints.erase(lit);
+            lit = recent_map_points_.erase(lit);
         }
         else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=3)
-            lit = mlpRecentAddedMapPoints.erase(lit);
+            lit = recent_map_points_.erase(lit);
         else
             lit++;
     }
 }
 
-mat3f LocalMapping::SkewSymmetricMatrix(const vec3f &v)
-{
-    mat3f M;
-    M <<     0.0f   , -v(2),  v(1),
-          v(2),    0.0f    , -v(0),
-         -v(1), v(0) ,     0.0f;
-
-    return M;
-}
-
-mat3f LocalMapping::ComputeF12(Keyframe &pKF1, Keyframe &pKF2)
-{
-    mat3f R1w = pKF1->get_rotation();
-    vec3f t1w = pKF1->get_translation();
-    mat3f R2w = pKF2->get_rotation();
-    vec3f t2w = pKF2->get_translation();
-
-    mat3f R12 = R1w * R2w.transpose();
-    vec3f t12 = -R1w * R2w.transpose() * t2w + t1w;
-
-    mat3f t12x = SkewSymmetricMatrix(t12);
-
-    const cv::Mat &K1 = pKF1->mK;
-    const cv::Mat &K2 = pKF2->mK;
-
-
-    return Converter::to_matrix3f(K1.t().inv()) * t12x * R12 * Converter::to_matrix3f(K2.inv());
-}
-
-void LocalMapping::CreateNewMapPoints()
+void LocalMapping::create_new_map_points()
 {
     // Retrieve neighbor keyframes in covisibility graph
     const vector <Keyframe> vpNeighKFs = current_keyframe_->get_best_covisibility_keyframes(CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES);
@@ -408,7 +248,7 @@ void LocalMapping::CreateNewMapPoints()
             FeatureType ft = fts[i];
 
             // If some ft might be missing, you'd want find() guards here instead of at()
-            out[k][i] = matcher->serialFeatureMatching(
+            out[k][i] = matcher_->serialFeatureMatching(
                 current_keyframe_->descriptors.at(ft), pKF2->descriptors.at(ft),
                 current_keyframe_->keypoints.at(ft),     pKF2->keypoints.at(ft),
                 ft
@@ -492,10 +332,10 @@ void LocalMapping::CreateNewMapPoints()
 
         #ifdef ALLFEATURE_REAL_TIME
         if ((j <= 1) || (t_duration < 10.05))
-            matcher->match_keyframes_for_triangulation(current_keyframe_, pKF2, vMatchedIndices, current_keyframe_->featureTypes);
+            matcher_->match_keyframes_for_triangulation(current_keyframe_, pKF2, vMatchedIndices, current_keyframe_->featureTypes);
         ++j;
         #else
-        matcher->match_keyframes_for_triangulation(current_keyframe_, pKF2, vMatchedIndices, current_keyframe_->featureTypes);
+        matcher_->match_keyframes_for_triangulation(current_keyframe_, pKF2, vMatchedIndices, current_keyframe_->featureTypes);
         #endif
 
         for(auto& [featureType, N_]: pKF2->N){
@@ -632,7 +472,7 @@ void LocalMapping::CreateNewMapPoints()
                 Pt pMP = current_keyframe_->create_monocular_map_point(x3D, KeypointIndex(idx1),
                                                                     pKF2,  KeypointIndex(idx2),
                                                                     featureType);
-                mlpRecentAddedMapPoints.push_back(pMP);
+                recent_map_points_.push_back(pMP);
             }
         }
     }
@@ -666,15 +506,15 @@ void LocalMapping::CreateNewMapPoints()
             newMapPoints[featureType]++;
             nFromSensor++;
             Pt pMP = current_keyframe_->create_map_point(x3D, KeypointIndex(idx), featureType);
-            mlpRecentAddedMapPoints.push_back(pMP);
+            recent_map_points_.push_back(pMP);
         }
     }
 
-    //cout << "[LocalMapping::CreateNewMapPoints] New map points: " << (nFromSensor + nFromTriangulation)
+    //cout << "[LocalMapping::create_new_map_points] New map points: " << (nFromSensor + nFromTriangulation)
          //<< " (sensor: " << nFromSensor << ", triangulation: " << nFromTriangulation << ")" << endl;
 }
 
-void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
+void LocalMapping::search_in_neighbors(const FeatureType& featureType)
 {
     // Retrieve neighbor keyframes
     const vector<Keyframe > vpNeighKFs = current_keyframe_->get_best_covisibility_keyframes(SEARCH_IN_NEIGHBORS_NUM_KEYFRAMES);
@@ -699,12 +539,11 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
     }
 
     // Search matches by projection from current KF in target KFs
-    //FeatureMatcher matcher;
     vector<Pt> vpMapPointMatches = current_keyframe_->get_map_point_matches(featureType);
     for(vector<Keyframe >::iterator vit=vpTargetKFs.begin(), vend=vpTargetKFs.end(); vit!=vend; vit++)
     {
         Keyframe  pKFi = *vit;
-        matcher->fuse_map_points_to_keyframe(pKFi,vpMapPointMatches, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
+        matcher_->fuse_map_points_to_keyframe(pKFi,vpMapPointMatches, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
     }
 
     // Search matches by projection from target KFs in current KF
@@ -729,7 +568,7 @@ void LocalMapping::SearchInNeighbors(const FeatureType& featureType)
         }
     }
 
-    matcher->fuse_map_points_to_keyframe(current_keyframe_,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
+    matcher_->fuse_map_points_to_keyframe(current_keyframe_,vpFuseCandidates, SEARCH_IN_NEIGHBORS_RADIUS_TH, featureType);
 
     // Update points
     vpMapPointMatches = current_keyframe_->get_map_point_matches(featureType);
@@ -753,8 +592,6 @@ void LocalMapping::request_stop()
 {
     std::lock_guard<std::mutex> lock(stop_mutex_);
     stop_requested_ = true;
-    std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
-    abort_ba_ = true;
 }
 
 bool LocalMapping::stop_if_requested()
@@ -819,11 +656,6 @@ bool LocalMapping::set_insertion_lock(const bool locked)
 
     insertion_locked_ = locked;
     return true;
-}
-
-void LocalMapping::InterruptBA()
-{
-    abort_ba_ = true;
 }
 
 void LocalMapping::cull_keyframes()
@@ -1177,17 +1009,17 @@ void LocalMapping::reset_if_requested()
         std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
         new_keyframes_.clear();
     }
-    mlpRecentAddedMapPoints.clear();
+    recent_map_points_.clear();
     {
         std::lock_guard<std::mutex> vpr_lock(vpr_mutex_);
         vpr_keyframes_.clear();
         keyframe_vpr_matrix_.resize(0, 0);
     }
 
-    localMapping_times.clear();
-    createNewMapPoints_times.clear();
-    searchInNeighbors_times.clear();
-    localbundleadjustment_times.clear();
+    local_mapping_times_.clear();
+    create_new_map_points_times_.clear();
+    search_in_neighbors_times_.clear();
+    local_ba_times_.clear();
 
     reset_requested_ = false;
 }

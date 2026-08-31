@@ -29,6 +29,7 @@ set(SRCS_ALLFEATURE
         src/Tracking.cc
         src/Tracking_aux.cc
         src/LocalMapping.cc
+        src/LocalMapping_aux.cc
         src/LoopClosing.cc
         src/FeatureMatcher.cpp
         src/BruteForceMatcher.cpp
