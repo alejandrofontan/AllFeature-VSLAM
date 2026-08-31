@@ -1,3 +1,12 @@
+/**
+ * Local Mapping thread: the map back-end of AllFeature-VSLAM. Consumes the
+ * keyframes Tracking inserts (run/process_keyframe), culls recent map points,
+ * creates new ones (sensor depth and/or two-view triangulation), fuses
+ * duplicates with covisible neighbors, runs the local bundle adjustment, and
+ * culls redundant keyframes. Auxiliary members (parameter loading, thread
+ * synchronization, the online VPR matrix, profiling) live in
+ * LocalMapping_aux.{h,cc}.
+ */
 #include "LocalMapping.h"
 #include "LocalMapping_aux.h"
 #include "LoopClosing.h"
@@ -11,7 +20,6 @@
 #include <chrono>
 #include <cmath>
 #include <iomanip>
-#include <iostream>
 #include <limits>
 #include <sstream>
 #include <thread>
@@ -114,18 +122,6 @@ void LocalMapping::process_keyframe()
         viewer_->set_runLocalMapping_time_median(map_median(local_mapping_times_));
     profiler.iteration_done(local_mapping_times_);
     log_profile();
-}
-
-void LocalMapping::insert_keyframe(const Keyframe& keyframe)
-{
-    std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
-    new_keyframes_.push_back(keyframe);
-}
-
-bool LocalMapping::has_new_keyframes() const
-{
-    std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
-    return !new_keyframes_.empty();
 }
 
 void LocalMapping::process_new_keyframe()
@@ -588,76 +584,6 @@ void LocalMapping::search_in_neighbors(const FeatureType& featureType)
     current_keyframe_->update_connections();
 }
 
-void LocalMapping::request_stop()
-{
-    std::lock_guard<std::mutex> lock(stop_mutex_);
-    stop_requested_ = true;
-}
-
-bool LocalMapping::stop_if_requested()
-{
-    std::lock_guard<std::mutex> lock(stop_mutex_);
-    if(!stop_requested_ || insertion_locked_)
-        return false;
-
-    stopped_ = true;
-    AF_INFO("[LocalMapping] stopped");
-    std::cout.flush(); // AF_INFO's stdout is fully buffered under the runner's redirect
-    return true;
-}
-
-bool LocalMapping::is_stopped() const
-{
-    std::lock_guard<std::mutex> lock(stop_mutex_);
-    return stopped_;
-}
-
-bool LocalMapping::is_stop_requested() const
-{
-    std::lock_guard<std::mutex> lock(stop_mutex_);
-    return stop_requested_;
-}
-
-void LocalMapping::release()
-{
-    // scoped_lock (deadlock-free acquisition): set_finished takes the same two mutexes in
-    // the opposite order from the Local Mapping thread.
-    std::scoped_lock lock(stop_mutex_, finish_mutex_);
-    if(finished_)
-        return;
-
-    stopped_ = false;
-    stop_requested_ = false;
-    {
-        std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
-        new_keyframes_.clear();
-    }
-    AF_INFO("[LocalMapping] released");
-    std::cout.flush();
-}
-
-bool LocalMapping::accepts_keyframes() const
-{
-    std::lock_guard<std::mutex> lock(accept_mutex_);
-    return accept_keyframes_;
-}
-
-void LocalMapping::set_accept_keyframes(const bool accept)
-{
-    std::lock_guard<std::mutex> lock(accept_mutex_);
-    accept_keyframes_ = accept;
-}
-
-bool LocalMapping::set_insertion_lock(const bool locked)
-{
-    std::lock_guard<std::mutex> lock(stop_mutex_);
-    if(locked && stopped_)
-        return false;
-
-    insertion_locked_ = locked;
-    return true;
-}
-
 void LocalMapping::cull_keyframes()
 {
     if(params.keyframe_culling_method == "information"){
@@ -982,72 +908,4 @@ void LocalMapping::cull_keyframes_information()
     }
 }
 
-void LocalMapping::request_reset()
-{
-    {
-        std::lock_guard<std::mutex> lock(reset_mutex_);
-        reset_requested_ = true;
-    }
-    // Block until the Local Mapping thread has performed the reset (reset_if_requested)
-    while(is_reset_requested())
-        std::this_thread::sleep_for(std::chrono::milliseconds(3));
-}
-
-bool LocalMapping::is_reset_requested() const
-{
-    std::lock_guard<std::mutex> lock(reset_mutex_);
-    return reset_requested_;
-}
-
-void LocalMapping::reset_if_requested()
-{
-    std::lock_guard<std::mutex> lock(reset_mutex_);
-    if(!reset_requested_)
-        return;
-
-    {
-        std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
-        new_keyframes_.clear();
-    }
-    recent_map_points_.clear();
-    {
-        std::lock_guard<std::mutex> vpr_lock(vpr_mutex_);
-        vpr_keyframes_.clear();
-        keyframe_vpr_matrix_.resize(0, 0);
-    }
-
-    local_mapping_times_.clear();
-    create_new_map_points_times_.clear();
-    search_in_neighbors_times_.clear();
-    local_ba_times_.clear();
-
-    reset_requested_ = false;
-}
-
-void LocalMapping::request_finish()
-{
-    std::lock_guard<std::mutex> lock(finish_mutex_);
-    finish_requested_ = true;
-}
-
-bool LocalMapping::is_finish_requested() const
-{
-    std::lock_guard<std::mutex> lock(finish_mutex_);
-    return finish_requested_;
-}
-
-void LocalMapping::set_finished()
-{
-    // Same two mutexes as release(), acquired deadlock-free
-    std::scoped_lock lock(finish_mutex_, stop_mutex_);
-    finished_ = true;
-    stopped_ = true; // releases anyone waiting on is_stopped()
-}
-
-bool LocalMapping::is_finished() const
-{
-    std::lock_guard<std::mutex> lock(finish_mutex_);
-    return finished_;
-}
-
-} //namespace ORB_SLAM
+} // namespace AF_VSLAM
