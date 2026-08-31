@@ -200,10 +200,9 @@ void LocalMapping::cull_map_points()
 
 void LocalMapping::create_new_map_points()
 {
-    // Retrieve neighbor keyframes in covisibility graph
-    const vector <Keyframe> vpNeighKFs = current_keyframe_->get_best_covisibility_keyframes(CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES);
+    const std::vector<Keyframe> neighbors =
+        current_keyframe_->get_best_covisibility_keyframes(params.create_new_map_points_keyframes);
 
-    // Init Current Keyframe
     mat4f Twc1, Tcw1;
     mat3f Rwc1, Rcw1;
     vec3f twc1, tcw1;
@@ -212,302 +211,236 @@ void LocalMapping::create_new_map_points()
     float fx1, fy1, cx1, cy1, invfx1, invfy1;
     current_keyframe_->getFullIntrinsics(fx1, fy1, cx1, cy1, invfx1, invfy1);
 
-    //////////////////////////////////////////////////////////////////////////////////////////////
-    //////////////////////////////////////////////////////////////////////////////////////////////
-    const auto& fts = current_keyframe_->featureTypes;
-    const int NK = (int)vpNeighKFs.size();
-    const int NF = (int)fts.size();
+    cache_neighbor_matches(neighbors);
 
-    std::vector<char> skipK(NK, 0);
-    skipK.shrink_to_fit(); // optional
-
-    // Decide which neighbors are cached (single-thread)
-    for (int k = 0; k < NK; ++k) {
-        auto pKF2 = vpNeighKFs[k];
-
-        auto it = current_keyframe_->cache_matched_pairs.find(pKF2->frame_id);
-        if (it != current_keyframe_->cache_matched_pairs.end() && !it->second.empty()) {
-            skipK[k] = 1;
-        }
-    }
-
-    std::vector<std::vector<std::vector<cv::DMatch>>> out(
-        NK, std::vector<std::vector<cv::DMatch>>(NF)
-    );
-
-    #pragma omp parallel for collapse(2) schedule(dynamic)
-    for (int k = 0; k < NK; ++k) {
-        for (int i = 0; i < NF; ++i) {
-            if (skipK[k]) continue;
-
-            auto pKF2 = vpNeighKFs[k];
-            FeatureType ft = fts[i];
-
-            // If some ft might be missing, you'd want find() guards here instead of at()
-            out[k][i] = matcher_->serialFeatureMatching(
-                current_keyframe_->descriptors.at(ft), pKF2->descriptors.at(ft),
-                current_keyframe_->keypoints.at(ft),     pKF2->keypoints.at(ft),
-                ft
-            );
-        }
-    }
-
-    // Build stacked matches and store (serial)
-    for (int k = 0; k < NK; ++k) {
-        if (skipK[k]) continue;
-
-        auto pKF2 = vpNeighKFs[k];
-        std::vector<cv::DMatch> allMatches;
-
-        int queryOffset = 0;
-        int trainOffset = 0;
-
-        auto& it1 = current_keyframe_->cache_matched_pairs_feat_type[pKF2->frame_id];
-        auto& it2 = pKF2->cache_matched_pairs_feat_type[current_keyframe_->frame_id];
-
-        for (int i = 0; i < NF; ++i) {
-            FeatureType ft = fts[i];
-
-            const int nq = (int)current_keyframe_->keypoints.at(ft).size();
-            const int nt = (int)pKF2->keypoints.at(ft).size();
-
-            auto& m = out[k][i];
-            allMatches.reserve(allMatches.size() + m.size());
-
-            for (const auto& d : m) {
-                cv::DMatch dd = d;
-                dd.queryIdx += queryOffset;
-                dd.trainIdx += trainOffset;
-
-                it1[ft].push_back(d);
-                it2[ft].push_back(cv::DMatch(d.trainIdx, d.queryIdx, d.distance));
-                allMatches.push_back(dd);
-            }
-            queryOffset += nq;
-            trainOffset += nt;
-        }
-
-        pKF2->cache_matched_pairs.insert_or_assign(current_keyframe_->frame_id, FeatureMatcher::swap_match_direction(allMatches));
-        current_keyframe_->cache_matched_pairs.insert_or_assign(pKF2->frame_id, std::move(allMatches));
-    }
-
-    //////////////////////////////////////////////////////////////////////////////////////////////
-    //////////////////////////////////////////////////////////////////////////////////////////////
-    // Search matches with epipolar restriction and triangulate
-    std::map<FeatureType, int> newMapPoints;
-    int nFromSensor{0};
-    int nFromTriangulation{0};
-    int j{0};
-    std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
-    for(size_t i{0}; i < vpNeighKFs.size(); i++)
+    // For each neighbor with enough baseline, place each matched keypoint pair in 3D:
+    // from sensor depth when either view has it (cross-validated by the reprojection
+    // gates below), by two-view triangulation otherwise.
+    for(const Keyframe& neighbor : neighbors)
     {
-        // Init Second Keyframe
-        Keyframe  pKF2 = vpNeighKFs[i];
         mat4f Twc2, Tcw2;
         mat3f Rwc2, Rcw2;
         vec3f twc2, tcw2;
-        pKF2->getFullPose(Twc2, Rwc2, twc2, Tcw2, Rcw2, tcw2);
+        neighbor->getFullPose(Twc2, Rwc2, twc2, Tcw2, Rcw2, tcw2);
 
         float fx2, fy2, cx2, cy2, invfx2, invfy2;
-        pKF2->getFullIntrinsics(fx2, fy2, cx2, cy2, invfx2, invfy2);
+        neighbor->getFullIntrinsics(fx2, fy2, cx2, cy2, invfx2, invfy2);
 
-        // Check first that baseline is not too short
-        vec3f vBaseline = twc2 - twc1;
-        const float baseline = vBaseline.norm();
-
-        const float medianDepthKF2 = pKF2->compute_scene_median_depth(2);
-        const float ratioBaselineDepth = baseline/medianDepthKF2;
-
-        if(ratioBaselineDepth < CREATE_NEW_MAP_POINTS_RATIO_BASELINE_DEPTH)
+        // Discard neighbors whose baseline is too short relative to their scene depth:
+        // a near-zero-parallax pair only yields ill-conditioned triangulations
+        const float baseline = (twc2 - twc1).norm();
+        if(baseline / neighbor->compute_scene_median_depth(2) < params.create_new_map_points_min_baseline_depth_ratio)
             continue;
 
-        // Search matches that fullfil epipolar constraint
-        std::map<FeatureType, vector<pair<size_t,size_t>>> vMatchedIndices;
-        std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
-        double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
+        std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_indices;
+        matcher_->match_keyframes_for_triangulation(current_keyframe_, neighbor, matched_indices,
+                                                    current_keyframe_->featureTypes);
 
-        #ifdef ALLFEATURE_REAL_TIME
-        if ((j <= 1) || (t_duration < 10.05))
-            matcher_->match_keyframes_for_triangulation(current_keyframe_, pKF2, vMatchedIndices, current_keyframe_->featureTypes);
-        ++j;
-        #else
-        matcher_->match_keyframes_for_triangulation(current_keyframe_, pKF2, vMatchedIndices, current_keyframe_->featureTypes);
-        #endif
+        for(const auto& [feature_type, pairs] : matched_indices)
+        {
+            const auto& inv_depth1_ft = current_keyframe_->inv_depth.at(feature_type);
+            const auto& inv_depth2_ft = neighbor->inv_depth.at(feature_type);
+            const auto& keypoints1_ft = current_keyframe_->keypoints.at(feature_type);
+            const auto& keypoints2_ft = neighbor->keypoints.at(feature_type);
 
-        for(auto& [featureType, N_]: pKF2->N){
-            // Triangulate each
-            auto it = vMatchedIndices.find(featureType);
-            if(it == vMatchedIndices.end())
-                continue;
-            const int nmatches = vMatchedIndices.at(featureType).size();
-            for(int ikp{0}; ikp < nmatches; ikp++)
+            for(const auto& [idx1, idx2] : pairs)
             {
-                const int &idx1 = vMatchedIndices.at(featureType)[ikp].first;
-                const int &idx2 = vMatchedIndices.at(featureType)[ikp].second;
+                const cv::KeyPoint& kp1 = keypoints1_ft[idx1];
+                const cv::KeyPoint& kp2 = keypoints2_ft[idx2];
 
-                const cv::KeyPoint &kp1 = current_keyframe_->keypoints.at(featureType)[idx1];
-                const cv::KeyPoint &kp2 = pKF2->keypoints.at(featureType)[idx2];
+                // Viewing rays and their parallax
+                const vec3f xn1{(kp1.pt.x-cx1)*invfx1, (kp1.pt.y-cy1)*invfy1, 1.0f};
+                const vec3f xn2{(kp2.pt.x-cx2)*invfx2, (kp2.pt.y-cy2)*invfy2, 1.0f};
+                const vec3f ray1 = Rwc1 * xn1;
+                const vec3f ray2 = Rwc2 * xn2;
+                const float cos_parallax = ray1.dot(ray2) / (ray1.norm() * ray2.norm());
 
-                // Check parallax between rays
-                vec3f xn1{(kp1.pt.x-cx1)*invfx1, (kp1.pt.y-cy1)*invfy1, 1.0f};
-                vec3f xn2{(kp2.pt.x-cx2)*invfx2, (kp2.pt.y-cy2)*invfy2, 1.0f};
-
-                vec3f ray1 = Rwc1 * xn1;
-                vec3f ray2 = Rwc2 * xn2;
-                const float cosParallaxRays = ray1.dot(ray2)/(ray1.norm() * ray2.norm());
-                //const float sinParallaxRays = ray1.cross(ray2).norm() / (ray1.norm() * ray2.norm());
+                const float inv_depth1 = inv_depth1_ft[idx1];
+                const float inv_depth2 = inv_depth2_ft[idx2];
+                const bool have_depth1 = inv_depth1 > 0.0f;
+                const bool have_depth2 = inv_depth2 > 0.0f;
 
                 vec3f x3D;
-                bool fromSensorDepth = false;
-                const float invDepth1 = current_keyframe_->inv_depth.at(featureType)[idx1];
-                const float invDepth2 = pKF2->inv_depth.at(featureType)[idx2];
-                const bool haveDepth1 = invDepth1 > 0.0f;
-                const bool haveDepth2 = invDepth2 > 0.0f;
-                //if(true)
-                //if(cosParallaxRays > 0 && (sinParallaxRays > sinThr))
-                if(haveDepth1 && haveDepth2)
+                if(have_depth1 && have_depth2)
                 {
                     // Two independent sensor depth readings of the same point: back-project
-                    // each from its own keyframe and average. The reprojection-error checks
-                    // below now validate agreement between them in both views.
-                    vec3f x3D_1 = Rwc1 * (xn1 * (1.0f / invDepth1)) + twc1;
-                    vec3f x3D_2 = Rwc2 * (xn2 * (1.0f / invDepth2)) + twc2;
+                    // each from its own keyframe and average. The reprojection gates below
+                    // then validate agreement between them in both views.
+                    const vec3f x3D_1 = Rwc1 * (xn1 / inv_depth1) + twc1;
+                    const vec3f x3D_2 = Rwc2 * (xn2 / inv_depth2) + twc2;
                     x3D = 0.5f * (x3D_1 + x3D_2);
-                    fromSensorDepth = true;
                 }
-                else if(haveDepth1)
+                else if(have_depth1)
                 {
-                    // Back-project from KF1's own measured depth: no second-view triangulation,
-                    // no parallax requirement. The reprojection-error check against KF2 below
-                    // still cross-validates it.
-                    x3D = Rwc1 * (xn1 * (1.0f / invDepth1)) + twc1;
-                    fromSensorDepth = true;
+                    // Back-project from this keyframe's own measured depth: no second-view
+                    // triangulation, no parallax requirement. The reprojection gate against
+                    // the neighbor below still cross-validates it.
+                    x3D = Rwc1 * (xn1 / inv_depth1) + twc1;
                 }
-                else if(haveDepth2)
+                else if(have_depth2)
                 {
-                    // Symmetric case: back-project from KF2's depth, cross-validated against KF1.
-                    x3D = Rwc2 * (xn2 * (1.0f / invDepth2)) + twc2;
-                    fromSensorDepth = true;
+                    // Symmetric case: back-project from the neighbor's depth,
+                    // cross-validated against this keyframe
+                    x3D = Rwc2 * (xn2 / inv_depth2) + twc2;
                 }
-                else if(cosParallaxRays > 0 && (cosParallaxRays < CREATE_NEW_MAP_POINTS_MIN_COS))
+                else if(cos_parallax > 0 && cos_parallax < params.create_new_map_points_max_parallax_cos)
                 {
+                    // No sensor depth on either side: linear two-view triangulation (SVD)
                     Eigen::Matrix<float, 4, 4> A;
-                        A.row(0) = xn1(0) * Tcw1.row(2) - Tcw1.row(0);
-                        A.row(1) = xn1(1) * Tcw1.row(2) - Tcw1.row(1);
-                        A.row(2) = xn2(0) * Tcw2.row(2) - Tcw2.row(0);
-                        A.row(3) = xn2(1) * Tcw2.row(2) - Tcw2.row(1);
+                    A.row(0) = xn1(0) * Tcw1.row(2) - Tcw1.row(0);
+                    A.row(1) = xn1(1) * Tcw1.row(2) - Tcw1.row(1);
+                    A.row(2) = xn2(0) * Tcw2.row(2) - Tcw2.row(0);
+                    A.row(3) = xn2(1) * Tcw2.row(2) - Tcw2.row(1);
 
-                    Eigen::JacobiSVD<Eigen::Matrix<float,4,4>> svd(
-                        A, Eigen::ComputeFullV
-                    );
-
-                    const Eigen::Matrix<float,4,4>& V = svd.matrixV();
-                    Eigen::Vector4f x_h = V.col(3);
-
-                    const float w = x_h(3);
-                    if (std::abs(w) < 1e-12f)
+                    const Eigen::JacobiSVD<Eigen::Matrix<float, 4, 4>> svd(A, Eigen::ComputeFullV);
+                    const Eigen::Vector4f x_h = svd.matrixV().col(3);
+                    if(std::abs(x_h(3)) < HOMOGENEOUS_W_EPSILON)
                         continue;
-
-                    x3D = x_h.head<3>() / w;
+                    x3D = x_h.head<3>() / x_h(3);
                 }
                 else
-                    continue; //No depth, and no stereo / very low parallax
+                    continue; // no depth, and too little parallax to triangulate
 
-                //Check triangulation in front of cameras
-                float z1 = Rcw1.row(2).dot(x3D) + tcw1(2);
-                if(z1<=0)
+                // The point must lie in front of both cameras
+                const float z1 = Rcw1.row(2).dot(x3D) + tcw1(2);
+                if(z1 <= 0)
+                    continue;
+                const float z2 = Rcw2.row(2).dot(x3D) + tcw2(2);
+                if(z2 <= 0)
                     continue;
 
-                float z2 = Rcw2.row(2).dot(x3D) + tcw2(2);
-                if(z2<=0)
+                // Reprojection gate in this keyframe
+                const float u1 = fx1 * (Rcw1.row(0).dot(x3D) + tcw1(0)) / z1 + cx1;
+                const float v1 = fy1 * (Rcw1.row(1).dot(x3D) + tcw1(1)) / z1 + cy1;
+                const float err_x1 = u1 - kp1.pt.x;
+                const float err_y1 = v1 - kp1.pt.y;
+                if(err_x1 * err_x1 + err_y1 * err_y1 > CHI2_2DOF * current_keyframe_->GetKeyPt1DSigma2(idx1, feature_type))
                     continue;
 
-                //Check reprojection error in first keyframe
-                const float &sigmaSquare1 = current_keyframe_->GetKeyPt1DSigma2(idx1, featureType);
-                const float x1 = Rcw1.row(0).dot(x3D) + tcw1(0);
-                const float y1 = Rcw1.row(1).dot(x3D) + tcw1(1);
-                const float invz1 = 1.0f / z1;
-
-
-                float u1 = fx1*x1*invz1+cx1;
-                float v1 = fy1*y1*invz1+cy1;
-                float errX1 = u1 - kp1.pt.x;
-                float errY1 = v1 - kp1.pt.y;
-                if((errX1*errX1+errY1*errY1) > CHI2_2DOF * sigmaSquare1)
+                // Reprojection gate in the neighbor
+                const float u2 = fx2 * (Rcw2.row(0).dot(x3D) + tcw2(0)) / z2 + cx2;
+                const float v2 = fy2 * (Rcw2.row(1).dot(x3D) + tcw2(1)) / z2 + cy2;
+                const float err_x2 = u2 - kp2.pt.x;
+                const float err_y2 = v2 - kp2.pt.y;
+                if(err_x2 * err_x2 + err_y2 * err_y2 > CHI2_2DOF * neighbor->GetKeyPt1DSigma2(idx2, feature_type))
                     continue;
 
-                // Check reprojection error in second keyframe
-                const float sigmaSquare2 = pKF2->GetKeyPt1DSigma2(idx2, featureType);
-                const float x2 = Rcw2.row(0).dot(x3D) + tcw2(0);
-                const float y2 = Rcw2.row(1).dot(x3D) + tcw2(1);
-                const float invz2 = 1.0f / z2;
-
-                float u2 = fx2*x2*invz2+cx2;
-                float v2 = fy2*y2*invz2+cy2;
-                float errX2 = u2 - kp2.pt.x;
-                float errY2 = v2 - kp2.pt.y;
-                if((errX2*errX2+errY2*errY2) > CHI2_2DOF * sigmaSquare2)
-                    continue;
-
-                // Check scale consistency
-                vec3f normal1 = x3D - twc1;
-                float dist1 = normal1.norm();
-
-                vec3f normal2 = x3D - twc2;
-                float dist2 = normal2.norm();
-
-                if(dist1 == 0 || dist2 == 0)
-                    continue;
-
-                // Triangulation is succesfull
-                newMapPoints[featureType]++;
-                if(fromSensorDepth)
-                    nFromSensor++;
-                else
-                    nFromTriangulation++;
-                Pt pMP = current_keyframe_->create_monocular_map_point(x3D, KeypointIndex(idx1),
-                                                                    pKF2,  KeypointIndex(idx2),
-                                                                    featureType);
-                recent_map_points_.push_back(pMP);
+                const Pt map_point = current_keyframe_->create_monocular_map_point(
+                    x3D, KeypointIndex(idx1), neighbor, KeypointIndex(idx2), feature_type);
+                recent_map_points_.push_back(map_point);
             }
         }
     }
 
-    //////////////////////////////////////////////////////////////////////////////////////////////
-    //////////////////////////////////////////////////////////////////////////////////////////////
-    // Back-project close, still-unmatched keypoints straight from current_keyframe_'s own depth
-    // reading. The loop above only creates points for keypoints that found a 2D feature match
-    // against a covisible neighbor (match_keyframes_for_triangulation) -- a keypoint with a
-    // perfectly good sensor-depth reading but no such match (textureless region, repeated
-    // pattern, fast motion) was previously silently dropped, even though depth alone already
-    // places it in the map with no matching required at all. Matches the existing haveDepth1/
-    // haveDepth2 branch above: any inv_depth>0 is trusted, no mThDepth range gate.
-    for(const auto& featureType : fts)
+    create_depth_seeded_points();
+}
+
+void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors)
+{
+    // Brute-force descriptor matching of the new keyframe against every neighbor it has no
+    // cached matches with yet, all (neighbor, feature type) pairs in parallel. Results are
+    // stored symmetrically in both keyframes' caches, per feature type and stacked (with
+    // keypoint-index offsets) over all feature types.
+    const auto& feature_types = current_keyframe_->featureTypes;
+    const int num_neighbors = int(neighbors.size());
+    const int num_feature_types = int(feature_types.size());
+
+    std::vector<char> cached(num_neighbors, 0);
+    for(int k = 0; k < num_neighbors; k++)
     {
-        const auto& invDepthFt = current_keyframe_->inv_depth.at(featureType);
-        const auto& keypointsFt = current_keyframe_->keypoints.at(featureType);
+        const auto it = current_keyframe_->cache_matched_pairs.find(neighbors[k]->frame_id);
+        cached[k] = it != current_keyframe_->cache_matched_pairs.end() && !it->second.empty();
+    }
 
-        for(size_t idx = 0; idx < invDepthFt.size(); idx++)
+    std::vector<std::vector<std::vector<cv::DMatch>>> matches(
+        num_neighbors, std::vector<std::vector<cv::DMatch>>(num_feature_types));
+
+    #pragma omp parallel for collapse(2) schedule(dynamic)
+    for(int k = 0; k < num_neighbors; k++)
+    {
+        for(int f = 0; f < num_feature_types; f++)
         {
-            if(invDepthFt[idx] <= 0.0f)
-                continue; // no valid sensor depth at this keypoint
-
-            if(current_keyframe_->get_map_point(idx, featureType))
-                continue; // already has a map point (from tracking, or the matched-pairs loop above)
-
-            const cv::KeyPoint& kp1 = keypointsFt[idx];
-            vec3f xn1{(kp1.pt.x-cx1)*invfx1, (kp1.pt.y-cy1)*invfy1, 1.0f};
-            vec3f x3D = Rwc1 * (xn1 * (1.0f / invDepthFt[idx])) + twc1;
-
-            newMapPoints[featureType]++;
-            nFromSensor++;
-            Pt pMP = current_keyframe_->create_map_point(x3D, KeypointIndex(idx), featureType);
-            recent_map_points_.push_back(pMP);
+            if(cached[k])
+                continue;
+            const Keyframe& neighbor = neighbors[k];
+            const FeatureType feature_type = feature_types[f];
+            matches[k][f] = matcher_->serialFeatureMatching(
+                current_keyframe_->descriptors.at(feature_type), neighbor->descriptors.at(feature_type),
+                current_keyframe_->keypoints.at(feature_type), neighbor->keypoints.at(feature_type),
+                feature_type);
         }
     }
 
-    //cout << "[LocalMapping::create_new_map_points] New map points: " << (nFromSensor + nFromTriangulation)
-         //<< " (sensor: " << nFromSensor << ", triangulation: " << nFromTriangulation << ")" << endl;
+    // Store (serial): per-feature-type caches in both directions, plus the stacked list
+    for(int k = 0; k < num_neighbors; k++)
+    {
+        if(cached[k])
+            continue;
+        const Keyframe& neighbor = neighbors[k];
+
+        auto& forward_by_type = current_keyframe_->cache_matched_pairs_feat_type[neighbor->frame_id];
+        auto& backward_by_type = neighbor->cache_matched_pairs_feat_type[current_keyframe_->frame_id];
+
+        std::vector<cv::DMatch> stacked;
+        int query_offset = 0;
+        int train_offset = 0;
+        for(int f = 0; f < num_feature_types; f++)
+        {
+            const FeatureType feature_type = feature_types[f];
+            stacked.reserve(stacked.size() + matches[k][f].size());
+            for(const cv::DMatch& match : matches[k][f])
+            {
+                forward_by_type[feature_type].push_back(match);
+                backward_by_type[feature_type].push_back(cv::DMatch(match.trainIdx, match.queryIdx, match.distance));
+
+                cv::DMatch stacked_match = match;
+                stacked_match.queryIdx += query_offset;
+                stacked_match.trainIdx += train_offset;
+                stacked.push_back(stacked_match);
+            }
+            query_offset += int(current_keyframe_->keypoints.at(feature_type).size());
+            train_offset += int(neighbor->keypoints.at(feature_type).size());
+        }
+
+        neighbor->cache_matched_pairs.insert_or_assign(current_keyframe_->frame_id,
+                                                       FeatureMatcher::swap_match_direction(stacked));
+        current_keyframe_->cache_matched_pairs.insert_or_assign(neighbor->frame_id, std::move(stacked));
+    }
+}
+
+void LocalMapping::create_depth_seeded_points()
+{
+    // Back-project still-unmatched keypoints straight from the keyframe's own sensor depth.
+    // Triangulation only creates points for keypoints with a 2D feature match in a covisible
+    // neighbor -- a keypoint with a valid depth reading but no such match (textureless
+    // region, repeated pattern, fast motion) is exactly where sensor depth helps most.
+    // Same trust policy as the triangulation depth branches: any inv_depth > 0, no range gate.
+    mat4f Twc1, Tcw1;
+    mat3f Rwc1, Rcw1;
+    vec3f twc1, tcw1;
+    current_keyframe_->getFullPose(Twc1, Rwc1, twc1, Tcw1, Rcw1, tcw1);
+
+    float fx1, fy1, cx1, cy1, invfx1, invfy1;
+    current_keyframe_->getFullIntrinsics(fx1, fy1, cx1, cy1, invfx1, invfy1);
+
+    for(const FeatureType feature_type : current_keyframe_->featureTypes)
+    {
+        const auto& inv_depth = current_keyframe_->inv_depth.at(feature_type);
+        const auto& keypoints = current_keyframe_->keypoints.at(feature_type);
+        for(size_t idx = 0; idx < inv_depth.size(); idx++)
+        {
+            if(inv_depth[idx] <= 0.0f)
+                continue; // no valid sensor depth at this keypoint
+            if(current_keyframe_->get_map_point(idx, feature_type))
+                continue; // already has a map point (from tracking, or the triangulation loop)
+
+            const cv::KeyPoint& kp = keypoints[idx];
+            const vec3f xn{(kp.pt.x - cx1) * invfx1, (kp.pt.y - cy1) * invfy1, 1.0f};
+            const Pt map_point = current_keyframe_->create_map_point(Rwc1 * (xn / inv_depth[idx]) + twc1,
+                                                                     KeypointIndex(idx), feature_type);
+            recent_map_points_.push_back(map_point);
+        }
+    }
 }
 
 void LocalMapping::search_in_neighbors()

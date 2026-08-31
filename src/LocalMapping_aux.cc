@@ -41,6 +41,10 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("LocalMapping.MapPointCullingObservationTestAge", params.map_point_culling_observation_test_age);
     read_if_present("LocalMapping.MapPointCullingProbationAge", params.map_point_culling_probation_age);
 
+    read_if_present("LocalMapping.CreateNewMapPointsKeyframes", params.create_new_map_points_keyframes);
+    read_if_present("LocalMapping.CreateNewMapPointsMinBaselineDepthRatio", params.create_new_map_points_min_baseline_depth_ratio);
+    read_if_present("LocalMapping.CreateNewMapPointsMaxParallaxCos", params.create_new_map_points_max_parallax_cos);
+
     read_if_present("LocalMapping.SearchInNeighborsKeyframes", params.search_in_neighbors_keyframes);
     read_if_present("LocalMapping.SearchInNeighborsSecondKeyframes", params.search_in_neighbors_second_keyframes);
     read_if_present("LocalMapping.SearchInNeighborsRadius", params.search_in_neighbors_radius);

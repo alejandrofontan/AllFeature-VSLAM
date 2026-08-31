@@ -44,6 +44,11 @@ struct LocalMappingParameters
     int map_point_culling_observation_test_age{2};  // keyframes after creation at which the observation test applies
     int map_point_culling_probation_age{3};         // keyframes after creation at which a surviving point graduates out of the probation list
 
+    // create_new_map_points()
+    int create_new_map_points_keyframes{5};                      // covisible keyframes matched and triangulated against
+    float create_new_map_points_min_baseline_depth_ratio{0.01f}; // skip neighbors with baseline / median scene depth below this
+    float create_new_map_points_max_parallax_cos{0.9998f};       // two-view triangulation needs cos(parallax) below this (parallax > ~1.15 deg)
+
     // search_in_neighbors()
     int search_in_neighbors_keyframes{20};       // covisible keyframes fused with the new keyframe
     int search_in_neighbors_second_keyframes{5}; // second-degree neighbors added per covisible keyframe
@@ -71,6 +76,9 @@ struct LocalMappingParameters
         map_point_culling_min_observations = o.map_point_culling_min_observations;
         map_point_culling_observation_test_age = o.map_point_culling_observation_test_age;
         map_point_culling_probation_age = o.map_point_culling_probation_age;
+        create_new_map_points_keyframes = o.create_new_map_points_keyframes;
+        create_new_map_points_min_baseline_depth_ratio = o.create_new_map_points_min_baseline_depth_ratio;
+        create_new_map_points_max_parallax_cos = o.create_new_map_points_max_parallax_cos;
         search_in_neighbors_keyframes = o.search_in_neighbors_keyframes;
         search_in_neighbors_second_keyframes = o.search_in_neighbors_second_keyframes;
         search_in_neighbors_radius = o.search_in_neighbors_radius;
@@ -151,22 +159,23 @@ public:
 
 protected:
 
-    // Parameters for local mapping
-    const float CHI2_2DOF{5.991f};
-
     // run(): local BA needs more keyframes than this in the map
     static constexpr int LOCAL_BA_MIN_KEYFRAMES{2};
 
-    // create_new_map_points()
-    const int CREATE_NEW_MAP_POINTS_BEST_COVISIBILITY_KEYFRAMES{5};
-    const float CREATE_NEW_MAP_POINTS_RATIO_BASELINE_DEPTH{0.01f};
-    const float CREATE_NEW_MAP_POINTS_MIN_COS{0.9998f};
+    // create_new_map_points(): 2-DoF chi-square 95% quantile (reprojection gate),
+    // and the numerical zero for the homogeneous scale of a triangulated point
+    static constexpr float CHI2_2DOF{5.991f};
+    static constexpr float HOMOGENEOUS_W_EPSILON{1e-12f};
 
     // One full mapping iteration for the keyframe at the head of the queue (see run())
     void process_keyframe();
     void process_new_keyframe();
     void cull_map_points();
     void create_new_map_points();
+    // create_new_map_points() helpers: brute-force match the new keyframe against its
+    // neighbors (cached, OMP-parallel), and back-project unmatched keypoints with depth
+    void cache_neighbor_matches(const std::vector<Keyframe>& neighbors);
+    void create_depth_seeded_points();
     void search_in_neighbors();
     // Keyframe culling: dispatches on params.keyframe_culling_method.
     void cull_keyframes();
