@@ -127,41 +127,37 @@ void LocalMapping::process_keyframe()
 void LocalMapping::process_new_keyframe()
 {
     {
-        unique_lock<mutex> lock(new_keyframes_mutex_);
+        std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
         current_keyframe_ = new_keyframes_.front();
         new_keyframes_.pop_front();
     }
 
-    // Compute Bags of Words structures
+    // Global descriptor (BoW vector or VPR image embedding, backend-dependent)
     current_keyframe_->compute_global_descriptor();
 
-    // Associate MapPoints to the new keyframe and update normal and descriptor
-    for(const auto& feat: current_keyframe_->featureTypes){
-        const vector<Pt> vpMapPointMatches = current_keyframe_->get_map_point_matches(feat);
-
-        for(size_t i=0; i<vpMapPointMatches.size(); i++)
+    // Register the keyframe as an observer of the map points Tracking matched into it
+    // (add_observation also refreshes the point's descriptor and normal/depth). Points
+    // that already observe this keyframe -- created WITH it by the initializer -- enter
+    // the probation list instead (cull_map_points).
+    for(const FeatureType feature_type : current_keyframe_->featureTypes)
+    {
+        // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
+        const std::vector<Pt> map_points = current_keyframe_->get_map_point_matches(feature_type);
+        for(size_t i = 0; i < map_points.size(); i++)
         {
-            Pt pMP = vpMapPointMatches[i];
-            if(pMP)
-            {
-                if(!pMP->is_bad())
-                {
-                    if(!pMP->is_in_keyframe(current_keyframe_))
-                    {
-                        pMP->add_observation(current_keyframe_, i);
-                    }
-                    else // this can only happen for new stereo points inserted by the Tracking
-                    {
-                        recent_map_points_.push_back(pMP);
-                    }
-                }
-            }
+            const Pt& map_point = map_points[i];
+            if(!map_point || map_point->is_bad())
+                continue;
+            if(!map_point->is_in_keyframe(current_keyframe_))
+                map_point->add_observation(current_keyframe_, i);
+            else
+                recent_map_points_.push_back(map_point);
         }
     }
-    // Update links in the Covisibility Graph
+
+    // Update links in the covisibility graph
     current_keyframe_->update_connections();
 
-    // Insert Keyframe in Map
     map_->add_keyframe(current_keyframe_);
 
     // Extend the online keyframe VPR matrix with the new keyframe (no-op without a descriptor)
