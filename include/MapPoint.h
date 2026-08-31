@@ -104,17 +104,22 @@ public:
     long int mnFirstFrame;
     int nObs;
 
-    // Variables used by the tracking
-    float track_proj_x;
-    float track_proj_y;
-    float track_proj_xR;
-    bool mbTrackInView;
+    // Variables used by the tracking. Default-initialized: they are scratch written by
+    // Frame::is_in_frustum, but get_overlap() reads track_proj_x/y for matched points
+    // that were never frustum-projected — without initializers that was an
+    // uninitialized-memory read, and the garbage (recycled heap contents, different
+    // every run) made the overlap-based keyframe decision nondeterministic (issue #16).
+    // -1 keeps never-projected points deterministically outside get_overlap's bounds check.
+    float track_proj_x{-1.0f};
+    float track_proj_y{-1.0f};
+    float track_proj_xR{-1.0f};
+    bool mbTrackInView{false};
 
-    float trackSize;
-    float trackSigma;
-    float trackViewCos;
+    float trackSize{0.0f};
+    float trackSigma{1.0f};
+    float trackViewCos{0.0f};
 
-    FrameId idLastFrameSeen;
+    FrameId idLastFrameSeen{0};
 
     // Variables used by local mapping
     long unsigned int mnBALocalForKF;
