@@ -162,8 +162,8 @@ void LocalMapping::process_new_keyframe()
 
     map_->add_keyframe(current_keyframe_);
 
-    // Extend the online keyframe VPR matrix with the new keyframe (no-op without a descriptor)
-    grow_keyframe_vpr_matrix(current_keyframe_);
+    // The online keyframe VPR kernel needs no explicit growth here anymore: placecell
+    // grew it when compute_global_descriptor() stored this keyframe's descriptor.
 }
 
 void LocalMapping::cull_map_points()
@@ -516,7 +516,7 @@ void LocalMapping::cull_keyframes()
     if(params.keyframe_culling_method == "information"){
         // The information method needs the online kernel, i.e. an image-embedding VPR backend
         // (vpr: megaloc). Without stored descriptors, degrade to the heuristic once, loudly.
-        if((!place_cell_ || !place_cell_->has(current_keyframe_->frame_id)) && !has_keyframe_vpr_matrix()){
+        if(!place_cell_ || place_cell_->size() == 0){
             static bool warned{false};
             if(!warned){
                 AF_WARN("[LocalMapping] KeyframeCullingMethod: information requested but keyframes carry no global "
@@ -629,16 +629,29 @@ void LocalMapping::cull_keyframes_information()
     // keyframes whose best alive explainer lies in it (so far-away history cannot veto a local
     // cull, and far-away keyframes cannot explain a local one).
 
-    std::vector<Keyframe> keyframes;
-    Eigen::MatrixXf similarity;
-    {
-        unique_lock<mutex> lock(vpr_mutex_);
-        keyframes = vpr_keyframes_;
-        similarity = keyframe_vpr_matrix_;
-    }
-    const int n = int(keyframes.size());
+    if(!place_cell_)
+        return;
+
+    // Snapshot the kernel and its row ids from placecell (ids first: rows only ever
+    // grow, so the kernel snapshot covers at least those rows), then resolve each
+    // row's frame_id back to a keyframe through the map. Rows that no longer resolve
+    // are the culled keyframes -- the culling history.
+    const std::vector<placecell::PlaceCell::ExternalId> row_ids = place_cell_->external_ids();
+    Eigen::MatrixXf similarity = place_cell_->kernel();   // mutable: recentred in place below
+    const int n = int(row_ids.size());
     if(n < 3)
         return;
+
+    std::unordered_map<FrameId, Keyframe> keyframe_by_frame_id;
+    for(const Keyframe& keyframe : map_->GetAllKeyFrames())
+        keyframe_by_frame_id.emplace(keyframe->frame_id, keyframe);
+    std::vector<Keyframe> keyframes(n);
+    for(int i = 0; i < n; i++)
+    {
+        const auto it = keyframe_by_frame_id.find(FrameId(row_ids[i]));
+        if(it != keyframe_by_frame_id.end())
+            keyframes[i] = it->second;
+    }
 
     // Usable keyframes: those with a complete similarity row (a descriptor-size mismatch leaves NaN)
     std::vector<int> alive, history;
@@ -672,7 +685,7 @@ void LocalMapping::cull_keyframes_information()
 
     for(int i = 0; i < n; i++){
         if(!usable[i]) continue;
-        if(keyframes[i]->is_bad()) history.push_back(i);
+        if(!keyframes[i] || keyframes[i]->is_bad()) history.push_back(i);
         else alive.push_back(i);
     }
     const bool local_scope = (params.keyframe_culling_scope == "local");

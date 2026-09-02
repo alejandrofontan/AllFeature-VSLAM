@@ -181,11 +181,8 @@ void LocalMapping::reset_if_requested()
         new_keyframes_.clear();
     }
     recent_map_points_.clear();
-    {
-        std::lock_guard<std::mutex> vpr_lock(vpr_mutex_);
-        vpr_keyframes_.clear();
-        keyframe_vpr_matrix_.resize(0, 0);
-    }
+    // The VPR store/kernel lives in placecell; PlaceRecognitionMegaLoc::clear()
+    // (called from Tracking's reset) clears it.
 
     local_mapping_times_.clear();
     create_new_map_points_times_.clear();
@@ -222,38 +219,6 @@ bool LocalMapping::is_finished() const
 }
 
 // ------------------------------------------------------------------------------------------
-// Online keyframe VPR similarity matrix
-// ------------------------------------------------------------------------------------------
-
-bool LocalMapping::has_keyframe_vpr_matrix() const
-{
-    std::lock_guard<std::mutex> lock(vpr_mutex_);
-    return !vpr_keyframes_.empty();
-}
-
-void LocalMapping::grow_keyframe_vpr_matrix(const Keyframe& keyframe)
-{
-    // The descriptor is computed and stored in placecell by compute_global_descriptor()
-    // at the top of process_new_keyframe; it is absent when the VPR backend is not
-    // image-based (bow/none), in which case place_cell_ is null.
-    const Eigen::VectorXf* descriptor = place_cell_ ? place_cell_->descriptor(keyframe->frame_id) : nullptr;
-    if(!descriptor)
-        return;
-    std::lock_guard<std::mutex> lock(vpr_mutex_);
-    const int k = int(vpr_keyframes_.size());
-    keyframe_vpr_matrix_.conservativeResize(k + 1, k + 1);
-    for(int i = 0; i < k; i++){
-        const Eigen::VectorXf* other = place_cell_->descriptor(vpr_keyframes_[i]->frame_id);
-        float s = std::numeric_limits<float>::quiet_NaN();
-        if(other && other->size() == descriptor->size())
-            s = float(descriptor->cast<double>().dot(other->cast<double>()));   // unit descriptors: dot == cosine
-        keyframe_vpr_matrix_(i, k) = s;
-        keyframe_vpr_matrix_(k, i) = s;
-    }
-    keyframe_vpr_matrix_(k, k) = 1.0f;
-    vpr_keyframes_.push_back(keyframe);
-}
-
 // Cumulative per-stage timing histograms, printed through the AF_PROFILE sink.
 void LocalMapping::log_profile()
 {

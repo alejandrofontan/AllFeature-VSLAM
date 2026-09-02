@@ -78,8 +78,13 @@ void PlaceRecognitionMegaLoc::erase(const Keyframe& keyframe)
 
 void PlaceRecognitionMegaLoc::clear()
 {
-    std::lock_guard<std::mutex> lock(database_mutex_);
-    keyframes_.clear();
+    {
+        std::lock_guard<std::mutex> lock(database_mutex_);
+        keyframes_.clear();
+    }
+    // System reset: drop the stored descriptors and the VPR kernel too, so a fresh
+    // map does not inherit rows from the wiped one.
+    place_cell_->clear();
 }
 
 float PlaceRecognitionMegaLoc::score(const KeyFrame& a, const KeyFrame& b) const

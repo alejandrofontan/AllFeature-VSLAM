@@ -197,18 +197,13 @@ protected:
     std::list<Keyframe> new_keyframes_;
     Keyframe current_keyframe_;
 
-    // Online keyframe x keyframe VPR similarity matrix (cosine of the keyframes' MegaLoc
-    // global descriptors, read from placecell by frame_id), grown once per processed
-    // keyframe: row/col k = k-th keyframe with a descriptor, in insertion order;
-    // rows/cols are never removed when a keyframe is culled (culled keyframes stay as
-    // the culling "history"). Empty when the VPR backend does not store global
-    // descriptors (vpr: bow / none), i.e. when place_cell_ is null.
+    // placecell store: the keyframes' global descriptors AND the keyframe x keyframe
+    // VPR similarity kernel (raw cosine, grown by placecell on every stored keyframe;
+    // rows are never removed when a keyframe is culled -- culled keyframes stay as the
+    // culling "history"). Null when the VPR backend does not store global descriptors
+    // (vpr: bow / none). Kernel rows map back to keyframes via
+    // place_cell_->external_ids() (frame_id) -- see cull_keyframes_information.
     std::shared_ptr<placecell::PlaceCell> place_cell_{};
-    mutable std::mutex vpr_mutex_;
-    std::vector<Keyframe> vpr_keyframes_{};   // k -> keyframe
-    Eigen::MatrixXf keyframe_vpr_matrix_{};   // k x k, raw cosine
-    void grow_keyframe_vpr_matrix(const Keyframe& keyframe);
-    bool has_keyframe_vpr_matrix() const;
     std::list<Pt> recent_map_points_;
 
     bool stopped_{false};
