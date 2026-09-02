@@ -164,7 +164,7 @@ System::System(const string &vocabularyFolder,
         if(!std::ifstream(megaloc_onnx).good()){
             AF_ERROR("[System] vpr: megaloc requested but the model is missing ('" + megaloc_onnx
                      + "') — let the VSLAM-LAB wrapper download it, generate it with "
-                       "Thirdparty/MegaLoc-TensorRT/convert2onnx/export_megaloc.py, "
+                       "Thirdparty/placecell/tools/export_megaloc.py, "
                        "or set megaloc_onnx: to an existing export");
             exit(-1);
         }
@@ -177,14 +177,15 @@ System::System(const string &vocabularyFolder,
                 + megaloc_onnx + " ...");
         std::cout.flush();
         try {
-            place_recognition = make_shared<PlaceRecognitionMegaLoc>(megaloc_onnx, megaloc_precision, vpr_feature, megaloc_params);
+            // Engine build/load + CUDA warmup happen in the embedder constructor
+            placecell_embedder = make_shared<placecell::MegaLocEmbedder>(megaloc_onnx, megaloc_precision);
         } catch (const std::exception& e) {
             AF_ERROR("[System] MegaLoc backend setup failed: " + std::string(e.what()));
             exit(-1);
         }
-        const auto& megaloc = static_cast<const PlaceRecognitionMegaLoc&>(*place_recognition);
-        AF_INFO("[System] VPR: megaloc ready (engine " << (megaloc.engine().loadedFromCache() ? "cached" : "built")
-                << ": " << megaloc.engine().enginePath() << ", " << megaloc.engine().descriptorDim()
+        place_recognition = make_shared<PlaceRecognitionMegaLoc>(placecell_embedder, vpr_feature, megaloc_params);
+        AF_INFO("[System] VPR: megaloc ready (engine " << (placecell_embedder->loaded_from_cache() ? "cached" : "built")
+                << ": " << placecell_embedder->engine_path() << ", " << placecell_embedder->descriptor_dim()
                 << "-d, min similarity " << megaloc_params.min_similarity
                 << ", max candidates " << megaloc_params.max_candidates << ")");
         std::cout.flush();

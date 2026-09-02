@@ -111,10 +111,15 @@ target_compile_options(PoseLib PRIVATE -w)
 # of how Image::mask gets filled.
 add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/Segmentation-TensorRT ${CMAKE_BINARY_DIR}/segmentation_tensorrt)
 
-# ---- MegaLoc-TensorRT (visual place recognition backend `vpr: megaloc`) ----
-# First-party module (not vendored). Unlike segmentation, the SLAM library itself
-# consumes it: PlaceRecognitionMegaLoc owns the engine, so the library links it.
-add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/MegaLoc-TensorRT ${CMAKE_BINARY_DIR}/megaloc_tensorrt)
+# ---- placecell (MegaLoc descriptors for the `vpr: megaloc` backend) ----
+# Standalone first-party library (github.com/alejandrofontan/placecell), pulled in as a
+# git submodule. System owns the placecell::MegaLocEmbedder and injects it into
+# PlaceRecognitionMegaLoc; the SLAM library links placecell::megaloc (the Eigen-only
+# core placecell::placecell comes in transitively).
+set(PLACECELL_WITH_MEGALOC ON)
+set(PLACECELL_BUILD_EXAMPLES OFF)
+set(PLACECELL_BUILD_PYTHON OFF)
+add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/placecell ${CMAKE_BINARY_DIR}/placecell)
 
 # ---- mimalloc (drop-in allocator, issue #13 addendum M1) ----
 # Must be the SHARED library, linked FIRST into each executable: libmimalloc.so then appears
@@ -180,7 +185,7 @@ target_link_libraries(${PROJECT_NAME}
         superpoint_lightglue_lib
         SiftGPU::sift_gpu
         PoseLib::PoseLib
-        tensorrt_megaloc
+        placecell::megaloc
 )
 
 

@@ -38,6 +38,10 @@
 #include "Viewer.h"
 #include "Utils.h"
 
+// placecell (Thirdparty/placecell): descriptor provider for the megaloc VPR backend.
+// Forward declaration only -- System.cc includes the real header.
+namespace placecell { class MegaLocEmbedder; }
+
 namespace AF_VSLAM
 {
 
@@ -141,6 +145,11 @@ private:
     // Visual place recognition backend (bow | megaloc | none): global descriptors,
     // keyframe database, relocalization and loop-detection candidates.
     std::shared_ptr<PlaceRecognition> place_recognition{};
+
+    // placecell MegaLoc embedder (vpr: megaloc only, null otherwise). Owned here and
+    // injected into PlaceRecognitionMegaLoc; kept as a System member so future
+    // placecell integrations (graph management) can share it.
+    std::shared_ptr<placecell::MegaLocEmbedder> placecell_embedder{};
 
     // Map structure that stores the pointers to all KeyFrames and MapPoints.
     shared_ptr<Map> mpMap;

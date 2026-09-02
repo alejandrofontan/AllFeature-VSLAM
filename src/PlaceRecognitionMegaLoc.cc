@@ -20,20 +20,32 @@
 namespace AF_VSLAM
 {
 
-PlaceRecognitionMegaLoc::PlaceRecognitionMegaLoc(const std::string& onnx_path, const std::string& precision,
+namespace
+{
+// global_descriptor is stored as std::vector<float>; map into placecell's Eigen-based
+// cosine without copying (Eigen::Ref binds to the Map views).
+float cosine(const std::vector<float>& a, const std::vector<float>& b)
+{
+    if(a.empty() || a.size() != b.size())
+        return 0.0f;
+    return placecell::MegaLocEmbedder::cosine(
+        Eigen::Map<const Eigen::VectorXf>(a.data(), Eigen::Index(a.size())),
+        Eigen::Map<const Eigen::VectorXf>(b.data(), Eigen::Index(b.size())));
+}
+} // namespace
+
+PlaceRecognitionMegaLoc::PlaceRecognitionMegaLoc(std::shared_ptr<placecell::MegaLocEmbedder> embedder,
                                                  const FeatureType verification_feature,
                                                  const PlaceRecognitionMegaLocParameters& params)
-    : PlaceRecognition(verification_feature), params_(params)
+    : PlaceRecognition(verification_feature), params_(params), embedder_(std::move(embedder))
 {
-    engine_ = std::make_unique<megaloc::TensorRTMegaLoc>(onnx_path, precision);
-    // Absorb the one-time lazy CUDA/TRT warmup here rather than on the first keyframe.
-    (void)engine_->infer(cv::Mat::zeros(480, 640, CV_8UC3));
 }
 
 std::vector<float> PlaceRecognitionMegaLoc::embed(const cv::Mat& image)
 {
-    std::lock_guard<std::mutex> lock(engine_mutex_);
-    return engine_->infer(image);
+    // placecell::MegaLocEmbedder::embed serialises internally: no lock needed here
+    const Eigen::VectorXf descriptor = embedder_->embed(image);
+    return std::vector<float>(descriptor.data(), descriptor.data() + descriptor.size());
 }
 
 void PlaceRecognitionMegaLoc::compute(Frame& frame)
@@ -90,7 +102,7 @@ void PlaceRecognitionMegaLoc::clear()
 
 float PlaceRecognitionMegaLoc::score(const KeyFrame& a, const KeyFrame& b) const
 {
-    return megaloc::TensorRTMegaLoc::cosine(a.global_descriptor, b.global_descriptor);
+    return cosine(a.global_descriptor, b.global_descriptor);
 }
 
 std::vector<Keyframe> PlaceRecognitionMegaLoc::retrieve(const std::vector<float>& query,
@@ -114,7 +126,7 @@ std::vector<Keyframe> PlaceRecognitionMegaLoc::retrieve(const std::vector<float>
     {
         if(excluded.count(candidate->keyId) || candidate->is_bad() || candidate->global_descriptor.empty())
             continue;
-        const float s = megaloc::TensorRTMegaLoc::cosine(query, candidate->global_descriptor);
+        const float s = cosine(query, candidate->global_descriptor);
         if(s >= floor)
             scored.emplace(candidate->keyId, Scored{s, candidate});
     }

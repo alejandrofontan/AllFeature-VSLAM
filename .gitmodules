@@ -16,3 +16,6 @@
 [submodule "Thirdparty/mimalloc"]
 	path = Thirdparty/mimalloc
 	url = https://github.com/microsoft/mimalloc.git
+[submodule "Thirdparty/placecell"]
+	path = Thirdparty/placecell
+	url = https://github.com/alejandrofontan/placecell.git

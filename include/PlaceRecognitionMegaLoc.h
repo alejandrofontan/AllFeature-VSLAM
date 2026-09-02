@@ -7,17 +7,18 @@
  * - License: GPLv3 License
  *
  * MegaLoc backend of the PlaceRecognition interface (issue #17, stage 3): one 8448-d
- * L2-normalised global descriptor per keyframe, computed by the TensorRT engine in
- * Thirdparty/MegaLoc-TensorRT from the keyframe's image; retrieval is brute-force
- * cosine similarity over the keyframe database, followed by the same covisibility
- * accumulation and 0.75-of-best pruning KeyFrameDatabase applies to BoW scores, so the
- * consumers (Tracking::relocalize, LoopClosing::DetectLoop) see the same candidate
- * semantics with a different similarity.
+ * L2-normalised global descriptor per keyframe, computed by the placecell MegaLoc
+ * embedder (Thirdparty/placecell, owned by System and injected here) from the
+ * keyframe's image; retrieval is brute-force cosine similarity over the keyframe
+ * database, followed by the same covisibility accumulation and 0.75-of-best pruning
+ * KeyFrameDatabase applies to BoW scores, so the consumers (Tracking::relocalize,
+ * LoopClosing::DetectLoop) see the same candidate semantics with a different
+ * similarity.
  *
  * Threading: compute() is called from the LocalMapping thread (keyframes) and the
- * tracking thread (relocalization query); the single execution context is guarded by
- * a mutex. The database is guarded separately; queries take a snapshot and score
- * outside the lock.
+ * tracking thread (relocalization query); placecell::MegaLocEmbedder::embed()
+ * serialises internally on its single execution context. The database has its own
+ * mutex; queries take a snapshot and score outside the lock.
  */
 
 #ifndef AF_VSLAM_PLACE_RECOGNITION_MEGALOC_H
@@ -29,8 +30,9 @@
 #include <string>
 #include <vector>
 
+#include <placecell/megaloc_embedder.h>
+
 #include "PlaceRecognition.h"
-#include "tensorrt_megaloc.hpp"
 
 namespace AF_VSLAM
 {
@@ -52,9 +54,9 @@ class PlaceRecognitionMegaLoc final : public PlaceRecognition
 public:
     static constexpr const char* kDefaultOnnx = "megaloc_models/megaloc_322x322.onnx";
 
-    // Builds/loads the TensorRT engine (see TensorRTMegaLoc) and warms it up; throws
-    // std::runtime_error when the model cannot be set up.
-    PlaceRecognitionMegaLoc(const std::string& onnx_path, const std::string& precision,
+    // The embedder (engine build/load + warmup already absorbed by its constructor)
+    // is owned by System and injected here.
+    PlaceRecognitionMegaLoc(std::shared_ptr<placecell::MegaLocEmbedder> embedder,
                             FeatureType verification_feature,
                             const PlaceRecognitionMegaLocParameters& params);
 
@@ -75,7 +77,7 @@ public:
     std::vector<Keyframe> detect_relocalization_candidates(Frame& frame) override;
 
     const PlaceRecognitionMegaLocParameters& parameters() const { return params_; }
-    const megaloc::TensorRTMegaLoc& engine() const { return *engine_; }
+    const placecell::MegaLocEmbedder& embedder() const { return *embedder_; }
 
 private:
     // Shared retrieval: score every database keyframe (not excluded, not bad, with a
@@ -88,8 +90,7 @@ private:
 
     PlaceRecognitionMegaLocParameters params_;
 
-    std::unique_ptr<megaloc::TensorRTMegaLoc> engine_;
-    std::mutex engine_mutex_;
+    std::shared_ptr<placecell::MegaLocEmbedder> embedder_;
 
     std::vector<Keyframe> keyframes_;
     mutable std::mutex database_mutex_;

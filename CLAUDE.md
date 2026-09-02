@@ -545,7 +545,7 @@ relocalization and loop detection now goes through one backend interface
 | `vpr:` | Class | Descriptor | Retrieval |
 |---|---|---|---|
 | `bow` (default) | `PlaceRecognitionBoW` | DBoW2 BoW vector of the `feature_vpr` local descriptors | the unchanged `KeyFrameDatabase` inverted file |
-| `megaloc` | `PlaceRecognitionMegaLoc` | MegaLoc 8448-d image embedding (TensorRT, `Thirdparty/MegaLoc-TensorRT`) | brute-force cosine over all keyframe descriptors + the same covisibility accumulation / 0.75-of-best pruning as BoW, capped by `PlaceRecognition.MaxCandidates` and floored by `PlaceRecognition.MegaLocMinSimilarity` |
+| `megaloc` | `PlaceRecognitionMegaLoc` | MegaLoc 8448-d image embedding (TensorRT, via the `Thirdparty/placecell` submodule's `placecell::MegaLocEmbedder`) | brute-force cosine over all keyframe descriptors + the same covisibility accumulation / 0.75-of-best pruning as BoW, capped by `PlaceRecognition.MaxCandidates` and floored by `PlaceRecognition.MegaLocMinSimilarity` |
 | `none` | `PlaceRecognitionNone` | — | nothing (no loop closing, no relocalization) |
 
 - `feature_vpr` now means "the local feature that geometrically verifies retrieved candidates"
@@ -571,12 +571,12 @@ relocalization and loop detection now goes through one backend interface
   `MinKeyframes`, `Scope: map|local`, `MaxPerCall`. Needs `vpr: megaloc`; with bow/none it falls back to
   heuristic with a one-time warning. The offline `VPRMatrix`/`vpr_matrix:` CLI path is gone for good;
   the maths/design history lives in `/home/alejandro/cull_keyframes_math.pdf` (rev. 5, outside the repo).
-- Model pipeline (reproducible): `Thirdparty/MegaLoc-TensorRT/convert2onnx/export_megaloc.py`
+- Model pipeline (reproducible, lives in the placecell submodule since 2026-09-02): `Thirdparty/placecell/tools/export_megaloc.py`
   clones `gmberton/MegaLoc` (pinned commit), downloads the HF weights into
   `megaloc_models/.cache`, exports `megaloc_models/megaloc_322x322.onnx` + sidecar yaml, and
-  self-checks against the PyTorch reference; `bin/test_megaloc` validates the TensorRT engine + C++ preprocessing against that
-  reference. `megaloc_models/` is gitignored; the VSLAM-LAB wrapper downloads the two files from
-  HF `vslamlab/allfeature-vslamlab` on install (upload them there after exporting).
+  self-checks against the PyTorch reference; placecell's `megaloc_test` example validates the TensorRT engine + C++ preprocessing
+  against that reference. `megaloc_models/` is gitignored; the VSLAM-LAB wrapper downloads the two
+  files from HF `vslamlab/megaloc-models` on install.
 - Export fidelity measured on ETH table_3 frames: export wrapper vs upstream forward max|diff| ≈ 2e-7;
   ONNX vs wrapper cos 0.999998; ONNX vs README-preprocessed (torchvision antialiased resize)
   reference cos ≈ 0.995 — the residual is the cv2 `INTER_AREA` vs torchvision resampling filter.
