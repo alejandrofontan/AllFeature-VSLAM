@@ -7,18 +7,19 @@
  * - License: GPLv3 License
  *
  * MegaLoc backend of the PlaceRecognition interface (issue #17, stage 3): one 8448-d
- * L2-normalised global descriptor per keyframe, computed by the placecell MegaLoc
- * embedder (Thirdparty/placecell, owned by System and injected here) from the
- * keyframe's image; retrieval is brute-force cosine similarity over the keyframe
- * database, followed by the same covisibility accumulation and 0.75-of-best pruning
- * KeyFrameDatabase applies to BoW scores, so the consumers (Tracking::relocalize,
- * LoopClosing::DetectLoop) see the same candidate semantics with a different
- * similarity.
+ * L2-normalised global descriptor per keyframe, computed AND STORED by placecell
+ * (Thirdparty/placecell MegaLocPlaceCell, owned by System and injected here), keyed
+ * by the keyframe's frame_id — keyframes carry no descriptor member. Relocalization
+ * query frames are transient: embedded via the store's embedder() but never stored
+ * (Frame::global_descriptor holds that query). Retrieval is brute-force cosine
+ * similarity over the keyframe database, followed by the same covisibility
+ * accumulation and 0.75-of-best pruning KeyFrameDatabase applies to BoW scores, so
+ * the consumers (Tracking::relocalize, LoopClosing::DetectLoop) see the same
+ * candidate semantics with a different similarity.
  *
  * Threading: compute() is called from the LocalMapping thread (keyframes) and the
- * tracking thread (relocalization query); placecell::MegaLocEmbedder::embed()
- * serialises internally on its single execution context. The database has its own
- * mutex; queries take a snapshot and score outside the lock.
+ * tracking thread (relocalization query); placecell serialises internally. The
+ * database has its own mutex; queries take a snapshot and score outside the lock.
  */
 
 #ifndef AF_VSLAM_PLACE_RECOGNITION_MEGALOC_H
@@ -30,7 +31,7 @@
 #include <string>
 #include <vector>
 
-#include <placecell/megaloc_embedder.h>
+#include <placecell/megaloc_placecell.h>
 
 #include "PlaceRecognition.h"
 
@@ -54,9 +55,10 @@ class PlaceRecognitionMegaLoc final : public PlaceRecognition
 public:
     static constexpr const char* kDefaultOnnx = "megaloc_models/megaloc_322x322.onnx";
 
-    // The embedder (engine build/load + warmup already absorbed by its constructor)
-    // is owned by System and injected here.
-    PlaceRecognitionMegaLoc(std::shared_ptr<placecell::MegaLocEmbedder> embedder,
+    // The placecell store (embedder + keyframe descriptor storage; engine build/load
+    // and warmup already absorbed by its constructor) is owned by System and
+    // injected here.
+    PlaceRecognitionMegaLoc(std::shared_ptr<placecell::MegaLocPlaceCell> place_cell,
                             FeatureType verification_feature,
                             const PlaceRecognitionMegaLocParameters& params);
 
@@ -77,20 +79,18 @@ public:
     std::vector<Keyframe> detect_relocalization_candidates(Frame& frame) override;
 
     const PlaceRecognitionMegaLocParameters& parameters() const { return params_; }
-    const placecell::MegaLocEmbedder& embedder() const { return *embedder_; }
+    const placecell::MegaLocPlaceCell& place_cell() const { return *place_cell_; }
 
 private:
     // Shared retrieval: score every database keyframe (not excluded, not bad, with a
-    // descriptor) against `query`, keep those >= floor, accumulate over covisibility
-    // groups, return the best ones (see the .cc for the exact rule).
-    std::vector<Keyframe> retrieve(const std::vector<float>& query,
+    // descriptor in placecell) against `query`, keep those >= floor, accumulate over
+    // covisibility groups, return the best ones (see the .cc for the exact rule).
+    std::vector<Keyframe> retrieve(const Eigen::Ref<const Eigen::VectorXf>& query,
                                    const std::set<KeyframeId>& excluded, float floor) const;
-
-    std::vector<float> embed(const cv::Mat& image);
 
     PlaceRecognitionMegaLocParameters params_;
 
-    std::shared_ptr<placecell::MegaLocEmbedder> embedder_;
+    std::shared_ptr<placecell::MegaLocPlaceCell> place_cell_;
 
     std::vector<Keyframe> keyframes_;
     mutable std::mutex database_mutex_;

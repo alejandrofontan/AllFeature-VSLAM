@@ -10,6 +10,8 @@
 #include "LocalMapping.h"
 #include "LocalMapping_aux.h"
 
+#include <placecell/placecell.h>
+
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -513,8 +515,8 @@ void LocalMapping::cull_keyframes()
 {
     if(params.keyframe_culling_method == "information"){
         // The information method needs the online kernel, i.e. an image-embedding VPR backend
-        // (vpr: megaloc). Without descriptors, degrade to the heuristic once, loudly.
-        if(current_keyframe_->global_descriptor.empty() && !has_keyframe_vpr_matrix()){
+        // (vpr: megaloc). Without stored descriptors, degrade to the heuristic once, loudly.
+        if((!place_cell_ || !place_cell_->has(current_keyframe_->frame_id)) && !has_keyframe_vpr_matrix()){
             static bool warned{false};
             if(!warned){
                 AF_WARN("[LocalMapping] KeyframeCullingMethod: information requested but keyframes carry no global "

@@ -6,6 +6,8 @@
  */
 #include "LocalMapping.h"
 
+#include <placecell/placecell.h>
+
 #include <chrono>
 #include <iomanip>
 #include <iostream>
@@ -231,23 +233,20 @@ bool LocalMapping::has_keyframe_vpr_matrix() const
 
 void LocalMapping::grow_keyframe_vpr_matrix(const Keyframe& keyframe)
 {
-    // The descriptor is computed by compute_global_descriptor() at the top of
-    // process_new_keyframe; it is empty when the VPR backend is not image-based (bow/none).
-    const std::vector<float>& descriptor = keyframe->global_descriptor;
-    if(descriptor.empty())
+    // The descriptor is computed and stored in placecell by compute_global_descriptor()
+    // at the top of process_new_keyframe; it is absent when the VPR backend is not
+    // image-based (bow/none), in which case place_cell_ is null.
+    const Eigen::VectorXf* descriptor = place_cell_ ? place_cell_->descriptor(keyframe->frame_id) : nullptr;
+    if(!descriptor)
         return;
     std::lock_guard<std::mutex> lock(vpr_mutex_);
     const int k = int(vpr_keyframes_.size());
     keyframe_vpr_matrix_.conservativeResize(k + 1, k + 1);
     for(int i = 0; i < k; i++){
-        const std::vector<float>& other = vpr_keyframes_[i]->global_descriptor;
+        const Eigen::VectorXf* other = place_cell_->descriptor(vpr_keyframes_[i]->frame_id);
         float s = std::numeric_limits<float>::quiet_NaN();
-        if(other.size() == descriptor.size()){
-            double dot = 0.0;
-            for(size_t d = 0; d < descriptor.size(); d++)
-                dot += double(descriptor[d]) * other[d];
-            s = float(dot);   // unit descriptors: dot product == cosine
-        }
+        if(other && other->size() == descriptor->size())
+            s = float(descriptor->cast<double>().dot(other->cast<double>()));   // unit descriptors: dot == cosine
         keyframe_vpr_matrix_(i, k) = s;
         keyframe_vpr_matrix_(k, i) = s;
     }

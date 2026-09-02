@@ -142,9 +142,11 @@ public:
     // keyframe made from this frame can be embedded later; empty otherwise.
     cv::Mat image;
 
-    // Backend-neutral global descriptor (MegaLoc: 8448-d unit vector; empty for BoW,
-    // which uses mBowVec/mFeatVec below).
-    std::vector<float> global_descriptor;
+    // Transient global descriptor of a relocalization QUERY frame (MegaLoc: 8448-d
+    // unit vector; size 0 for BoW, which uses mBowVec/mFeatVec below). Keyframe
+    // descriptors do NOT live here: they are stored in placecell (System::place_cell),
+    // keyed by frame_id, when PlaceRecognitionMegaLoc::compute(KeyFrame&) runs.
+    Eigen::VectorXf global_descriptor;
 
     // Feature extractor. The right is used only in the stereo case.
     std::map<FeatureType, shared_ptr<FeatureExtractor>> featureExtractorLeft, featureExtractorRight;

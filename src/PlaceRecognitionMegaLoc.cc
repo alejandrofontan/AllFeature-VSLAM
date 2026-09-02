@@ -20,37 +20,18 @@
 namespace AF_VSLAM
 {
 
-namespace
-{
-// global_descriptor is stored as std::vector<float>; map into placecell's Eigen-based
-// cosine without copying (Eigen::Ref binds to the Map views).
-float cosine(const std::vector<float>& a, const std::vector<float>& b)
-{
-    if(a.empty() || a.size() != b.size())
-        return 0.0f;
-    return placecell::MegaLocEmbedder::cosine(
-        Eigen::Map<const Eigen::VectorXf>(a.data(), Eigen::Index(a.size())),
-        Eigen::Map<const Eigen::VectorXf>(b.data(), Eigen::Index(b.size())));
-}
-} // namespace
-
-PlaceRecognitionMegaLoc::PlaceRecognitionMegaLoc(std::shared_ptr<placecell::MegaLocEmbedder> embedder,
+PlaceRecognitionMegaLoc::PlaceRecognitionMegaLoc(std::shared_ptr<placecell::MegaLocPlaceCell> place_cell,
                                                  const FeatureType verification_feature,
                                                  const PlaceRecognitionMegaLocParameters& params)
-    : PlaceRecognition(verification_feature), params_(params), embedder_(std::move(embedder))
+    : PlaceRecognition(verification_feature), params_(params), place_cell_(std::move(place_cell))
 {
-}
-
-std::vector<float> PlaceRecognitionMegaLoc::embed(const cv::Mat& image)
-{
-    // placecell::MegaLocEmbedder::embed serialises internally: no lock needed here
-    const Eigen::VectorXf descriptor = embedder_->embed(image);
-    return std::vector<float>(descriptor.data(), descriptor.data() + descriptor.size());
 }
 
 void PlaceRecognitionMegaLoc::compute(Frame& frame)
 {
-    if(!frame.global_descriptor.empty())
+    // Relocalization QUERY: transient descriptor, deliberately NOT stored in placecell
+    // (queries arrive every frame while tracking is lost; the store holds keyframes only).
+    if(frame.global_descriptor.size() != 0)
         return;
     if(frame.image.empty())
     {
@@ -60,12 +41,13 @@ void PlaceRecognitionMegaLoc::compute(Frame& frame)
                     << " has no image to embed (Frame::image empty) — relocalization query skipped");
         return;
     }
-    frame.global_descriptor = embed(frame.image);
+    frame.global_descriptor = place_cell_->embedder().embed(frame.image);
 }
 
 void PlaceRecognitionMegaLoc::compute(KeyFrame& keyframe)
 {
-    if(keyframe.global_descriptor.empty())
+    // Embed + store in placecell under the keyframe's frame_id (idempotent)
+    if(!place_cell_->has(keyframe.frame_id))
     {
         if(keyframe.image.empty())
         {
@@ -75,7 +57,7 @@ void PlaceRecognitionMegaLoc::compute(KeyFrame& keyframe)
                         << " has no image to embed (KeyFrame::image empty) — it will never be retrieved");
             return;
         }
-        keyframe.global_descriptor = embed(keyframe.image);
+        place_cell_->add_image(keyframe.frame_id, keyframe.image);
     }
     // The image only existed for this purpose.
     keyframe.image.release();
@@ -102,14 +84,18 @@ void PlaceRecognitionMegaLoc::clear()
 
 float PlaceRecognitionMegaLoc::score(const KeyFrame& a, const KeyFrame& b) const
 {
-    return cosine(a.global_descriptor, b.global_descriptor);
+    const Eigen::VectorXf* da = place_cell_->descriptor(a.frame_id);
+    const Eigen::VectorXf* db = place_cell_->descriptor(b.frame_id);
+    if(!da || !db)
+        return 0.0f;
+    return placecell::MegaLocEmbedder::cosine(*da, *db);
 }
 
-std::vector<Keyframe> PlaceRecognitionMegaLoc::retrieve(const std::vector<float>& query,
+std::vector<Keyframe> PlaceRecognitionMegaLoc::retrieve(const Eigen::Ref<const Eigen::VectorXf>& query,
                                                         const std::set<KeyframeId>& excluded,
                                                         const float floor) const
 {
-    if(query.empty())
+    if(query.size() == 0)
         return {};
 
     std::vector<Keyframe> database;
@@ -124,9 +110,12 @@ std::vector<Keyframe> PlaceRecognitionMegaLoc::retrieve(const std::vector<float>
     std::map<KeyframeId, Scored> scored;
     for(const Keyframe& candidate : database)
     {
-        if(excluded.count(candidate->keyId) || candidate->is_bad() || candidate->global_descriptor.empty())
+        if(excluded.count(candidate->keyId) || candidate->is_bad())
             continue;
-        const float s = cosine(query, candidate->global_descriptor);
+        const Eigen::VectorXf* descriptor = place_cell_->descriptor(candidate->frame_id);
+        if(!descriptor)
+            continue;
+        const float s = placecell::MegaLocEmbedder::cosine(query, *descriptor);
         if(s >= floor)
             scored.emplace(candidate->keyId, Scored{s, candidate});
     }
@@ -188,7 +177,10 @@ std::vector<Keyframe> PlaceRecognitionMegaLoc::detect_loop_candidates(const Keyf
         excluded.insert(id);
     // LoopClosing's min_score (lowest similarity to a covisible) can be arbitrarily low
     // when a covisible looks very different; the configured floor bounds it from below.
-    return retrieve(keyframe->global_descriptor, excluded, std::max(min_score, params_.min_similarity));
+    const Eigen::VectorXf* query = place_cell_->descriptor(keyframe->frame_id);
+    if(!query)
+        return {};
+    return retrieve(*query, excluded, std::max(min_score, params_.min_similarity));
 }
 
 std::vector<Keyframe> PlaceRecognitionMegaLoc::detect_relocalization_candidates(Frame& frame)

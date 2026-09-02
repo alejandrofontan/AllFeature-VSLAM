@@ -178,14 +178,14 @@ System::System(const string &vocabularyFolder,
         std::cout.flush();
         try {
             // Engine build/load + CUDA warmup happen in the embedder constructor
-            placecell_embedder = make_shared<placecell::MegaLocEmbedder>(megaloc_onnx, megaloc_precision);
+            place_cell = make_shared<placecell::MegaLocPlaceCell>(megaloc_onnx, megaloc_precision);
         } catch (const std::exception& e) {
             AF_ERROR("[System] MegaLoc backend setup failed: " + std::string(e.what()));
             exit(-1);
         }
-        place_recognition = make_shared<PlaceRecognitionMegaLoc>(placecell_embedder, vpr_feature, megaloc_params);
-        AF_INFO("[System] VPR: megaloc ready (engine " << (placecell_embedder->loaded_from_cache() ? "cached" : "built")
-                << ": " << placecell_embedder->engine_path() << ", " << placecell_embedder->descriptor_dim()
+        place_recognition = make_shared<PlaceRecognitionMegaLoc>(place_cell, vpr_feature, megaloc_params);
+        AF_INFO("[System] VPR: megaloc ready (engine " << (place_cell->embedder().loaded_from_cache() ? "cached" : "built")
+                << ": " << place_cell->embedder().engine_path() << ", " << place_cell->embedder().descriptor_dim()
                 << "-d, min similarity " << megaloc_params.min_similarity
                 << ", max candidates " << megaloc_params.max_candidates << ")");
         std::cout.flush();
@@ -252,6 +252,8 @@ System::System(const string &vocabularyFolder,
     tracker->set_loop_closing(loopCloser);
 
     localMapper->set_loop_closer(loopCloser);
+    if(place_cell)
+        localMapper->set_placecell(place_cell);   // keyframe descriptors for the online VPR matrix
 
     loopCloser->SetTracker(tracker);
     loopCloser->SetLocalMapper(localMapper);

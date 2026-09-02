@@ -32,6 +32,10 @@
 #include <Eigen/Core>
 #include <opencv2/core/core.hpp>
 
+// placecell (Thirdparty/placecell): stores the keyframes' global descriptors, keyed by
+// frame_id. Forward declaration only -- the .cc files include the real header.
+namespace placecell { class PlaceCell; }
+
 #include "FeatureMatcher.h"
 #include "KeyFrame.h"
 #include "LoopClosing.h"
@@ -102,6 +106,7 @@ public:
 
     void set_loop_closer(std::shared_ptr<LoopClosing> loop_closer) { loop_closer_ = std::move(loop_closer); }
     void set_viewer(std::shared_ptr<Viewer> viewer) { viewer_ = std::move(viewer); }
+    void set_placecell(std::shared_ptr<placecell::PlaceCell> place_cell) { place_cell_ = std::move(place_cell); }
 
     // Main function: runs on the Local Mapping thread. One process_keyframe() per
     // queued keyframe; the stop/reset/finish protocols are honored between iterations.
@@ -193,10 +198,12 @@ protected:
     Keyframe current_keyframe_;
 
     // Online keyframe x keyframe VPR similarity matrix (cosine of the keyframes' MegaLoc
-    // global descriptors), grown once per processed keyframe: row/col k = k-th keyframe
-    // with a descriptor, in insertion order; rows/cols are never removed when a keyframe
-    // is culled (culled keyframes stay as the culling "history"). Empty when the VPR
-    // backend does not produce global descriptors (vpr: bow / none).
+    // global descriptors, read from placecell by frame_id), grown once per processed
+    // keyframe: row/col k = k-th keyframe with a descriptor, in insertion order;
+    // rows/cols are never removed when a keyframe is culled (culled keyframes stay as
+    // the culling "history"). Empty when the VPR backend does not store global
+    // descriptors (vpr: bow / none), i.e. when place_cell_ is null.
+    std::shared_ptr<placecell::PlaceCell> place_cell_{};
     mutable std::mutex vpr_mutex_;
     std::vector<Keyframe> vpr_keyframes_{};   // k -> keyframe
     Eigen::MatrixXf keyframe_vpr_matrix_{};   // k x k, raw cosine
