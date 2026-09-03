@@ -73,9 +73,11 @@ public:
     // BoW score in [0,1], cosine in [-1,1] for MegaLoc). 0 if either is missing.
     virtual float score(const KeyFrame& a, const KeyFrame& b) const = 0;
 
-    // Loop candidates for a keyframe: not covisible with it, similarity >= min_score
-    // (LoopClosing passes the lowest similarity among the keyframe's covisibles),
-    // accumulated over covisibility groups and pruned to the best ones.
+    // Loop candidates for a keyframe: not covisible with it, similar enough,
+    // accumulated over covisibility groups and pruned to the best ones. min_score is
+    // LoopClosing's adaptive reference (lowest similarity among the keyframe's
+    // covisibles): the BoW backend needs it to calibrate its scene-dependent scores;
+    // the MegaLoc backend ignores it (globally calibrated cosine, fixed floor only).
     virtual std::vector<Keyframe> detect_loop_candidates(const Keyframe& keyframe, float min_score) = 0;
 
     // Relocalization candidates for a (lost) frame; compute(frame) must have run.

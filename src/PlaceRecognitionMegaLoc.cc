@@ -175,17 +175,21 @@ std::vector<Keyframe> PlaceRecognitionMegaLoc::retrieve(const Eigen::Ref<const E
     return candidates;
 }
 
-std::vector<Keyframe> PlaceRecognitionMegaLoc::detect_loop_candidates(const Keyframe& keyframe, const float min_score)
+std::vector<Keyframe> PlaceRecognitionMegaLoc::detect_loop_candidates(const Keyframe& keyframe, const float /*min_score*/)
 {
     std::set<KeyframeId> excluded{keyframe->keyId};
     for(const auto& [id, connected] : keyframe->GetConnectedKeyFrames())
         excluded.insert(id);
-    // LoopClosing's min_score (lowest similarity to a covisible) can be arbitrarily low
-    // when a covisible looks very different; the configured floor bounds it from below.
+    // The fixed floor alone gates candidates. LoopClosing's adaptive reference score
+    // (lowest similarity to a covisible keyframe) is deliberately IGNORED for this
+    // backend: it exists to calibrate BoW's scene-dependent scores, while MegaLoc's
+    // cosine is globally calibrated -- and with covisibles scoring ~0.75-0.9, the
+    // adaptive bar would reject genuine revisits seen from a different viewpoint,
+    // direction, or season (which legitimately score ~0.6-0.7).
     const Eigen::VectorXf* query = place_cell_->descriptor(keyframe->frame_id);
     if(!query)
         return {};
-    return retrieve(*query, excluded, std::max(min_score, params_.min_similarity));
+    return retrieve(*query, excluded, params_.min_similarity);
 }
 
 std::vector<Keyframe> PlaceRecognitionMegaLoc::detect_relocalization_candidates(Frame& frame)
