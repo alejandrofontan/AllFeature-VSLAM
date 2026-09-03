@@ -65,8 +65,7 @@ public:
 public:
 
     // Initialize the SLAM system. It launches the Local Mapping, Loop Closing and Viewer threads.
-    System(const string &vocabularyFolder,
-           const string &strCalibrationFile, const string &strSettingsFile,
+    System(const string &strCalibrationFile, const string &strSettingsFile,
            const eSensor sensor, const bool activateVisualization,
            const vector<FeatureType>& featureTypes, const bool& fixImageSize = false);
 

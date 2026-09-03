@@ -135,7 +135,7 @@ void LocalMapping::process_new_keyframe()
         new_keyframes_.pop_front();
     }
 
-    // Global descriptor (BoW vector or VPR image embedding, backend-dependent)
+    // Global descriptor (VPR image embedding, backend-dependent)
     current_keyframe_->compute_global_descriptor();
 
 #ifdef ALLFEATURE_EVALUATION

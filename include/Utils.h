@@ -10,6 +10,7 @@
 #include<opencv2/core/core.hpp>
 
 #include <vector>
+#include <mutex>
 #include <random>
 
 namespace AF_VSLAM{
@@ -28,10 +29,14 @@ namespace AF_VSLAM{
     void median_tracking_time(std::map<int, int> &timeMap, const std::string& stage, const bool& activate);
     double map_median(std::map<int, int>& timeMap);
 
+    // Deterministic RNG for every RANSAC sampler (Initializer, PnPsolver, Sim3Solver):
+    // fixed seed (issue #16), one engine, mutex-guarded because the tracking thread
+    // (relocalization PnP) and the loop-closing thread (Sim3) can draw concurrently.
     class RandomIntegerGenerator
     {
     private:
 
+        static std::mutex randomIntMutex;
         static std::mt19937 randomIntGenerator;
 
     public:

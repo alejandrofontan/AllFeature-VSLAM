@@ -13,7 +13,7 @@
  * query frames are transient: embedded via the store's embedder() but never stored
  * (Frame::global_descriptor holds that query). Retrieval is brute-force cosine
  * similarity over the keyframe database, followed by the same covisibility
- * accumulation and 0.75-of-best pruning KeyFrameDatabase applies to BoW scores, so
+ * accumulation and 0.75-of-best pruning classic ORB-SLAM2 applied to BoW scores, so
  * the consumers (Tracking::relocalize, LoopClosing::DetectLoop) see the same
  * candidate semantics with a different similarity.
  *

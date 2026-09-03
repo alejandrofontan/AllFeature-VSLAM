@@ -201,7 +201,7 @@ protected:
     // VPR similarity kernel (raw cosine, grown by placecell on every stored keyframe;
     // rows are never removed when a keyframe is culled -- culled keyframes stay as the
     // culling "history"). Null when the VPR backend does not store global descriptors
-    // (vpr: bow / none). Kernel rows map back to keyframes via
+    // (vpr: none). Kernel rows map back to keyframes via
     // place_cell_->external_ids() (frame_id) -- see cull_keyframes_information.
     std::shared_ptr<placecell::PlaceCell> place_cell_{};
     std::list<Pt> recent_map_points_;

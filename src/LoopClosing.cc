@@ -141,9 +141,9 @@ bool LoopClosing::DetectLoop()
         return false;
     }
 
-    // Compute the reference similarity score (backend-specific: BoW score or MegaLoc
-    // cosine). This is the lowest score to a connected keyframe in the covisibility
-    // graph; loop candidates must be at least this similar to the current keyframe.
+    // Compute the reference similarity score: the lowest score to a connected keyframe
+    // in the covisibility graph. Passed to detect_loop_candidates as a calibration aid
+    // for scene-dependent-score backends; the MegaLoc backend ignores it (fixed floor).
     const vector<Keyframe> vpConnectedKeyFrames = mpCurrentKF->get_covisible_keyframes();
     float minScore = 1;
     for(size_t i=0; i<vpConnectedKeyFrames.size(); i++)

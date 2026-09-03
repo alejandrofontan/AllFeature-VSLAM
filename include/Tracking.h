@@ -31,7 +31,6 @@
 
 #include "FeatureExtractor.h"
 #include "FeatureMatcher.h"
-#include "FeatureVocabulary.h"
 #include "Frame.h"
 #include "FrameDrawer.h"
 #include "Initializer.h"

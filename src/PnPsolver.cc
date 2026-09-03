@@ -51,11 +51,11 @@
 #include <iostream>
 
 #include "PnPsolver.h"
+#include "Utils.h"
 
 #include <vector>
 #include <cmath>
 #include <opencv2/core/core.hpp>
-#include "DBoW2/Random.h"
 #include <algorithm>
 
 using namespace std;
@@ -190,7 +190,7 @@ cv::Mat PnPsolver::iterate(int nIterations, bool &bNoMore, vector<bool> &vbInlie
         // Get min set of points
         for(short i = 0; i < mRansacMinSet; ++i)
         {
-            int randi = DUtils::Random::RandomInt(0, vAvailableIndices.size()-1);
+            int randi = RandomIntegerGenerator::GetRandomInteger(0, int(vAvailableIndices.size())-1);
 
             int idx = vAvailableIndices[randi];
 

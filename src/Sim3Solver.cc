@@ -20,6 +20,7 @@
 
 
 #include "Sim3Solver.h"
+#include "Utils.h"
 
 #include <vector>
 #include <cmath>
@@ -29,7 +30,6 @@
 #include "FeatureMatcher.h"
 #include "Converter.h"
 
-#include "DBoW2/Random.h"
 
 namespace AF_VSLAM
 {
@@ -163,7 +163,7 @@ cv::Mat Sim3Solver::iterate(int nIterations, bool &bNoMore, vector<bool> &vbInli
         // Get min set of points
         for(short i = 0; i < 3; ++i)
         {
-            int randi = DUtils::Random::RandomInt(0, vAvailableIndices.size()-1);
+            int randi = RandomIntegerGenerator::GetRandomInteger(0, int(vAvailableIndices.size())-1);
 
             int idx = vAvailableIndices[randi];
             P3Dc1i.col(i) = mvX3Dc1[idx];

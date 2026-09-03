@@ -26,9 +26,6 @@
 #include "MapPoint.h"
 #include "Image.h"
 
-#include "DBoW2/BowVector.h"
-#include "DBoW2/FeatureVector.h"
-#include "FeatureVocabulary.h"
 #include "KeyFrame.h"
 #include "FeatureExtractor.h"
 #include "FeatureFactory.h"
@@ -37,6 +34,9 @@
 
 namespace AF_VSLAM
 {
+// Legacy ORB-SLAM2 headers use unqualified std types throughout; this using-directive
+// previously arrived transitively through the (now removed) DBoW2 vocabulary headers.
+using namespace std;
 #define FRAME_GRID_ROWS 48
 #define FRAME_GRID_COLS 64
 
@@ -68,8 +68,8 @@ public:
     // Extract ORB on the image. 0 for left image and 1 for right image.
     void ExtractFeatures(int flag, const Image & img);
 
-    // Compute the global descriptor with the active VPR backend (BoW vector, or a
-    // MegaLoc image embedding); no-op when VPR is inactive.
+    // Compute the global descriptor with the active VPR backend (a MegaLoc image
+    // embedding); no-op when VPR is inactive.
     void compute_global_descriptor();
 
     // Drop matches to map points that no observation backs (matched during
@@ -143,7 +143,7 @@ public:
     cv::Mat image;
 
     // Transient global descriptor of a relocalization QUERY frame (MegaLoc: 8448-d
-    // unit vector; size 0 for BoW, which uses mBowVec/mFeatVec below). Keyframe
+    // unit vector; size 0 when VPR is inactive). Keyframe
     // descriptors do NOT live here: they are stored in placecell (System::place_cell),
     // keyed by frame_id, when PlaceRecognitionMegaLoc::compute(KeyFrame&) runs.
     Eigen::VectorXf global_descriptor;
@@ -201,9 +201,6 @@ public:
     // standard for RGB-D/ToF sensors) propagated through inv_depth=1/depth. 0 wherever inv_depth is 0.
     std::map<FeatureType, std::vector<float>> sigma2invDepth;
 
-    // Bag of Words Vector structures.
-    DBoW2::BowVector mBowVec;
-    DBoW2::FeatureVector mFeatVec;
 
     // ORB descriptor, each row associated to a keypoint.
     std::map<FeatureType, cv::Mat> descriptors, descriptorsRight;

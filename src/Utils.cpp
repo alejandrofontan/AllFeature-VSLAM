@@ -7,8 +7,8 @@
 #include <utility>
 #include "Feature_superpoint256.h"
 
-std::random_device rd;
-//std::mt19937 AF_VSLAM::RandomIntegerGenerator::randomIntGenerator{std::mt19937(rd())};
+//std::mt19937 AF_VSLAM::RandomIntegerGenerator::randomIntGenerator{std::mt19937(std::random_device{}())};
+std::mutex AF_VSLAM::RandomIntegerGenerator::randomIntMutex{};
 std::mt19937 AF_VSLAM::RandomIntegerGenerator::randomIntGenerator{123456u};
 
 void AF_VSLAM::printInfo(const std::string& function, const std::string& message,
@@ -91,6 +91,7 @@ std::string AF_VSLAM::replaceAllOccurrences(std::string str, const std::string& 
 }
 
 int AF_VSLAM::RandomIntegerGenerator::GetRandomInteger(const int& minNumber, const int& maxNumber){
+    std::lock_guard<std::mutex> lock(randomIntMutex);
     std::uniform_int_distribution<> distrib(minNumber, maxNumber);
     return distrib(randomIntGenerator);
 }

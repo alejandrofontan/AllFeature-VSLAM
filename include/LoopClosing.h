@@ -24,7 +24,6 @@
 #include "KeyFrame.h"
 #include "LocalMapping.h"
 #include "Map.h"
-#include "FeatureVocabulary.h"
 #include "Tracking.h"
 #include "MapDrawer.h"
 #include "FeatureMatcher.h"

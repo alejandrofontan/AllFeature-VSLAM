@@ -22,9 +22,6 @@
 #define KEYFRAME_H
 
 #include "MapPoint.h"
-#include "DBoW2/BowVector.h"
-#include "DBoW2/FeatureVector.h"
-#include "FeatureVocabulary.h"
 #include "FeatureExtractor.h"
 #include "Frame.h"
 #include "PlaceRecognition.h"
@@ -35,6 +32,9 @@
 
 namespace AF_VSLAM
 {
+// Legacy ORB-SLAM2 headers use unqualified std types throughout; this using-directive
+// previously arrived transitively through the (now removed) DBoW2 vocabulary headers.
+using namespace std;
 
 class Map;
 class Frame;
@@ -73,12 +73,12 @@ public:
     void getFullIntrinsics(float &fx, float &fy, float &cx, float &cy, float& invfx, float& invfy) const;
     void getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_);
 
-    // Compute the global descriptor with the active VPR backend (BoW vector, or a
-    // MegaLoc image embedding — which then releases `image`); no-op when VPR is inactive.
+    // Compute the global descriptor with the active VPR backend (MegaLoc image
+    // embedding — which then releases `image`); no-op when VPR is inactive.
     void compute_global_descriptor();
 
     // Similarity of the two keyframes' global descriptors through the VPR backend
-    // (MegaLoc: cosine; BoW: DBoW2 score). NaN when VPR is inactive. Hook for
+    // (MegaLoc: cosine). NaN when VPR is inactive. Hook for
     // appearance-based keyframe culling.
     float vpr_similarity(const Keyframe& other) const;
 
@@ -212,14 +212,11 @@ public:
     const std::map<FeatureType, std::vector<float>> sigma2invDepth; // variance of inv_depth; 0 where no valid depth
     std::map<FeatureType, cv::Mat> descriptors;
 
-    //BoW
-    DBoW2::BowVector mBowVec;
-    DBoW2::FeatureVector mFeatVec;
 
     // Image-embedding VPR (MegaLoc): the keyframe's image (OpenCV-native BGR, shared
     // header from the Frame) lives only until compute_global_descriptor() has embedded
     // and stored it in placecell (System::place_cell, keyed by frame_id); empty for
-    // BoW/none. The descriptor itself is not a member: read it via
+    // none. The descriptor itself is not a member: read it via
     // place_cell->descriptor(frame_id).
     cv::Mat image;
 

@@ -568,7 +568,7 @@ relocalization and loop detection now goes through one backend interface
   double-centred over every keyframe inserted so far (`KeyframeCullingCentred`, default on = Pearson
   correlation of mean-centred descriptors, removes MegaLoc's ~0.37 common-mode floor). Keys
   `KeyframeCullingMaxUnexplained` (tau; live Viewer slider "Cull Max Unexplained"), `MinAge`,
-  `MinKeyframes`, `Scope: map|local`, `MaxPerCall`. Needs `vpr: megaloc`; with bow/none it falls back to
+  `MinKeyframes`, `Scope: map|local`, `MaxPerCall`. Needs `vpr: megaloc`; with none it falls back to
   heuristic with a one-time warning. The offline `VPRMatrix`/`vpr_matrix:` CLI path is gone for good;
   the maths/design history lives in `/home/alejandro/cull_keyframes_math.pdf` (rev. 5, outside the repo).
 - Model pipeline (reproducible, lives in the placecell submodule since 2026-09-02): `Thirdparty/placecell/tools/export_megaloc.py`

@@ -47,7 +47,6 @@ int main(int argc, char **argv)
     bool verbose{true};
 
     std::string feature{"orb32"};
-    std::string path_to_vocabulary_folder("allfeature_vocabulary");
     bool fixImageSize = true;
 
     std::cout << std::endl;
@@ -95,12 +94,6 @@ int main(int argc, char **argv)
             removeSubstring(arg, "verbose:");
             verbose = bool(std::stoi(arg));
             AF_CONFIG_FIELD("Verbose mode: ", verbose);
-            continue;
-        }
-        if (hasPrefix(arg, "vocabulary_folder:")) {
-            removeSubstring(arg, "vocabulary_folder:");
-            path_to_vocabulary_folder = arg;
-            AF_CONFIG_FIELD("Path to vocabulary folder: ", path_to_vocabulary_folder);
             continue;
         }
     }
@@ -175,8 +168,7 @@ int main(int argc, char **argv)
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
 
-    AF_VSLAM::System SLAM(path_to_vocabulary_folder,
-                                  calibration_yaml, settings_yaml,
+    AF_VSLAM::System SLAM(calibration_yaml, settings_yaml,
                                   AF_VSLAM::System::RGBD,
                                   verbose,
                                   featureTypes,

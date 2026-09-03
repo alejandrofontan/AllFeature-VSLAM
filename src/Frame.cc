@@ -55,7 +55,6 @@ Frame::Frame(const Frame &frame)
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
      mvKeysRight(frame.mvKeysRight), keypoints(frame.keypoints),  mvuRight(frame.mvuRight),
      mvDepth(frame.mvDepth), inv_depth(frame.inv_depth), sigma2invDepth(frame.sigma2invDepth),
-     mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec),
      pts(frame.pts), outliers(frame.outliers), frame_id(frame.frame_id), ref_keyframe(frame.ref_keyframe),
      sizeTolerance(frame.sizeTolerance),invSizeTolerance(frame.invSizeTolerance),
      keyPtsSigma2(frame.keyPtsSigma2),keyPtsInf(frame.keyPtsInf),keyPtsSize(frame.keyPtsSize),

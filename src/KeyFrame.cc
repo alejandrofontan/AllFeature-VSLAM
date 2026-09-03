@@ -42,7 +42,7 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> 
     fx(F.fx), fy(F.fy), cx(F.cx), cy(F.cy), invfx(F.invfx), invfy(F.invfy),
     mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), mvKeys(F.mvKeys), keypoints(F.keypoints),
     mvuRight(F.mvuRight), mvDepth(F.mvDepth), inv_depth(F.inv_depth), sigma2invDepth(F.sigma2invDepth),
-    mBowVec(F.mBowVec), mFeatVec(F.mFeatVec), image(F.image), sizeTolerance(F.sizeTolerance),
+    image(F.image), sizeTolerance(F.sizeTolerance),
     keyPtsSigma2(F.keyPtsSigma2),keyPtsInf(F.keyPtsInf),keyPtsSize(F.keyPtsSize),
     maxKeyPtSize(F.maxKeyPtSize),maxKeyPtSigma(F.maxKeyPtSigma),
     mnMinX(F.mnMinX), mnMinY(F.mnMinY), mnMaxX(F.mnMaxX), mnMaxY(F.mnMaxY),

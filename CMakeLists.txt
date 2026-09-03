@@ -14,15 +14,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 
 # Compiler flags
 add_compile_options(-Wall -Wextra -Wpedantic -O3 -march=native)
-# -Wno-overloaded-virtual: this project's own translation units transitively include vendored
-# DBoW2 headers (FOrb.h, FBrief.h, ...) whose FXxx classes intentionally hide the private, never
-# dynamically-dispatched FClass::meanValue with their own differently-typed static meanValue --
-# see the matching note in Thirdparty/DBoW2/CMakeLists.txt for the full rationale. Scoped to CXX
-# only (via generator expression) since this directory's compile options are inherited by
-# add_subdirectory()'d targets that include plain C sources (e.g. vendored g2o's os_specific.c),
-# and -Woverloaded-virtual is a C++-only concept -- passing it unconditionally produced its own
-# "valid for C++/ObjC++ but not for C" warning from the C frontend.
-add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-overloaded-virtual>)
 
 set(SRCS_ALLFEATURE
         src/System.cc
@@ -42,15 +33,12 @@ set(SRCS_ALLFEATURE
         src/Optimizer.cc
         src/PnPsolver.cc
         src/Frame.cc
-        src/KeyFrameDatabase.cc
         src/Sim3Solver.cc
         src/Initializer.cc
         src/Viewer.cc
         src/Observation.cpp
         src/FeatureExtractor.cpp
         src/Utils.cpp
-        src/Vocabulary.cpp
-        src/PlaceRecognitionBoW.cc
         src/PlaceRecognitionMegaLoc.cc
         src/Image.cpp
         src/Feature.cpp
@@ -158,8 +146,6 @@ else()
   message(WARNING "OpenMP NOT found")
 endif()
 
-set(DBoW2_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/include")
-set(DBoW2_LIBRARIES "${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so")
 
 add_library(${PROJECT_NAME} SHARED ${SRCS_ALLFEATURE})
 
@@ -167,7 +153,6 @@ add_library(${PROJECT_NAME} SHARED ${SRCS_ALLFEATURE})
 target_include_directories(${PROJECT_NAME} PUBLIC
         ${PROJECT_SOURCE_DIR}
         ${PROJECT_SOURCE_DIR}/include
-        ${DBoW2_INCLUDE_DIRS}
 )
 
 # Link libraries
@@ -176,7 +161,6 @@ target_link_libraries(${PROJECT_NAME}
         Eigen3::Eigen
         ${YAML_CPP_LIBRARIES}
         g2o
-        ${DBoW2_LIBRARIES}
         ${brisk_LIBRARIES}
         ${akaze_LIBRARIES}
         ${Pangolin_LIBRARIES}

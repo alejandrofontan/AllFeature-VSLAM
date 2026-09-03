@@ -23,7 +23,6 @@ int main(int argc, char** argv) {
     // ALLFEATURE_VSLAM inputs (defaults are for local testing; override via CLI: key:value)
     std::string calibration_yaml{"/home/alejandro/Desktop/calibration.yaml"};
     std::string settings_yaml{"/home/alejandro/VSLAM-LAB/Baselines/AllFeature-VSLAM-DEV/vslamlab_allfeature-dev_settings.yaml"};
-    std::string path_to_vocabulary_folder("/home/alejandro/VSLAM-LAB/Baselines/AllFeature-VSLAM-DEV/allfeature_vocabulary");
     std::string stream_url{"rtmp://10.68.61.71:1935/live/stream"};
     bool verbose{true};
     bool fixImageSize = false;
@@ -32,7 +31,6 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if (hasPrefix(arg, "calibration_yaml:")) { calibration_yaml = arg.substr(std::string("calibration_yaml:").size()); continue; }
         if (hasPrefix(arg, "settings_yaml:")) { settings_yaml = arg.substr(std::string("settings_yaml:").size()); continue; }
-        if (hasPrefix(arg, "vocabulary_folder:")) { path_to_vocabulary_folder = arg.substr(std::string("vocabulary_folder:").size()); continue; }
         if (hasPrefix(arg, "stream_url:")) { stream_url = arg.substr(std::string("stream_url:").size()); continue; }
     }
 
@@ -73,8 +71,7 @@ int main(int argc, char** argv) {
     }
 
     // Setting AllFeature-VSLAM
-    AF_VSLAM::System SLAM(path_to_vocabulary_folder,
-                                  calibration_yaml, settings_yaml,
+    AF_VSLAM::System SLAM(calibration_yaml, settings_yaml,
                                   AF_VSLAM::System::MONOCULAR,
                                   verbose,
                                   featureTypes,

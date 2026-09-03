@@ -7,16 +7,16 @@
  * - License: GPLv3 License
  *
  * Visual place recognition (VPR) backend interface (issue #17, stage 2). One object
- * owns everything retrieval-related that used to be spread over Vocabulary +
- * KeyFrameDatabase: computing a frame's/keyframe's global descriptor, the keyframe
- * database, a similarity score, and the two candidate queries (relocalization, loop
- * detection). The downstream geometric verification (feature matching, PnP, Sim3) is
- * backend-agnostic and uses the local feature named by verification_feature()
- * (settings key `feature_vpr`).
+ * owns everything retrieval-related: computing a frame's/keyframe's global
+ * descriptor, a similarity score, and the two candidate queries (relocalization,
+ * loop detection). The downstream geometric verification (feature matching, PnP,
+ * Sim3) is backend-agnostic and uses the local feature named by
+ * verification_feature() (settings key `feature_vpr`). A new backend (another
+ * global descriptor / retrieval method) plugs in by implementing this interface
+ * and registering in System's constructor.
  *
  * Backends (selected by the `vpr:` settings key, resolved in System's constructor):
- *   - PlaceRecognitionBoW      DBoW2 bag-of-words over one classical feature (default)
- *   - PlaceRecognitionMegaLoc  MegaLoc global image descriptor (TensorRT), cosine retrieval
+ *   - PlaceRecognitionMegaLoc  MegaLoc global image descriptor via placecell (default)
  *   - PlaceRecognitionNone     disabled: no loop closing, no relocalization
  */
 
@@ -43,7 +43,7 @@ public:
         : verification_feature_(verification_feature) {}
     virtual ~PlaceRecognition() = default;
 
-    // Backend name as written in the settings ("bow", "megaloc", "none").
+    // Backend name as written in the settings ("megaloc", "none").
     virtual std::string name() const = 0;
 
     // The single gate every consumer checks. When false the system runs without VPR:
@@ -51,7 +51,7 @@ public:
     virtual bool is_active() const = 0;
 
     // Local feature used to geometrically verify retrieved candidates (reloc PnP,
-    // loop Sim3). For BoW it is also the feature the vocabulary was trained on.
+    // loop Sim3).
     FeatureType verification_feature() const { return verification_feature_; }
 
     // True when the backend embeds IMAGES (not local descriptors): Frame/KeyFrame
@@ -70,14 +70,14 @@ public:
     virtual void clear() = 0;
 
     // Similarity between two keyframes' global descriptors (backend-specific scale:
-    // BoW score in [0,1], cosine in [-1,1] for MegaLoc). 0 if either is missing.
+    // cosine in [-1,1] for MegaLoc). 0 if either is missing.
     virtual float score(const KeyFrame& a, const KeyFrame& b) const = 0;
 
     // Loop candidates for a keyframe: not covisible with it, similar enough,
     // accumulated over covisibility groups and pruned to the best ones. min_score is
     // LoopClosing's adaptive reference (lowest similarity among the keyframe's
-    // covisibles): the BoW backend needs it to calibrate its scene-dependent scores;
-    // the MegaLoc backend ignores it (globally calibrated cosine, fixed floor only).
+    // covisibles), a calibration aid for backends with scene-dependent scores (the
+    // late BoW backend); MegaLoc ignores it (globally calibrated cosine, fixed floor).
     virtual std::vector<Keyframe> detect_loop_candidates(const Keyframe& keyframe, float min_score) = 0;
 
     // Relocalization candidates for a (lost) frame; compute(frame) must have run.
@@ -87,8 +87,8 @@ protected:
     FeatureType verification_feature_;
 };
 
-// `vpr: none` (or a defaulted BoW that cannot run): inert backend, so the rest of the
-// system needs no null checks — every query returns nothing, every compute is a no-op.
+// `vpr: none`: inert backend, so the rest of the system needs no null checks — every
+// query returns nothing, every compute is a no-op.
 class PlaceRecognitionNone final : public PlaceRecognition
 {
 public:
