@@ -8,6 +8,7 @@
 #include "afvslam_log.hpp"
 #include "BruteForceMatcher.h"
 #include "FeatureMatcher.h"
+#include "Feature_superpoint256.h"
 
 #include <opencv2/core/utility.hpp>
 
@@ -57,8 +58,8 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
 
         if (feat_type == FEAT_SUPERPOINT256) {
             AF_INFO("Initializing SuperPoint-LightGlue...");
-            std::string config_path = "Thirdparty/SuperPoint-LightGlue-TensorRT/config/config.yaml";
-            std::string model_dir = "Thirdparty/SuperPoint-LightGlue-TensorRT/weights/";
+            const std::string& config_path = Superpoint256::getConfigYaml();
+            const std::string& model_dir = Superpoint256::getModelsDir();
             Configs configs(config_path, model_dir);
             matcher_lightglue_superpoint = std::make_shared<SuperPointLightGlue>(configs.superpoint_lightglue_config);
 

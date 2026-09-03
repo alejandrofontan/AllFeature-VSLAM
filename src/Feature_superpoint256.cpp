@@ -9,8 +9,8 @@ AF_VSLAM::FeatureExtractor_superpoint256::FeatureExtractor_superpoint256(std::sh
         AF_INFO("Initializing SuperPoint256 feature extractor...");
         AF_INFO("Building SuperPoint inference engine...");
 
-        std::string config_path = "Thirdparty/SuperPoint-LightGlue-TensorRT/config/config.yaml";
-        std::string model_dir = "Thirdparty/SuperPoint-LightGlue-TensorRT/weights";
+        const std::string& config_path = Superpoint256::getConfigYaml();
+        const std::string& model_dir = Superpoint256::getModelsDir();
         Configs configs(config_path, model_dir);
         AF_INFO("SuperPoint256 config loaded.");
         extractor = std::make_shared<SuperPoint>(configs.superpoint_config);

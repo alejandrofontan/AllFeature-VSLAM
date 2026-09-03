@@ -40,14 +40,24 @@ build_library() {
   	delete_if_exists ${source_folder}
   fi
 
+  # Light_Glue_CPP compiles LIGHTGLUE_MODELS_DIR into the library. Pass the bare folder name so the
+  # ALIKED/LightGlue weights are looked up in `lightglue_models/` relative to the process cwd, like
+  # megaloc_models/ and segmentation_models/ (the `download-lightglue-models` task fetches them).
+  # The :STRING type matters: an untyped -D value is turned into an absolute path by the
+  # project's `CACHE PATH` declaration.
+  local extra_flags=()
+  if [ "$library_name" = "Light_Glue_CPP" ]; then
+    extra_flags=(-DLIGHTGLUE_MODELS_DIR:STRING=lightglue_models)
+  fi
+
   if [ "$verbose" = true ]; then
     echo "[${library_name}][build.sh] Compile ${library_name} ... "
-  	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder
+  	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder "${extra_flags[@]}"
   	cmake --build $build_folder --config Release --parallel 4
     #ninja -C build 2>&1 | grep "error:" | head -30
   else
     echo "[${library_name}][build.sh] Compile ${library_name} (output disabled) ... "
-  	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder > /dev/null 2>&1
+  	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder "${extra_flags[@]}" > /dev/null 2>&1
   	cmake --build $build_folder --config Release --parallel 4 > /dev/null 2>&1
   fi
 }

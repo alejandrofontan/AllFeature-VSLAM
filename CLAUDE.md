@@ -46,7 +46,7 @@ The mono executable takes `key:value` style positional args (no flags), parsed b
   feature:<name> vocabulary_folder:<path> verbose:<0|1>
 ```
 
-`settings_yaml` (e.g. `vslamlab_allfeature-dev_settings.yaml`) sets `features: [...]` (candidate feature list), camera name, and viewer/RGB-D params. `feature:` selects the active one at startup. Vocabulary files (DBoW2, one per feature family) live in `allfeature_vocabulary/` (gitignored — downloaded on demand by the Python baseline wrapper from the `fontan/anyfeature_vocabulary` HF dataset repo).
+`settings_yaml` (e.g. `vslamlab_allfeature-dev_settings.yaml`) sets `features: [...]` (candidate feature list), camera name, and viewer/RGB-D params. `feature:` is parsed but unused; the settings' `features:` list decides. All learned-model assets are resolved relative to the process cwd and downloaded by pixi tasks (`pixi run setup` runs them all): `megaloc_models/` (HF `vslamlab/megaloc-models`), `segmentation_models/`, `superpoint_models/` (SuperPoint + SuperPoint-LightGlue ONNX and their `config.yaml`) and `lightglue_models/` (ALIKED `aliked-n16.pt` + `aliked_lightglue.pt`), the last three from HF `vslamlab/allfeature-vslamlab`. None of them is tracked in git any more (the Thirdparty submodules used to carry the SuperPoint/ALIKED weights); TensorRT engines are built on first run and cached next to the ONNX. The old DBoW2 vocabulary is gone (place recognition goes through `vpr:`).
 
 ---
 

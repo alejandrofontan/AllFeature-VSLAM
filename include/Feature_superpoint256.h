@@ -25,9 +25,19 @@ namespace AF_VSLAM {
         std::shared_ptr<FeatureExtractor> createExtractor(
             std::shared_ptr<FeatureExtractorSettings> settings) const override;
 
+        /// TensorRT assets of the SuperPoint extractor and the SuperPoint-LightGlue matcher
+        /// (ONNX files + the config.yaml naming them), resolved relative to the process cwd like
+        /// every other model folder of this project (megaloc_models/, segmentation_models/,
+        /// lightglue_models/). Downloaded from the HF repo vslamlab/allfeature-vslamlab by the
+        /// `download-superpoint-models` pixi task; TensorRT engines are cached next to the ONNX.
+        static const std::string& getModelsDir()  { return s_modelsDir; }
+        static const std::string& getConfigYaml() { return s_configYaml; }
+
     private:
         inline static const std::string s_featureName    = "superpoint256";
         inline static const std::string s_settingsYamlFile = "settings/superpoint256_settings.yaml";
+        inline static const std::string s_modelsDir  = "superpoint_models";
+        inline static const std::string s_configYaml = "superpoint_models/config.yaml";
         inline static const Eigen::Matrix<float,3,1> s_color = {122, 0, 255};
     };
 

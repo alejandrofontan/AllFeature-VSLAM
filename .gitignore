@@ -15,3 +15,6 @@ Thirdparty/Segmentation-TensorRT/convert2onnx/efficientvit/
 segmentation_models/
 Thirdparty/MegaLoc-TensorRT/convert2onnx/megaloc/
 megaloc_models/
+superpoint_models/
+lightglue_models/
+.cache/

@@ -22,6 +22,11 @@ git-clone = "git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git -
 # cached next to them)
 download-megaloc-models = { cmd = "hf download vslamlab/megaloc-models --local-dir megaloc_models", outputs = ["megaloc_models/*.onnx"] }
 download-segmentation-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'efficientvit-seg*' --local-dir segmentation_models", outputs = ["segmentation_models/*.onnx"] }
+# SuperPoint + SuperPoint-LightGlue ONNX (and their config.yaml) and the ALIKED + LightGlue torch
+# weights: no longer tracked in the Thirdparty submodules, served from the same HF repo as
+# subfolders, downloaded to superpoint_models/ and lightglue_models/ next to the other model folders
+download-superpoint-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'superpoint_models/*' --local-dir .", outputs = ["superpoint_models/*.onnx"] }
+download-lightglue-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'lightglue_models/*' --local-dir .", outputs = ["lightglue_models/*.pt"] }
 
 execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
 execute-rgbd = { cmd = "./bin/vslamlab_allfeature_rgbd" }
@@ -106,7 +111,7 @@ tensorrt-cxx-headers = "*"   # NvInfer.h etc. for compilation (the runtime libs 
 [feature.build.tasks]
 build = { cmd = "./build.sh" }
 # setup = everything a fresh clone needs to run: fetch the models, then compile
-setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "build"] }
+setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "download-superpoint-models", "download-lightglue-models", "build"] }
 
 [environments]
 build = ["build"]
