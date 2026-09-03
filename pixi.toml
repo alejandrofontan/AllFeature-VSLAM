@@ -6,6 +6,14 @@ name = "AllFeature-VSLAM-DEV"
 platforms = [{ platform = "linux-64", cuda = "12.0" }]
 version = "0.1.0"
 
+# ------------------------------------------------------------------------------------
+# default env  = RUNTIME: everything the built executables load (per ldd) plus the
+#                hf CLI for the model-download tasks. LightGlue links libtorch, so
+#                pytorch-gpu is genuinely a runtime dependency.
+# build env    = runtime + compilers/CMake/headers; `pixi run build` / `setup` resolve
+#                to it automatically (pixi picks the env that defines the task).
+# ------------------------------------------------------------------------------------
+
 [tasks]
 git-clone = "git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git --recursive"
 
@@ -15,36 +23,20 @@ git-clone = "git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git -
 download-megaloc-models = { cmd = "hf download vslamlab/megaloc-models --local-dir megaloc_models", outputs = ["megaloc_models/*.onnx"] }
 download-segmentation-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'efficientvit-seg*' --local-dir segmentation_models", outputs = ["segmentation_models/*.onnx"] }
 
-# setup = everything a fresh clone needs to run: fetch the models, then compile.
-# build stays compile-only for quick iteration.
-setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "build"] }
-build = { cmd = "./build.sh" }
 execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
 execute-rgbd = { cmd = "./bin/vslamlab_allfeature_rgbd" }
 stream = { cmd = "./bin/vslamlab_allfeature_mono_stream" }
 
 [dependencies]
 python = "3.11.*"
-pip = "*"
-onnx = "*"
-onnxruntime = { version = "*", build = "*cuda*" }
-onnxruntime-cpp = { version = "*", build = "*cuda*" }
+huggingface_hub = "*"   # `hf` CLI for the download tasks
 
-# CUDA Build Tools
-cuda-compiler = "*"
+# CUDA runtime libraries (the -dev variants also carry the headers the build needs;
+# splitting lib/header per package is a finer pass than is worth it here)
 cuda-version = "12.6.*"
 cuda-cudart-dev = "*"
-cuda-crt = "*"
-libcusparse-dev = "*"
-cuda-driver-dev = "*"
-cuda-nvcc = "*"
-cuda-nvrtc-dev = "*"
+cuda-nvrtc-dev = "*"    # torch JIT loads libnvrtc at runtime
 cuda-nvtx = "*"
-cuda-nvtx-dev = "*"
-cuda-nvml-dev = "*"
-cuda-profiler-api = "*"
-
-# CUDA Libraries
 cudnn = "*"
 libcublas-dev = "*"
 libcudss-dev = "*"
@@ -52,70 +44,25 @@ libcufile-dev = "*"
 libcufft-dev = "*"
 libcurand-dev = "*"
 libcusolver-dev = "*"
+libcusparse-dev = "*"
 cusparselt = "*"
 libnvjitlink = "*"
 
-# Torch libraries
+# libtorch (linked by Light_Glue_CPP)
 pytorch-gpu = "*"
-torchvision = "*"
-torchcodec = "*"
 
-# Core
-pre-commit = "*"
-trimesh = "*"
-einops = "*"
-# huggingface_hub = "*"
-imageio = "*"
-numpy = "<2"
-# opencv = "*"
-xformers = "*"
-open3d = "*"
-
-# API / CLI
-fastapi = "*"
-uvicorn = "*"
-requests = "*"
-typer = "*"
-
-# Config / IO
-pillow = "*"
-omegaconf = "*"
-safetensors = "*"
-plyfile = "*"
-
-# 3D / geometry / eval / video
-evo = "*"
-e3nn = "*"
-moviepy = "*"
-pycolmap = "*"
-addict = "*"
-
-cxx-compiler = "*"
-
-tensorrt-cxx = "*"
-tensorrt-cxx-builder = "*"
-tensorrt-cxx-full = "*"
-
-compilers = "*"
-ninja = "*"
-cmake = "*"
-pkg-config = "*"
-eigen  = "*"
-yaml-cpp = "*"
+# SLAM runtime libraries
 opencv = "4.12.*"
+yaml-cpp = "*"
+tensorrt-cxx = "*"
 pangolin = { channel = "fontan" }
 brisk-vslamlab = { channel = "fontan" }
 akaze-vslamlab = { channel = "fontan" }
 siftgpu-vslamlab = { channel = "fontan" }
-
-huggingface_hub = "*"
-pandas = "*"
 glew = "*"
-
-# pytorch-gpu = "*"
-git-lfs = "*"
 zlib = "*"
 
+# Display stack (Pangolin viewer)
 xorg-libxext = "*"
 xorg-libx11 = "*"
 xorg-libxfixes = "*"
@@ -126,11 +73,35 @@ xorg-libxdmcp = "*"
 xorg-libxau = "*"
 xorg-xorgproto = "*"
 libxkbcommon = "*"
-
 libgl-devel = "*"
 libegl-devel = "*"
 libglvnd-devel = "*"
 libopengl-devel = "*"
 
-[pypi-dependencies]
-intel-openmp = "*"
+[feature.build.dependencies]
+# Toolchain
+cxx-compiler = "*"
+compilers = "*"
+cmake = "*"
+ninja = "*"
+pkg-config = "*"
+
+# Build-only headers/tools
+eigen = "3.4.*"   # match vendored g2o's system-Eigen fallback; 5.x mixes fatally with it
+cuda-compiler = "*"
+cuda-nvcc = "*"
+cuda-crt = "*"
+cuda-driver-dev = "*"
+cuda-nvtx-dev = "*"
+cuda-nvml-dev = "*"
+cuda-profiler-api = "*"
+tensorrt-cxx-builder = "*"
+tensorrt-cxx-full = "*"
+
+[feature.build.tasks]
+build = { cmd = "./build.sh" }
+# setup = everything a fresh clone needs to run: fetch the models, then compile
+setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "build"] }
+
+[environments]
+build = ["build"]
