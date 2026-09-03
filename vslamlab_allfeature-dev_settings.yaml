@@ -4,13 +4,13 @@
 # Camera names
 #--------------------------------------------------------------------------------------------
 cam_mono: rgb_0
-features: ["orb32"]   # aliked-only experiment: no vocabulary -> no loop closing / BoW reloc
-vpr: "none"       # visual place recognition backend: "bow" | "megaloc" | "none"
-feature_vpr: "orb32" # local feature that verifies retrieved candidates (reloc PnP, loop Sim3); must be in features.
-                     # bow: also the DBoW2 vocabulary feature (needs a vocabulary). megaloc: defaults to the first feature.
-megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # vpr: megaloc — exported by Thirdparty/MegaLoc-TensorRT/convert2onnx/export_megaloc.py
+features: ["orb32", "aliked128"]
+vpr: "megaloc"       # visual place recognition backend: "megaloc" (default) | "none"
+feature_vpr: "orb32" # local feature that verifies retrieved candidates (reloc PnP, loop Sim3);
+                     # must be in features; defaults to the first feature.
+megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # vpr: megaloc — exported by Thirdparty/placecell/tools/export_megaloc.py
 megaloc_precision: "fp16"                            # TensorRT engine precision: "fp16" | "fp32"
-segmentation: "efficientvit" # online semantic segmentation: "efficientvit" | "none"
+segmentation: "none" # online semantic segmentation: "efficientvit" | "none"
 debug: false
 
 #--------------------------------------------------------------------------------------------
@@ -60,7 +60,7 @@ Optimizer.Sim3MinCorrespondences: 10
 # a missing key keeps the default, so this section is safe to trim or edit per dataset)
 #--------------------------------------------------------------------------------------------
 # Two-view monocular initialization
-Tracking.Sequential: 1                  # 1 = deterministic mode: tracking blocks until Local Mapping finishes each keyframe (pair with features: [orb32], vpr: none, verbose: 0)
+Tracking.Sequential: 0                  # 1 = deterministic mode: tracking blocks until Local Mapping finishes each keyframe (pair with features: [orb32], vpr: none, verbose: 0)
 Tracking.InitMinKeypoints: 100          # min keypoints to accept a frame for init
 Tracking.InitSigma: 1.0                 # measurement sigma of the two-view initializer
 Tracking.InitMinMatches: 100            # min correspondences (all features pooled) to attempt init
@@ -141,7 +141,7 @@ LocalMapping.KeyframeCullingMinObservations: 3   # a point is redundant when thi
 
 # information (compiled-in defaults: MaxUnexplained 0.3, MinAge 5, MinKeyframes 5, Scope map, MaxPerCall 5, Centred 1)
 LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # every keyframe ever inserted must stay at least (1 - this) explained by the alive keyframes (Viewer slider "Cull Max Unexplained")
-LocalMapping.KeyframeCullingMinAge: 0            # keyframes younger than this many keyframes are never culled
+LocalMapping.KeyframeCullingMinAge: 5            # keyframes younger than this many keyframes are never culled
 LocalMapping.KeyframeCullingMinKeyframes: 5      # never cull below this many alive keyframes
 LocalMapping.KeyframeCullingScope: map           # marginalise over "map" (all alive keyframes) or "local" (current keyframe + its covisible keyframes)
 LocalMapping.KeyframeCullingMaxPerCall: 5        # at most this many culls per call (0 = unlimited): a raised threshold thins the map gradually instead of in one burst
