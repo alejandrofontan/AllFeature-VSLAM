@@ -15,9 +15,10 @@ git-clone = "git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git -
 download-megaloc-models = { cmd = "hf download vslamlab/megaloc-models --local-dir megaloc_models", outputs = ["megaloc_models/*.onnx"] }
 download-segmentation-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'efficientvit-seg*' --local-dir segmentation_models", outputs = ["segmentation_models/*.onnx"] }
 
-# build = compile + fetch every model the executables need: a fresh clone is
-# up to speed with `pixi run build` alone
-build = { cmd = "./build.sh", depends-on = ["download-megaloc-models", "download-segmentation-models"] }
+# setup = everything a fresh clone needs to run: fetch the models, then compile.
+# build stays compile-only for quick iteration.
+setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "build"] }
+build = { cmd = "./build.sh" }
 execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
 execute-rgbd = { cmd = "./bin/vslamlab_allfeature_rgbd" }
 stream = { cmd = "./bin/vslamlab_allfeature_mono_stream" }
