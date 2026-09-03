@@ -8,7 +8,16 @@ version = "0.1.0"
 
 [tasks]
 git-clone = "git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git --recursive"
-build = { cmd = "./build.sh" }
+
+# Model downloads (skipped once the ONNX is present, e.g. after a local export or a
+# wrapper-driven install; the TensorRT engines are built from these on first run and
+# cached next to them)
+download-megaloc-models = { cmd = "hf download vslamlab/megaloc-models --local-dir megaloc_models", outputs = ["megaloc_models/*.onnx"] }
+download-segmentation-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'efficientvit-seg*' --local-dir segmentation_models", outputs = ["segmentation_models/*.onnx"] }
+
+# build = compile + fetch every model the executables need: a fresh clone is
+# up to speed with `pixi run build` alone
+build = { cmd = "./build.sh", depends-on = ["download-megaloc-models", "download-segmentation-models"] }
 execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
 execute-rgbd = { cmd = "./bin/vslamlab_allfeature_rgbd" }
 stream = { cmd = "./bin/vslamlab_allfeature_mono_stream" }
