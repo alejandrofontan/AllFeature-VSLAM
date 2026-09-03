@@ -129,7 +129,7 @@ std::vector<Keyframe> PlaceRecognitionMegaLoc::retrieve(const Eigen::Ref<const E
 
     // 2) Accumulate each candidate's score over its best covisible neighbours that are
     //    candidates themselves, and represent the group by its best-scoring member
-    //    (same rule as KeyFrameDatabase::DetectLoopCandidates / detect_relocalization_candidates).
+    //    (same rule classic ORB-SLAM2's keyframe database applied to BoW scores).
     struct Group { float accumulated; Keyframe best; };
     std::vector<Group> groups;
     groups.reserve(scored.size());

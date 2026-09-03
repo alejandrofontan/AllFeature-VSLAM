@@ -190,7 +190,7 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, TrackingState nState, cv::Mat &imTex
     }
     else if(nState==TrackingState::SYSTEM_NOT_READY)
     {
-        s << " LOADING ORB VOCABULARY. PLEASE WAIT...";
+        s << " INITIALIZING SYSTEM. PLEASE WAIT...";
     }
 
     int baseline=0;
