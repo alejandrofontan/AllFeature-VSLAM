@@ -54,7 +54,13 @@ pytorch-gpu = "*"
 # SLAM runtime libraries
 opencv = "4.12.*"
 yaml-cpp = "*"
+# TensorRT: -full carries libnvinfer/nvonnxparser (needed to LOAD engines), -builder the
+# tactics resource needed to BUILD them -- which happens at runtime, on the first run on
+# each GPU (engines are machine-specific, then cached next to the ONNX). Neither is a
+# compile-time-only dependency.
 tensorrt-cxx = "*"
+tensorrt-cxx-full = "*"
+tensorrt-cxx-builder = "*"
 pangolin = { channel = "fontan" }
 brisk-vslamlab = { channel = "fontan" }
 akaze-vslamlab = { channel = "fontan" }
@@ -95,8 +101,7 @@ cuda-driver-dev = "*"
 cuda-nvtx-dev = "*"
 cuda-nvml-dev = "*"
 cuda-profiler-api = "*"
-tensorrt-cxx-builder = "*"
-tensorrt-cxx-full = "*"
+tensorrt-cxx-headers = "*"   # NvInfer.h etc. for compilation (the runtime libs live in default)
 
 [feature.build.tasks]
 build = { cmd = "./build.sh" }

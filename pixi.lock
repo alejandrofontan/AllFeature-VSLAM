@@ -627,7 +627,9 @@ environments:
       - conda: https://prefix.dev/conda-forge/noarch/urllib3-2.6.3-pyhd8ed1ab_0.conda
       - conda: https://prefix.dev/conda-forge/noarch/wayland-protocols-1.47-hd8ed1ab_0.conda
       - conda: https://repo.prefix.dev/spqr-tests/linux-64/tensorrt-cxx-10.3.0.26-hb0f4dca_1.conda
+      - conda: https://repo.prefix.dev/spqr-tests/linux-64/tensorrt-cxx-builder-10.3.0.26-h736c03c_1.conda
       - conda: https://repo.prefix.dev/spqr-tests/linux-64/tensorrt-cxx-core-10.3.0.26-h736c03c_1.conda
+      - conda: https://repo.prefix.dev/spqr-tests/linux-64/tensorrt-cxx-full-10.3.0.26-h736c03c_1.conda
       - conda: https://repo.prefix.dev/spqr-tests/linux-64/tensorrt-cxx-headers-10.3.0.26-hb0f4dca_1.conda
       - conda: https://repo.prefix.dev/spqr-tests/linux-64/tensorrt-cxx-onnx-10.3.0.26-hb0f4dca_1.conda
       - conda: https://repo.prefix.dev/spqr-tests/linux-64/tensorrt-cxx-plugins-10.3.0.26-h736c03c_1.conda
