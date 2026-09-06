@@ -138,15 +138,6 @@ void LocalMapping::process_new_keyframe()
     // Global descriptor (VPR image embedding, backend-dependent)
     current_keyframe_->compute_global_descriptor();
 
-#ifdef ALLFEATURE_EVALUATION
-    // Evaluation builds keep the evaluation-sampled and the cadence keyframes: register
-    // them as protected in placecell (never proposed for culling, still explainers).
-    // Must run after compute_global_descriptor(), which stores the keyframe there.
-    if(place_cell_ && ((current_keyframe_->frame_id % ALLFEATURE_EVALUATION) == 0
-                       || (current_keyframe_->frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0))
-        place_cell_->set_protected(current_keyframe_->frame_id);
-#endif
-
     // Register the keyframe as an observer of the map points Tracking matched into it
     // (add_observation also refreshes the point's descriptor and normal/depth). Points
     // that already observe this keyframe -- created WITH it by the initializer -- enter
@@ -589,11 +580,7 @@ void LocalMapping::cull_keyframes_heuristic()
                 continue;
 
             bool protected_keyframe{false};
-#ifdef ALLFEATURE_EVALUATION
-            // Evaluation builds keep the evaluation-sampled and the cadence keyframes
-            protected_keyframe = (keyframe->frame_id % ALLFEATURE_EVALUATION) == 0
-                              || (keyframe->frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0;
-#endif
+
             if(!protected_keyframe)
                 keyframe->set_bad_flag();
         }

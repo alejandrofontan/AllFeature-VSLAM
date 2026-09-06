@@ -888,18 +888,13 @@ bool Tracking::need_new_keyframe()
     const bool weak_tracking = num_inlier_matches_ < num_ref_matches * params.ref_matches_ratio
                                && num_inlier_matches_ > params.min_inliers_for_keyframe;
 
-    bool forced_by_evaluation{false};
-#ifdef ALLFEATURE_EVALUATION
-    forced_by_evaluation = (int(current_frame_.frame_id) % ALLFEATURE_EVALUATION) == 0;
-#endif
-
     bool forced_by_cadence{false};
 #ifdef ALLFEATURE_MAX_KEYFRAMES
     forced_by_cadence = (current_frame_.frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0;
 #endif
 
     const bool low_overlap = current_frame_.get_overlap() < params.min_ref_overlap;
-    const bool forced = forced_by_evaluation || forced_by_cadence;
+    const bool forced = forced_by_cadence;
 
     // Median inlier count over the recent tracked frames (reference for the
     // emergency trigger below) — computed before pushing the current frame's
