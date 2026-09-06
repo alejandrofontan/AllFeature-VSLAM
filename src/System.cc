@@ -201,8 +201,8 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
 
     //Initialize the Loop Closing thread and launch. Without an active VPR backend the object
     //is still constructed (other threads hold pointers to it and enqueue keyframes) but its
-    //thread never starts: LoopClosing's constructor leaves mbFinished=true, so Shutdown()'s
-    //isFinished()/isRunningGBA() waits pass immediately.
+    //thread never starts: LoopClosing starts with finished_ = true, so Shutdown()'s
+    //is_finished()/isRunningGBA() waits pass immediately.
     loopCloser =  make_shared<LoopClosing>(mpMap, place_recognition, mSensor!=MONOCULAR,
         featureTypes,
         tracker->get_image_width(), tracker->get_image_height());
@@ -398,7 +398,7 @@ void System::reset()
 void System::Shutdown()
 {
     localMapper->request_finish();
-    loopCloser->RequestFinish();
+    loopCloser->request_finish();
     if(viewer)
     {
         viewer->RequestFinish();
@@ -407,10 +407,16 @@ void System::Shutdown()
     }
 
     // Wait until all thread have effectively stopped
-    while(!localMapper->is_finished() || !loopCloser->isFinished() || loopCloser->isRunningGBA())
+    while(!localMapper->is_finished() || !loopCloser->is_finished() || loopCloser->isRunningGBA())
     {
         usleep(5000);
     }
+
+    // The threads have returned; join them so their std::thread objects are not destroyed
+    // joinable with System (that calls std::terminate at exit, issue #12).
+    for(const auto& thread : {mptLocalMapping, mptLoopClosing, mptViewer})
+        if(thread && thread->joinable())
+            thread->join();
 
     if(viewer)
         pangolin::BindToContext(viewer->GetWindowTitle());

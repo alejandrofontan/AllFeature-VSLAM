@@ -99,9 +99,11 @@ public:
         return mbFinishedGBA;
     }
 
-    void RequestFinish();
-
-    bool isFinished();
+    // Finish protocol, used by System::Shutdown: request_finish() makes Run() return at
+    // its next check; is_finished() turns true once it has. finished_ starts true, so a
+    // system without an active VPR backend (thread never started) shuts down at once.
+    void request_finish();
+    bool is_finished() const;
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
@@ -122,11 +124,12 @@ protected:
     bool mbResetRequested;
     std::mutex mMutexReset;
 
-    bool CheckFinish();
-    void SetFinish();
-    bool mbFinishRequested;
-    bool mbFinished;
-    std::mutex mMutexFinish;
+    // Called by Run(): exit when asked / publish the exit
+    bool is_finish_requested() const;
+    void set_finished();
+    mutable std::mutex finish_mutex_;   // guards finish_requested_ and finished_
+    bool finish_requested_{false};
+    bool finished_{true};
 
     FeatureType featureType;
     std::vector<FeatureType> feat_types;

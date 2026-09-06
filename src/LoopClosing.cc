@@ -42,7 +42,7 @@ LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<PlaceRecognition> place
     const bool bFixScale,
     const std::vector<FeatureType>& feat_types,
     int image_width, int image_height):
-    mbResetRequested(false), mbFinishRequested(false), mbFinished(true), featureType(place_recognition->verification_feature()), feat_types(feat_types), mpMap(pMap),
+    mbResetRequested(false), featureType(place_recognition->verification_feature()), feat_types(feat_types), mpMap(pMap),
     place_recognition(std::move(place_recognition)), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
     mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), mnFullBAIdx(0),
     image_width(image_width), image_height(image_height)
@@ -68,7 +68,10 @@ void LoopClosing::SetMapDrawer(std::shared_ptr<MapDrawer> mapDrawer_)
 
 void LoopClosing::Run()
 {
-    mbFinished =false;
+    {
+        std::lock_guard<std::mutex> lock(finish_mutex_);
+        finished_ = false;
+    }
 
     while(1)
     {
@@ -101,13 +104,13 @@ void LoopClosing::Run()
 
         ResetIfRequested();
 
-        if(CheckFinish())
+        if(is_finish_requested())
             break;
 
         usleep(5000);
     }
 
-    SetFinish();
+    set_finished();
 }
 
 void LoopClosing::insert_keyframe(const Keyframe& keyframe)
@@ -791,28 +794,28 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
     }
 }
 
-void LoopClosing::RequestFinish()
+void LoopClosing::request_finish()
 {
-    unique_lock<mutex> lock(mMutexFinish);
-    mbFinishRequested = true;
+    std::lock_guard<std::mutex> lock(finish_mutex_);
+    finish_requested_ = true;
 }
 
-bool LoopClosing::CheckFinish()
+bool LoopClosing::is_finish_requested() const
 {
-    unique_lock<mutex> lock(mMutexFinish);
-    return mbFinishRequested;
+    std::lock_guard<std::mutex> lock(finish_mutex_);
+    return finish_requested_;
 }
 
-void LoopClosing::SetFinish()
+void LoopClosing::set_finished()
 {
-    unique_lock<mutex> lock(mMutexFinish);
-    mbFinished = true;
+    std::lock_guard<std::mutex> lock(finish_mutex_);
+    finished_ = true;
 }
 
-bool LoopClosing::isFinished()
+bool LoopClosing::is_finished() const
 {
-    unique_lock<mutex> lock(mMutexFinish);
-    return mbFinished;
+    std::lock_guard<std::mutex> lock(finish_mutex_);
+    return finished_;
 }
 
 
