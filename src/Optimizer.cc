@@ -636,12 +636,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
     lLocalKeyFrames.push_back(pKF);
     pKF->mnBALocalForKF = pKF->keyId;
 
-    #ifdef ALLFEATURE_REAL_TIME
     vector<Keyframe> vNeighKFs = pKF->get_best_covisibility_keyframes(10);
-    //vector<Keyframe> vNeighKFs = pKF->get_covisible_keyframes();
-    #else
-    vector<Keyframe> vNeighKFs = pKF->get_covisible_keyframes();
-    #endif
 
     for(int i=0, iend=vNeighKFs.size(); i<iend; i++)
     {
