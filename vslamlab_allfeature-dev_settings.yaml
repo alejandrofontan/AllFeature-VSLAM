@@ -10,7 +10,7 @@ feature_vpr: "orb32" # local feature that verifies retrieved candidates (reloc P
                      # must be in features; defaults to the first feature.
 megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # vpr: megaloc — exported by Thirdparty/placecell/tools/export_megaloc.py
 megaloc_precision: "fp16"                            # TensorRT engine precision: "fp16" | "fp32"
-segmentation: "none" # online semantic segmentation: "efficientvit" | "none"
+segmentation: "efficientvit" # online semantic segmentation: "efficientvit" | "none"
 debug: false
 
 #--------------------------------------------------------------------------------------------
