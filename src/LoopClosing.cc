@@ -28,8 +28,9 @@
 
 #include "FeatureMatcher.h"
 
-#include<mutex>
-#include<thread>
+#include <chrono>
+#include <mutex>
+#include <thread>
 
 
 namespace AF_VSLAM
@@ -42,7 +43,7 @@ LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<PlaceRecognition> place
     const bool bFixScale,
     const std::vector<FeatureType>& feat_types,
     int image_width, int image_height):
-    mbResetRequested(false), featureType(place_recognition->verification_feature()), feat_types(feat_types), mpMap(pMap),
+    featureType(place_recognition->verification_feature()), feat_types(feat_types), mpMap(pMap),
     place_recognition(std::move(place_recognition)), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
     mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), mnFullBAIdx(0),
     image_width(image_width), image_height(image_height)
@@ -102,7 +103,7 @@ void LoopClosing::Run()
             }
         }
 
-        ResetIfRequested();
+        reset_if_requested();
 
         if(is_finish_requested())
             break;
@@ -654,43 +655,6 @@ void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap)
 }
 
 
-void LoopClosing::request_reset()
-{
-    // Without an active VPR backend this thread never runs, so nobody would ever clear
-    // the request (the caller would spin forever); there is nothing to reset either.
-    if(!place_recognition->is_active())
-        return;
-
-    {
-        unique_lock<mutex> lock(mMutexReset);
-        mbResetRequested = true;
-    }
-
-    while(1)
-    {
-        {
-        unique_lock<mutex> lock2(mMutexReset);
-        if(!mbResetRequested)
-            break;
-        }
-        usleep(5000);
-    }
-}
-
-void LoopClosing::ResetIfRequested()
-{
-    unique_lock<mutex> lock(mMutexReset);
-    if(mbResetRequested)
-    {
-        {
-            std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
-            new_keyframes_.clear();
-        }
-        mLastLoopKFid=0;
-        mbResetRequested=false;
-    }
-}
-
 void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
 {
     cout << "Starting Global Bundle Adjustment" << endl;
@@ -796,6 +760,57 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
         mbRunningGBA = false;
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// # Reset protocol
+void LoopClosing::request_reset()
+{
+    // Without an active VPR backend this thread never runs, so nobody would ever clear
+    // the request (the caller would spin forever); there is nothing to reset either.
+    if(!place_recognition->is_active())
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(reset_mutex_);
+        reset_requested_ = true;
+    }
+    // Block until the Loop Closing thread has performed the reset (reset_if_requested)
+    while(is_reset_requested())
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+}
+
+bool LoopClosing::is_reset_requested() const
+{
+    std::lock_guard<std::mutex> lock(reset_mutex_);
+    return reset_requested_;
+}
+
+void LoopClosing::reset_if_requested()
+{
+    std::lock_guard<std::mutex> lock(reset_mutex_);
+    if(!reset_requested_)
+        return;
+
+    {
+        std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
+        new_keyframes_.clear();
+    }
+    mLastLoopKFid = 0;
+
+    // Loop-detection state of the wiped map. Keyframe ids restart at 0 after a reset, so
+    // stale consistency groups (keyed by id) could vote for the new map's first
+    // candidates; the vectors would also keep the old map's keyframes and points alive.
+    mvConsistentGroups.clear();
+    mvpEnoughConsistentCandidates.clear();
+    mvpCurrentConnectedKFs.clear();
+    mvpCurrentMatchedPoints.clear();
+    mvpLoopMapPoints.clear();
+    mpCurrentKF.reset();
+    mpMatchedKF.reset();
+
+    reset_requested_ = false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // # Finish protocol

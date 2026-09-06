@@ -83,8 +83,10 @@ public:
     void insert_keyframe(const Keyframe& keyframe);
     bool has_new_keyframes() const;
 
-    // Blocks the caller until the Loop Closing thread has dropped its keyframe queue
-    // (ResetIfRequested). Returns at once when the VPR backend is inactive (no thread).
+    // Reset protocol, used by Tracking::reset: request_reset() blocks the caller until
+    // the Loop Closing thread has dropped its keyframe queue and loop-detection state
+    // (reset_if_requested, at the end of each Run() iteration). Returns at once when
+    // the VPR backend is inactive (no thread would ever clear the request).
     void request_reset();
 
     // This function will run in a separate thread
@@ -120,9 +122,11 @@ protected:
 
     void CorrectLoop();
 
-    void ResetIfRequested();
-    bool mbResetRequested;
-    std::mutex mMutexReset;
+    // Called by Run(): perform a pending reset
+    void reset_if_requested();
+    bool is_reset_requested() const;
+    mutable std::mutex reset_mutex_;   // guards reset_requested_
+    bool reset_requested_{false};
 
     // Called by Run(): exit when asked / publish the exit
     bool is_finish_requested() const;
