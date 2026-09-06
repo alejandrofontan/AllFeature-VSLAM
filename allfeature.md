@@ -36,7 +36,7 @@ flowchart TD
 
 # AllFeature-VSLAM — `src/LoopClosing.cc`
 
-**Section:** [`# Keyframe queue`](src/LoopClosing.cc#L118)
+**Section:** [`# Keyframe queue`](src/LoopClosing.cc#L106)
 ```mermaid
 flowchart LR
     PK([LocalMapping::process_keyframe]) --> IK[insert_keyframe] --> ACT{place_recognition<br/>is_active?}
@@ -45,12 +45,12 @@ flowchart LR
     PUSH --> Q[(new_keyframes_)]
 
     RUN([LoopClosing::Run]) --> HNK{has_new_keyframes?}
-    HNK -- no --> SLEEP["ResetIfRequested<br/>CheckFinish · sleep 5 ms"] --> HNK
+    HNK -- no --> SLEEP["reset_if_requested<br/>is_finish_requested · sleep 5 ms"] --> HNK
     HNK -- yes --> DL[DetectLoop] --> POP["lock new_keyframes_mutex_<br/>mpCurrentKF = front · pop_front<br/>SetNotErase"]
     Q -.-> HNK
     Q -.-> POP
 
-    RST([Tracking::reset]) --> RR[request_reset] --> RIR["ResetIfRequested<br/>(loop-closing thread)<br/>new_keyframes_.clear"]
+    RST([Tracking::reset]) --> RR[request_reset] --> RIR["reset_if_requested<br/>(loop-closing thread)<br/>new_keyframes_.clear"]
     RIR -.-> Q
 
     %% VSLAM-LAB logo squares: cyan #b5f3f9, periwinkle #8195fb, lavender #a59ddf
@@ -79,11 +79,11 @@ void LoopClosing::insert_keyframe(const Keyframe& keyframe)
 ```cpp
 bool LoopClosing::has_new_keyframes() const
 ```
-- consumer-side poll: `!new_keyframes_.empty()` under the same mutex (`mutable`, so the query stays `const`). Only reports; the pop happens in `DetectLoop` ([`LoopClosing.cc`](src/LoopClosing.cc#L137)), which takes the front keyframe, marks it `SetNotErase` so culling cannot delete it mid-detection, and runs the loop pipeline on it.
-- called from: `Run` ([`LoopClosing.cc`](src/LoopClosing.cc#L80)), once per 5 ms iteration; `false` means the thread only services `reset_if_requested`/`is_finish_requested` and sleeps.
+- consumer-side poll: `!new_keyframes_.empty()` under the same mutex (`mutable`, so the query stays `const`). Only reports; the pop happens in `DetectLoop` ([`LoopClosing.cc`](src/LoopClosing.cc#L125)), which takes the front keyframe, marks it `SetNotErase` so culling cannot delete it mid-detection, and runs the loop pipeline on it.
+- called from: `Run` ([`LoopClosing.cc`](src/LoopClosing.cc#L68)), once per 5 ms iteration; `false` means the thread only services `reset_if_requested`/`is_finish_requested` and sleeps.
 - queue lifetime: cleared by `reset_if_requested` (on the loop-closing thread, under the queue mutex) when `Tracking::reset` calls `request_reset`; that call returns at once when the backend is inactive, since no thread would ever clear the request.
 
-**Section:** [`# Reset protocol`](src/LoopClosing.cc#L765)
+**Section:** [`# Reset protocol`](src/LoopClosing.cc#L753)
 ```mermaid
 flowchart LR
     TR([Tracking::reset]) --> RR[request_reset] --> ACT{place_recognition<br/>is_active?}
@@ -126,11 +126,11 @@ bool LoopClosing::is_reset_requested() const
 ```cpp
 void LoopClosing::reset_if_requested()
 ```
-- thread side: once per `Run` iteration ([`LoopClosing.cc`](src/LoopClosing.cc#L106)), after the queue has been serviced and before the finish check. Early-returns when nothing is pending; otherwise, under `reset_mutex_`, it clears the keyframe queue (under its own mutex), resets `mLastLoopKFid` so the "10 keyframes since the last loop" gate restarts, and clears the request.
+- thread side: once per `Run` iteration ([`LoopClosing.cc`](src/LoopClosing.cc#L94)), after the queue has been serviced and before the finish check. Early-returns when nothing is pending; otherwise, under `reset_mutex_`, it clears the keyframe queue (under its own mutex), resets `mLastLoopKFid` so the "10 keyframes since the last loop" gate restarts, and clears the request.
 - also drops the loop-detection state of the wiped map (`mvConsistentGroups`, `mvpEnoughConsistentCandidates`, `mvpCurrentConnectedKFs`, `mvpCurrentMatchedPoints`, `mvpLoopMapPoints`, `mpCurrentKF`, `mpMatchedKF`). Stock ORB-SLAM2 leaves these: keyframe ids restart at 0 after a reset, so stale consistency groups (keyed by id) could vote for the new map's first candidates, and the vectors kept the old map's keyframes and points alive until the next loop closure.
 - runs between iterations, when the thread holds no other loop state, so the clear is safe without further locking.
 
-**Section:** [`# Finish protocol`](src/LoopClosing.cc#L816)
+**Section:** [`# Finish protocol`](src/LoopClosing.cc#L803)
 ```mermaid
 flowchart LR
     SD([System::Shutdown]) --> RF[request_finish] --> REQ["lock finish_mutex_<br/>finish_requested_ = true"]
@@ -162,20 +162,20 @@ flowchart LR
 void LoopClosing::request_finish()
 ```
 - raises `finish_requested_` under `finish_mutex_`. It only asks: `Run` notices at the end of its current iteration, so a loop closure in flight completes first. A running global BA is not stopped by this (inherited from ORB-SLAM2), which is why `Shutdown` also waits on `isRunningGBA()`.
-- called from: `System::Shutdown` ([`System.cc`](src/System.cc#L401)), right after LocalMapping's `request_finish`.
+- called from: `System::Shutdown` ([`System.cc`](src/System.cc#L397)), right after LocalMapping's `request_finish`.
 
 ```cpp
 bool LoopClosing::is_finish_requested() const
 ```
-- the thread's own poll of that flag, once per iteration in `Run` ([`LoopClosing.cc`](src/LoopClosing.cc#L108)) after `reset_if_requested`; `true` breaks the loop. Protected: nobody outside the thread needs it.
+- the thread's own poll of that flag, once per iteration in `Run` ([`LoopClosing.cc`](src/LoopClosing.cc#L96)) after `reset_if_requested`; `true` breaks the loop. Protected: nobody outside the thread needs it.
 
 ```cpp
 void LoopClosing::set_finished()
 ```
-- publishes the exit: `finished_ = true` under the mutex, the last statement of `Run` ([`LoopClosing.cc`](src/LoopClosing.cc#L114)). Its counterpart at the top of `Run` ([`LoopClosing.cc`](src/LoopClosing.cc#L74)) clears the flag under the same mutex, so `Shutdown` can never read a stale `true` while the loop is alive.
+- publishes the exit: `finished_ = true` under the mutex, the last statement of `Run` ([`LoopClosing.cc`](src/LoopClosing.cc#L102)). Its counterpart at the top of `Run` ([`LoopClosing.cc`](src/LoopClosing.cc#L62)) clears the flag under the same mutex, so `Shutdown` can never read a stale `true` while the loop is alive.
 
 ```cpp
 bool LoopClosing::is_finished() const
 ```
-- what `Shutdown` spins on ([`System.cc`](src/System.cc#L410)), together with LocalMapping's `is_finished` and `isRunningGBA`. Starts `true` (`finished_{true}`): with `vpr: none` the thread is never started ([`System.cc`](src/System.cc#L209)) and the wait passes immediately.
-- after the wait, `Shutdown` joins the three worker threads ([`System.cc`](src/System.cc#L418)). Nothing joined them before, so their `std::thread` objects were destroyed joinable with `System`, which is what `std::terminate` at exit looks like (issue #12).
+- what `Shutdown` spins on ([`System.cc`](src/System.cc#L406)), together with LocalMapping's `is_finished` and `isRunningGBA`. Starts `true` (`finished_{true}`): with `vpr: none` the thread is never started ([`System.cc`](src/System.cc#L209)) and the wait passes immediately.
+- after the wait, `Shutdown` joins the three worker threads ([`System.cc`](src/System.cc#L414)). Nothing joined them before, so their `std::thread` objects were destroyed joinable with `System`, which is what `std::terminate` at exit looks like (issue #12).

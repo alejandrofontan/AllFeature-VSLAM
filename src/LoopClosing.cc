@@ -40,31 +40,19 @@ namespace AF_VSLAM
             keyframeId(keyframeId), keyframe(keyframe), connections(connections){}
 
 LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<PlaceRecognition> place_recognition,
+    std::shared_ptr<LocalMapping> local_mapper, std::shared_ptr<MapDrawer> map_drawer,
     const bool bFixScale,
     const std::vector<FeatureType>& feat_types,
     int image_width, int image_height):
     featureType(place_recognition->verification_feature()), feat_types(feat_types), mpMap(pMap),
-    place_recognition(std::move(place_recognition)), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
+    map_drawer_(std::move(map_drawer)),
+    place_recognition(std::move(place_recognition)), local_mapper_(std::move(local_mapper)),
+    mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
     mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), mnFullBAIdx(0),
     image_width(image_width), image_height(image_height)
 {
     mnCovisibilityConsistencyTh = 3;
     matcher = std::make_shared<FeatureMatcher>(image_width, image_height, feat_types, "LoopClosing", 0.8, true);
-}
-
-void LoopClosing::SetTracker(std::shared_ptr<Tracking> tracker_)
-{
-    tracker = tracker_;
-}
-
-void LoopClosing::SetLocalMapper(std::shared_ptr<LocalMapping> localMapper_)
-{
-    localMapper = localMapper_;
-}
-
-void LoopClosing::SetMapDrawer(std::shared_ptr<MapDrawer> mapDrawer_)
-{
-    mapDrawer = mapDrawer_;
 }
 
 void LoopClosing::Run()
@@ -94,7 +82,7 @@ void LoopClosing::Run()
                    CorrectLoop();
 
                    ++numOfLoopClosures;
-                   mapDrawer->AddLoopClosureKeyframe(mpCurrentKF->get_pose_inverse());
+                   map_drawer_->AddLoopClosureKeyframe(mpCurrentKF->get_pose_inverse());
 
                    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
                    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
@@ -450,7 +438,7 @@ void LoopClosing::CorrectLoop()
 
     // Send a stop signal to Local Mapping
     // Avoid new keyframes are inserted while correcting the loop
-    localMapper->request_stop();
+    local_mapper_->request_stop();
 
     // If a Global Bundle Adjustment is running, abort it
     if(isRunningGBA())
@@ -468,7 +456,7 @@ void LoopClosing::CorrectLoop()
     }
 
     // Wait until Local Mapping has effectively stopped
-    while(!localMapper->is_stopped())
+    while(!local_mapper_->is_stopped())
     {
         usleep(1000);
     }
@@ -622,7 +610,7 @@ void LoopClosing::CorrectLoop()
     mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this,mpCurrentKF->keyId);
 
     // Loop closed. release Local Mapping.
-    localMapper->release();
+    local_mapper_->release();
 
     mLastLoopKFid = mpCurrentKF->keyId;
 }
@@ -675,10 +663,10 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
         {
             cout << "Global Bundle Adjustment finished" << endl;
             cout << "Updating map ..." << endl;
-            localMapper->request_stop();
+            local_mapper_->request_stop();
             // Wait until Local Mapping has effectively stopped
 
-            while(!localMapper->is_stopped() && !localMapper->is_finished())
+            while(!local_mapper_->is_stopped() && !local_mapper_->is_finished())
             {
                 usleep(1000);
             }
@@ -751,7 +739,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
 
             mpMap->InformNewBigChange();
 
-            localMapper->release();
+            local_mapper_->release();
 
             cout << "Map updated!" << endl;
         }
@@ -810,7 +798,6 @@ void LoopClosing::reset_if_requested()
 
     reset_requested_ = false;
 }
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // # Finish protocol

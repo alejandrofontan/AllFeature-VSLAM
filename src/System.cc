@@ -203,8 +203,8 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //is still constructed (other threads hold pointers to it and enqueue keyframes) but its
     //thread never starts: LoopClosing starts with finished_ = true, so Shutdown()'s
     //is_finished()/isRunningGBA() waits pass immediately.
-    loopCloser =  make_shared<LoopClosing>(mpMap, place_recognition, mSensor!=MONOCULAR,
-        featureTypes,
+    loopCloser =  make_shared<LoopClosing>(mpMap, place_recognition, localMapper, mapDrawer,
+        mSensor!=MONOCULAR, featureTypes,
         tracker->get_image_width(), tracker->get_image_height());
     if(place_recognition->is_active())
         mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::Run, loopCloser);
@@ -227,10 +227,6 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     localMapper->set_loop_closer(loopCloser);
     if(place_cell)
         localMapper->set_placecell(place_cell);   // keyframe descriptors for the online VPR matrix
-
-    loopCloser->SetTracker(tracker);
-    loopCloser->SetLocalMapper(localMapper);
-    loopCloser->SetMapDrawer(mapDrawer);
 }
 
 mat4f System::TrackStereo(const cv::Mat &, const cv::Mat &, const double &)

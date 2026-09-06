@@ -24,7 +24,6 @@
 #include "KeyFrame.h"
 #include "LocalMapping.h"
 #include "Map.h"
-#include "Tracking.h"
 #include "MapDrawer.h"
 #include "FeatureMatcher.h"
 
@@ -38,7 +37,6 @@
 namespace AF_VSLAM
 {
 
-class Tracking;
 class LocalMapping;
 class MapDrawer;
 
@@ -63,15 +61,12 @@ public:
 
     // featureType (geometric verification of loop candidates) is the backend's
     // verification_feature(); the backend also owns the keyframe database.
-    LoopClosing(shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> place_recognition, const bool bFixScale,
-        const std::vector<FeatureType>& feat_types,
+    // local_mapper is paused/released around loop corrections; map_drawer records the
+    // closed loops for the viewer. Both exist before this object (System's constructor).
+    LoopClosing(shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> place_recognition,
+        std::shared_ptr<LocalMapping> local_mapper, std::shared_ptr<MapDrawer> map_drawer,
+        const bool bFixScale, const std::vector<FeatureType>& feat_types,
         int image_width, int image_height);
-
-    void SetTracker(std::shared_ptr<Tracking> tracker);
-
-    void SetLocalMapper(std::shared_ptr<LocalMapping> localMapper_);
-
-    void SetMapDrawer(std::shared_ptr<MapDrawer> mapDrawer_);
 
     // Main function
     void Run();
@@ -139,12 +134,11 @@ protected:
     std::vector<FeatureType> feat_types;
 
     shared_ptr<Map> mpMap;
-    std::shared_ptr<Tracking> tracker;
-    std::shared_ptr<MapDrawer> mapDrawer;
+    std::shared_ptr<MapDrawer> map_drawer_;
 
     shared_ptr<PlaceRecognition> place_recognition;
 
-    std::shared_ptr<LocalMapping> localMapper;
+    std::shared_ptr<LocalMapping> local_mapper_;
 
     mutable std::mutex new_keyframes_mutex_;   // guards new_keyframes_
     std::list<Keyframe> new_keyframes_;
