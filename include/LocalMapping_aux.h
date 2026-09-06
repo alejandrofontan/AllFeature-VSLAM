@@ -6,8 +6,8 @@
  * LocalMappingProfiler: total per-keyframe mapping time. Always measured — its
  * histogram feeds the viewer's median-time display, so it must work in
  * non-profiling builds too (same rationale as Tracking's GrabProfiler total).
- * The per-stage histograms are recorded at the call sites through StageTimer,
- * which is PROFILING_EXHAUSTIVE-only.
+ * The per-stage histograms are recorded inside each stage function through
+ * StageTimer, which is PROFILING_EXHAUSTIVE-only.
  */
 #ifndef AF_VSLAM_LOCALMAPPING_AUX_H
 #define AF_VSLAM_LOCALMAPPING_AUX_H

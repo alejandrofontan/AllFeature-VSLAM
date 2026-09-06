@@ -79,10 +79,10 @@ void LocalMapping::run()
     set_finished();
 }
 
-// One full mapping iteration for the keyframe at the head of the queue. The first
-// stages always run; the refinement stages (fuse, local BA, keyframe culling) are
-// skipped when Tracking has meanwhile queued another keyframe -- draining the queue
-// first bounds keyframe latency and returns the busy flag to Tracking sooner.
+// One full mapping iteration for the keyframe at the head of the queue. Every stage
+// runs for every keyframe: the refinement stages (fuse, local BA, keyframe culling)
+// are no longer skipped when Tracking has meanwhile queued another keyframe. Each
+// stage function records its own PROFILING_EXHAUSTIVE histogram.
 void LocalMapping::process_keyframe()
 {
     LocalMappingProfiler profiler{};
@@ -93,30 +93,14 @@ void LocalMapping::process_keyframe()
     // Enforce the quality checks on recently added map points
     cull_map_points();
 
-    {
-        StageTimer timer{};
-        create_new_map_points();
-        timer.record(create_new_map_points_times_);
-    }
+    create_new_map_points();
 
-    if(!has_new_keyframes())
-    {
-        // Find more matches in neighbor keyframes and fuse point duplications
-        StageTimer timer{};
-        search_in_neighbors();
-        timer.record(search_in_neighbors_times_);
-    }
+    // Find more matches in neighbor keyframes and fuse point duplications
+    search_in_neighbors();
 
-    if(!has_new_keyframes())
-    {
-        if(map_->keyframes_in_map() > LOCAL_BA_MIN_KEYFRAMES)
-        {
-            StageTimer timer{};
-            Optimizer::LocalBundleAdjustment(current_keyframe_, map_);
-            timer.record(local_ba_times_);
-        }
-        cull_keyframes();
-    }
+    local_bundle_adjustment();
+
+    cull_keyframes();
 
     loop_closer_->insert_keyframe(current_keyframe_);
 
@@ -204,6 +188,8 @@ void LocalMapping::cull_map_points()
 
 void LocalMapping::create_new_map_points()
 {
+    StageTimer timer{};
+
     const std::vector<Keyframe> neighbors =
         current_keyframe_->get_best_covisibility_keyframes(params.create_new_map_points_keyframes);
 
@@ -337,6 +323,8 @@ void LocalMapping::create_new_map_points()
     }
 
     create_depth_seeded_points();
+
+    timer.record(create_new_map_points_times_);
 }
 
 void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors)
@@ -449,6 +437,8 @@ void LocalMapping::create_depth_seeded_points()
 
 void LocalMapping::search_in_neighbors()
 {
+    StageTimer timer{};
+
     // Fuse target set: the best covisible keyframes plus a few of THEIR best covisible
     // keyframes, deduplicated via the fuse-target mark. Collected ONCE for all feature
     // types: an earlier per-feature-type version re-ran this collection each call, and
@@ -510,6 +500,19 @@ void LocalMapping::search_in_neighbors()
 
     // Update links in the covisibility graph
     current_keyframe_->update_connections();
+
+    timer.record(search_in_neighbors_times_);
+}
+
+void LocalMapping::local_bundle_adjustment()
+{
+    // Local BA needs more keyframes than this in the map
+    if(map_->keyframes_in_map() <= LOCAL_BA_MIN_KEYFRAMES)
+        return;
+
+    StageTimer timer{};
+    Optimizer::LocalBundleAdjustment(current_keyframe_, map_);
+    timer.record(local_ba_times_);
 }
 
 void LocalMapping::cull_keyframes()

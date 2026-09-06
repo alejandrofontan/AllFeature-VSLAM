@@ -149,7 +149,7 @@ public:
 
 protected:
 
-    // run(): local BA needs more keyframes than this in the map
+    // local_bundle_adjustment(): local BA needs more keyframes than this in the map
     static constexpr int LOCAL_BA_MIN_KEYFRAMES{2};
 
     // create_new_map_points(): 2-DoF chi-square 95% quantile (reprojection gate),
@@ -167,6 +167,8 @@ protected:
     void cache_neighbor_matches(const std::vector<Keyframe>& neighbors);
     void create_depth_seeded_points();
     void search_in_neighbors();
+    // Optimizer::LocalBundleAdjustment on the current keyframe (skipped on a too-small map)
+    void local_bundle_adjustment();
     // Keyframe culling: dispatches on params.keyframe_culling_method.
     void cull_keyframes();
     // "heuristic": mark as bad the covisible keyframes whose map points are (mostly)
@@ -217,7 +219,7 @@ protected:
     // Per-iteration timing histograms (ms buckets), printed by log_profile() through
     // the AF_PROFILE sink. local_mapping_times_ is always recorded -- it feeds the
     // viewer's median-time display; the per-stage histograms are PROFILING_EXHAUSTIVE-
-    // only (LocalMapping_aux.h: LocalMappingProfiler / StageTimer).
+    // only, each recorded inside its stage function (LocalMappingProfiler / StageTimer).
     void log_profile();
     std::map<int, int> local_mapping_times_{};
     std::map<int, int> create_new_map_points_times_{};
