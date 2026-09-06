@@ -113,6 +113,8 @@ void LoopClosing::Run()
     set_finished();
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// # Keyframe queue
 void LoopClosing::insert_keyframe(const Keyframe& keyframe)
 {
     // Without an active VPR backend this thread never runs (System's constructor): a
@@ -129,6 +131,7 @@ bool LoopClosing::has_new_keyframes() const
     std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
     return !new_keyframes_.empty();
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 bool LoopClosing::DetectLoop()
 {
@@ -794,6 +797,8 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
     }
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// # Finish protocol
 void LoopClosing::request_finish()
 {
     std::lock_guard<std::mutex> lock(finish_mutex_);
@@ -817,6 +822,5 @@ bool LoopClosing::is_finished() const
     std::lock_guard<std::mutex> lock(finish_mutex_);
     return finished_;
 }
-
 
 } //namespace ORB_SLAM
