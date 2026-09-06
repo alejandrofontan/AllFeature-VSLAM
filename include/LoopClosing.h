@@ -76,8 +76,15 @@ public:
     // Main function
     void Run();
 
-    void insert_keyframe(Keyframe pKF);
+    // Keyframe queue, fed by LocalMapping (process_keyframe, after each keyframe's
+    // mapping iteration) and drained by Run() (DetectLoop). Without an active VPR
+    // backend the thread never runs (System's constructor), so insert_keyframe drops
+    // the keyframe instead of queueing it forever.
+    void insert_keyframe(const Keyframe& keyframe);
+    bool has_new_keyframes() const;
 
+    // Blocks the caller until the Loop Closing thread has dropped its keyframe queue
+    // (ResetIfRequested). Returns at once when the VPR backend is inactive (no thread).
     void request_reset();
 
     // This function will run in a separate thread
@@ -102,8 +109,6 @@ public:
     size_t numOfLoopClosures{0};
 
 protected:
-
-    bool CheckNewKeyFrames();
 
     bool DetectLoop();
 
@@ -134,9 +139,8 @@ protected:
 
     std::shared_ptr<LocalMapping> localMapper;
 
-    std::list<Keyframe > mlpLoopKeyFrameQueue;
-
-    std::mutex mMutexLoopQueue;
+    mutable std::mutex new_keyframes_mutex_;   // guards new_keyframes_
+    std::list<Keyframe> new_keyframes_;
 
     // Loop detector parameters
     float mnCovisibilityConsistencyTh;

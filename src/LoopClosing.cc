@@ -73,7 +73,7 @@ void LoopClosing::Run()
     while(1)
     {
         // Check if there are keyframes in the queue
-        if(CheckNewKeyFrames())
+        if(has_new_keyframes())
         {
             // Detect loop candidates and check covisibility consistency
 
@@ -110,25 +110,29 @@ void LoopClosing::Run()
     SetFinish();
 }
 
-void LoopClosing::insert_keyframe(Keyframe pKF)
+void LoopClosing::insert_keyframe(const Keyframe& keyframe)
 {
-    unique_lock<mutex> lock(mMutexLoopQueue);
-    if(pKF->keyId != 0)
-        mlpLoopKeyFrameQueue.push_back(pKF);
+    // Without an active VPR backend this thread never runs (System's constructor): a
+    // queued keyframe would never be drained and would stay alive, culled or not.
+    if(!place_recognition->is_active())
+        return;
+
+    std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
+    new_keyframes_.push_back(keyframe);
 }
 
-bool LoopClosing::CheckNewKeyFrames()
+bool LoopClosing::has_new_keyframes() const
 {
-    unique_lock<mutex> lock(mMutexLoopQueue);
-    return(!mlpLoopKeyFrameQueue.empty());
+    std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
+    return !new_keyframes_.empty();
 }
 
 bool LoopClosing::DetectLoop()
 {
     {
-        unique_lock<mutex> lock(mMutexLoopQueue);
-        mpCurrentKF = mlpLoopKeyFrameQueue.front();
-        mlpLoopKeyFrameQueue.pop_front();
+        std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
+        mpCurrentKF = new_keyframes_.front();
+        new_keyframes_.pop_front();
         // Avoid that a keyframe can be erased while it is being process by this thread
         mpCurrentKF->SetNotErase();
     }
@@ -646,6 +650,11 @@ void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap)
 
 void LoopClosing::request_reset()
 {
+    // Without an active VPR backend this thread never runs, so nobody would ever clear
+    // the request (the caller would spin forever); there is nothing to reset either.
+    if(!place_recognition->is_active())
+        return;
+
     {
         unique_lock<mutex> lock(mMutexReset);
         mbResetRequested = true;
@@ -667,7 +676,10 @@ void LoopClosing::ResetIfRequested()
     unique_lock<mutex> lock(mMutexReset);
     if(mbResetRequested)
     {
-        mlpLoopKeyFrameQueue.clear();
+        {
+            std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
+            new_keyframes_.clear();
+        }
         mLastLoopKFid=0;
         mbResetRequested=false;
     }
