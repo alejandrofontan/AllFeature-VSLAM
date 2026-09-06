@@ -40,6 +40,7 @@ set(SRCS_ALLFEATURE
         src/FeatureExtractor.cpp
         src/Utils.cpp
         src/PlaceRecognitionMegaLoc.cc
+        src/PlaceCellSettings.cc
         src/Image.cpp
         src/Feature.cpp
         src/Feature_orb32.cpp
@@ -101,10 +102,15 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/Segmentation-TensorRT ${CMAKE_
 
 # ---- placecell (MegaLoc descriptors for the `vpr: megaloc` backend) ----
 # Standalone first-party library (github.com/alejandrofontan/placecell), pulled in as a
-# git submodule. System owns the placecell::MegaLocEmbedder and injects it into
+# git submodule. System owns the placecell::MegaLocPlaceCell and injects it into
 # PlaceRecognitionMegaLoc; the SLAM library links placecell::megaloc (the Eigen-only
-# core placecell::placecell comes in transitively).
+# core placecell::placecell comes in transitively) and placecell::viz, whose kernel /
+# information / alive renders the Viewer shows as Pangolin panels and
+# System::SavePlaceCellDiagnostics writes as PNGs (PlaceCell.* settings keys). viz only
+# needs OpenCV core/imgproc/imgcodecs here: its cv::imshow windows are never used
+# (the pixi env ships the headless OpenCV build, where imshow throws).
 set(PLACECELL_WITH_MEGALOC ON)
+set(PLACECELL_WITH_VIZ ON)
 set(PLACECELL_BUILD_EXAMPLES OFF)
 set(PLACECELL_BUILD_PYTHON OFF)
 add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/placecell ${CMAKE_BINARY_DIR}/placecell)
@@ -170,6 +176,7 @@ target_link_libraries(${PROJECT_NAME}
         SiftGPU::sift_gpu
         PoseLib::PoseLib
         placecell::megaloc
+        placecell::viz
 )
 
 

@@ -273,6 +273,9 @@ int main(int argc, char **argv)
     SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
     SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply", imageFilenames);
 
+    // placecell kernel / history / profile / plots (PlaceCell.Dump; no-op otherwise)
+    SLAM.SavePlaceCellDiagnostics(resultsPath_expId + "_placecell");
+
     return 0;
 }
 

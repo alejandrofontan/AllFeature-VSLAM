@@ -4,7 +4,9 @@
 #include "Optimizer.h"
 #include "PlaceRecognitionMegaLoc.h"
 
+#include <placecell/viz.h>
 
+#include <algorithm>
 #include <fstream>
 
 #include <thread>
@@ -50,6 +52,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     Optimizer::LoadParameters(fsSettings);
     Tracking::LoadParameters(fsSettings);
     LocalMapping::LoadParameters(fsSettings);
+    placecell_settings = PlaceCellSettings::Load(fsSettings);
 
     ////////////////////////////////////////////////////////////////////////////////
     // Visual place recognition (VPR) backend selection (PlaceRecognition.h). Settings
@@ -62,6 +65,8 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //   megaloc_precision: "fp16" (default) | "fp32"
     //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:
     //                      see PlaceRecognitionMegaLocParameters
+    //   PlaceCell.*:       placecell's print manager / profiler / recorder / visualizer
+    //                      (PlaceCellSettings.h)
     // A request that cannot be satisfied (missing model, unknown backend) is a hard error.
     std::string vpr_method{"megaloc"};
     std::string feature_vpr_name{};
@@ -119,9 +124,25 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 + " | " + (engineCached ? "loading cached TensorRT engine for " : "building TensorRT engine (1-2 min) for ")
                 + megaloc_onnx + " ...");
         std::cout.flush();
+
+        // placecell's diagnostic managers (PlaceCell.* keys). The Logger is process-wide:
+        // its level is applied through Options (PLACECELL_VERBOSITY in the environment
+        // wins, by placecell's contract); the Profiler and the Recorder belong to the store.
+        placecell::PlaceCell::Options placecell_options{};
+        placecell_options.name = "placecell";
+        placecell_options.profile = placecell_settings.profile;
+        placecell_options.record = placecell_settings.record;
+        placecell_options.report_on_destruction = false;   // printed explicitly in Shutdown() (PlaceCell.PrintProfile)
+        if(const auto level = placecell::Logger::parse(placecell_settings.verbosity))
+            placecell_options.verbosity = *level;
+        else
+            AF_WARN("[System] PlaceCell.Verbosity '" << placecell_settings.verbosity
+                    << "' is not a placecell log level (off|error|warn|info|debug|trace or 0-5) — keeping placecell's default");
+        placecell::Logger::instance().set_show_elapsed(placecell_settings.log_elapsed);
+
         try {
             // Engine build/load + CUDA warmup happen in the embedder constructor
-            place_cell = make_shared<placecell::MegaLocPlaceCell>(megaloc_onnx, megaloc_precision);
+            place_cell = make_shared<placecell::MegaLocPlaceCell>(megaloc_onnx, megaloc_precision, placecell_options);
         } catch (const std::exception& e) {
             AF_ERROR("[System] MegaLoc backend setup failed: " + std::string(e.what()));
             exit(-1);
@@ -131,6 +152,15 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 << ": " << place_cell->embedder().engine_path() << ", " << place_cell->embedder().descriptor_dim()
                 << "-d, min similarity " << megaloc_params.min_similarity
                 << ", max candidates " << megaloc_params.max_candidates << ")");
+        AF_INFO("[System] placecell diagnostics: verbosity "
+                << placecell::Logger::name(placecell::Logger::instance().level())
+                << (placecell::Logger::instance().level_from_environment() ? " (PLACECELL_VERBOSITY)" : "")
+                << " | profile " << (placecell_settings.profile ? "on" : "off")
+                << (placecell_settings.print_profile ? " (table at shutdown)" : "")
+                << " | record " << (placecell_settings.record ? "on" : "off")
+                << " | dump " << (placecell_settings.dump ? "on" : "off")
+                << " | visualize " << (placecell_settings.visualize ? "on" : "off")
+                << (placecell_settings.visualize && !activateVisualization ? " (no Viewer: verbose:0)" : ""));
         std::cout.flush();
     }
     else{
@@ -384,6 +414,45 @@ void System::Shutdown()
 
     if(viewer)
         pangolin::BindToContext(viewer->GetWindowTitle());
+
+    // Every placecell caller has stopped: the profile table is complete
+    if(place_cell && placecell_settings.print_profile)
+    {
+        std::cout.flush();   // keep the (stdout) AF_ lines before the (stderr) table when redirected
+        place_cell->print_profile();
+    }
+}
+
+void System::SavePlaceCellDiagnostics(const std::string& directory)
+{
+    if(!place_cell || !placecell_settings.dump)
+        return;
+
+    AF_INFO("Saving placecell diagnostics to " << directory << " ...");
+    try {
+        // Kernel (.npy, raw + centred), views.csv, recorder CSVs, profile.csv
+        place_cell->dump(directory);
+
+        // The three plots at their full-size defaults (the Viewer panels are smaller);
+        // windows stay off (renders to cv::Mat and cv::imwrite only, headless-safe)
+        placecell::viz::Visualizer::Options viz_options{};
+        viz_options.windows = false;
+        viz_options.max_hz = 0.0;
+        viz_options.kernel.centred = placecell_settings.visualize_centred;
+        viz_options.history.last_n = static_cast<size_t>(std::max(0, placecell_settings.visualize_history_last_n));
+        placecell::viz::Visualizer visualizer(*place_cell, viz_options);
+        visualizer.update(true);
+        visualizer.save(directory);
+    } catch (const std::exception& e) {
+        AF_WARN("[System] placecell diagnostics dump failed: " << e.what());
+        return;
+    }
+    AF_INFO("placecell diagnostics saved!");
+}
+
+const placecell::PlaceCell* System::GetPlaceCell() const
+{
+    return place_cell.get();
 }
 
 void System::SetSequenceInfo(const size_t nImages, const bool useMasks)

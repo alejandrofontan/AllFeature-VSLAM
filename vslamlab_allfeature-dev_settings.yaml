@@ -121,6 +121,33 @@ PlaceRecognition.MegaLocMinSimilarity: 0.55 # cosine floor for a keyframe to be 
 PlaceRecognition.MaxCandidates: 10          # cap on candidates per query (each costs a feature match + PnP/Sim3); 0 = unlimited
 
 #--------------------------------------------------------------------------------------------
+# placecell diagnostics (vpr: megaloc; Thirdparty/placecell's print manager, profiler, recorder
+# and visualizer). Every key is optional — a missing key keeps the compiled-in default, shown in
+# brackets. Flags are 0/1.
+#--------------------------------------------------------------------------------------------
+# Print manager (process-wide logger; lines look like "[placecell][DEBUG] cull_keyframes: ...", on stderr)
+PlaceCell.Verbosity: "warn"       # [warn] off | error | warn | info | debug | trace (or 0-5). WARN = degraded path, INFO = one-off
+                                  # facts, DEBUG = one line per add / cull / cull call, TRACE = every information query.
+                                  # The environment variable PLACECELL_VERBOSITY overrides this key for a single run.
+PlaceCell.LogElapsed: 0           # [0] 1 = prefix placecell lines with the seconds since the logger started
+# Profiler (per store: add, unexplained_information, cull_keyframes + its stages, add_image, embed)
+PlaceCell.Profile: 1              # [1] time the main entry points, with the problem size of every sample
+PlaceCell.PrintProfile: 1         # [0] print the count / median / p95 / max table at shutdown (stderr, ignores Verbosity)
+# Recorder (per store: every information query, every cull, Tracking's keyframe decisions and thresholds)
+PlaceCell.Record: 1               # [1] keep the history; Dump and Visualize need it
+PlaceCell.Dump: 1                 # [0] at the end write kernel.npy / kernel_centred.npy / views.csv, queries.csv / culls.csv /
+                                  # cull_calls.csv / alive_information.csv / decisions.csv / thresholds.csv, profile.csv and the
+                                  # three plots (kernel.png, information.png, alive.png) to <exp_folder>/<exp_id>_placecell/;
+                                  # offline plotting: Thirdparty/placecell/tools/plot_placecell.py <that dir>
+# Visualizer (placecell::viz, drawn in a second Pangolin window next to the Viewer's; needs verbose:1)
+PlaceCell.Visualize: 1            # [0] open a window with the kernel heatmap, the unexplained-information history (with tau /
+                                  # min-information lines, insertions and culls) and the alive unique-information strip;
+                                  # Viewer toggle "PlaceCell Window" (closing the window unticks it)
+PlaceCell.VisualizeMaxHz: 2.0     # [2.0] re-render the panels at most this often (a render is O(keyframes^2) for the centred kernel)
+PlaceCell.VisualizeCentred: 1     # [1] kernel heatmap of the centred kernel (what the culler marginalises); 0 = raw cosine
+PlaceCell.VisualizeHistoryLastN: 0 # [0] information history shows only the last N queries (0 = all)
+
+#--------------------------------------------------------------------------------------------
 # Local Mapping parameters (values shown are the compiled-in defaults; every key is optional —
 # a missing key keeps the default, so this section is safe to trim or edit per dataset)
 #--------------------------------------------------------------------------------------------

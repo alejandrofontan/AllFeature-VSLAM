@@ -34,13 +34,14 @@
 #include "Map.h"
 #include "LocalMapping.h"
 #include "LoopClosing.h"
+#include "PlaceCellSettings.h"
 #include "PlaceRecognition.h"
 #include "Viewer.h"
 #include "Utils.h"
 
 // placecell (Thirdparty/placecell): embeds AND stores the global descriptors for the
-// megaloc VPR backend. Forward declaration only -- System.cc includes the real header.
-namespace placecell { class MegaLocPlaceCell; }
+// megaloc VPR backend. Forward declarations only -- System.cc includes the real headers.
+namespace placecell { class PlaceCell; class MegaLocPlaceCell; }
 
 namespace AF_VSLAM
 {
@@ -104,6 +105,17 @@ public:
     void SaveKeyFrameTrajectoryVSLAMLAB(const string &filename);
     void SavePointCloudVSLAMLAB(const string &filename, const vector<string>& imageFilenames);
 
+    // placecell diagnostics (PlaceCell.Dump): the store's kernel (.npy), views.csv, the
+    // recorder's CSVs, profile.csv and the three visualizer plots as PNGs, written into
+    // `directory` (created if needed). No-op without a placecell store (vpr: none) or
+    // with PlaceCell.Dump: 0. Call after Shutdown().
+    void SavePlaceCellDiagnostics(const std::string& directory);
+
+    // placecell store as seen by the Viewer (visualizer panels): null without vpr: megaloc.
+    // Non-owning; System outlives the Viewer (Shutdown joins its thread).
+    const placecell::PlaceCell* GetPlaceCell() const;
+    const PlaceCellSettings& GetPlaceCellSettings() const { return placecell_settings; }
+
     // TODO: Save/Load functions
     // SaveMap(const string &filename);
     // LoadMap(const string &filename);
@@ -150,6 +162,11 @@ private:
     // into PlaceRecognitionMegaLoc, and shared with LocalMapping (VPR matrix); future
     // placecell integrations (graph management) share the same object.
     std::shared_ptr<placecell::MegaLocPlaceCell> place_cell{};
+
+    // PlaceCell.* settings (print manager / profiler / recorder / visualizer), loaded
+    // once at construction; consulted here (Options, profile print, dump) and by the
+    // Viewer (panels).
+    PlaceCellSettings placecell_settings{};
 
     // Map structure that stores the pointers to all KeyFrames and MapPoints.
     shared_ptr<Map> mpMap;

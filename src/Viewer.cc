@@ -24,7 +24,16 @@
 #include <yaml-cpp/yaml.h>
 #include "afvslam_log.hpp"
 
+// placecell visualizer (Thirdparty/placecell, placecell::viz): renders the kernel heatmap,
+// the unexplained-information history and the alive-information strip to cv::Mat; this
+// viewer uploads them as textures into Pangolin panels (PlaceCell.Visualize).
+#include <placecell/viz.h>
+
+#include <algorithm>
+#include <chrono>
+#include <exception>
 #include <iomanip>
+#include <memory>
 #include <mutex>
 #include <sstream>
 
@@ -188,6 +197,15 @@ void Viewer::Run()
     pangolin::Var<bool> menuShowTrajectory("menu.Show Trajectory",true,true);
     pangolin::Var<bool> menuShowTopView("menu.Show Top View",true,true);
 
+    // placecell window (PlaceCell.Visualize): the visualizer's three images in a second
+    // Pangolin window, see the block after d_top below. Only offered when a placecell store
+    // exists (vpr: megaloc).
+    const placecell::PlaceCell* placeCell = system->GetPlaceCell();
+    const PlaceCellSettings& placeCellSettings = system->GetPlaceCellSettings();
+    std::unique_ptr<pangolin::Var<bool>> menuPlaceCellWindow;
+    if(placeCell)
+        menuPlaceCellWindow = std::make_unique<pangolin::Var<bool>>("menu.PlaceCell Window", placeCellSettings.visualize, true);
+
     // Thickness
     pangolin::Var<float> menuPointSize("menu.Point Size", defaults.pointSize, 1.0f, 10.0f);
     pangolin::Var<float> menuTrajWidth("menu.Trajectory Width", defaults.trajectoryLineWidth, 0.5f, 10.0f);
@@ -223,6 +241,76 @@ void Viewer::Run()
     const float topH = topW * w / h;
     pangolin::View& d_top = pangolin::Display("topview")
         .SetBounds(margin, margin + topH, 1.0f - topW - margin, 1.0f - margin);
+
+    // placecell window: a SECOND Pangolin window driven from this same thread. Pangolin keeps
+    // one GL context per named window, so each loop iteration renders the main window,
+    // binds the placecell one, renders it and binds back. The window (and its GL textures
+    // and views, which belong to its context) is created lazily when the menu toggle is on
+    // and destroyed when it is off or the user closes it. Layout, 1:1 pixels (no resampling
+    // of the plot text): kernel heatmap on the left, information history above the alive-
+    // information strip on the right; the kernel canvas is (side + title) tall and (side +
+    // colourbar) wide, so the side is derived from the window height and the plots get the
+    // remaining width, stacked 64/36.
+    const std::string placeCellWindowTitle = windowTitle + " | placecell";
+    const int pcW{1500}, pcH{600}, pcMargin{8};
+    constexpr int kPlaceCellTitleHeight{26};   // placecell::viz title strip (kTitleHeight)
+    constexpr int kPlaceCellColorbarWidth{56}; // placecell::viz colourbar strip
+    const int pcBandH = pcH - 2 * pcMargin;
+    placecell::viz::Visualizer::Options placeCellVizOptions{};
+    placeCellVizOptions.windows = false;   // rendered into Pangolin, never cv::imshow (headless OpenCV)
+    placeCellVizOptions.max_hz = 0.0;      // throttled here (see the loop) to avoid its change-check copies
+    placeCellVizOptions.kernel.centred = placeCellSettings.visualize_centred;
+    placeCellVizOptions.kernel.target_size = std::max(64, pcBandH - kPlaceCellTitleHeight);
+    placeCellVizOptions.history.last_n = static_cast<size_t>(std::max(0, placeCellSettings.visualize_history_last_n));
+    placeCellVizOptions.history.width = std::max(200, pcW - (placeCellVizOptions.kernel.target_size + kPlaceCellColorbarWidth) - 3 * pcMargin);
+    placeCellVizOptions.history.height = int(0.64f * pcBandH);
+    placeCellVizOptions.alive.width = placeCellVizOptions.history.width;
+    placeCellVizOptions.alive.height = pcBandH - placeCellVizOptions.history.height;
+    std::unique_ptr<placecell::viz::Visualizer> placeCellViz;
+    pangolin::View* d_pc_kernel{nullptr};
+    pangolin::View* d_pc_information{nullptr};
+    pangolin::View* d_pc_alive{nullptr};
+    std::unique_ptr<pangolin::GlTexture> texPcKernel, texPcInformation, texPcAlive;
+    int texPcKernelW{0}, texPcKernelH{0}, texPcInformationW{0}, texPcInformationH{0}, texPcAliveW{0}, texPcAliveH{0};
+    bool placeCellWindowOpen{false};
+    bool placeCellWindowFailed{false};
+    const double placeCellMinPeriod = placeCellSettings.visualize_max_hz > 0.0 ? 1.0 / placeCellSettings.visualize_max_hz : 0.0;
+    auto placeCellLastUpdate = std::chrono::steady_clock::time_point::min();
+
+    // Upload a BGR render into its texture (re-created on a size change) and place its view
+    // at 1:1 pixels in the placecell window: bounds are (bottom, top, left, right) as
+    // fractions of that window. Call with the placecell context bound.
+    auto uploadPlaceCellPanel = [&](pangolin::View& view, pangolin::GlTexture& texture, int& texW, int& texH,
+                                    const cv::Mat& image, const int bottomPx, const int leftPx)
+    {
+        if(image.empty() || !image.isContinuous() || image.type() != CV_8UC3)
+            return;
+        if(image.cols != texW || image.rows != texH)
+        {
+            texture.Reinitialise(image.cols, image.rows, GL_RGB, true, 0, GL_BGR, GL_UNSIGNED_BYTE);
+            texW = image.cols;
+            texH = image.rows;
+        }
+        view.SetBounds(float(bottomPx) / pcH, float(bottomPx + texH) / pcH, float(leftPx) / pcW, float(leftPx + texW) / pcW);
+        texture.Upload(image.data, GL_BGR, GL_UNSIGNED_BYTE);
+    };
+
+    // Tear the placecell window down (GL objects first, with its context bound) and return
+    // to the main context. Safe to call when it is not open.
+    auto closePlaceCellWindow = [&]()
+    {
+        if(!placeCellWindowOpen)
+            return;
+        pangolin::BindToContext(placeCellWindowTitle);
+        texPcKernel.reset();
+        texPcInformation.reset();
+        texPcAlive.reset();
+        texPcKernelW = texPcKernelH = texPcInformationW = texPcInformationH = texPcAliveW = texPcAliveH = 0;
+        d_pc_kernel = d_pc_information = d_pc_alive = nullptr;
+        pangolin::DestroyWindow(placeCellWindowTitle);
+        pangolin::BindToContext(windowTitle);
+        placeCellWindowOpen = false;
+    };
 
     bool bAerial = false;
     while(1)
@@ -318,6 +406,81 @@ void Viewer::Run()
 
         pangolin::FinishFrame();
 
+        // placecell window: create it on demand, (re)render through the visualizer at most
+        // visualize_max_hz, upload what changed, draw the three textures, and return to
+        // the main context. Closing the window from its title bar unticks the menu toggle.
+        const bool wantPlaceCellWindow = menuPlaceCellWindow && *menuPlaceCellWindow && !placeCellWindowFailed;
+        if(wantPlaceCellWindow)
+        {
+            try
+            {
+                const bool justOpened = !placeCellWindowOpen;
+                if(justOpened)
+                {
+                    pangolin::CreateWindowAndBind(placeCellWindowTitle, pcW, pcH);
+                    placeCellWindowOpen = true;
+                    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                    d_pc_kernel = &pangolin::Display("placecell_kernel");
+                    d_pc_information = &pangolin::Display("placecell_information");
+                    d_pc_alive = &pangolin::Display("placecell_alive");
+                    texPcKernel = std::make_unique<pangolin::GlTexture>();
+                    texPcInformation = std::make_unique<pangolin::GlTexture>();
+                    texPcAlive = std::make_unique<pangolin::GlTexture>();
+                    if(!placeCellViz)
+                        placeCellViz = std::make_unique<placecell::viz::Visualizer>(*placeCell, placeCellVizOptions);
+                }
+                else
+                    pangolin::BindToContext(placeCellWindowTitle);
+
+                if(pangolin::ShouldQuit())
+                {
+                    // The user closed the placecell window
+                    closePlaceCellWindow();
+                    *menuPlaceCellWindow = false;
+                }
+                else
+                {
+                    glClearColor(vslamlab_colors::kDarkBg[0], vslamlab_colors::kDarkBg[1], vslamlab_colors::kDarkBg[2], 1.0f);
+                    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+                    const auto now = std::chrono::steady_clock::now();
+                    const bool due = justOpened || placeCellLastUpdate == std::chrono::steady_clock::time_point::min()
+                                     || std::chrono::duration<double>(now - placeCellLastUpdate).count() >= placeCellMinPeriod;
+                    if(due)
+                    {
+                        placeCellLastUpdate = now;
+                        // A fresh window has no textures yet: force a render even if nothing changed
+                        if(placeCellViz->update(justOpened) || justOpened)
+                        {
+                            uploadPlaceCellPanel(*d_pc_kernel, *texPcKernel, texPcKernelW, texPcKernelH,
+                                                 placeCellViz->kernel_image(), pcMargin, pcMargin);
+                            const int plotsLeft = pcMargin + texPcKernelW + pcMargin;
+                            uploadPlaceCellPanel(*d_pc_alive, *texPcAlive, texPcAliveW, texPcAliveH,
+                                                 placeCellViz->alive_image(), pcMargin, plotsLeft);
+                            uploadPlaceCellPanel(*d_pc_information, *texPcInformation, texPcInformationW, texPcInformationH,
+                                                 placeCellViz->information_image(), pcMargin + texPcAliveH, plotsLeft);
+                        }
+                    }
+
+                    glColor3f(1.0, 1.0, 1.0);
+                    if(texPcKernelW > 0)      { d_pc_kernel->Activate();      texPcKernel->RenderToViewportFlipY(); }
+                    if(texPcInformationW > 0) { d_pc_information->Activate(); texPcInformation->RenderToViewportFlipY(); }
+                    if(texPcAliveW > 0)       { d_pc_alive->Activate();       texPcAlive->RenderToViewportFlipY(); }
+                    pangolin::FinishFrame();
+                    pangolin::BindToContext(windowTitle);
+                }
+            }
+            catch(const std::exception& e)
+            {
+                AF_WARN("[Viewer] placecell window disabled: " << e.what());
+                placeCellWindowFailed = true;
+                closePlaceCellWindow();
+                placeCellViz.reset();
+            }
+        }
+        else if(placeCellWindowOpen)
+            closePlaceCellWindow();
+
         if(Stop())
         {
             while(is_stopped())
@@ -329,6 +492,9 @@ void Viewer::Run()
         if(CheckFinish())
             break;
     }
+
+    // System::Shutdown binds back to the main window's context afterwards
+    closePlaceCellWindow();
 
     SetFinish();
 }
