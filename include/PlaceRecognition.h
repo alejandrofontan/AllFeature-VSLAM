@@ -24,6 +24,7 @@
 #define AF_VSLAM_PLACE_RECOGNITION_H
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,16 @@ namespace AF_VSLAM
 class Frame;
 class KeyFrame;
 typedef std::shared_ptr<KeyFrame> Keyframe;
+
+// Information a frame's view would add to a set of keyframes (backends with a global
+// descriptor kernel — see placecell::PlaceCell::unexplained_information).
+struct KeyframeInformation
+{
+    float unexplained{1.0f};      // v in [0,1]: 1 = nothing in the set resembles the view, 0 = fully explained
+    int explainers{0};            // keyframes of the set that had a stored descriptor
+    FrameId best_explainer{0};    // frame_id of the most similar explainer
+    float best_similarity{0.0f};  // its similarity on the kernel used (centred or raw)
+};
 
 class PlaceRecognition
 {
@@ -83,6 +94,27 @@ public:
     // Relocalization candidates for a (lost) frame; compute(frame) must have run.
     virtual std::vector<Keyframe> detect_relocalization_candidates(Frame& frame) = 0;
 
+    // Unexplained information of the frame's view given the keyframes in `window`
+    // (Tracking's local map) — the information a keyframe made from the frame would
+    // add to them, on the same kernel keyframe culling marginalises (`centred` as
+    // LocalMapping.KeyframeCullingCentred). Read-only for the keyframe database. The
+    // backend caches the frame's global descriptor in frame.global_descriptor so a
+    // keyframe made from it is not embedded twice. std::nullopt when the backend has
+    // no information measure (none) or the frame cannot be embedded.
+    virtual std::optional<KeyframeInformation> keyframe_information(Frame& frame,
+                                                                    const std::vector<Keyframe>& window,
+                                                                    bool centred) = 0;
+
+    // Diagnostics feed for backends that keep a decision history (placecell's Recorder,
+    // behind PlaceCell.Record): the thresholds Tracking's keyframe policy is applying
+    // (tau = LocalMapping.KeyframeCullingMaxUnexplained, min_information =
+    // Tracking.KeyframeMinInformation — every change is kept so plots can draw steps)
+    // and its per-frame decision (drawn as insertion markers on the information plot).
+    // Called once per tracked frame from Tracking::need_new_keyframe. No-ops by default.
+    virtual void record_keyframe_thresholds(float /*tau*/, float /*min_information*/) {}
+    virtual void record_keyframe_decision(FrameId /*frame_id*/, bool /*inserted*/,
+                                          std::optional<float> /*unexplained*/, const std::string& /*reason*/) {}
+
 protected:
     FeatureType verification_feature_;
 };
@@ -104,6 +136,7 @@ public:
     float score(const KeyFrame&, const KeyFrame&) const override { return 0.0f; }
     std::vector<Keyframe> detect_loop_candidates(const Keyframe&, float) override { return {}; }
     std::vector<Keyframe> detect_relocalization_candidates(Frame&) override { return {}; }
+    std::optional<KeyframeInformation> keyframe_information(Frame&, const std::vector<Keyframe>&, bool) override { return std::nullopt; }
 };
 
 } // namespace AF_VSLAM

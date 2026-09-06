@@ -214,11 +214,14 @@ public:
 
 
     // Image-embedding VPR (MegaLoc): the keyframe's image (OpenCV-native BGR, shared
-    // header from the Frame) lives only until compute_global_descriptor() has embedded
-    // and stored it in placecell (System::place_cell, keyed by frame_id); empty for
-    // none. The descriptor itself is not a member: read it via
-    // place_cell->descriptor(frame_id).
+    // header from the Frame) and the frame's already-computed global descriptor (if
+    // Tracking embedded the frame for the keyframe-information decision) live only until
+    // compute_global_descriptor() has stored the descriptor in placecell
+    // (System::place_cell, keyed by frame_id) — the descriptor is preferred, the image is
+    // embedded only when no descriptor came with the frame; both are released afterwards.
+    // Read the stored descriptor via place_cell->descriptor(frame_id).
     cv::Mat image;
+    Eigen::VectorXf global_descriptor;
 
     // Pose relative to parent (this is computed when bad flag is activated)
     mat4f Tcp;

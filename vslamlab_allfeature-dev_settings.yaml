@@ -82,9 +82,16 @@ Tracking.MaxLocalKeyframes: 80        # stop expanding the local map beyond this
 Tracking.BestCovisibleKeyframes: 10   # covisible neighbors considered per keyframe
 Tracking.ViewingCosLimit: 0.5         # frustum viewing-angle limit for local-point candidates
 
-# Keyframe policy
-Tracking.MinMedianFlow: 1.0           # px; below this the camera counts as static (no keyframes)
-Tracking.MinSharedPointsForFlow: 20   # the flow gate needs at least this many shared points
+# Keyframe policy. Information = unexplained information of the current view given the local map
+# (placecell, same MegaLoc kernel and centring as keyframe culling; [0,1], 1 = nothing in the local
+# map resembles the view). Three bands: below KeyframeMinInformation the view is redundant and no
+# keyframe is inserted (replaces the old pixel-flow stationarity gate); above
+# LocalMapping.KeyframeCullingMaxUnexplained (tau, the culler's budget: one shared key) the view is
+# novel and a keyframe is inserted even if tracking is fine; in between the tracking triggers below decide.
+Tracking.KeyframeMinInformation: 0.05 # redundancy band: information below this -> no keyframe (forced keyframes bypass)
+Tracking.LogKeyframeInformation: 0    # 1 = one diagnostic line per tracked frame (information, best explainer, flow, triggers, decision)
+Tracking.MinMedianFlow: 1.0           # px; below this the camera counts as static (diagnostic only, no longer gates keyframes)
+Tracking.MinSharedPointsForFlow: 20   # the flow estimate needs at least this many shared points
 Tracking.RefMatchesRatio: 0.9         # weak tracking: inliers < ratio x reference-KF tracked points
 Tracking.MinInliersForKeyframe: 15    # floor below which a keyframe is not inserted
 Tracking.MinObservationsHigh: 3       # reference-KF match counting: min observations per point
@@ -140,7 +147,7 @@ LocalMapping.KeyframeCullingRedundancyRatio: 0.9 # cull when more than this frac
 LocalMapping.KeyframeCullingMinObservations: 3   # a point is redundant when this many OTHER keyframes observe it
 
 # information (compiled-in defaults: MaxUnexplained 0.3, MinAge 5, MinKeyframes 5, Scope map, MaxPerCall 5, Centred 1)
-LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # every keyframe ever inserted must stay at least (1 - this) explained by the alive keyframes (Viewer slider "Cull Max Unexplained")
+LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # tau, shared by culling and insertion: every keyframe ever inserted must stay at least (1 - tau) explained by the alive keyframes, and a view more than tau unexplained by the local map becomes a keyframe (Viewer slider "KF Max Unexplained")
 LocalMapping.KeyframeCullingMinAge: 5            # keyframes younger than this many keyframes are never culled
 LocalMapping.KeyframeCullingMinKeyframes: 5      # never cull below this many alive keyframes
 LocalMapping.KeyframeCullingScope: map           # marginalise over "map" (all alive keyframes) or "local" (current keyframe + its covisible keyframes)

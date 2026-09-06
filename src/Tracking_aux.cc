@@ -4,6 +4,8 @@
  */
 #include "Tracking.h"
 
+#include <string>
+
 #include <cmath>
 #include <iostream>
 
@@ -122,6 +124,7 @@ void Tracking::log_heartbeat()
         return;
     AF_INFO("track: heartbeat | frame=" << current_frame_.frame_id
             << " inliers=" << num_inlier_matches_
+            << " info=" << (last_keyframe_information_ ? std::to_string(*last_keyframe_information_) : std::string("n/a"))
             << " localPts=" << local_points_.size()
             << " KFs=" << map_->keyframes_in_map()
             << " mapPts=" << map_->map_points_in_map());

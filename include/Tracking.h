@@ -102,8 +102,10 @@ struct TrackingParameters
     float viewing_cos_limit{0.5f}; // frustum viewing-angle limit for local-point candidates
 
     // need_new_keyframe()
-    float min_median_flow{1.0f};        // px; below this the camera counts as static (no keyframes)
-    int min_shared_points_for_flow{20}; // the flow gate needs at least this many shared points
+    float keyframe_min_information{0.05f}; // unexplained information (placecell, [0,1]) below which the local map already explains the view: no keyframe
+    bool log_keyframe_information{false};  // one diagnostic line per tracked frame with the information, the flow, the triggers, and the decision
+    float min_median_flow{1.0f};        // px; below this the camera counts as static (diagnostic only: no longer gates keyframes)
+    int min_shared_points_for_flow{20}; // the flow estimate needs at least this many shared points
     float ref_matches_ratio{0.9f};      // weak tracking: inliers < ratio x reference-KF tracked points...
     int min_inliers_for_keyframe{15};   // ...but above this floor (below it suggests loss, not a keyframe)
     int min_observations_high{3};       // reference-KF match counting: min observations per point
@@ -323,6 +325,10 @@ protected:
     // (see CLAUDE.md, Stop-Induced Keyframe Runaway Investigation).
     std::deque<int> recent_inliers_history_;
     FrameId last_emergency_keyframe_id_{0};
+
+    // Unexplained information of the last tracked frame given the local map (see
+    // need_new_keyframe); nullopt when the VPR backend has no information measure.
+    std::optional<float> last_keyframe_information_{};
 
     // Last Frame, KeyFrame and Relocalisation Info
     Keyframe last_keyframe_;

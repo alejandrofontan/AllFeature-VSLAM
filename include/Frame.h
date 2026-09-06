@@ -142,10 +142,12 @@ public:
     // keyframe made from this frame can be embedded later; empty otherwise.
     cv::Mat image;
 
-    // Transient global descriptor of a relocalization QUERY frame (MegaLoc: 8448-d
-    // unit vector; size 0 when VPR is inactive). Keyframe
-    // descriptors do NOT live here: they are stored in placecell (System::place_cell),
-    // keyed by frame_id, when PlaceRecognitionMegaLoc::compute(KeyFrame&) runs.
+    // Transient global descriptor of the frame (MegaLoc: 8448-d unit vector; size 0
+    // when VPR is inactive), computed on the tracking thread by the keyframe-information
+    // query (Tracking::need_new_keyframe) or a relocalization query, whichever comes
+    // first — never twice. Keyframe descriptors do NOT live here: a KeyFrame made from
+    // this frame carries this copy only until PlaceRecognitionMegaLoc::compute(KeyFrame&)
+    // stores it in placecell (System::place_cell), keyed by frame_id.
     Eigen::VectorXf global_descriptor;
 
     // Feature extractor. The right is used only in the stereo case.

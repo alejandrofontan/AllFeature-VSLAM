@@ -166,10 +166,12 @@ void Viewer::Run()
 
     pangolin::Var<std::string> headerLocalMapping("menu.LOCAL MAPPING", "");
 
-    // Keyframe culling threshold (LocalMapping.KeyframeCullingMaxUnexplained, information
-    // method), editable online: seeded from the loaded parameter, written back every frame
-    // (atomic; LocalMapping reads it at each cull_keyframes call). 0 = never cull, 1 = cull anything.
-    pangolin::Var<float> menuCullMaxUnexplained("menu.Cull Max Unexplained",
+    // Keyframe information budget tau (LocalMapping.KeyframeCullingMaxUnexplained), editable
+    // online: seeded from the loaded parameter, written back every frame (atomic). It drives
+    // both ends of the keyframe lifecycle: LocalMapping culls a keyframe only if every keyframe
+    // stays at most tau unexplained, Tracking inserts a keyframe whose view is more than tau
+    // unexplained by the local map. 0 = never cull / insert everything, 1 = cull anything / never insert for novelty.
+    pangolin::Var<float> menuCullMaxUnexplained("menu.KF Max Unexplained",
                                                 LocalMapping::params.keyframe_culling_max_unexplained.load(), 0.0f, 1.0f);
 
     pangolin::Var<std::string> headerVisualization("menu.VISUALIZATION", "");

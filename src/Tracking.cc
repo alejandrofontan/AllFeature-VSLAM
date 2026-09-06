@@ -9,11 +9,14 @@
 #include "Tracking.h"
 
 #include <algorithm>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <string>
 #include <unordered_map>
+#include <utility>
 
 #include <opencv2/core/core.hpp>
 
@@ -60,6 +63,10 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.MaxLocalKeyframes", params.max_local_keyframes);
     read_if_present("Tracking.BestCovisibleKeyframes", params.best_covisible_keyframes);
     read_if_present("Tracking.ViewingCosLimit", params.viewing_cos_limit);
+    read_if_present("Tracking.KeyframeMinInformation", params.keyframe_min_information);
+    int log_keyframe_information = params.log_keyframe_information ? 1 : 0;   // cv::FileStorage has no bool reader
+    read_if_present("Tracking.LogKeyframeInformation", log_keyframe_information);
+    params.log_keyframe_information = (log_keyframe_information != 0);
     read_if_present("Tracking.MinMedianFlow", params.min_median_flow);
     read_if_present("Tracking.MinSharedPointsForFlow", params.min_shared_points_for_flow);
     read_if_present("Tracking.RefMatchesRatio", params.ref_matches_ratio);
@@ -882,7 +889,7 @@ bool Tracking::need_new_keyframe()
                                                                                : params.min_observations_high;
     const int num_ref_matches = ref_keyframe_->tracked_map_points(min_observations);
 
-    // Insertion conditions. (A close-point condition — insert when too few nearby
+    // Tracking-health triggers. (A close-point condition — insert when too few nearby
     // RGB-D points are tracked but many could be created — belongs here once depth
     // populates per-point close/far classification; see CLAUDE.md depth table row 8.)
     const bool weak_tracking = num_inlier_matches_ < num_ref_matches * params.ref_matches_ratio
@@ -893,7 +900,8 @@ bool Tracking::need_new_keyframe()
     forced_by_cadence = (current_frame_.frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0;
 #endif
 
-    const bool low_overlap = current_frame_.get_overlap() < params.min_ref_overlap;
+    const float overlap = current_frame_.get_overlap();
+    const bool low_overlap = overlap < params.min_ref_overlap;
     const bool forced = forced_by_cadence;
 
     // Median inlier count over the recent tracked frames (reference for the
@@ -910,25 +918,97 @@ bool Tracking::need_new_keyframe()
     if (recent_inliers_history_.size() > static_cast<size_t>(params.inliers_history_size))
         recent_inliers_history_.pop_front();
 
-    // Stationarity gate: a static camera adds no viewpoint information — new
-    // keyframes would only feed zero-baseline triangulation, which poisons the map
-    // with ill-conditioned points (see CLAUDE.md, Stop-Induced Keyframe Runaway
-    // Investigation). Forced keyframes bypass the gate.
-    const std::optional<float> median_flow = median_flow_from_last_frame();
-    if (!forced && median_flow && *median_flow < params.min_median_flow)
-        return false;
+    // Information the current view would add to the local map: its unexplained
+    // information v in [0,1] given the local keyframes, on the same global-descriptor
+    // kernel (and centring) keyframe culling marginalises (placecell). Costs one MegaLoc
+    // embedding per tracked frame; the embedding is cached in current_frame_ so a
+    // keyframe made from this frame is not embedded twice. Three bands, sharing the
+    // culler's budget tau (LocalMapping.KeyframeCullingMaxUnexplained):
+    //   v <  keyframe_min_information : redundant — the local map already explains the view;
+    //                                   no keyframe (replaces the pixel-flow stationarity gate:
+    //                                   a static camera is the extreme case of this band)
+    //   v >  tau                      : novel — insert even if tracking is fine, so the alive
+    //                                   keyframes keep every view seen within tau (the same
+    //                                   invariant the culler maintains from the other end;
+    //                                   by the Schur identity a keyframe inserted here has
+    //                                   unique information v > tau, so it is not a cull
+    //                                   candidate on its own account)
+    //   in between                    : the tracking-health triggers above decide.
+    // Without an information measure (vpr: none) only the tracking triggers decide.
+    const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load();
+    const std::optional<KeyframeInformation> information =
+        place_recognition_->keyframe_information(current_frame_, local_keyframes_, LocalMapping::params.keyframe_culling_centred);
+    last_keyframe_information_ = information ? std::optional<float>(information->unexplained) : std::nullopt;
+    const bool redundant = information && information->unexplained < params.keyframe_min_information;
+    const bool novel = information && information->unexplained > tau;
 
-    if(!(weak_tracking || forced || low_overlap))
-        return false;
+    // Thresholds in force, for the backend's decision history (placecell Recorder):
+    // recorded as a step wherever they change (Viewer slider), ignored otherwise.
+    place_recognition_->record_keyframe_thresholds(tau, params.keyframe_min_information);
+
+    // Decision sink: the backend's decision history (placecell Recorder, drawn as
+    // insertion markers on the information plot), the insertion line (always) and the
+    // per-frame diagnostic line (Tracking.LogKeyframeInformation), all carrying the
+    // information value.
+    const auto decide = [&](const bool insert, const std::string& reason) -> bool
+    {
+        place_recognition_->record_keyframe_decision(current_frame_.frame_id, insert, last_keyframe_information_, reason);
+        if(insert || params.log_keyframe_information)
+        {
+            std::ostringstream line;
+            line << (insert ? "need_new_keyframe: keyframe (" : "need_new_keyframe: skip (") << reason << ")"
+                 << " | frame=" << current_frame_.frame_id;
+            if(information)
+            {
+                KeyframeId best_explainer_key_id = 0;
+                for(const Keyframe& keyframe : local_keyframes_)
+                    if(keyframe && keyframe->frame_id == information->best_explainer)
+                        best_explainer_key_id = keyframe->keyId;
+                line << " info=" << std::fixed << std::setprecision(3) << information->unexplained
+                     << " tau=" << tau << " minInfo=" << params.keyframe_min_information
+                     << " explainers=" << information->explainers
+                     << " best=KF" << best_explainer_key_id << "(" << information->best_similarity << ")";
+            }
+            else
+                line << " info=n/a";
+            if(params.log_keyframe_information)
+            {
+                // Pixel flow to the last frame: kept as a diagnostic only, no longer a gate
+                const std::optional<float> median_flow = median_flow_from_last_frame();
+                line << " flow=" << (median_flow ? std::to_string(*median_flow) : std::string("n/a"))
+                     << " inliers=" << num_inlier_matches_ << " refMatches=" << num_ref_matches
+                     << " medianRecentInliers=" << median_recent_inliers
+                     << std::setprecision(2) << " overlap=" << overlap
+                     << " weak=" << weak_tracking << " lowOverlap=" << low_overlap
+                     << " novel=" << novel << " redundant=" << redundant << " forced=" << forced
+                     << " KFs=" << num_keyframes_in_map;
+            }
+            AF_INFO(line.str());
+        }
+        return insert;
+    };
+
+    // Redundancy band. Forced keyframes bypass it.
+    if(!forced && redundant)
+        return decide(false, "redundant");
+
+    if(!(weak_tracking || forced || low_overlap || novel))
+        return decide(false, "no trigger");
+
+    std::string reason;
+    for(const auto& [active, name] : {std::pair{forced, "forced"}, std::pair{novel, "novel"},
+                                      std::pair{weak_tracking, "weak_tracking"}, std::pair{low_overlap, "low_overlap"}})
+        if(active)
+            reason += (reason.empty() ? "" : "+") + std::string(name);
 
     // Sequential mode: the end-of-frame wait guarantees Local Mapping is idle, so do
     // not consult the live busy flag — run() toggles it once per idle cycle, and
     // sampling that flicker would make the insertion decision timing-dependent.
     if(params.sequential)
-        return true;
+        return decide(true, reason);
 
     if(local_mapper_->accepts_keyframes())
-        return true;
+        return decide(true, reason);
 
     // Local Mapping is busy. Emergency keyframe: only on a genuine drop against the
     // *recent frames'* own inlier level (not ref_keyframe_->tracked_map_points(),
@@ -941,12 +1021,13 @@ bool Tracking::need_new_keyframe()
     {
         AF_WARN("need_new_keyframe: emergency keyframe (inliers=" << num_inlier_matches_
                 << " < " << params.emergency_inlier_drop_ratio << "*medianRecentInliers=" << median_recent_inliers
-                << ", medianFlow=" << median_flow.value_or(-1.0f) << ") | frame=" << current_frame_.frame_id);
+                << ", info=" << (information ? std::to_string(information->unexplained) : std::string("n/a"))
+                << ") | frame=" << current_frame_.frame_id);
         last_emergency_keyframe_id_ = current_frame_.frame_id;
         emergency_keyframe_ = true;
-        return true;
+        return decide(true, reason + "+emergency");
     }
-    return false;
+    return decide(false, reason + ", local mapping busy");
 }
 
 void Tracking::create_new_keyframe()

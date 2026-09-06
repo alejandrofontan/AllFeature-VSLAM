@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <limits>
 #include <map>
 
 #include "Frame.h"
@@ -46,10 +48,16 @@ void PlaceRecognitionMegaLoc::compute(Frame& frame)
 
 void PlaceRecognitionMegaLoc::compute(KeyFrame& keyframe)
 {
-    // Embed + store in placecell under the keyframe's frame_id (idempotent)
+    // Store in placecell under the keyframe's frame_id (idempotent): the descriptor the
+    // frame already carries (embedded by keyframe_information on the tracking thread),
+    // or embed the image now.
     if(!place_cell_->has(keyframe.frame_id))
     {
-        if(keyframe.image.empty())
+        if(keyframe.global_descriptor.size() != 0)
+            place_cell_->add(keyframe.frame_id, keyframe.global_descriptor);
+        else if(!keyframe.image.empty())
+            place_cell_->add_image(keyframe.frame_id, keyframe.image);
+        else
         {
             static std::atomic<bool> warned{false};
             if(!warned.exchange(true))
@@ -57,10 +65,11 @@ void PlaceRecognitionMegaLoc::compute(KeyFrame& keyframe)
                         << " has no image to embed (KeyFrame::image empty) — it will never be retrieved");
             return;
         }
-        place_cell_->add_image(keyframe.frame_id, keyframe.image);
     }
-    // The image only existed for this purpose.
+    // The image and the descriptor copy only existed for this purpose (placecell holds
+    // the stored descriptor: place_cell->descriptor(frame_id)).
     keyframe.image.release();
+    keyframe.global_descriptor.resize(0);
 }
 
 void PlaceRecognitionMegaLoc::add(const Keyframe& keyframe)
@@ -196,6 +205,59 @@ std::vector<Keyframe> PlaceRecognitionMegaLoc::detect_relocalization_candidates(
 {
     compute(frame);
     return retrieve(frame.global_descriptor, {}, params_.min_similarity);
+}
+
+std::optional<KeyframeInformation> PlaceRecognitionMegaLoc::keyframe_information(Frame& frame,
+                                                                                 const std::vector<Keyframe>& window,
+                                                                                 const bool centred)
+{
+    std::vector<placecell::PlaceCell::ExternalId> window_ids;
+    window_ids.reserve(window.size());
+    for(const Keyframe& keyframe : window)
+        if(keyframe && !keyframe->is_bad())
+            window_ids.push_back(keyframe->frame_id);
+
+    // Read-only query on placecell: the frame's view is NOT stored. The embedding is
+    // cached in the frame (reused by a relocalization query on the same frame, and by
+    // compute(KeyFrame&) if the frame becomes a keyframe).
+    placecell::PlaceCell::Information information;
+    if(frame.global_descriptor.size() != 0)
+        information = place_cell_->unexplained_information(frame.global_descriptor, &window_ids, centred);
+    else if(!frame.image.empty())
+        information = place_cell_->unexplained_information(frame.image, &window_ids, centred, &frame.global_descriptor);
+    else
+    {
+        static std::atomic<bool> warned{false};
+        if(!warned.exchange(true))
+            AF_WARN("[PlaceRecognitionMegaLoc] frame " << frame.frame_id
+                    << " has no image to embed (Frame::image empty) — keyframe information unavailable");
+        return std::nullopt;
+    }
+    if(std::isnan(information.unexplained))
+        return std::nullopt;
+
+    KeyframeInformation result;
+    result.unexplained = information.unexplained;
+    result.explainers = information.explainers;
+    result.best_explainer = FrameId(information.best_explainer);
+    result.best_similarity = information.best_similarity;
+    return result;
+}
+
+void PlaceRecognitionMegaLoc::record_keyframe_thresholds(const float tau, const float min_information)
+{
+    // The recorder keeps a change history and ignores repeated identical values, so
+    // calling this every frame is cheap and the plots get a step wherever the Viewer
+    // slider or a settings change moved a threshold.
+    place_cell_->recorder().set_thresholds(tau, min_information);
+}
+
+void PlaceRecognitionMegaLoc::record_keyframe_decision(const FrameId frame_id, const bool inserted,
+                                                       const std::optional<float> unexplained,
+                                                       const std::string& reason)
+{
+    place_cell_->recorder().record_decision(frame_id, inserted,
+                                            unexplained.value_or(std::numeric_limits<float>::quiet_NaN()), reason);
 }
 
 } // namespace AF_VSLAM
