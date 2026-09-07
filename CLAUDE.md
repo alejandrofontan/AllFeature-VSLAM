@@ -571,6 +571,14 @@ relocalization and loop detection now goes through one backend interface
   `MinKeyframes`, `Scope: map|local`, `MaxPerCall`. Needs `vpr: megaloc`; with none it falls back to
   heuristic with a one-time warning. The offline `VPRMatrix`/`vpr_matrix:` CLI path is gone for good;
   the maths/design history lives in `/home/alejandro/cull_keyframes_math.pdf` (rev. 5, outside the repo).
+  **Offline matrices live in placecell now (2026-09-07):** `placecell::load_npy` +
+  `similarity_from_distance(D, DistanceKind::squared_euclidean)` + `PlaceCell::set_kernel` turn
+  VSLAM-LAB's `<sequence>/vpr-lab/D.npy` (faiss squared L2 on MegaLoc descriptors, min over four
+  image rotations, so asymmetric; `S = 1 − D/2`, rows = `rgb.csv` rows = `frame_id`) into a
+  kernel-only store that `cull_keyframes` can run on (`Thirdparty/placecell/examples/kernel_demo.cpp`).
+  No `vpr: matrix` backend exists here yet: a kernel-only store cannot take new rows or answer
+  insertion queries (placecell issue #2 was deliberately left for later), so wiring one up needs
+  that first.
 - Model pipeline (reproducible, lives in the placecell submodule since 2026-09-02): `Thirdparty/placecell/tools/export_megaloc.py`
   clones `gmberton/MegaLoc` (pinned commit), downloads the HF weights into
   `megaloc_models/.cache`, exports `megaloc_models/megaloc_322x322.onnx` + sidecar yaml, and
