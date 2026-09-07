@@ -578,7 +578,9 @@ relocalization and loop detection now goes through one backend interface
   kernel-only store that `cull_keyframes` can run on (`Thirdparty/placecell/examples/kernel_demo.cpp`).
   No `vpr: matrix` backend exists here yet: a kernel-only store cannot take new rows or answer
   insertion queries (placecell issue #2 was deliberately left for later), so wiring one up needs
-  that first.
+  that first. placecell's `tools/colmap_information_kernel.py` (2026-09-07) builds the same kind of
+  kernel from a COLMAP model in `VSLAM-LAB-Evaluation/<exp>/<dataset>/<sequence>/colmap_<id>/<best_model>`
+  (normalised BA mutual information between images; pass the sub-model named in `best_model`).
 - Model pipeline (reproducible, lives in the placecell submodule since 2026-09-02): `Thirdparty/placecell/tools/export_megaloc.py`
   clones `gmberton/MegaLoc` (pinned commit), downloads the HF weights into
   `megaloc_models/.cache`, exports `megaloc_models/megaloc_322x322.onnx` + sidecar yaml, and
