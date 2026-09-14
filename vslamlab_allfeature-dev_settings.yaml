@@ -12,6 +12,9 @@ megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # vpr: megaloc — exported 
 megaloc_precision: "fp16"                            # TensorRT engine precision: "fp16" | "fp32"
 segmentation: "efficientvit" # online semantic segmentation: "efficientvit" | "none"
 debug: false
+max_frame_wait: 0.2  # s; the mono/rgbd executables replay the sequence at its own rate (sleep for the rest of the
+                     # timestamp gap after tracking a frame); this caps that pause so holes in the recording do not
+                     # stall the run. Missing, 0 or negative = no cap (original behaviour).
 
 #--------------------------------------------------------------------------------------------
 # Viewer Parameters

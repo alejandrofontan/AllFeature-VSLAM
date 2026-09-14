@@ -13,6 +13,7 @@
 #include "SegmentationSettings.h"
 
 #include "DebugKeyStepper.h"
+#include "FramePacer.h"
 #include "StringUtils.h"
 
 void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
@@ -109,6 +110,14 @@ int main(int argc, char **argv)
     const std::vector<std::string> features = settings["features"].as<std::vector<std::string>>();
     bool debug = settings["debug"].as<bool>();
     AF_CONFIG_FIELD("Debug mode: ", debug);
+
+    // Replay pacing: cap on the pause before the next frame (max_frame_wait, seconds; <= 0 = none)
+    AF_VSLAM::FramePacer pacer{};
+    pacer.load(settings);
+    if (pacer.enabled())
+        AF_CONFIG_FIELD("Max frame wait (s): ", pacer.maxWait());
+    else
+        AF_CONFIG_FIELD("Max frame wait (s): ", "none");
 
     // Depth scale factor: metric_depth = raw_depth_pixel / depth_factor. Read from the
     // calibration.yaml camera entry matching settings_yaml's cam_mono (defaults to 1, i.e.
@@ -230,15 +239,14 @@ int main(int argc, char **argv)
         AF_VSLAM::Seconds ttrack = std::chrono::duration_cast<std::chrono::duration<AF_VSLAM::Seconds> >(t2 - t1).count();
         vTimesTrack[ni] = ttrack;
 
-        // Wait to load the next frame
+        // Wait to load the next frame (remainder of the timestamp gap, capped by max_frame_wait)
         AF_VSLAM::Seconds T = 0.0;
         if(ni < nImages-1)
             T = timestamps[ni+1] - tframe;
         else if(ni > 0)
             T = tframe - timestamps[ni-1];
 
-        if(ttrack < T)
-            usleep(1.0 * (T-ttrack)  * 1e6);
+        pacer.wait(T, ttrack);
 
         // Advance to next image only after processing this one
         ++ni;
@@ -268,6 +276,7 @@ int main(int argc, char **argv)
     std::cout << "-------" << std::endl << std::endl;
     std::cout << "median tracking time: " << vTimesTrack[nImages/2] << std::endl;
     std::cout << "mean tracking time: " << totaltime/nImages << std::endl;
+    pacer.printSummary();
 
     // Save camera trajectory
     SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
