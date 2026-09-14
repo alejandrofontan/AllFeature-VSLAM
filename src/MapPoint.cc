@@ -29,10 +29,11 @@ namespace AF_VSLAM
 long unsigned int MapPoint::nNextId=0;
 mutex MapPoint::mGlobalMutex;
 
-MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType):
+MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType,
+                   const cv::Vec3b& color):
     mnFirstKFid(pRefKF->keyId), mnFirstFrame(pRefKF->frame_id), nObs(0),
     idLastFrameSeen(0), mnBALocalForKF(0), mnFuseCandidateForKF(0), mnLoopPointForKF(0), mnCorrectedByKF(0),
-    mnCorrectedReference(0), mnBAGlobalForKF(0), featureType(featureType), minDistance(0), maxDistance(0),
+    mnCorrectedReference(0), mnBAGlobalForKF(0), featureType(featureType), color(color), minDistance(0), maxDistance(0),
     mpRefKF(pRefKF), mnVisible(1), mnFound(1), mbBad(false), mpReplaced(static_cast<Pt>(NULL)), mpMap(pMap)
 {
 
@@ -51,7 +52,7 @@ MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, con
 MapPoint::MapPoint(const vec3f &XYZ_, shared_ptr<Map> pMap, Frame* pFrame, const int &idxF, const FeatureType& featureType):
     mnFirstKFid(-1), mnFirstFrame(pFrame->frame_id), nObs(0), idLastFrameSeen(0),
     mnBALocalForKF(0), mnFuseCandidateForKF(0),mnLoopPointForKF(0), mnCorrectedByKF(0),
-    mnCorrectedReference(0), mnBAGlobalForKF(0), featureType(featureType),
+    mnCorrectedReference(0), mnBAGlobalForKF(0), featureType(featureType), color(0, 0, 0),
     mpRefKF(static_cast<Keyframe>(NULL)), mnVisible(1),
     mnFound(1), mbBad(false), mpReplaced(NULL), mpMap(pMap)
 {

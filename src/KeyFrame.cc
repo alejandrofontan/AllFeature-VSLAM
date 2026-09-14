@@ -42,7 +42,7 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> 
     fx(F.fx), fy(F.fy), cx(F.cx), cy(F.cy), invfx(F.invfx), invfy(F.invfy),
     mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), mvKeys(F.mvKeys), keypoints(F.keypoints),
     mvuRight(F.mvuRight), mvDepth(F.mvDepth), inv_depth(F.inv_depth), sigma2invDepth(F.sigma2invDepth),
-    image(F.image), global_descriptor(F.global_descriptor), sizeTolerance(F.sizeTolerance),
+    keypoint_colors(F.keypoint_colors), image(F.image), global_descriptor(F.global_descriptor), sizeTolerance(F.sizeTolerance),
     keyPtsSigma2(F.keyPtsSigma2),keyPtsInf(F.keyPtsInf),keyPtsSize(F.keyPtsSize),
     maxKeyPtSize(F.maxKeyPtSize),maxKeyPtSigma(F.maxKeyPtSigma),
     mnMinX(F.mnMinX), mnMinY(F.mnMinY), mnMaxX(F.mnMaxX), mnMaxY(F.mnMaxY),
@@ -232,7 +232,8 @@ Pt KeyFrame::create_monocular_map_point(const vec3f& worldPos,
                             Keyframe projKeyframe, const KeypointIndex& projIndex,
                             const FeatureType& featureType)
 {
-    auto pt = make_shared<MapPoint>(worldPos,thisKeyframe(),mpMap, featureType);
+    auto pt = make_shared<MapPoint>(worldPos,thisKeyframe(),mpMap, featureType,
+                                    keypoint_colors.at(featureType)[refIndex]);
 
     add_map_point(pt,refIndex);
     pt->add_observation(thisKeyframe(), refIndex);
@@ -245,7 +246,8 @@ Pt KeyFrame::create_monocular_map_point(const vec3f& worldPos,
 }
 
 Pt KeyFrame::create_map_point(const vec3f& worldPos, const KeypointIndex& refIndex, const FeatureType& featureType){
-        auto pt = make_shared<MapPoint>(worldPos,thisKeyframe(),mpMap,featureType);
+        auto pt = make_shared<MapPoint>(worldPos,thisKeyframe(),mpMap,featureType,
+                                        keypoint_colors.at(featureType)[refIndex]);
 
         add_map_point(pt,refIndex);
         pt->add_observation(thisKeyframe(), refIndex);

@@ -210,6 +210,7 @@ public:
     const std::map<FeatureType, std::vector<float>> mvDepth; // negative value for monocular points
     const std::map<FeatureType, std::vector<float>> inv_depth; // inverse depth; 0 where no valid depth
     const std::map<FeatureType, std::vector<float>> sigma2invDepth; // variance of inv_depth; 0 where no valid depth
+    const std::map<FeatureType, std::vector<cv::Vec3b>> keypoint_colors; // BGR under each keypoint (Frame::GetColors); map points created here inherit it
     std::map<FeatureType, cv::Mat> descriptors;
 
 

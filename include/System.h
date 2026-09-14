@@ -103,7 +103,8 @@ public:
     // Call first Shutdown()
     // See format details at: http://vision.in.tum.de/data/datasets/rgbd-dataset
     void SaveKeyFrameTrajectoryVSLAMLAB(const string &filename);
-    void SavePointCloudVSLAMLAB(const string &filename, const vector<string>& imageFilenames);
+    // Binary PLY of every good map point, colored with the point's own image color (MapPoint::color).
+    void SavePointCloudVSLAMLAB(const string &filename);
 
     // placecell diagnostics (PlaceCell.Dump): the store's kernel (.npy), views.csv, the
     // recorder's CSVs, profile.csv and the three visualizer plots as PNGs, written into

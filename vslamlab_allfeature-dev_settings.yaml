@@ -24,6 +24,10 @@ Viewer.KeyFrameLineWidth: 1
 Viewer.GraphLineWidth: 0.9
 Viewer.TrajectoryLineWidth: 3.0
 Viewer.PointSize: 5
+Viewer.PointColorMode: "feature"  # map point color: "feature" (feature-type palette) | "rgb" (image color sampled at creation);
+                                  # seeds the Viewer selector "Point Color" (0 feature, 1 rgb); missing key = feature.
+                                  # The PLY export always writes the rgb color. Keep the quotes: cv::FileStorage does not
+                                  # strip a trailing comment from an unquoted string.
 Viewer.CameraSize: 0.08
 Viewer.CameraLineWidth: 3
 Viewer.ViewpointX: 0
@@ -180,6 +184,6 @@ LocalMapping.KeyframeCullingMinObservations: 3   # a point is redundant when thi
 LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # tau, shared by culling and insertion: every keyframe ever inserted must stay at least (1 - tau) explained by the alive keyframes, and a view more than tau unexplained by the local map becomes a keyframe (Viewer slider "KF Max Unexplained")
 LocalMapping.KeyframeCullingMinAge: 5            # keyframes younger than this many keyframes are never culled
 LocalMapping.KeyframeCullingMinKeyframes: 5      # never cull below this many alive keyframes
-LocalMapping.KeyframeCullingScope: map           # marginalise over "map" (all alive keyframes) or "local" (current keyframe + its covisible keyframes)
+LocalMapping.KeyframeCullingScope: "map"         # marginalise over "map" (all alive keyframes) or "local" (current keyframe + its covisible keyframes)
 LocalMapping.KeyframeCullingMaxPerCall: 5        # at most this many culls per call (0 = unlimited): a raised threshold thins the map gradually instead of in one burst
 LocalMapping.KeyframeCullingCentred: 1           # 1 = correlation of mean-centred descriptors (recommended: removes MegaLoc's ~0.37 common-mode floor), 0 = raw cosine

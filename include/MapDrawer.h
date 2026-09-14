@@ -57,10 +57,23 @@ namespace vslamlab_colors
     void gradientVivid(float t, float rgb[3]);
 }
 
+// How DrawMapPoints colors each map point. Integer-valued so the Viewer can expose it as a
+// pangolin::Var<int> selector ("Point Color") and new modes can be appended without a UI change.
+enum class PointColorMode : int
+{
+    Feature = 0,  // the feature type's palette color (getFeatureColor)
+    RGB = 1,      // the point's own image color, sampled at creation (MapPoint::color)
+};
+constexpr int kPointColorModeCount = 2;
+
+// Settings-yaml spelling ("feature" | "rgb") <-> enum; unknown names return false and leave `mode` untouched.
+bool parsePointColorMode(const std::string& name, PointColorMode& mode);
+
 // All appearance knobs the Viewer UI can adjust at runtime, passed to every draw call.
 struct ViewerStyle
 {
     bool darkTheme{true};
+    PointColorMode pointColorMode{PointColorMode::Feature};
     float pointSize{2.0f};
     float keyFrameSize{0.05f};
     float keyFrameLineWidth{1.0f};

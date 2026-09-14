@@ -44,7 +44,8 @@ typedef shared_ptr<AF_VSLAM::MapPoint> Pt;
 class MapPoint: public std::enable_shared_from_this<MapPoint>
 {
 public:
-    MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType);
+    MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType,
+             const cv::Vec3b& color = cv::Vec3b(0, 0, 0));
     MapPoint(const vec3f &XYZ_,  shared_ptr<Map> pMap, Frame* pFrame, const int &idxF, const FeatureType& featureType);
     std::shared_ptr<MapPoint> thisPt() {
         return shared_from_this();
@@ -135,6 +136,11 @@ public:
 
     static std::mutex mGlobalMutex;
     FeatureType featureType;
+
+    // Image color (OpenCV-native BGR) of the reference keypoint at creation. Fixed for the
+    // point's lifetime (never averaged or re-sampled), so it is read without a lock: viewer
+    // "Point Color: rgb" mode and the PLY export.
+    const cv::Vec3b color;
 
 protected:
 

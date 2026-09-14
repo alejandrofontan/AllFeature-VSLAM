@@ -55,7 +55,7 @@ Frame::Frame(const Frame &frame)
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
      mvKeysRight(frame.mvKeysRight), keypoints(frame.keypoints),  mvuRight(frame.mvuRight),
      mvDepth(frame.mvDepth), inv_depth(frame.inv_depth), sigma2invDepth(frame.sigma2invDepth),
-     pts(frame.pts), outliers(frame.outliers), frame_id(frame.frame_id), ref_keyframe(frame.ref_keyframe),
+     keypoint_colors(frame.keypoint_colors), pts(frame.pts), outliers(frame.outliers), frame_id(frame.frame_id), ref_keyframe(frame.ref_keyframe),
      sizeTolerance(frame.sizeTolerance),invSizeTolerance(frame.invSizeTolerance),
      keyPtsSigma2(frame.keyPtsSigma2),keyPtsInf(frame.keyPtsInf),keyPtsSize(frame.keyPtsSize),
      maxKeyPtSize(frame.maxKeyPtSize),maxKeyPtSigma(frame.maxKeyPtSigma)
@@ -120,6 +120,7 @@ Frame::Frame(const Image & img, const double &timeStamp,
 
     UndistortKeyPoints();
     GetDepth(img);
+    GetColors(img);
 
     // Set no stereo information
     for(auto& [ft, N_] : N){
@@ -481,6 +482,52 @@ void Frame::GetDepth(const Image& img)
             {
                 inv_depth[ft][i] = 1.0f / depth;
                 sigma2invDepth[ft][i] = depthNoiseCoeff * depthNoiseCoeff;
+            }
+        }
+    }
+}
+
+void Frame::GetColors(const Image& img)
+{
+    // Prefer the color image; fall back to the gray one (both share the keypoints' resize/crop).
+    const cv::Mat& im = img.img.empty() ? img.grayImg : img.img;
+    const int channels = im.empty() ? 0 : im.channels();
+    if(!im.empty() && im.depth() != CV_8U)
+        throw std::runtime_error("Frame::GetColors: unsupported image depth: " + std::to_string(im.depth()));
+
+    for(auto& [ft, N_] : N)
+    {
+        std::vector<cv::Vec3b>& colors = keypoint_colors[ft];
+        colors.assign(N_, cv::Vec3b(0, 0, 0));
+        if(im.empty())
+            continue;
+
+        const vector<cv::KeyPoint>& kps = mvKeys.at(ft);
+        for(int i = 0; i < N_; i++)
+        {
+            // Distorted pixel coordinates: the image is indexed like the depth image in GetDepth.
+            const int u = cvRound(kps[i].pt.x);
+            const int v = cvRound(kps[i].pt.y);
+            if(u < 0 || v < 0 || u >= im.cols || v >= im.rows)
+                continue;
+
+            switch(channels)
+            {
+                case 1: {
+                    const uchar g = im.at<uchar>(v, u);
+                    colors[i] = cv::Vec3b(g, g, g);
+                    break;
+                }
+                case 3:
+                    colors[i] = im.at<cv::Vec3b>(v, u);
+                    break;
+                case 4: {
+                    const cv::Vec4b bgra = im.at<cv::Vec4b>(v, u);
+                    colors[i] = cv::Vec3b(bgra[0], bgra[1], bgra[2]);
+                    break;
+                }
+                default:
+                    throw std::runtime_error("Frame::GetColors: unsupported number of channels: " + std::to_string(channels));
             }
         }
     }

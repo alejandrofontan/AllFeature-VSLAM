@@ -557,61 +557,28 @@ bool write_ply_binary(const std::string& path, const std::vector<PointRGB>& pts)
     return static_cast<bool>(out);
 }
 
-auto to_u8 = [](double v) {
-    v = std::clamp(v, 0.0, 1.0);
-    return static_cast<uint8_t>(std::lround(v * 255.0));
-};
-
-void System::SavePointCloudVSLAMLAB(const string &filename, const vector<string>& imageFilenames)
+void System::SavePointCloudVSLAMLAB(const string &filename)
 {
     AF_INFO("Saving point cloud to " << filename << " ...");
 
+    // Each point carries the image color sampled under its reference keypoint at creation
+    // (MapPoint::color, BGR): no image re-read, so no dependency on the input files still
+    // being reachable or on the tracking resize matching the files' resolution.
     std::vector<PointRGB> pts;
-    auto mapPoints = mpMap->get_all_map_points();
-    int numPoints = 0;
-    std::map<int, cv::Mat> imageCache;
-    float alpha = 0.0f;
-    for (auto& mp: mapPoints) {
+    const auto mapPoints = mpMap->get_all_map_points();
+    pts.reserve(mapPoints.size());
+    for (const auto& mp: mapPoints) {
         if (mp->is_bad()) continue;
-        numPoints++;
-        PointRGB p;
-        vec3f pos = mp->get_world_pos();
-        p.x = pos(0);
-        p.y = pos(1);
-        p.z = pos(2);
-
-        FeatureType ft = mp->featureType;
-        cv::Scalar color = AF_VSLAM::getFeatureColor(ft, 0, true);
-        // p.r = 255;
-        // p.g = 255;
-        // p.b = 255;
-
-        auto keyfram = mp->GetCurrentRefKeyframe();
-        int idx = mp->GetIndexInKeyFrame(keyfram);
-        int imgIdx = keyfram->frame_id;
-
-        if (imageCache.find(imgIdx) == imageCache.end()) {
-            cv::Mat cvimg = cv::imread(imageFilenames[imgIdx],cv::IMREAD_UNCHANGED);
-            imageCache[imgIdx] = cvimg;
-        }
-        cv::Mat cvimg = imageCache[imgIdx];
-        int u = static_cast<int>(keyfram->mvKeys.at(mp->featureType)[idx].pt.x);
-        int v = static_cast<int>(keyfram->mvKeys.at(mp->featureType)[idx].pt.y);
-        if (cvimg.channels() == 1) {
-            uint8_t intensity = cvimg.at<uint8_t>(v, u);
-            p.r = intensity;
-            p.g = intensity;
-            p.b = intensity;
-        } else if (cvimg.channels() == 3) {
-            cv::Vec3b bgr = cvimg.at<cv::Vec3b>(v, u);
-            p.r = to_u8(alpha * (float(bgr[2]) / 255.0f) + (1.0f - alpha) * (float(color[0])));
-            p.g = to_u8(alpha * (float(bgr[1]) / 255.0f) + (1.0f - alpha) * (float(color[1])));
-            p.b = to_u8(alpha * (float(bgr[0]) / 255.0f) + (1.0f - alpha) * (float(color[2])));
-        }
-        pts.push_back(p);
+        const vec3f pos = mp->get_world_pos();
+        const cv::Vec3b& bgr = mp->color;
+        pts.push_back(PointRGB{pos(0), pos(1), pos(2), bgr[2], bgr[1], bgr[0]});
     }
-    AF_INFO("Point cloud saved! Number of points: " << numPoints);
-    write_ply_binary(filename, pts);
+
+    if (!write_ply_binary(filename, pts)) {
+        AF_WARN("Failed to write point cloud: " << filename);
+        return;
+    }
+    AF_INFO("Point cloud saved! Number of points: " << pts.size());
 }
 
 

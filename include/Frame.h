@@ -203,6 +203,12 @@ public:
     // standard for RGB-D/ToF sensors) propagated through inv_depth=1/depth. 0 wherever inv_depth is 0.
     std::map<FeatureType, std::vector<float>> sigma2invDepth;
 
+    // Image color (OpenCV-native BGR) under each keypoint, sampled once at construction. The
+    // only place a pixel is ever read for a keypoint: the image is not retained afterwards
+    // (vpr: none) or is released after MegaLoc embeds it, so map points inherit their color
+    // from here at creation. Gray input replicates the intensity into all three channels.
+    std::map<FeatureType, std::vector<cv::Vec3b>> keypoint_colors;
+
 
     // ORB descriptor, each row associated to a keypoint.
     std::map<FeatureType, cv::Mat> descriptors, descriptorsRight;
@@ -257,6 +263,10 @@ private:
     // Populate inv_depth (and sigma2invDepth) by sampling img.depthImg at each keypoint's (distorted)
     // pixel coordinates, matching how the depth image itself is indexed (called in the constructor).
     void GetDepth(const Image& img);
+
+    // Populate keypoint_colors by sampling img.img (BGR, same resize/crop as the keypoints) at each
+    // keypoint's (distorted) pixel coordinates, like GetDepth (called in the constructor).
+    void GetColors(const Image& img);
 
     // Quadratic depth-sensor noise coefficient k in sigma_depth(z) = k*z^2 (e.g. Khoshelham &
     // Elberink 2012, Nguyen et al. 2012 for Kinect-style RGB-D sensors). Propagated through

@@ -23,6 +23,7 @@
 #include "KeyFrame.h"
 #include "Converter.h"
 #include "Utils.h"
+#include "afvslam_log.hpp"
 
 #include <pangolin/pangolin.h>
 #include <algorithm>
@@ -93,12 +94,32 @@ MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const v
         mDefaultStyle.cameraLineWidth = fSettings["Viewer.CameraLineWidth"];
     if (!fSettings["Viewer.TrajectoryLineWidth"].empty())
         mDefaultStyle.trajectoryLineWidth = fSettings["Viewer.TrajectoryLineWidth"];
+    if (!fSettings["Viewer.PointColorMode"].empty())
+    {
+        // cv::FileStorage returns an UNQUOTED scalar together with any trailing "# comment" on
+        // its line (same workaround as PlaceCellSettings): keep the first token only.
+        std::string name = static_cast<std::string>(fSettings["Viewer.PointColorMode"]);
+        if (const size_t hash = name.find('#'); hash != std::string::npos)
+            name.erase(hash);
+        const size_t first = name.find_first_not_of(" \t\r\n");
+        const size_t last = name.find_last_not_of(" \t\r\n");
+        name = (first == std::string::npos) ? std::string{} : name.substr(first, last - first + 1);
+        if (!parsePointColorMode(name, mDefaultStyle.pointColorMode))
+            AF_WARN("MapDrawer: unknown Viewer.PointColorMode '" << name << "' (expected feature | rgb), keeping feature");
+    }
 
     for (size_t i = 0; i < featureTypes.size(); i++)
     {
         const cv::Scalar c = getFeatureColor(featureTypes[i], 0, true);
         featureColors[featureTypes[i]] = {float(c[0]), float(c[1]), float(c[2])};
     }
+}
+
+bool parsePointColorMode(const std::string& name, PointColorMode& mode)
+{
+    if (name == "feature") { mode = PointColorMode::Feature; return true; }
+    if (name == "rgb")     { mode = PointColorMode::RGB;     return true; }
+    return false;
 }
 
 const std::array<float,3>& MapDrawer::pointColor(const FeatureType ft) const
@@ -117,6 +138,10 @@ void MapDrawer::DrawMapPoints(const ViewerStyle& style)
     if(vpMPs.empty())
         return;
 
+    const bool rgb = style.pointColorMode == PointColorMode::RGB;
+    constexpr float kAlpha = 0.9f;
+    constexpr float kInv255 = 1.0f / 255.0f;
+
     glPointSize(style.pointSize);
     glBegin(GL_POINTS);
 
@@ -125,9 +150,17 @@ void MapDrawer::DrawMapPoints(const ViewerStyle& style)
         if(vpMPs[i]->is_bad())
              continue;
 
-        const std::array<float,3>& c = pointColor(vpMPs[i]->featureType);
+        if(rgb)
+        {
+            const cv::Vec3b& bgr = vpMPs[i]->color; // immutable after construction: no lock
+            glColor4f(bgr[2] * kInv255, bgr[1] * kInv255, bgr[0] * kInv255, kAlpha);
+        }
+        else
+        {
+            const std::array<float,3>& c = pointColor(vpMPs[i]->featureType);
+            glColor4f(c[0], c[1], c[2], kAlpha);
+        }
         vec3f pos = vpMPs[i]->get_world_pos();
-        glColor4f(c[0], c[1], c[2], 0.9f);
         glVertex3f(pos(0),pos(1),pos(2));
     }
     glEnd();

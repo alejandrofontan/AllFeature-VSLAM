@@ -206,6 +206,9 @@ void Viewer::Run()
     if(placeCell)
         menuPlaceCellWindow = std::make_unique<pangolin::Var<bool>>("menu.PlaceCell Window", placeCellSettings.visualize, true);
 
+    // Map point coloring (PointColorMode: 0 = feature type, 1 = image rgb; seeded from Viewer.PointColorMode)
+    pangolin::Var<int> menuPointColor("menu.Point Color", static_cast<int>(defaults.pointColorMode), 0, kPointColorModeCount - 1);
+
     // Thickness
     pangolin::Var<float> menuPointSize("menu.Point Size", defaults.pointSize, 1.0f, 10.0f);
     pangolin::Var<float> menuTrajWidth("menu.Trajectory Width", defaults.trajectoryLineWidth, 0.5f, 10.0f);
@@ -345,6 +348,11 @@ void Viewer::Run()
         ////////////////////////////////////////////////////////////////////////////////////
         ViewerStyle style;
         style.darkTheme = menuDarkTheme;
+        {
+            int mode = menuPointColor;
+            mode = mode < 0 ? 0 : (mode >= kPointColorModeCount ? kPointColorModeCount - 1 : mode);
+            style.pointColorMode = static_cast<PointColorMode>(mode);
+        }
         style.pointSize = menuPointSize;
         style.trajectoryLineWidth = menuTrajWidth;
         style.keyFrameLineWidth = menuKFLineWidth;
