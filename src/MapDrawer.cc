@@ -27,6 +27,8 @@
 
 #include <pangolin/pangolin.h>
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <mutex>
 
 namespace AF_VSLAM
@@ -107,6 +109,14 @@ MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const v
         if (!parsePointColorMode(name, mDefaultStyle.pointColorMode))
             AF_WARN("MapDrawer: unknown Viewer.PointColorMode '" << name << "' (expected feature | rgb), keeping feature");
     }
+    if (!fSettings["Viewer.MapPointsRefreshHz"].empty())
+    {
+        const double hz = static_cast<double>(fSettings["Viewer.MapPointsRefreshHz"]);
+        if (hz > 0.0)
+            pointRefreshPeriod_ = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0 / hz));
+        else
+            pointRefreshPeriod_ = std::chrono::steady_clock::duration::zero();   // 0 = refresh every viewer frame
+    }
 
     for (size_t i = 0; i < featureTypes.size(); i++)
     {
@@ -122,48 +132,89 @@ bool parsePointColorMode(const std::string& name, PointColorMode& mode)
     return false;
 }
 
-const std::array<float,3>& MapDrawer::pointColor(const FeatureType ft) const
+void MapDrawer::RefreshPointSnapshot()
 {
-    const auto it = featureColors.find(ft);
-    if (it != featureColors.end())
-        return it->second;
-    static const std::array<float,3> fallback{0.5f, 0.5f, 0.5f};
-    return fallback;
+    constexpr std::uint8_t kAlpha = 230;   // ~0.9, the blend the immediate-mode path used
+
+    // Palette as bytes, once per refresh (a handful of entries).
+    std::map<FeatureType, std::array<std::uint8_t,3>> palette;
+    for (const auto& [ft, c] : featureColors)
+        palette[ft] = {static_cast<std::uint8_t>(std::lround(c[0] * 255.0f)),
+                       static_cast<std::uint8_t>(std::lround(c[1] * 255.0f)),
+                       static_cast<std::uint8_t>(std::lround(c[2] * 255.0f))};
+    const std::array<std::uint8_t,3> fallback{128, 128, 128};
+
+    // The only map access on the drawing path: one copy of the point set under the map mutex,
+    // then one position read per point. Happens at most once per pointRefreshPeriod_.
+    const vector<Pt> points = mpMap->get_all_map_points();
+
+    pointSnapshot_.clear();
+    pointSnapshot_.reserve(points.size());
+    for (const Pt& mp : points)
+    {
+        if (mp->is_bad())
+            continue;
+
+        const vec3f pos = mp->get_world_pos();
+        const auto it = palette.find(mp->featureType);
+        const std::array<std::uint8_t,3>& fc = (it != palette.end()) ? it->second : fallback;
+        const cv::Vec3b& bgr = mp->color;   // immutable after construction: no lock
+
+        PointVertex v;
+        v.x = pos(0); v.y = pos(1); v.z = pos(2);
+        v.feat[0] = fc[0]; v.feat[1] = fc[1]; v.feat[2] = fc[2]; v.feat[3] = kAlpha;
+        v.rgb[0] = bgr[2]; v.rgb[1] = bgr[1]; v.rgb[2] = bgr[0]; v.rgb[3] = kAlpha;
+        pointSnapshot_.push_back(v);
+    }
+
+    // Upload. Grow the buffer with headroom so a steadily growing map reallocates rarely.
+    const std::size_t count = pointSnapshot_.size();
+    if (!pointBuffer_)
+        pointBuffer_ = std::make_unique<pangolin::GlBufferData>();
+    if (count > pointBufferCapacity_)
+    {
+        pointBufferCapacity_ = std::max<std::size_t>(count + count / 2, 4096);
+        pointBuffer_->Reinitialise(pangolin::GlArrayBuffer,
+                                   static_cast<GLsizeiptr>(pointBufferCapacity_ * sizeof(PointVertex)),
+                                   GL_DYNAMIC_DRAW);
+    }
+    if (count > 0)
+        pointBuffer_->Upload(pointSnapshot_.data(), static_cast<GLsizeiptr>(count * sizeof(PointVertex)));
+    pointBufferCount_ = count;
+
+    lastPointRefresh_ = std::chrono::steady_clock::now();
+    pointSnapshotEverTaken_ = true;
 }
 
 void MapDrawer::DrawMapPoints(const ViewerStyle& style)
 {
-    const vector<Pt> &vpMPs = mpMap->get_all_map_points();
+    if (!pointSnapshotEverTaken_ || std::chrono::steady_clock::now() - lastPointRefresh_ >= pointRefreshPeriod_)
+        RefreshPointSnapshot();
 
-    if(vpMPs.empty())
+    if (pointBufferCount_ == 0 || !pointBuffer_ || !pointBuffer_->IsValid())
         return;
 
-    const bool rgb = style.pointColorMode == PointColorMode::RGB;
-    constexpr float kAlpha = 0.9f;
-    constexpr float kInv255 = 1.0f / 255.0f;
+    const std::size_t colorOffset = (style.pointColorMode == PointColorMode::RGB)
+                                        ? offsetof(PointVertex, rgb) : offsetof(PointVertex, feat);
 
     glPointSize(style.pointSize);
-    glBegin(GL_POINTS);
+    pointBuffer_->Bind();
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_COLOR_ARRAY);
+    glVertexPointer(3, GL_FLOAT, sizeof(PointVertex), reinterpret_cast<const GLvoid*>(offsetof(PointVertex, x)));
+    glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(PointVertex), reinterpret_cast<const GLvoid*>(colorOffset));
+    glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(pointBufferCount_));
+    glDisableClientState(GL_COLOR_ARRAY);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    pointBuffer_->Unbind();
+}
 
-    for(size_t i=0, iend=vpMPs.size(); i<iend;i++)
-    {
-        if(vpMPs[i]->is_bad())
-             continue;
-
-        if(rgb)
-        {
-            const cv::Vec3b& bgr = vpMPs[i]->color; // immutable after construction: no lock
-            glColor4f(bgr[2] * kInv255, bgr[1] * kInv255, bgr[0] * kInv255, kAlpha);
-        }
-        else
-        {
-            const std::array<float,3>& c = pointColor(vpMPs[i]->featureType);
-            glColor4f(c[0], c[1], c[2], kAlpha);
-        }
-        vec3f pos = vpMPs[i]->get_world_pos();
-        glVertex3f(pos(0),pos(1),pos(2));
-    }
-    glEnd();
+void MapDrawer::ReleaseGL()
+{
+    pointBuffer_.reset();   // GlBufferData::~GlBufferData -> glDeleteBuffers on the current context
+    pointBufferCount_ = 0;
+    pointBufferCapacity_ = 0;
+    pointSnapshotEverTaken_ = false;
 }
 
 void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const ViewerStyle& style)

@@ -27,8 +27,12 @@
 #include<pangolin/pangolin.h>
 
 #include<array>
+#include<chrono>
+#include<cstdint>
 #include<map>
+#include<memory>
 #include<mutex>
+#include<vector>
 
 namespace AF_VSLAM
 {
@@ -108,9 +112,41 @@ public:
     // Defaults loaded from the settings yaml, used to seed the Viewer UI controls.
     ViewerStyle GetDefaultStyle() const { return mDefaultStyle; }
 
+    // Free the GL objects owned by the drawer (the map-point vertex buffer). Must run on the
+    // viewer thread while its GL context is still current: the Viewer calls it at the end of
+    // Run(), before the window goes away; the destructor then has nothing GL-side to do.
+    void ReleaseGL();
+
 private:
 
     ViewerStyle mDefaultStyle{};
+
+    // --- Map-point snapshot -------------------------------------------------------------
+    // DrawMapPoints used to walk the live map every viewer frame, taking every MapPoint's
+    // position mutex and copying the map's point set under the map mutex — a lock storm that
+    // competes with Tracking and LocalMapping. Instead, the points are snapshotted into a
+    // vertex buffer at most `pointRefreshPeriod_` apart (Viewer.MapPointsRefreshHz) and every
+    // frame just draws the buffer. Both color sets are stored so the "Point Color" selector
+    // switches instantly without a refresh.
+    struct PointVertex
+    {
+        float x, y, z;
+        std::uint8_t feat[4];   // feature-type palette color, RGBA
+        std::uint8_t rgb[4];    // image color at creation (MapPoint::color, BGR -> RGB), RGBA
+    };
+    static_assert(sizeof(PointVertex) == 20, "PointVertex must stay tightly packed for the GL strides");
+
+    std::vector<PointVertex> pointSnapshot_{};
+    std::unique_ptr<pangolin::GlBufferData> pointBuffer_{};
+    std::size_t pointBufferCount_{0};       // vertices currently in the GL buffer
+    std::size_t pointBufferCapacity_{0};    // vertices the GL buffer can hold before a Reinitialise
+    std::chrono::steady_clock::duration pointRefreshPeriod_{std::chrono::milliseconds(200)};
+    std::chrono::steady_clock::time_point lastPointRefresh_{};
+    bool pointSnapshotEverTaken_{false};
+
+    // Rebuild pointSnapshot_ from the live map (the only place the map is locked for drawing
+    // points) and upload it to pointBuffer_. Viewer thread only.
+    void RefreshPointSnapshot();
 
     std::mutex mMutexCamera;
     mat4f mCameraPose{mat4f::Zero()};
@@ -120,10 +156,8 @@ private:
     vector<FeatureType> featureTypes{};
 
     // Feature color lookup cached once at construction: getFeatureColor() heap-allocates a
-    // Feature instance per call, far too expensive for a per-point-per-frame loop.
+    // Feature instance per call, far too expensive to call per point in RefreshPointSnapshot.
     std::map<FeatureType, std::array<float,3>> featureColors{};
-
-    const std::array<float,3>& pointColor(const FeatureType ft) const;
 };
 
 } //namespace ORB_SLAM

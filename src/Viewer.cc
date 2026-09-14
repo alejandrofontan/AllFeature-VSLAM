@@ -501,6 +501,10 @@ void Viewer::Run()
             break;
     }
 
+    // The main window's context is current here (every loop iteration binds back to it), so
+    // the drawer's GL objects can be freed before the placecell window and then the main one go.
+    mapDrawer->ReleaseGL();
+
     // System::Shutdown binds back to the main window's context afterwards
     closePlaceCellWindow();
 

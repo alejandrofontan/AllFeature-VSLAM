@@ -28,6 +28,8 @@ Viewer.PointColorMode: "feature"  # map point color: "feature" (feature-type pal
                                   # seeds the Viewer selector "Point Color" (0 feature, 1 rgb); missing key = feature.
                                   # The PLY export always writes the rgb color. Keep the quotes: cv::FileStorage does not
                                   # strip a trailing comment from an unquoted string.
+Viewer.MapPointsRefreshHz: 5      # the viewer snapshots the map points into a vertex buffer at most this often (the only
+                                  # time it locks the map for drawing points); 0 = every viewer frame; missing key = 5
 Viewer.CameraSize: 0.08
 Viewer.CameraLineWidth: 3
 Viewer.ViewpointX: 0
