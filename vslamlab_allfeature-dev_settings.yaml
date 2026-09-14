@@ -30,6 +30,13 @@ Viewer.PointColorMode: "feature"  # map point color: "feature" (feature-type pal
                                   # strip a trailing comment from an unquoted string.
 Viewer.MapPointsRefreshHz: 5      # the viewer snapshots the map points into a vertex buffer at most this often (the only
                                   # time it locks the map for drawing points); 0 = every viewer frame; missing key = 5
+Viewer.Multisampling: 0           # MSAA samples requested for the window; 0 = off (default). Advisory only: the Pangolin this
+                                  # project ships (conda-forge 2024-07-03, EGL-based X11 backend) ignores the request and always
+                                  # returns a single-sample framebuffer; the viewer logs what it actually got. Points and lines
+                                  # are anti-aliased by GL_POINT_SMOOTH / GL_LINE_SMOOTH regardless.
+Viewer.DepthFog: 1                # 1 = fade map points into the background with distance (Viewer checkbox "Depth Fog"); missing key = 1
+Viewer.FogStart: 1.5              # fog range in units of the local scene depth D (median point distance to the SLAM camera):
+Viewer.FogEnd: 6.0                # clear up to FogStart*D beyond the camera, fully faded from FogEnd*D; missing keys = 1.5 / 6.0
 Viewer.CameraSize: 0.08
 Viewer.CameraLineWidth: 3
 Viewer.ViewpointX: 0

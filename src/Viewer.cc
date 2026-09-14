@@ -84,6 +84,8 @@ Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
     mViewpointY = fSettings["Viewer.ViewpointY"];
     mViewpointZ = fSettings["Viewer.ViewpointZ"];
     mViewpointF = fSettings["Viewer.ViewpointF"];
+    if (!fSettings["Viewer.Multisampling"].empty())
+        mMultisampling = std::max(0, static_cast<int>(fSettings["Viewer.Multisampling"]));
 
     AF_INFO("Viewer Parameters: " << strSettingPath);
     AF_CONFIG_BEGIN("Viewer Parameters");
@@ -91,6 +93,7 @@ Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
      AF_CONFIG_FIELD("Viewpoint Y:        ", mViewpointY);
      AF_CONFIG_FIELD("Viewpoint Z:        ", mViewpointZ);
      AF_CONFIG_FIELD("Viewpoint F:        ", mViewpointF);
+     AF_CONFIG_FIELD("Multisampling:      ", mMultisampling);
     AF_CONFIG_END();
 
     windowTitle = "VSLAM-LAB | AllFeature-VSLAM (";
@@ -133,7 +136,33 @@ void Viewer::Run()
     const float panelWidth{0.28f};
     const float imgWidthFrac{0.40f};
 
-    pangolin::CreateWindowAndBind(windowTitle, w, h);
+    // Multisampled framebuffer (Viewer.Multisampling, default off): would smooth points, lines
+    // and wireframes at once, GPU-side only. Advisory: the X11 backend of the Pangolin this
+    // project ships (conda-forge 2024-07-03, EGL-based) declares the lowercase "samples" /
+    // "sample_buffers" keys but never reads them and hardcodes a 0-sample EGL config, so on
+    // that build the request is accepted and ignored (the uppercase PARAM_SAMPLES constants
+    // are rejected outright). Kept for other backends / a future Pangolin; the outcome is logged.
+    pangolin::Params windowParams;
+    if (mMultisampling > 0)
+    {
+        windowParams.Set("sample_buffers", 1);
+        windowParams.Set("samples", mMultisampling);
+    }
+    pangolin::CreateWindowAndBind(windowTitle, w, h, windowParams);
+    if (mMultisampling > 0)
+    {
+        GLint sampleBuffers = 0, samples = 0;
+        glGetIntegerv(GL_SAMPLE_BUFFERS, &sampleBuffers);
+        glGetIntegerv(GL_SAMPLES, &samples);
+        if (sampleBuffers > 0 && samples > 0)
+        {
+            glEnable(GL_MULTISAMPLE);
+            AF_INFO("[Viewer] multisampling: " << samples << " samples (requested " << mMultisampling << ")");
+        }
+        else
+            AF_INFO("[Viewer] multisampling requested (" << mMultisampling
+                    << " samples) but this Pangolin backend returned a single-sample framebuffer; continuing without MSAA");
+    }
 
     // 3D Mouse handler requires depth testing to be enabled
     glEnable(GL_DEPTH_TEST);
@@ -189,6 +218,7 @@ void Viewer::Run()
     pangolin::Var<bool> menuFollowCamera("menu.Follow Camera",true,true);
     pangolin::Var<bool> menuAerialCamera("menu.Aerial View",false,true);
     pangolin::Var<bool> menuDarkTheme("menu.Dark Theme",true,true);
+    pangolin::Var<bool> menuDepthFog("menu.Depth Fog", defaults.depthFog, true);
 
     // Elements
     pangolin::Var<bool> menuShowPoints("menu.Show Map Points",true,true);
@@ -360,6 +390,9 @@ void Viewer::Run()
         style.cameraLineWidth = menuCamLineWidth;
         style.keyFrameSize = defaults.keyFrameSize;
         style.cameraSize = defaults.cameraSize;
+        style.depthFog = menuDepthFog;
+        style.fogStart = defaults.fogStart;
+        style.fogEnd = defaults.fogEnd;
 
         mapDrawer->GetCurrentOpenGLCameraMatrix(Twc);
 

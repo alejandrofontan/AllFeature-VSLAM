@@ -117,6 +117,19 @@ MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const v
         else
             pointRefreshPeriod_ = std::chrono::steady_clock::duration::zero();   // 0 = refresh every viewer frame
     }
+    if (!fSettings["Viewer.DepthFog"].empty())
+        mDefaultStyle.depthFog = static_cast<int>(fSettings["Viewer.DepthFog"]) != 0;
+    if (!fSettings["Viewer.FogStart"].empty())
+        mDefaultStyle.fogStart = fSettings["Viewer.FogStart"];
+    if (!fSettings["Viewer.FogEnd"].empty())
+        mDefaultStyle.fogEnd = fSettings["Viewer.FogEnd"];
+    if (mDefaultStyle.fogEnd <= mDefaultStyle.fogStart)
+    {
+        AF_WARN("MapDrawer: Viewer.FogEnd (" << mDefaultStyle.fogEnd << ") must exceed Viewer.FogStart ("
+                << mDefaultStyle.fogStart << "), using defaults 1.5 / 6.0");
+        mDefaultStyle.fogStart = 1.5f;
+        mDefaultStyle.fogEnd = 6.0f;
+    }
 
     for (size_t i = 0; i < featureTypes.size(); i++)
     {
@@ -134,7 +147,11 @@ bool parsePointColorMode(const std::string& name, PointColorMode& mode)
 
 void MapDrawer::RefreshPointSnapshot()
 {
-    constexpr std::uint8_t kAlpha = 230;   // ~0.9, the blend the immediate-mode path used
+    // Palette points stay slightly translucent (~0.9, the blend the immediate-mode path used;
+    // drawn without depth writes so overlaps blend instead of punching holes). Image-colored
+    // points are opaque: real colors read better solid and keep correct depth occlusion.
+    constexpr std::uint8_t kAlphaFeature = 230;
+    constexpr std::uint8_t kAlphaRGB = 255;
 
     // Palette as bytes, once per refresh (a handful of entries).
     std::map<FeatureType, std::array<std::uint8_t,3>> palette;
@@ -162,9 +179,39 @@ void MapDrawer::RefreshPointSnapshot()
 
         PointVertex v;
         v.x = pos(0); v.y = pos(1); v.z = pos(2);
-        v.feat[0] = fc[0]; v.feat[1] = fc[1]; v.feat[2] = fc[2]; v.feat[3] = kAlpha;
-        v.rgb[0] = bgr[2]; v.rgb[1] = bgr[1]; v.rgb[2] = bgr[0]; v.rgb[3] = kAlpha;
+        v.feat[0] = fc[0]; v.feat[1] = fc[1]; v.feat[2] = fc[2]; v.feat[3] = kAlphaFeature;
+        v.rgb[0] = bgr[2]; v.rgb[1] = bgr[1]; v.rgb[2] = bgr[0]; v.rgb[3] = kAlphaRGB;
         pointSnapshot_.push_back(v);
+    }
+
+    // Fog anchor: SLAM camera center and the median point distance to it, over a stride
+    // subsample (at most ~2048 distances) so this stays negligible on large maps.
+    pointSceneDepth_ = 0.0f;
+    {
+        mat4f Tcw{};
+        {
+            unique_lock<mutex> lock(mMutexCamera);
+            Tcw = mCameraPose;
+        }
+        if (Tcw(3,3) == 1.0f && !pointSnapshot_.empty())
+        {
+            const mat3f Rwc = Tcw.block<3,3>(0,0).transpose();
+            pointSceneCenter_ = -Rwc * Tcw.block<3,1>(0,3);
+
+            const std::size_t stride = std::max<std::size_t>(1, pointSnapshot_.size() / 2048);
+            std::vector<float> dists;
+            dists.reserve(pointSnapshot_.size() / stride + 1);
+            for (std::size_t i = 0; i < pointSnapshot_.size(); i += stride)
+            {
+                const PointVertex& v = pointSnapshot_[i];
+                const float dx = v.x - pointSceneCenter_(0), dy = v.y - pointSceneCenter_(1), dz = v.z - pointSceneCenter_(2);
+                dists.push_back(std::sqrt(dx*dx + dy*dy + dz*dz));
+            }
+            std::nth_element(dists.begin(), dists.begin() + dists.size() / 2, dists.end());
+            const float median = dists[dists.size() / 2];
+            if (std::isfinite(median) && median > 0.0f)
+                pointSceneDepth_ = median;
+        }
     }
 
     // Upload. Grow the buffer with headroom so a steadily growing map reallocates rarely.
@@ -194,8 +241,37 @@ void MapDrawer::DrawMapPoints(const ViewerStyle& style)
     if (pointBufferCount_ == 0 || !pointBuffer_ || !pointBuffer_->IsValid())
         return;
 
-    const std::size_t colorOffset = (style.pointColorMode == PointColorMode::RGB)
-                                        ? offsetof(PointVertex, rgb) : offsetof(PointVertex, feat);
+    const bool rgb = style.pointColorMode == PointColorMode::RGB;
+    const std::size_t colorOffset = rgb ? offsetof(PointVertex, rgb) : offsetof(PointVertex, feat);
+
+    // Linear fog towards the theme background, anchored at the SLAM camera: fog is evaluated in
+    // eye space, so map the anchor through the current modelview (column-major) to get its
+    // eye distance d0, then start/end at d0 + fogStart*D / d0 + fogEnd*D.
+    const bool fog = style.depthFog && pointSceneDepth_ > 0.0f;
+    if (fog)
+    {
+        GLfloat mv[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+        const vec3f& c = pointSceneCenter_;
+        const float ex = mv[0]*c(0) + mv[4]*c(1) + mv[8]*c(2)  + mv[12];
+        const float ey = mv[1]*c(0) + mv[5]*c(1) + mv[9]*c(2)  + mv[13];
+        const float ez = mv[2]*c(0) + mv[6]*c(1) + mv[10]*c(2) + mv[14];
+        const float d0 = std::sqrt(ex*ex + ey*ey + ez*ez);
+
+        const float* bg = style.darkTheme ? vslamlab_colors::kDarkBg : vslamlab_colors::kLightBg;
+        const GLfloat fogColor[4] = {bg[0], bg[1], bg[2], 1.0f};
+        glFogi(GL_FOG_MODE, GL_LINEAR);
+        glFogfv(GL_FOG_COLOR, fogColor);
+        glFogf(GL_FOG_START, d0 + style.fogStart * pointSceneDepth_);
+        glFogf(GL_FOG_END,   d0 + style.fogEnd   * pointSceneDepth_);
+        glHint(GL_FOG_HINT, GL_NICEST);
+        glEnable(GL_FOG);
+    }
+
+    // Translucent palette points: read depth but do not write it, so overlapping points blend
+    // instead of nearer ones punching holes into farther ones. Opaque rgb points keep writes.
+    if (!rgb)
+        glDepthMask(GL_FALSE);
 
     glPointSize(style.pointSize);
     pointBuffer_->Bind();
@@ -207,6 +283,11 @@ void MapDrawer::DrawMapPoints(const ViewerStyle& style)
     glDisableClientState(GL_COLOR_ARRAY);
     glDisableClientState(GL_VERTEX_ARRAY);
     pointBuffer_->Unbind();
+
+    if (!rgb)
+        glDepthMask(GL_TRUE);
+    if (fog)
+        glDisable(GL_FOG);
 }
 
 void MapDrawer::ReleaseGL()

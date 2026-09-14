@@ -79,6 +79,13 @@ struct ViewerStyle
     bool darkTheme{true};
     PointColorMode pointColorMode{PointColorMode::Feature};
     float pointSize{2.0f};
+    // Linear depth fog on the map points, towards the theme background. The range is anchored
+    // at the SLAM camera and scaled by the local scene depth D (median point distance to that
+    // camera, measured at snapshot time): fully clear up to fogStart*D beyond the camera,
+    // fully faded from fogEnd*D. Viewer checkbox "Depth Fog"; Viewer.DepthFog/FogStart/FogEnd.
+    bool depthFog{true};
+    float fogStart{1.5f};
+    float fogEnd{6.0f};
     float keyFrameSize{0.05f};
     float keyFrameLineWidth{1.0f};
     float graphLineWidth{0.9f};
@@ -143,6 +150,11 @@ private:
     std::chrono::steady_clock::duration pointRefreshPeriod_{std::chrono::milliseconds(200)};
     std::chrono::steady_clock::time_point lastPointRefresh_{};
     bool pointSnapshotEverTaken_{false};
+
+    // Fog anchor, measured at snapshot time: the SLAM camera center (world) and the median
+    // distance of the points to it (local scene depth). sceneDepth 0 = no fog this snapshot.
+    vec3f pointSceneCenter_{vec3f::Zero()};
+    float pointSceneDepth_{0.0f};
 
     // Rebuild pointSnapshot_ from the live map (the only place the map is locked for drawing
     // points) and upload it to pointBuffer_. Viewer thread only.
