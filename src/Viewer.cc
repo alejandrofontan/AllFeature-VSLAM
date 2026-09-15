@@ -236,8 +236,12 @@ void Viewer::Run()
     if(placeCell)
         menuPlaceCellWindow = std::make_unique<pangolin::Var<bool>>("menu.PlaceCell Window", placeCellSettings.visualize, true);
 
-    // Map point coloring (PointColorMode: 0 = feature type, 1 = image rgb; seeded from Viewer.PointColorMode)
-    pangolin::Var<int> menuPointColor("menu.Point Color", static_cast<int>(defaults.pointColorMode), 0, kPointColorModeCount - 1);
+    // Map point coloring: one checkbox per PointColorMode, behaving as radio buttons (ticking one
+    // unticks the other, unticking the active one switches to the other, so exactly one is always
+    // on). Seeded from Viewer.PointColorMode.
+    PointColorMode pointColorMode = defaults.pointColorMode;
+    pangolin::Var<bool> menuColorFeature("menu.Color: Feature", pointColorMode == PointColorMode::Feature, true);
+    pangolin::Var<bool> menuColorRGB("menu.Color: RGB", pointColorMode == PointColorMode::RGB, true);
 
     // Thickness
     pangolin::Var<float> menuPointSize("menu.Point Size", defaults.pointSize, 1.0f, 10.0f);
@@ -379,9 +383,15 @@ void Viewer::Run()
         ViewerStyle style;
         style.darkTheme = menuDarkTheme;
         {
-            int mode = menuPointColor;
-            mode = mode < 0 ? 0 : (mode >= kPointColorModeCount ? kPointColorModeCount - 1 : mode);
-            style.pointColorMode = static_cast<PointColorMode>(mode);
+            // Radio-button behaviour over the two checkboxes: react to the one the user touched
+            // this frame, then re-sync both boxes to the resulting mode.
+            if (menuColorFeature.GuiChanged())
+                pointColorMode = menuColorFeature ? PointColorMode::Feature : PointColorMode::RGB;
+            else if (menuColorRGB.GuiChanged())
+                pointColorMode = menuColorRGB ? PointColorMode::RGB : PointColorMode::Feature;
+            menuColorFeature = (pointColorMode == PointColorMode::Feature);
+            menuColorRGB = (pointColorMode == PointColorMode::RGB);
+            style.pointColorMode = pointColorMode;
         }
         style.pointSize = menuPointSize;
         style.trajectoryLineWidth = menuTrajWidth;

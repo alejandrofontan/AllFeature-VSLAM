@@ -25,7 +25,7 @@ Viewer.GraphLineWidth: 0.9
 Viewer.TrajectoryLineWidth: 3.0
 Viewer.PointSize: 5
 Viewer.PointColorMode: "feature"  # map point color: "feature" (feature-type palette) | "rgb" (image color sampled at creation);
-                                  # seeds the Viewer selector "Point Color" (0 feature, 1 rgb); missing key = feature.
+                                  # seeds the Viewer checkboxes "Color: Feature" / "Color: RGB" (mutually exclusive); missing key = feature.
                                   # The PLY export always writes the rgb color. Keep the quotes: cv::FileStorage does not
                                   # strip a trailing comment from an unquoted string.
 Viewer.MapPointsRefreshHz: 5      # the viewer snapshots the map points into a vertex buffer at most this often (the only

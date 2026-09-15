@@ -61,14 +61,13 @@ namespace vslamlab_colors
     void gradientVivid(float t, float rgb[3]);
 }
 
-// How DrawMapPoints colors each map point. Integer-valued so the Viewer can expose it as a
-// pangolin::Var<int> selector ("Point Color") and new modes can be appended without a UI change.
+// How DrawMapPoints colors each map point. The Viewer exposes one checkbox per mode
+// ("Color: Feature" / "Color: RGB"), kept mutually exclusive like radio buttons.
 enum class PointColorMode : int
 {
     Feature = 0,  // the feature type's palette color (getFeatureColor)
     RGB = 1,      // the point's own image color, sampled at creation (MapPoint::color)
 };
-constexpr int kPointColorModeCount = 2;
 
 // Settings-yaml spelling ("feature" | "rgb") <-> enum; unknown names return false and leave `mode` untouched.
 bool parsePointColorMode(const std::string& name, PointColorMode& mode);
@@ -133,8 +132,8 @@ private:
     // position mutex and copying the map's point set under the map mutex — a lock storm that
     // competes with Tracking and LocalMapping. Instead, the points are snapshotted into a
     // vertex buffer at most `pointRefreshPeriod_` apart (Viewer.MapPointsRefreshHz) and every
-    // frame just draws the buffer. Both color sets are stored so the "Point Color" selector
-    // switches instantly without a refresh.
+    // frame just draws the buffer. Both color sets are stored so the "Color: ..." checkboxes
+    // switch instantly without a refresh.
     struct PointVertex
     {
         float x, y, z;
