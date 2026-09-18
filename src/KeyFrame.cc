@@ -126,7 +126,7 @@ vec3f KeyFrame::get_translation() const
     return Tcw.block<3,1>(0,3);
 }
 
-void KeyFrame::AddConnection(const Keyframe& keyframe, const int &weight)
+void KeyFrame::add_connection(const Keyframe& keyframe, const int &weight)
 {
     {
         unique_lock<mutex> lock(mMutexConnections);
@@ -140,10 +140,10 @@ void KeyFrame::AddConnection(const Keyframe& keyframe, const int &weight)
             return;
     }
 
-    UpdateBestCovisibles();
+    update_best_covisibles();
 }
 
-void KeyFrame::UpdateBestCovisibles()
+void KeyFrame::update_best_covisibles()
 {
     unique_lock<mutex> lock(mMutexConnections);
     vector<pair<int,Keyframe> > vPairs;
@@ -165,7 +165,7 @@ void KeyFrame::UpdateBestCovisibles()
     orderedWeights = vector<int>(weights.begin(), weights.end());
 }
 
-map<KeyframeId,Keyframe> KeyFrame::GetConnectedKeyFrames() const
+map<KeyframeId,Keyframe> KeyFrame::get_connected_keyframes() const
 {
     unique_lock<mutex> lock(mMutexConnections);
     map<KeyframeId,Keyframe> connectedKeyFrames_tmp;
@@ -190,14 +190,14 @@ vector<Keyframe> KeyFrame::get_best_covisibility_keyframes(const int &N) const
 
 }
 
-vector<Keyframe> KeyFrame::GetCovisiblesByWeight(const int &w) const
+vector<Keyframe> KeyFrame::get_covisibles_by_weight(const int &w) const
 {
     unique_lock<mutex> lock(mMutexConnections);
 
     if(orderedConnectedKeyFrames.empty())
         return vector<Keyframe>();
 
-    const auto it = upper_bound(orderedWeights.begin(),orderedWeights.end(),w,KeyFrame::weightComp);
+    const auto it = upper_bound(orderedWeights.begin(),orderedWeights.end(),w,KeyFrame::weight_greater);
     if(it == orderedWeights.end())
         return vector<Keyframe>();
     else
@@ -207,7 +207,7 @@ vector<Keyframe> KeyFrame::GetCovisiblesByWeight(const int &w) const
     }
 }
 
-int KeyFrame::GetWeight(const Keyframe& keyframe) const
+int KeyFrame::get_weight(const Keyframe& keyframe) const
 {
     unique_lock<mutex> lock(mMutexConnections);
     const auto it = connectedKeyFrameWeights.find(keyframe->keyId);
@@ -219,11 +219,11 @@ Pt KeyFrame::create_monocular_map_point(const vec3f& worldPos,
                             const Keyframe& projKeyframe, const KeypointIndex& projIndex,
                             const FeatureType& featureType)
 {
-    auto pt = make_shared<MapPoint>(worldPos,thisKeyframe(),mpMap, featureType,
+    auto pt = make_shared<MapPoint>(worldPos,this_keyframe(),mpMap, featureType,
                                     keypoint_colors.at(featureType)[refIndex]);
 
     add_map_point(pt,refIndex);
-    pt->add_observation(thisKeyframe(), refIndex);
+    pt->add_observation(this_keyframe(), refIndex);
 
     projKeyframe->add_map_point(pt,projIndex);
     pt->add_observation(projKeyframe, projIndex);
@@ -233,11 +233,11 @@ Pt KeyFrame::create_monocular_map_point(const vec3f& worldPos,
 }
 
 Pt KeyFrame::create_map_point(const vec3f& worldPos, const KeypointIndex& refIndex, const FeatureType& featureType){
-        auto pt = make_shared<MapPoint>(worldPos,thisKeyframe(),mpMap,featureType,
+        auto pt = make_shared<MapPoint>(worldPos,this_keyframe(),mpMap,featureType,
                                         keypoint_colors.at(featureType)[refIndex]);
 
         add_map_point(pt,refIndex);
-        pt->add_observation(thisKeyframe(), refIndex);
+        pt->add_observation(this_keyframe(), refIndex);
         mpMap->add_map_point(pt);
         return pt;
 }
@@ -248,24 +248,24 @@ void KeyFrame::add_map_point(const Pt& pt, const KeypointIndex& index)
     mvpMapPoints[pt->featureType][index] = pt;
 }
 
-void KeyFrame::EraseMapPointMatch(const size_t &idx, const FeatureType& featType)
+void KeyFrame::erase_map_point_match(const size_t &idx, const FeatureType& featType)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     mvpMapPoints[featType][idx] = nullptr;
 }
 
-void KeyFrame::EraseMapPointMatch(const Pt& pMP)
+void KeyFrame::erase_map_point_match(const Pt& pMP)
 {
-    // The point's own lock is taken by GetIndexInKeyFrame, before ours (keyframe -> point
+    // The point's own lock is taken by get_index_in_keyframe, before ours (keyframe -> point
     // is the lock order everywhere else in this class)
-    const int idx = pMP->GetIndexInKeyFrame(thisKeyframe());
+    const int idx = pMP->get_index_in_keyframe(this_keyframe());
     if(idx < 0)
         return;
     unique_lock<mutex> lock(mMutexFeatures);
     mvpMapPoints[pMP->featureType][idx] = nullptr;
 }
 
-void KeyFrame::ReplaceMapPointMatch(const size_t &idx, const Pt& pMP)
+void KeyFrame::replace_map_point_match(const size_t &idx, const Pt& pMP)
 {
     // Runs on the local-mapping thread (MapPoint::replace, fusion) while Tracking reads the
     // same vectors: a torn shared_ptr write racing a copy corrupts the refcount
@@ -386,14 +386,14 @@ void KeyFrame::update_connections()
         if(weightCount.second >= th)
         {
             vPairs.push_back(make_pair(weightCount.second,KFcounter[weightCount.first]));
-            KFcounter[weightCount.first]->AddConnection(thisKeyframe(),weightCount.second);
+            KFcounter[weightCount.first]->add_connection(this_keyframe(),weightCount.second);
         }
     }
 
     if(vPairs.empty())
     {
         vPairs.push_back(make_pair(nmax,keyframeMaxObs));
-        keyframeMaxObs->AddConnection(thisKeyframe(),nmax);
+        keyframeMaxObs->add_connection(this_keyframe(),nmax);
     }
 
     sort(vPairs.begin(),vPairs.end(),KeyframeComparison);
@@ -416,30 +416,30 @@ void KeyFrame::update_connections()
         if(mbFirstConnection && keyId!=0)
         {
             mpParent = orderedConnectedKeyFrames.front();
-            mpParent->AddChild(thisKeyframe());
+            mpParent->add_child(this_keyframe());
             mbFirstConnection = false;
         }
 
     }
 }
 
-void KeyFrame::AddChild(const Keyframe& pKF)
+void KeyFrame::add_child(const Keyframe& pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     mspChildrens.insert(pKF);
 }
 
-void KeyFrame::EraseChild(const Keyframe& pKF)
+void KeyFrame::erase_child(const Keyframe& pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     mspChildrens.erase(pKF);
 }
 
-void KeyFrame::ChangeParent(const Keyframe& pKF)
+void KeyFrame::change_parent(const Keyframe& pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     mpParent = pKF;
-    pKF->AddChild(thisKeyframe());
+    pKF->add_child(this_keyframe());
 }
 
 KeyframeIdSet KeyFrame::get_children() const
@@ -454,32 +454,32 @@ Keyframe KeyFrame::get_parent() const
     return mpParent;
 }
 
-bool KeyFrame::hasChild(const Keyframe& pKF) const
+bool KeyFrame::has_child(const Keyframe& pKF) const
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     return mspChildrens.count(pKF);
 }
 
-void KeyFrame::AddLoopEdge(const Keyframe& pKF)
+void KeyFrame::add_loop_edge(const Keyframe& pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     mbNotErase = true;
     mspLoopEdges.insert(pKF);
 }
 
-KeyframeIdSet KeyFrame::GetLoopEdges() const
+KeyframeIdSet KeyFrame::get_loop_edges() const
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     return mspLoopEdges;
 }
 
-void KeyFrame::SetNotErase()
+void KeyFrame::set_not_erase()
 {
     unique_lock<mutex> lock(mMutexConnections);
     mbNotErase = true;
 }
 
-void KeyFrame::SetErase()
+void KeyFrame::set_erase()
 {
     {
         unique_lock<mutex> lock(mMutexConnections);
@@ -523,12 +523,12 @@ void KeyFrame::set_bad_flag()
     }
 
     for(const auto& [id, keyframe] : connected)
-        keyframe->EraseConnection(thisKeyframe());
+        keyframe->erase_connection(this_keyframe());
 
     for(const auto& [ft, points] : map_points)
         for(const Pt& point : points)
             if(point)
-                point->EraseObservation(thisKeyframe());
+                point->erase_observation(this_keyframe());
 
     {
         unique_lock<mutex> lock(mMutexConnections);
@@ -572,7 +572,7 @@ void KeyFrame::set_bad_flag()
                     {
                         if(vpConnected[i]->keyId == (*spcit)->keyId)
                         {
-                            int w = pKF->GetWeight(vpConnected[i]);
+                            int w = pKF->get_weight(vpConnected[i]);
                             if(w>max)
                             {
                                 pC = pKF;
@@ -587,7 +587,7 @@ void KeyFrame::set_bad_flag()
 
             if(bContinue)
             {
-                pC->ChangeParent(pP);
+                pC->change_parent(pP);
                 sParentCandidates.insert(pC);
                 mspChildrens.erase(pC);
             }
@@ -599,14 +599,14 @@ void KeyFrame::set_bad_flag()
         if(mpParent)
         {
             for(const Keyframe& child : mspChildrens)
-                child->ChangeParent(mpParent);
-            mpParent->EraseChild(thisKeyframe());
+                child->change_parent(mpParent);
+            mpParent->erase_child(this_keyframe());
         }
         mbBad = true;
     }
 
-    mpMap->EraseKeyFrame(thisKeyframe());
-    place_recognition_->erase(thisKeyframe());
+    mpMap->EraseKeyFrame(this_keyframe());
+    place_recognition_->erase(this_keyframe());
 }
 
 bool KeyFrame::is_bad() const
@@ -615,7 +615,7 @@ bool KeyFrame::is_bad() const
     return mbBad;
 }
 
-void KeyFrame::EraseConnection(const Keyframe& keyframe)
+void KeyFrame::erase_connection(const Keyframe& keyframe)
 {
     bool bUpdate = false;
     {
@@ -629,7 +629,7 @@ void KeyFrame::EraseConnection(const Keyframe& keyframe)
     }
 
     if(bUpdate)
-        UpdateBestCovisibles();
+        update_best_covisibles();
 }
 
 vector<size_t> KeyFrame::get_features_in_area(const float &x, const float &y, const float &r, const FeatureType& featType) const
@@ -714,49 +714,34 @@ float KeyFrame::compute_scene_median_depth(const int q) const
     return vDepths[nth];
 }
 
-    float KeyFrame::GetKeyPtSize(const KeypointIndex &keyPtIdx, const FeatureType& featType) const {
+    float KeyFrame::get_keypoint_size(const KeypointIndex &keyPtIdx, const FeatureType& featType) const {
         return keyPtsSize.at(featType)[keyPtIdx];
     }
 
-    float KeyFrame::GetKeyPt1DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    float KeyFrame::get_keypoint_sigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return 0.5f * (keyPtsSigma2.at(featType)[keyPtIdx](0,0) + keyPtsSigma2.at(featType)[keyPtIdx](1,1));
     }
 
-    float KeyFrame::get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    float KeyFrame::get_keypoint_information_1d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return 0.5f * (keyPtsInf.at(featType)[keyPtIdx](0,0) + keyPtsInf.at(featType)[keyPtIdx](1,1));
     }
 
-    mat2f KeyFrame::GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    mat2f KeyFrame::get_keypoint_information_2d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return keyPtsInf.at(featType)[keyPtIdx];
     }
 
-    float KeyFrame::GetKeyPt1DSigma(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    float KeyFrame::get_keypoint_sigma(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
-        return sqrtf(GetKeyPt1DSigma2(keyPtIdx, featType));
+        return sqrtf(get_keypoint_sigma2(keyPtIdx, featType));
     }
 
-    void KeyFrame::getFullIntrinsics(float &fx_, float &fy_, float &cx_, float &cy_, float& invfx_, float& invfy_) const
-    {
-        fx_ = fx;
-        fy_ = fy;
-        cx_ = cx;
-        cy_ = cy;
-        invfx_ = invfx;
-        invfy_ = invfy;
-    }
-
-    void KeyFrame::getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_) const
+    KeyFrame::PoseMatrices KeyFrame::get_pose_matrices() const
     {
         unique_lock<mutex> lock(mMutexPose);
-        Twc_ = Twc;
-        Rwc_ = Twc.block<3,3>(0,0);
-        twc_ = twc;
-        Tcw_ = Tcw;
-        Rcw_ = Tcw.block<3,3>(0,0);
-        tcw_ = Tcw.block<3,1>(0,3);
+        return PoseMatrices{Tcw, Twc, Tcw.block<3,3>(0,0), Twc.block<3,3>(0,0), Tcw.block<3,1>(0,3), twc};
     }
 
 } //namespace ORB_SLAM

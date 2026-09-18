@@ -484,7 +484,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
     AF_INFO("Saving keyframe trajectory to " << filename << " ...");
 
     vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
-    sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
+    sort(vpKFs.begin(),vpKFs.end(),KeyFrame::less_by_id);
 
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.

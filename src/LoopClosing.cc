@@ -113,9 +113,9 @@ bool LoopClosing::detect_loop()
         current_keyframe_ = new_keyframes_.front();
         new_keyframes_.pop_front();
         // Keyframe culling must not delete the keyframe while this thread works on it.
-        // SetErase lifts the guard (a culling deferred meanwhile is applied then); on
+        // set_erase lifts the guard (a culling deferred meanwhile is applied then); on
         // success compute_sim3/correct_loop keep it until the loop is closed or rejected.
-        current_keyframe_->SetNotErase();
+        current_keyframe_->set_not_erase();
     }
 
     // Candidates retrieved by the VPR backend (covisible keyframes excluded), kept only
@@ -133,7 +133,7 @@ bool LoopClosing::detect_loop()
 
     if(loop_candidates_.empty())
     {
-        current_keyframe_->SetErase();
+        current_keyframe_->set_erase();
         return false;
     }
     return true;
@@ -175,9 +175,9 @@ std::vector<Keyframe> LoopClosing::consistent_loop_candidates(const std::vector<
 
     for(const Keyframe& candidate : candidates)
     {
-        // Covisibility group as sorted ids (GetConnectedKeyFrames is ordered by id)
+        // Covisibility group as sorted ids (get_connected_keyframes is ordered by id)
         ConsistentGroup group;
-        for(const auto& [id, keyframe] : candidate->GetConnectedKeyFrames())
+        for(const auto& [id, keyframe] : candidate->get_connected_keyframes())
             group.keyframes.push_back(id);
         group.keyframes.insert(std::lower_bound(group.keyframes.begin(), group.keyframes.end(), candidate->keyId),
                                candidate->keyId);
@@ -242,7 +242,7 @@ bool LoopClosing::compute_sim3()
     for(const Keyframe& keyframe : loop_candidates_)
     {
         // Keyframe culling must not delete a candidate while it is being verified
-        keyframe->SetNotErase();
+        keyframe->set_not_erase();
 
         Candidate candidate{keyframe, {}, nullptr};
         if(!keyframe->is_bad())
@@ -370,9 +370,9 @@ void LoopClosing::release_loop_candidates(const bool loop_accepted)
 {
     for(const Keyframe& candidate : loop_candidates_)
         if(!loop_accepted || candidate != matched_keyframe_)
-            candidate->SetErase();
+            candidate->set_erase();
     if(!loop_accepted)
-        current_keyframe_->SetErase();
+        current_keyframe_->set_erase();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -452,7 +452,7 @@ void LoopClosing::correct_loop()
                     point->set_world_pos(corrected.cast<float>());
                     point->mnCorrectedByKF = current_keyframe_->keyId;
                     point->mnCorrectedReference = keyframe->keyId;
-                    point->UpdateNormalAndDepth();
+                    point->update_normal_and_depth();
                 }
             }
 
@@ -492,8 +492,8 @@ void LoopClosing::correct_loop()
     map_->InformNewBigChange();
 
     // Loop edge (also pins both keyframes: never culled)
-    matched_keyframe_->AddLoopEdge(current_keyframe_);
-    current_keyframe_->AddLoopEdge(matched_keyframe_);
+    matched_keyframe_->add_loop_edge(current_keyframe_);
+    current_keyframe_->add_loop_edge(matched_keyframe_);
 
     // Global BA in its own thread; Local Mapping resumes meanwhile. A previous BA has
     // either finished (joinable, join returns at once) or was detached above.
@@ -523,7 +523,7 @@ std::map<KeyframeId, LoopConnections> LoopClosing::loop_connections_after_fusion
 
         LoopConnections& links = loop_connections[keyframe->keyId];
         links.keyframe = keyframe;
-        links.connections = keyframe->GetConnectedKeyFrames();
+        links.connections = keyframe->get_connected_keyframes();
         for(const Keyframe& neighbor : previous_neighbors)
             links.connections.erase(neighbor->keyId);
         for(const Keyframe& corrected : connected_keyframes)
@@ -636,7 +636,7 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
             continue;
         }
 
-        const Keyframe reference = point->GetReferenceKeyFrame();
+        const Keyframe reference = point->get_reference_keyframe();
         if(reference->mnBAGlobalForKF != loop_keyframe_id)
             continue;
 

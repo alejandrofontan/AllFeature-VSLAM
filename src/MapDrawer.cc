@@ -360,7 +360,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
         for(size_t i=0; i<vpKFs.size(); i++)
         {
             // Covisibility Graph
-            const vector<Keyframe > vCovKFs = vpKFs[i]->GetCovisiblesByWeight(100);
+            const vector<Keyframe > vCovKFs = vpKFs[i]->get_covisibles_by_weight(100);
             vec3f Ow = vpKFs[i]->get_camera_center();
             if(!vCovKFs.empty())
             {
@@ -384,7 +384,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
             }
 
             // Loops
-            const KeyframeIdSet sLoopKFs = vpKFs[i]->GetLoopEdges();
+            const KeyframeIdSet sLoopKFs = vpKFs[i]->get_loop_edges();
             for(auto sit=sLoopKFs.begin(), send=sLoopKFs.end(); sit!=send; sit++)
             {
                 if((*sit)->keyId < vpKFs[i]->keyId)
@@ -407,7 +407,7 @@ void MapDrawer::DrawTrajectory(const ViewerStyle& style)
                 vpKFs.end());
     if (vpKFs.size() < 2)
         return;
-    std::sort(vpKFs.begin(), vpKFs.end(), KeyFrame::lId);
+    std::sort(vpKFs.begin(), vpKFs.end(), KeyFrame::less_by_id);
 
     // Sequential keyframe polyline, tinted with the logo gradient along its length.
     applyLineWidth(style.trajectoryLineWidth);
@@ -447,7 +447,7 @@ void MapDrawer::DrawTrajectoryTopView(const ViewerStyle& style)
                 vpKFs.end());
     if (vpKFs.size() < 2)
         return;
-    std::sort(vpKFs.begin(), vpKFs.end(), KeyFrame::lId);
+    std::sort(vpKFs.begin(), vpKFs.end(), KeyFrame::less_by_id);
 
     std::vector<vec3f> centers;
     centers.reserve(vpKFs.size());

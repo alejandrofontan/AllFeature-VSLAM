@@ -15,7 +15,7 @@
 // Returns a stateless singleton per feature type (every Feature virtual is const).
 // Previously returned a fresh unique_ptr per call — a heap allocation inside every
 // descriptor_distance/match dispatch, i.e. per descriptor comparison in the fuse and
-// ComputeDistinctiveDescriptors inner loops (issue #13 addendum, factory-singletons item).
+// compute_distinctive_descriptors inner loops (issue #13 addendum, factory-singletons item).
 inline const AF_VSLAM::Feature& get_feature(const FeatureType& featureType) {
     static const AF_VSLAM::Orb32 orb32;
     static const AF_VSLAM::Akaze61 akaze61;

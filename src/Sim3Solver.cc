@@ -73,14 +73,14 @@ Sim3Solver::Sim3Solver(Keyframe pKF1, Keyframe pKF2, const vector<Pt> &vpMatched
             if(pMP1->is_bad() || pMP2->is_bad())
                 continue;
 
-            KeypointIndex indexKF1 = pMP1->GetIndexInKeyFrame(pKF1);
-            KeypointIndex indexKF2 = pMP2->GetIndexInKeyFrame(pKF2);
+            KeypointIndex indexKF1 = pMP1->get_index_in_keyframe(pKF1);
+            KeypointIndex indexKF2 = pMP2->get_index_in_keyframe(pKF2);
 
             if(indexKF1<0 || indexKF2<0)
                 continue;
 
-            const float sigmaSquare1 = pKF1->GetKeyPt1DSigma2(indexKF1, featureType);
-            const float sigmaSquare2 = pKF2->GetKeyPt1DSigma2(indexKF2, featureType);
+            const float sigmaSquare1 = pKF1->get_keypoint_sigma2(indexKF1, featureType);
+            const float sigmaSquare2 = pKF2->get_keypoint_sigma2(indexKF2, featureType);
 
             mvnMaxError1.push_back(9.210*sigmaSquare1);
             mvnMaxError2.push_back(9.210*sigmaSquare2);

@@ -46,7 +46,7 @@ class MapPoint: public std::enable_shared_from_this<MapPoint>
 public:
     MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType,
              const cv::Vec3b& color = cv::Vec3b(0, 0, 0));
-    std::shared_ptr<MapPoint> thisPt() {
+    std::shared_ptr<MapPoint> this_point() {
         return shared_from_this();
     }
 
@@ -54,24 +54,24 @@ public:
     vec3f get_world_pos() const;
 
     vec3f get_normal() const;
-    Keyframe GetReferenceKeyFrame() const;
+    Keyframe get_reference_keyframe() const;
 
     std::map<KeyframeId,shared_ptr<Observation>> get_observations() const;
 
     // Two observation counts. number_of_observations() is the WEIGHTED count the quality
     // gates use (map-point culling, KeyFrame::tracked_map_points): an observation with
-    // sensor depth (RGB-D, inv_depth > 0) counts twice, see increasePointObservability.
+    // sensor depth (RGB-D, inv_depth > 0) counts twice, see increase_observability.
     // num_observing_keyframes() is the plain number of keyframes observing the point
-    // (EraseObservation's discard rule, BA edge sizing).
+    // (erase_observation's discard rule, BA edge sizing).
     int number_of_observations() const;
     int num_observing_keyframes() const;
-    void increasePointObservability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
-    void decreasePointObservability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
+    void increase_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
+    void decrease_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
 
     void add_observation(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
-    void EraseObservation(const Keyframe& projKeyframe);
+    void erase_observation(const Keyframe& projKeyframe);
 
-    int GetIndexInKeyFrame(const Keyframe& pKF) const;
+    int get_index_in_keyframe(const Keyframe& pKF) const;
     bool is_in_keyframe(const Keyframe& keyframe) const;
 
     void set_bad_flag();
@@ -84,17 +84,17 @@ public:
     void increase_found(int n=1);
     float get_found_ratio() const;
 
-    Pt ComputeDistinctiveDescriptors();
+    Pt compute_distinctive_descriptors();
 
     cv::Mat get_descriptor() const;
 
-    void UpdateNormalAndDepth();
+    void update_normal_and_depth();
 
     float get_min_distance_invariance() const;
     float get_max_distance_invariance() const;
 
-    float PredictSize(const float &currentDist) const;
-    float PredictSigma(const float &currentDist) const;
+    float predict_size(const float &currentDist) const;
+    float predict_sigma(const float &currentDist) const;
 
 public:
     PtId ptId;
@@ -149,8 +149,8 @@ protected:
      // Best descriptor to fast matching
      cv::Mat mDescriptor;
 
-     // Distance, keypoint size and sigma at the reference keyframe (UpdateNormalAndDepth);
-     // PredictSize/PredictSigma scale them to the current viewing distance
+     // Distance, keypoint size and sigma at the reference keyframe (update_normal_and_depth);
+     // predict_size/predict_sigma scale them to the current viewing distance
      float refDistance;
      float refSize;
      float refSigma;
@@ -163,7 +163,7 @@ protected:
      static constexpr float reference_keypoint_size{1.5f};
 
      // Reference keyframe: the creating keyframe, re-pointed to another observer when it
-     // stops observing the point (EraseObservation). The single source for the point's
+     // stops observing the point (erase_observation). The single source for the point's
      // scale/normal reference and for the loop-closing / GBA corrections.
      Keyframe mpRefKF;
 

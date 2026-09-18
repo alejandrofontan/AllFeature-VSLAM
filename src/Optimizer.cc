@@ -69,9 +69,9 @@ void Optimizer::LoadParameters(const cv::FileStorage &fSettings)
 }
 
 // Per-observation information (1/variance) for the RGB-D inverse-depth residual, from
-// Frame/KeyFrame::sigma2invDepth (Frame::GetDepth's quadratic depth-noise model) instead of the
+// Frame/KeyFrame::sigma2invDepth (Frame::get_depth's quadratic depth-noise model) instead of the
 // single global params.invDepthInfo placeholder every observation used to share. Falls back to
-// that placeholder if sigma2 is non-positive -- shouldn't happen in practice, since Frame::GetDepth
+// that placeholder if sigma2 is non-positive -- shouldn't happen in practice, since Frame::get_depth
 // always sets sigma2invDepth alongside inv_depth, but keeps this safe if that invariant ever breaks.
 static double RGBDInvDepthInformation(float sigma2invDepth)
 {
@@ -251,7 +251,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 
                 const float sigma2invDepth_i = pKF->sigma2invDepth.at(featType)[obs.second->projIndex];
                 mat3f infMat = mat3f::Zero();
-                infMat.block<2,2>(0,0) = pKF->GetKeyPt2DInf(obs.second->projIndex, featType);
+                infMat.block<2,2>(0,0) = pKF->get_keypoint_information_2d(obs.second->projIndex, featType);
                 infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepth_i));
 
                 CreateBAEdge<g2o::EdgeRGBDSE3ProjectXYZ>(
@@ -264,7 +264,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 
                 CreateBAEdge<g2o::EdgeSE3ProjectXYZ>(
                     optimizer, id, pKF->keyId, obs2D,
-                    pKF->GetKeyPt2DInf(obs.second->projIndex, featType).cast<double>(), params.thHuber_2dof, pKF, bRobust);
+                    pKF->get_keypoint_information_2d(obs.second->projIndex, featType).cast<double>(), params.thHuber_2dof, pKF, bRobust);
             }
         }
 
@@ -320,7 +320,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
         if(nLoopKF==0)
         {
             pMP->set_world_pos(vPoint->estimate().cast<float>());
-            pMP->UpdateNormalAndDepth();
+            pMP->update_normal_and_depth();
         }
         else
         {
@@ -454,7 +454,7 @@ int Optimizer::pose_optimization(Frame *pFrame, const bool useDepthChannel)
                 obs3d << kpUn.pt.x, kpUn.pt.y, invDepth_i;
 
                 mat3f infMat = mat3f::Zero();
-                infMat.block<2,2>(0,0) = pFrame->GetKeyPt2DInf(i, ft);
+                infMat.block<2,2>(0,0) = pFrame->get_keypoint_information_2d(i, ft);
                 infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepthFt[i]));
 
                 auto* e = CreatePoseOnlyEdge<g2o::EdgeRGBDSE3ProjectXYZOnlyPose>(
@@ -469,7 +469,7 @@ int Optimizer::pose_optimization(Frame *pFrame, const bool useDepthChannel)
                 obs2D << kpUn.pt.x, kpUn.pt.y;
 
                 auto* e = CreatePoseOnlyEdge<g2o::EdgeSE3ProjectXYZOnlyPose>(
-                    optimizer, obs2D, pFrame->GetKeyPt2DInf(i, ft).cast<double>(), params.thHuber_2dof, pFrame, Xw);
+                    optimizer, obs2D, pFrame->get_keypoint_information_2d(i, ft).cast<double>(), params.thHuber_2dof, pFrame, Xw);
 
                 edgesMonoFt.push_back(e);
                 idxMonoFt.push_back(i);
@@ -717,7 +717,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
 
                     const float sigma2invDepth_i = pKFi->sigma2invDepth.at(featType)[obs.second->projIndex];
                     mat3f infMat = mat3f::Zero();
-                    infMat.block<2,2>(0,0) = pKFi->GetKeyPt2DInf(obs.second->projIndex, featType);
+                    infMat.block<2,2>(0,0) = pKFi->get_keypoint_information_2d(obs.second->projIndex, featType);
                     infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepth_i));
 
                     auto* e = CreateBAEdge<g2o::EdgeRGBDSE3ProjectXYZ>(
@@ -732,7 +732,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
 
                     auto* e = CreateBAEdge<g2o::EdgeSE3ProjectXYZ>(
                         optimizer, id, pKFi->keyId, obs2D,
-                        pKFi->GetKeyPt2DInf(obs.second->projIndex, featType).cast<double>(), params.thHuber_2dof, pKFi);
+                        pKFi->get_keypoint_information_2d(obs.second->projIndex, featType).cast<double>(), params.thHuber_2dof, pKFi);
 
                     obsMono.push_back({e, pKFi, pMP});
                 }
@@ -775,8 +775,8 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
         {
             Keyframe pKFi = vToErase[i].first;
             Pt pMPi = vToErase[i].second;
-            pKFi->EraseMapPointMatch(pMPi);
-            pMPi->EraseObservation(pKFi);
+            pKFi->erase_map_point_match(pMPi);
+            pMPi->erase_observation(pKFi);
         }
     }
 
@@ -797,7 +797,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
         Pt pMP = *lit;
         g2o::VertexSBAPointXYZ* vPoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pMP->ptId + maxKFid+1));
         pMP->set_world_pos(vPoint->estimate().cast<float>());
-        pMP->UpdateNormalAndDepth();
+        pMP->update_normal_and_depth();
     }
 }
 
@@ -882,7 +882,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         for(auto& sit : spConnections)
         {
             const long unsigned int nIDj = sit.first;
-            if((nIDi!=pCurKF->keyId || nIDj!=pLoopKF->keyId) && pKF->GetWeight(sit.second) < params.minFeat)
+            if((nIDi!=pCurKF->keyId || nIDj!=pLoopKF->keyId) && pKF->get_weight(sit.second) < params.minFeat)
                 continue;
 
             const g2o::Sim3 Sjw = vScw[nIDj];
@@ -945,7 +945,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         }
 
         // Loop edges
-        const KeyframeIdSet sLoopEdges = pKF->GetLoopEdges();
+        const KeyframeIdSet sLoopEdges = pKF->get_loop_edges();
         for(auto sit=sLoopEdges.begin(), send=sLoopEdges.end(); sit!=send; sit++)
         {
             Keyframe pLKF = *sit;
@@ -971,11 +971,11 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         }
 
         // Covisibility graph edges
-        const vector<Keyframe> vpConnectedKFs = pKF->GetCovisiblesByWeight(params.minFeat);
+        const vector<Keyframe> vpConnectedKFs = pKF->get_covisibles_by_weight(params.minFeat);
         for(vector<Keyframe>::const_iterator vit=vpConnectedKFs.begin(); vit!=vpConnectedKFs.end(); vit++)
         {
             Keyframe pKFn = *vit;
-            if(pKFn && pKFn!=pParentKF && !pKF->hasChild(pKFn) && !sLoopEdges.count(pKFn))
+            if(pKFn && pKFn!=pParentKF && !pKF->has_child(pKFn) && !sLoopEdges.count(pKFn))
             {
                 if(!pKFn->is_bad() && pKFn->keyId<pKF->keyId)
                 {
@@ -1046,7 +1046,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         }
         else
         {
-            Keyframe pRefKF = pMP->GetReferenceKeyFrame();
+            Keyframe pRefKF = pMP->get_reference_keyframe();
             nIDr = pRefKF->keyId;
         }
 
@@ -1060,7 +1060,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
 
         pMP->set_world_pos(eigCorrectedP3Dw.cast<float>());
 
-        pMP->UpdateNormalAndDepth();
+        pMP->update_normal_and_depth();
     }
 }
 
@@ -1130,7 +1130,7 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
         const int id1 = 2*i+1;
         const int id2 = 2*(i+1);
 
-        const int i2 = pMP2->GetIndexInKeyFrame(pKF2);
+        const int i2 = pMP2->get_index_in_keyframe(pKF2);
 
         if(pMP1 && pMP2)
         {
@@ -1170,7 +1170,7 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
         e12->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
 
         e12->setMeasurement(obs1);
-        e12->setInformation(pKF1->GetKeyPt2DInf(i, featType1).cast<double>());
+        e12->setInformation(pKF1->get_keypoint_information_2d(i, featType1).cast<double>());
 
         g2o::RobustKernelHuber* rk1 = new g2o::RobustKernelHuber;
         e12->setRobustKernel(rk1);
@@ -1188,7 +1188,7 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
         e21->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
 
         e21->setMeasurement(obs2);
-        e21->setInformation(pKF2->GetKeyPt2DInf(i2, featType2).cast<double>());
+        e21->setInformation(pKF2->get_keypoint_information_2d(i2, featType2).cast<double>());
 
         g2o::RobustKernelHuber* rk2 = new g2o::RobustKernelHuber;
         e21->setRobustKernel(rk2);

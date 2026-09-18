@@ -58,7 +58,7 @@ class KeyFrame : public std::enable_shared_from_this<KeyFrame>
 {
 public:
     KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> place_recognition);
-    std::shared_ptr<KeyFrame> thisKeyframe() {
+    std::shared_ptr<KeyFrame> this_keyframe() {
         return shared_from_this();
     }
 
@@ -69,8 +69,10 @@ public:
     vec3f get_camera_center() const;
     mat3f get_rotation() const;
     vec3f get_translation() const;
-    void getFullIntrinsics(float &fx, float &fy, float &cx, float &cy, float& invfx, float& invfy) const;
-    void getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_) const;
+    // The pose and its blocks from ONE lock acquisition (a consistent snapshot, unlike
+    // successive get_* calls); structured-binding order: Tcw, Twc, Rcw, Rwc, tcw, twc
+    struct PoseMatrices { mat4f Tcw, Twc; mat3f Rcw, Rwc; vec3f tcw, twc; };
+    PoseMatrices get_pose_matrices() const;
 
     // Compute the global descriptor with the active VPR backend (MegaLoc image
     // embedding — which then releases `image`); no-op when VPR is inactive.
@@ -82,27 +84,27 @@ public:
     float vpr_similarity(const Keyframe& other) const;
 
     // Covisibility graph functions
-    void AddConnection(const Keyframe& pKF, const int &weight);
-    void EraseConnection(const Keyframe& pKF);
+    void add_connection(const Keyframe& pKF, const int &weight);
+    void erase_connection(const Keyframe& pKF);
     void update_connections();
-    void UpdateBestCovisibles();
-    map<KeyframeId,Keyframe> GetConnectedKeyFrames() const;
+    void update_best_covisibles();
+    map<KeyframeId,Keyframe> get_connected_keyframes() const;
     std::vector<Keyframe > get_covisible_keyframes() const;
     std::vector<Keyframe> get_best_covisibility_keyframes(const int &N) const;
-    std::vector<Keyframe> GetCovisiblesByWeight(const int &w) const;
-    int GetWeight(const Keyframe& pKF) const;
+    std::vector<Keyframe> get_covisibles_by_weight(const int &w) const;
+    int get_weight(const Keyframe& pKF) const;
 
     // Spanning tree functions
-    void AddChild(const Keyframe& pKF);
-    void EraseChild(const Keyframe& pKF);
-    void ChangeParent(const Keyframe& pKF);
+    void add_child(const Keyframe& pKF);
+    void erase_child(const Keyframe& pKF);
+    void change_parent(const Keyframe& pKF);
     KeyframeIdSet get_children() const;
     Keyframe get_parent() const;
-    bool hasChild(const Keyframe& pKF) const;
+    bool has_child(const Keyframe& pKF) const;
 
     // Loop Edges
-    void AddLoopEdge(const Keyframe& pKF);
-    KeyframeIdSet GetLoopEdges() const;
+    void add_loop_edge(const Keyframe& pKF);
+    KeyframeIdSet get_loop_edges() const;
 
     // MapPoint observation functions
     Pt create_monocular_map_point(const vec3f& worldPos,
@@ -114,9 +116,9 @@ public:
                       const FeatureType& featureType);
 
     void add_map_point(const Pt& pt, const KeypointIndex& index);
-    void EraseMapPointMatch(const size_t &idx, const FeatureType& featType);
-    void EraseMapPointMatch(const Pt& pMP);
-    void ReplaceMapPointMatch(const size_t &idx, const Pt& pMP);
+    void erase_map_point_match(const size_t &idx, const FeatureType& featType);
+    void erase_map_point_match(const Pt& pMP);
+    void replace_map_point_match(const size_t &idx, const Pt& pMP);
     std::set<Pt> get_map_points(const FeatureType& featType) const;
     std::vector<Pt> get_map_point_matches(const FeatureType& feat_type) const;
     int tracked_map_points(const int &minObs) const;
@@ -129,8 +131,8 @@ public:
     bool is_in_image(const float &x, const float &y) const;
 
     // Enable/Disable bad flag changes
-    void SetNotErase();
-    void SetErase();
+    void set_not_erase();
+    void set_erase();
 
     // Set/check bad flag
     void set_bad_flag();
@@ -139,19 +141,19 @@ public:
     // Compute Scene Depth (q=2 median). Used in monocular. -1 when the keyframe has no map points.
     float compute_scene_median_depth(const int q) const;
 
-    static bool weightComp( int a, int b){
+    static bool weight_greater( int a, int b){
         return a>b;
     }
 
-    static bool lId(const Keyframe& pKF1, const Keyframe& pKF2){
+    static bool less_by_id(const Keyframe& pKF1, const Keyframe& pKF2){
         return pKF1->keyId < pKF2->keyId;
     }
 
-    [[nodiscard]] float GetKeyPtSize(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float GetKeyPt1DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] mat2f GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float GetKeyPt1DSigma(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] float get_keypoint_size(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] float get_keypoint_sigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] float get_keypoint_information_1d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] mat2f get_keypoint_information_2d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] float get_keypoint_sigma(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
 
     // The following variables are accesed from only 1 thread or never change (no mutex needed).
 public:
@@ -195,7 +197,7 @@ public:
     const std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
     const std::map<FeatureType, std::vector<float>> inv_depth; // inverse depth; 0 where no valid depth
     const std::map<FeatureType, std::vector<float>> sigma2invDepth; // variance of inv_depth; 0 where no valid depth
-    const std::map<FeatureType, std::vector<cv::Vec3b>> keypoint_colors; // BGR under each keypoint (Frame::GetColors); map points created here inherit it
+    const std::map<FeatureType, std::vector<cv::Vec3b>> keypoint_colors; // BGR under each keypoint (Frame::get_colors); map points created here inherit it
     std::map<FeatureType, cv::Mat> descriptors;
 
 

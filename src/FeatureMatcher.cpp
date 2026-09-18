@@ -525,7 +525,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(const Keyframe& keyframe, const 
             const float ey = v - kps_ft[idx].pt.y;
             const float e2 = ex * ex + ey * ey;
 
-            if (e2 * keyframe->get_keypt_1Dinf(KeypointIndex(idx), feat_type) > chi2_perc)
+            if (e2 * keyframe->get_keypoint_information_1d(KeypointIndex(idx), feat_type) > chi2_perc)
                 continue;
 
             const cv::Mat &descriptor = desc_ft.row(idx);
@@ -683,7 +683,7 @@ int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyfra
         if (cache_it == keyframe->cache_matched_pairs_feat_type.end())
             continue;
 
-        const int ref_idx = pt->GetIndexInKeyFrame(ref_kf);
+        const int ref_idx = pt->get_index_in_keyframe(ref_kf);
         int bestIdx{-1};
         for (const auto& m : cache_it->second[pt->featureType]) {
             if (m.trainIdx == ref_idx) {
@@ -789,7 +789,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f&
             continue;
 
         // Search in a radius
-        const float predictedSize = pMP->PredictSize(dist3D);
+        const float predictedSize = pMP->predict_size(dist3D);
         const float radius = radiusScale * radius_th * predictedSize;
 
         const vector<size_t> vIndices = keyframe->get_features_in_area(u,v,radius, feat_type);
@@ -804,7 +804,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f&
 
         for(const size_t idx : vIndices)
         {
-            //const float keyPtSize = pKF->GetKeyPtSize(KeypointIndex (idx), featType);
+            //const float keyPtSize = pKF->get_keypoint_size(KeypointIndex (idx), featType);
             //if((keyPtSize < predictedSize / pKF->sizeTolerance) || (keyPtSize > predictedSize * pKF->sizeTolerance))
             //    continue;
 
@@ -895,7 +895,7 @@ int FeatureMatcher::search_by_projection(Frame &CurrentFrame, Keyframe pKF, cons
                     continue;
 
                 // Search in a window
-                const float predictedSize = pMP->PredictSize(dist3D);
+                const float predictedSize = pMP->predict_size(dist3D);
                 const float radius = radiusScale * radiusTh * predictedSize;
 
                 const vector<size_t> vIndices2 = CurrentFrame.get_features_in_area(u, v, radius, featType);

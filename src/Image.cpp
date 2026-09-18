@@ -35,7 +35,7 @@ void AF_VSLAM::Image::LoadDepth(const std::string &depthPath, const float& depth
 
     // A raw value sitting exactly at the format's max representable value is a sensor
     // saturation/out-of-range sentinel, not a real depth reading -- map it to 0, matching
-    // the same "0 = invalid" convention already relied on downstream (Frame::GetDepth).
+    // the same "0 = invalid" convention already relied on downstream (Frame::get_depth).
     double maxRawValue = -1.0;
     switch (depthImg.type()) {
         case CV_8U:  maxRawValue = 255.0;   break;

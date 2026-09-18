@@ -67,7 +67,7 @@ public:
           shared_ptr<PlaceRecognition> place_recognition, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth);
 
     // Extract ORB on the image. 0 for left image and 1 for right image.
-    void ExtractFeatures(int flag, const Image & img);
+    void extract_features(int flag, const Image & img);
 
     // Compute the global descriptor with the active VPR backend (a MegaLoc image
     // embedding); no-op when VPR is inactive.
@@ -88,7 +88,7 @@ public:
     void set_pose(const mat4f& Tcw_);
 
     // Computes rotation, translation and camera center matrices from the camera pose.
-    void UpdatePoseMatrices();
+    void update_pose_matrices();
 
     // Returns the camera center.
     inline vec3f get_camera_center() const {
@@ -100,14 +100,14 @@ public:
     bool is_in_frustum(const Pt& pMP, float viewingCosLimit) const;
 
     // Compute the cell of a keypoint (return false if outside the grid)
-    bool PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY) const;
+    bool pos_in_grid(const cv::KeyPoint &kp, int &posX, int &posY) const;
 
     vector<size_t> get_features_in_area(const float &x, const float  &y, const float  &r,  const FeatureType& featType) const;
 
-    [[nodiscard]] float GetKeyPtSize(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float GetKeyPt1DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] mat2f GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] float get_keypoint_size(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] float get_keypoint_sigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] float get_keypoint_information_1d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] mat2f get_keypoint_information_2d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
 
     float get_overlap() const;
 
@@ -232,15 +232,15 @@ private:
     // Undistort keypoints given OpenCV distortion parameters.
     // Only for the RGB-D case. Stereo must be already rectified!
     // (called in the constructor).
-    void UndistortKeyPoints();
+    void undistort_keypoints();
 
     // Populate inv_depth (and sigma2invDepth) by sampling img.depthImg at each keypoint's (distorted)
     // pixel coordinates, matching how the depth image itself is indexed (called in the constructor).
-    void GetDepth(const Image& img);
+    void get_depth(const Image& img);
 
     // Populate keypoint_colors by sampling img.img (BGR, same resize/crop as the keypoints) at each
-    // keypoint's (distorted) pixel coordinates, like GetDepth (called in the constructor).
-    void GetColors(const Image& img);
+    // keypoint's (distorted) pixel coordinates, like get_depth (called in the constructor).
+    void get_colors(const Image& img);
 
     // Quadratic depth-sensor noise coefficient k in sigma_depth(z) = k*z^2 (e.g. Khoshelham &
     // Elberink 2012, Nguyen et al. 2012 for Kinect-style RGB-D sensors). Propagated through
@@ -250,10 +250,10 @@ private:
     static constexpr float depthNoiseCoeff{0.0028f};
 
     // Computes image bounds for the undistorted image (called in the constructor).
-    void ComputeImageBounds(const cv::Mat &imLeft);
+    void compute_image_bounds(const cv::Mat &imLeft);
 
     // Assign keypoints to the grid for speed up feature matching (called in the constructor).
-    void AssignFeaturesToGrid();
+    void assign_features_to_grid();
 
     // Rotation, translation and camera center (derived from Tcw by set_pose)
     mat3f Rcw{mat3f::Identity()};

@@ -193,13 +193,10 @@ void LocalMapping::create_new_map_points()
     const std::vector<Keyframe> neighbors =
         current_keyframe_->get_best_covisibility_keyframes(params.create_new_map_points_keyframes);
 
-    mat4f Twc1, Tcw1;
-    mat3f Rwc1, Rcw1;
-    vec3f twc1, tcw1;
-    current_keyframe_->getFullPose(Twc1, Rwc1, twc1, Tcw1, Rcw1, tcw1);
-
-    float fx1, fy1, cx1, cy1, invfx1, invfy1;
-    current_keyframe_->getFullIntrinsics(fx1, fy1, cx1, cy1, invfx1, invfy1);
+    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose_matrices();
+    const float fx1 = current_keyframe_->fx, fy1 = current_keyframe_->fy;
+    const float cx1 = current_keyframe_->cx, cy1 = current_keyframe_->cy;
+    const float invfx1 = current_keyframe_->invfx, invfy1 = current_keyframe_->invfy;
 
     cache_neighbor_matches(neighbors);
 
@@ -208,13 +205,10 @@ void LocalMapping::create_new_map_points()
     // gates below), by two-view triangulation otherwise.
     for(const Keyframe& neighbor : neighbors)
     {
-        mat4f Twc2, Tcw2;
-        mat3f Rwc2, Rcw2;
-        vec3f twc2, tcw2;
-        neighbor->getFullPose(Twc2, Rwc2, twc2, Tcw2, Rcw2, tcw2);
-
-        float fx2, fy2, cx2, cy2, invfx2, invfy2;
-        neighbor->getFullIntrinsics(fx2, fy2, cx2, cy2, invfx2, invfy2);
+        const auto [Tcw2, Twc2, Rcw2, Rwc2, tcw2, twc2] = neighbor->get_pose_matrices();
+        const float fx2 = neighbor->fx, fy2 = neighbor->fy;
+        const float cx2 = neighbor->cx, cy2 = neighbor->cy;
+        const float invfx2 = neighbor->invfx, invfy2 = neighbor->invfy;
 
         // Discard neighbors whose baseline is too short relative to their scene depth:
         // a near-zero-parallax pair only yields ill-conditioned triangulations
@@ -304,7 +298,7 @@ void LocalMapping::create_new_map_points()
                 const float v1 = fy1 * (Rcw1.row(1).dot(x3D) + tcw1(1)) / z1 + cy1;
                 const float err_x1 = u1 - kp1.pt.x;
                 const float err_y1 = v1 - kp1.pt.y;
-                if(err_x1 * err_x1 + err_y1 * err_y1 > CHI2_2DOF * current_keyframe_->GetKeyPt1DSigma2(idx1, feature_type))
+                if(err_x1 * err_x1 + err_y1 * err_y1 > CHI2_2DOF * current_keyframe_->get_keypoint_sigma2(idx1, feature_type))
                     continue;
 
                 // Reprojection gate in the neighbor
@@ -312,7 +306,7 @@ void LocalMapping::create_new_map_points()
                 const float v2 = fy2 * (Rcw2.row(1).dot(x3D) + tcw2(1)) / z2 + cy2;
                 const float err_x2 = u2 - kp2.pt.x;
                 const float err_y2 = v2 - kp2.pt.y;
-                if(err_x2 * err_x2 + err_y2 * err_y2 > CHI2_2DOF * neighbor->GetKeyPt1DSigma2(idx2, feature_type))
+                if(err_x2 * err_x2 + err_y2 * err_y2 > CHI2_2DOF * neighbor->get_keypoint_sigma2(idx2, feature_type))
                     continue;
 
                 const Pt map_point = current_keyframe_->create_monocular_map_point(
@@ -407,13 +401,9 @@ void LocalMapping::create_depth_seeded_points()
     // neighbor -- a keypoint with a valid depth reading but no such match (textureless
     // region, repeated pattern, fast motion) is exactly where sensor depth helps most.
     // Same trust policy as the triangulation depth branches: any inv_depth > 0, no range gate.
-    mat4f Twc1, Tcw1;
-    mat3f Rwc1, Rcw1;
-    vec3f twc1, tcw1;
-    current_keyframe_->getFullPose(Twc1, Rwc1, twc1, Tcw1, Rcw1, tcw1);
-
-    float fx1, fy1, cx1, cy1, invfx1, invfy1;
-    current_keyframe_->getFullIntrinsics(fx1, fy1, cx1, cy1, invfx1, invfy1);
+    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose_matrices();
+    const float cx1 = current_keyframe_->cx, cy1 = current_keyframe_->cy;
+    const float invfx1 = current_keyframe_->invfx, invfy1 = current_keyframe_->invfy;
 
     for(const FeatureType feature_type : current_keyframe_->featureTypes)
     {
@@ -492,8 +482,8 @@ void LocalMapping::search_in_neighbors()
         {
             if(map_point && !map_point->is_bad())
             {
-                map_point->ComputeDistinctiveDescriptors();
-                map_point->UpdateNormalAndDepth();
+                map_point->compute_distinctive_descriptors();
+                map_point->update_normal_and_depth();
             }
         }
     }
@@ -637,7 +627,7 @@ void LocalMapping::cull_keyframes_information()
         if(it == keyframe_by_frame_id.end())
             return false;
         it->second->set_bad_flag();
-        // Deferred by SetNotErase (loop closing holds it): leave it alive; placecell
+        // Deferred by set_not_erase (loop closing holds it): leave it alive; placecell
         // never retries a refused candidate within the same call
         return it->second->is_bad();
     };

@@ -64,7 +64,7 @@ vec3f MapPoint::get_normal() const
     return normalVector;
 }
 
-Keyframe MapPoint::GetReferenceKeyFrame() const
+Keyframe MapPoint::get_reference_keyframe() const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return mpRefKF;
@@ -78,9 +78,9 @@ void MapPoint::add_observation(const Keyframe& projKeyframe, const KeypointIndex
             return;
 
         observations[projKeyframe->keyId] = make_shared<Observation>(projKeyframe, projIndex);
-        increasePointObservability(projKeyframe,projIndex);
+        increase_observability(projKeyframe,projIndex);
     }
-    ComputeDistinctiveDescriptors()->UpdateNormalAndDepth();
+    compute_distinctive_descriptors()->update_normal_and_depth();
 }
 
 int MapPoint::num_observing_keyframes() const
@@ -91,20 +91,20 @@ int MapPoint::num_observing_keyframes() const
 
 // An observation with sensor depth (RGB-D, inv_depth > 0) counts twice in nObs: it
 // constrains the point's position, not only its bearing (ORB-SLAM2's stereo/RGB-D rule).
-void MapPoint::increasePointObservability(const Keyframe& projKeyframe, const KeypointIndex& projIndex){
+void MapPoint::increase_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex){
     if(projKeyframe->inv_depth.at(featureType)[projIndex] > 0.0f)
         nObs += 2;
     else
         nObs++;
 }
 
-void MapPoint::decreasePointObservability(const Keyframe& projKeyframe, const KeypointIndex& projIndex){
+void MapPoint::decrease_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex){
     if(projKeyframe->inv_depth.at(featureType)[projIndex] > 0.0f)
         nObs-=2;
     else
         nObs--;
 }
-void MapPoint::EraseObservation(const Keyframe& projKeyframe)
+void MapPoint::erase_observation(const Keyframe& projKeyframe)
 {
     bool removePoint = false;
     {
@@ -112,7 +112,7 @@ void MapPoint::EraseObservation(const Keyframe& projKeyframe)
         if(observations.count(projKeyframe->keyId))
         {
             KeypointIndex projIndex = observations[projKeyframe->keyId]->projIndex;
-            decreasePointObservability(projKeyframe,projIndex);
+            decrease_observability(projKeyframe,projIndex);
 
             observations.erase(projKeyframe->keyId);
 
@@ -121,7 +121,7 @@ void MapPoint::EraseObservation(const Keyframe& projKeyframe)
             // keyframe is culled) used to dereference observations.begin() on an EMPTY map —
             // copying a shared_ptr out of garbage memory, i.e. a refcount increment through a
             // wild pointer. That was the source of non-deterministic heap corruption and the
-            // GPF segfaults inside EraseObservation itself. When empty, mpRefKF is left as-is:
+            // GPF segfaults inside erase_observation itself. When empty, mpRefKF is left as-is:
             // the point is discarded via set_bad_flag below (size 0 <= 2) and never used again.
             if(mpRefKF->keyId == projKeyframe->keyId && !observations.empty())
                 mpRefKF = observations.begin()->second->projKeyframe;
@@ -135,7 +135,7 @@ void MapPoint::EraseObservation(const Keyframe& projKeyframe)
     if(removePoint)
         set_bad_flag();
     else
-        ComputeDistinctiveDescriptors()->UpdateNormalAndDepth();
+        compute_distinctive_descriptors()->update_normal_and_depth();
 }
 
 map<KeyframeId, Obs> MapPoint::get_observations() const
@@ -163,10 +163,10 @@ void MapPoint::set_bad_flag()
     for(auto& obs: observations_tmp)
     {
         Keyframe keyframe = obs.second->projKeyframe;
-        keyframe->EraseMapPointMatch(obs.second->projIndex, featureType);
+        keyframe->erase_map_point_match(obs.second->projIndex, featureType);
     }
 
-    mpMap->EraseMapPoint(thisPt());
+    mpMap->EraseMapPoint(this_point());
 }
 
 Pt MapPoint::get_replaced() const
@@ -202,19 +202,19 @@ void MapPoint::replace(const Pt& pMP)
 
         if(!pMP->is_in_keyframe(keyframe))
         {
-            keyframe->ReplaceMapPointMatch(obs.second->projIndex, pMP);
+            keyframe->replace_map_point_match(obs.second->projIndex, pMP);
             pMP->add_observation(keyframe,obs.second->projIndex);
         }
         else
         {
-            keyframe->EraseMapPointMatch(obs.second->projIndex, featureType);
+            keyframe->erase_map_point_match(obs.second->projIndex, featureType);
         }
     }
     pMP->increase_found(nfound);
     pMP->increase_visible(nvisible);
-    pMP->ComputeDistinctiveDescriptors();
+    pMP->compute_distinctive_descriptors();
 
-    mpMap->EraseMapPoint(thisPt());
+    mpMap->EraseMapPoint(this_point());
 }
 
 bool MapPoint::is_bad() const
@@ -242,19 +242,19 @@ float MapPoint::get_found_ratio() const
     return static_cast<float>(mnFound)/mnVisible;
 }
 
-Pt MapPoint::ComputeDistinctiveDescriptors()
+Pt MapPoint::compute_distinctive_descriptors()
 {
     // Retrieve all observed descriptors
     map<KeyframeId, Obs> observations_tmp;
     {
         unique_lock<mutex> lock1(mMutexFeatures);
         if(mbBad)
-            return thisPt();
+            return this_point();
     }
 
     observations_tmp = get_observations();
     if(observations_tmp.empty())
-        return thisPt();
+        return this_point();
 
     vector<cv::Mat> descriptors;
     descriptors.reserve(observations_tmp.size());
@@ -266,7 +266,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
     }
 
     if(descriptors.empty())
-        return thisPt();
+        return this_point();
 
     // Compute distances between them
     const size_t N = descriptors.size();
@@ -303,19 +303,19 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
         unique_lock<mutex> lock(mMutexFeatures);
         mDescriptor = descriptors[BestIdx].clone();
     }
-    return thisPt();
+    return this_point();
 }
 
 cv::Mat MapPoint::get_descriptor() const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     // Shared header, not a clone: mDescriptor is only ever REBOUND under this mutex
-    // (ctor fills it once; ComputeDistinctiveDescriptors assigns a fresh clone), never
+    // (ctor fills it once; compute_distinctive_descriptors assigns a fresh clone), never
     // written in place — so an outstanding shared view stays valid and immutable.
     return mDescriptor;
 }
 
-int MapPoint::GetIndexInKeyFrame(const Keyframe& keyframe) const
+int MapPoint::get_index_in_keyframe(const Keyframe& keyframe) const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     const auto it = observations.find(keyframe->keyId);
@@ -328,9 +328,9 @@ bool MapPoint::is_in_keyframe(const Keyframe& keyframe) const
     return (observations.count(keyframe->keyId));
 }
 
-void MapPoint::UpdateNormalAndDepth()
+void MapPoint::update_normal_and_depth()
 {
-    // One snapshot of observations AND the reference keyframe: EraseObservation re-points
+    // One snapshot of observations AND the reference keyframe: erase_observation re-points
     // mpRefKF concurrently, and indexing an older snapshot with the live reference used to
     // default-construct a null observation (operator[]) and dereference it
     map<KeyframeId , Obs> observations_tmp;
@@ -367,14 +367,14 @@ void MapPoint::UpdateNormalAndDepth()
 
     vec3f PC = XYZ_ - refKeyframe_->get_camera_center();
     const float dist = PC.norm();
-    const float levelScaleFactor = refKeyframe_->GetKeyPtSize(keyPtIdx, featureType);
+    const float levelScaleFactor = refKeyframe_->get_keypoint_size(keyPtIdx, featureType);
 
     {
         unique_lock<mutex> lock3(mMutexPos);
 
         refDistance = dist;
         refSize  = reference_keypoint_size;
-        refSigma = refKeyframe_->GetKeyPt1DSigma(keyPtIdx, featureType);
+        refSigma = refKeyframe_->get_keypoint_sigma(keyPtIdx, featureType);
 
         maxDistance = dist * levelScaleFactor;
         minDistance = maxDistance / refKeyframe_->maxKeyPtSize ;
@@ -395,13 +395,13 @@ float MapPoint::get_max_distance_invariance() const
     return 1.2f * maxDistance;
 }
 
-float MapPoint::PredictSize(const float &currentDist) const
+float MapPoint::predict_size(const float &currentDist) const
 {
     unique_lock<mutex> lock(mMutexPos);
     return refSize * refDistance / currentDist;
 }
 
-float MapPoint::PredictSigma(const float &currentDist) const
+float MapPoint::predict_sigma(const float &currentDist) const
 {
     unique_lock<mutex> lock(mMutexPos);
     return refSigma * refDistance / currentDist;

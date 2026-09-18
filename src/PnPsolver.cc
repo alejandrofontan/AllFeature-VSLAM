@@ -87,7 +87,7 @@ PnPsolver::PnPsolver(const Frame &F, const vector<Pt> &vpMapPointMatches, const 
                 const cv::KeyPoint &kp = F.keypoints.at(featType)[i];
 
                 mvP2D.push_back(kp.pt);
-                mvSigma2.push_back(F.GetKeyPt1DSigma2(KeypointIndex(i), featType));
+                mvSigma2.push_back(F.get_keypoint_sigma2(KeypointIndex(i), featType));
 
                 vec3f Pos = pMP->get_world_pos();
                 mvP3Dw.push_back(cv::Point3f(Pos(0),Pos(1), Pos(2)));

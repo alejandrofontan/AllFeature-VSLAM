@@ -187,7 +187,7 @@ std::vector<Keyframe> PlaceRecognitionMegaLoc::retrieve(const Eigen::Ref<const E
 std::vector<Keyframe> PlaceRecognitionMegaLoc::detect_loop_candidates(const Keyframe& keyframe)
 {
     std::set<KeyframeId> excluded{keyframe->keyId};
-    for(const auto& [id, connected] : keyframe->GetConnectedKeyFrames())
+    for(const auto& [id, connected] : keyframe->get_connected_keyframes())
         excluded.insert(id);
     // The fixed floor alone gates candidates. Classic ORB-SLAM2 raised the bar to the
     // lowest BoW score among the keyframe's covisibles, a calibration for BoW's

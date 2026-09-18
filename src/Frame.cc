@@ -60,13 +60,13 @@ Frame::Frame(const Image & img, const double &timeStamp,
     sizeTolerance = featureExtractorLeft.begin()->second->GetScaleFactor();
 
     // Feature extraction
-    ExtractFeatures(0, img);
+    extract_features(0, img);
     if(Ntotal == 0)
         return;
 
-    UndistortKeyPoints();
-    GetDepth(img);
-    GetColors(img);
+    undistort_keypoints();
+    get_depth(img);
+    get_colors(img);
 
     // No map-point associations yet
     for(auto& [ft, N_] : N){
@@ -77,7 +77,7 @@ Frame::Frame(const Image & img, const double &timeStamp,
     // This is done only for the first Frame (or after a change in the calibration)
     if(mbInitialComputations)
     {
-        ComputeImageBounds(img.grayImg);
+        compute_image_bounds(img.grayImg);
 
         mfGridElementWidthInv = static_cast<float>(FRAME_GRID_COLS) / static_cast<float>(mnMaxX - mnMinX);
         mfGridElementHeightInv = static_cast<float>(FRAME_GRID_ROWS) / static_cast<float>(mnMaxY - mnMinY);
@@ -93,10 +93,10 @@ Frame::Frame(const Image & img, const double &timeStamp,
     }
 
     mb = mbf / fx;
-    AssignFeaturesToGrid();
+    assign_features_to_grid();
 }
 
-void Frame::AssignFeaturesToGrid()
+void Frame::assign_features_to_grid()
 {
     for(const auto [ft, N_]: N){
         int nReserve = 0.5f * N_ / (FRAME_GRID_COLS*FRAME_GRID_ROWS);
@@ -112,14 +112,14 @@ void Frame::AssignFeaturesToGrid()
         {
             const cv::KeyPoint &kp = keypoints.at(ft)[i];
             int nGridPosX, nGridPosY;
-            if(PosInGrid(kp,nGridPosX,nGridPosY)){
+            if(pos_in_grid(kp,nGridPosX,nGridPosY)){
                 mGrid[ft][nGridPosX][nGridPosY].push_back(i);
             }
         }
     }
 }
 
-void Frame::ExtractFeatures(int, const Image& img)
+void Frame::extract_features(int, const Image& img)
 {
     featureTypes.clear();
     Ntotal = 0;
@@ -177,10 +177,10 @@ void Frame::ExtractFeatures(int, const Image& img)
 void Frame::set_pose(const mat4f& Tcw_)
 {
     Tcw = Tcw_;
-    UpdatePoseMatrices();
+    update_pose_matrices();
 }
 
-void Frame::UpdatePoseMatrices()
+void Frame::update_pose_matrices()
 {
     Rcw = Tcw.block<3,3>(0,0);
     tcw = Tcw.block<3,1>(0,3);
@@ -290,7 +290,7 @@ vector<size_t> Frame::get_features_in_area(const float &x, const float  &y, cons
     return vIndices;
 }
 
-bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY) const
+bool Frame::pos_in_grid(const cv::KeyPoint &kp, int &posX, int &posY) const
 {
     posX = round((kp.pt.x-mnMinX)*mfGridElementWidthInv);
     posY = round((kp.pt.y-mnMinY)*mfGridElementHeightInv);
@@ -348,7 +348,7 @@ void Frame::compute_global_descriptor()
         place_recognition->compute(*this);
 }
 
-void Frame::UndistortKeyPoints()
+void Frame::undistort_keypoints()
 {
     for(auto& [ft,extractor] : featureExtractorLeft)
     {
@@ -383,7 +383,7 @@ void Frame::UndistortKeyPoints()
     }
 }
 
-void Frame::GetDepth(const Image& img)
+void Frame::get_depth(const Image& img)
 {
     for(auto& [ft, N_] : N)
     {
@@ -414,7 +414,7 @@ void Frame::GetDepth(const Image& img)
                     depth = img.depthImg.at<float>(v, u);
                     break;
                 default:
-                    throw std::runtime_error("Frame::GetDepth: unsupported depthImg type: " + std::to_string(img.depthImg.type()));
+                    throw std::runtime_error("Frame::get_depth: unsupported depthImg type: " + std::to_string(img.depthImg.type()));
             }
 
             if(depth > 0.0f)
@@ -426,13 +426,13 @@ void Frame::GetDepth(const Image& img)
     }
 }
 
-void Frame::GetColors(const Image& img)
+void Frame::get_colors(const Image& img)
 {
     // Prefer the color image; fall back to the gray one (both share the keypoints' resize/crop).
     const cv::Mat& im = img.img.empty() ? img.grayImg : img.img;
     const int channels = im.empty() ? 0 : im.channels();
     if(!im.empty() && im.depth() != CV_8U)
-        throw std::runtime_error("Frame::GetColors: unsupported image depth: " + std::to_string(im.depth()));
+        throw std::runtime_error("Frame::get_colors: unsupported image depth: " + std::to_string(im.depth()));
 
     for(auto& [ft, N_] : N)
     {
@@ -444,7 +444,7 @@ void Frame::GetColors(const Image& img)
         const vector<cv::KeyPoint>& kps = mvKeys.at(ft);
         for(int i = 0; i < N_; i++)
         {
-            // Distorted pixel coordinates: the image is indexed like the depth image in GetDepth.
+            // Distorted pixel coordinates: the image is indexed like the depth image in get_depth.
             const int u = cvRound(kps[i].pt.x);
             const int v = cvRound(kps[i].pt.y);
             if(u < 0 || v < 0 || u >= im.cols || v >= im.rows)
@@ -466,13 +466,13 @@ void Frame::GetColors(const Image& img)
                     break;
                 }
                 default:
-                    throw std::runtime_error("Frame::GetColors: unsupported number of channels: " + std::to_string(channels));
+                    throw std::runtime_error("Frame::get_colors: unsupported number of channels: " + std::to_string(channels));
             }
         }
     }
 }
 
-void Frame::ComputeImageBounds(const cv::Mat &imLeft)
+void Frame::compute_image_bounds(const cv::Mat &imLeft)
 {
     if(mDistCoef.at<float>(0)!=0.0)
     {
@@ -502,21 +502,21 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
     }
 }
 
-    float Frame::GetKeyPtSize(const KeypointIndex &keyPtIdx, const FeatureType& featType) const {
+    float Frame::get_keypoint_size(const KeypointIndex &keyPtIdx, const FeatureType& featType) const {
         return keyPtsSize.at(featType)[keyPtIdx];
     }
 
-    float Frame::GetKeyPt1DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    float Frame::get_keypoint_sigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return 0.5f * (keyPtsSigma2.at(featType)[keyPtIdx](0,0) + keyPtsSigma2.at(featType)[keyPtIdx](1,1));
     }
 
-    float Frame::get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    float Frame::get_keypoint_information_1d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return 0.5f * (keyPtsInf.at(featType)[keyPtIdx](0,0) + keyPtsInf.at(featType)[keyPtIdx](1,1));
     }
 
-    mat2f Frame::GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    mat2f Frame::get_keypoint_information_2d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return keyPtsInf.at(featType)[keyPtIdx];
     }
