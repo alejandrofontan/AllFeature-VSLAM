@@ -64,13 +64,13 @@ public:
 
     // Pose functions
     void set_pose(const mat4f &Tcw_);
-    mat4f get_pose();
-    mat4f get_pose_inverse();
-    vec3f get_camera_center();
-    mat3f get_rotation();
-    vec3f get_translation();
+    mat4f get_pose() const;
+    mat4f get_pose_inverse() const;
+    vec3f get_camera_center() const;
+    mat3f get_rotation() const;
+    vec3f get_translation() const;
     void getFullIntrinsics(float &fx, float &fy, float &cx, float &cy, float& invfx, float& invfy) const;
-    void getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_);
+    void getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_) const;
 
     // Compute the global descriptor with the active VPR backend (MegaLoc image
     // embedding — which then releases `image`); no-op when VPR is inactive.
@@ -82,45 +82,45 @@ public:
     float vpr_similarity(const Keyframe& other) const;
 
     // Covisibility graph functions
-    void AddConnection(Keyframe pKF, const int &weight);
-    void EraseConnection(Keyframe pKF);
+    void AddConnection(const Keyframe& pKF, const int &weight);
+    void EraseConnection(const Keyframe& pKF);
     void update_connections();
     void UpdateBestCovisibles();
-    map<KeyframeId,Keyframe> GetConnectedKeyFrames();
-    std::vector<Keyframe > get_covisible_keyframes();
-    std::vector<Keyframe> get_best_covisibility_keyframes(const int &N);
-    std::vector<Keyframe> GetCovisiblesByWeight(const int &w);
-    int GetWeight(Keyframe pKF);
+    map<KeyframeId,Keyframe> GetConnectedKeyFrames() const;
+    std::vector<Keyframe > get_covisible_keyframes() const;
+    std::vector<Keyframe> get_best_covisibility_keyframes(const int &N) const;
+    std::vector<Keyframe> GetCovisiblesByWeight(const int &w) const;
+    int GetWeight(const Keyframe& pKF) const;
 
     // Spanning tree functions
-    void AddChild(Keyframe pKF);
-    void EraseChild(Keyframe pKF);
-    void ChangeParent(Keyframe pKF);
-    KeyframeIdSet get_children();
-    Keyframe get_parent();
-    bool hasChild(Keyframe pKF);
+    void AddChild(const Keyframe& pKF);
+    void EraseChild(const Keyframe& pKF);
+    void ChangeParent(const Keyframe& pKF);
+    KeyframeIdSet get_children() const;
+    Keyframe get_parent() const;
+    bool hasChild(const Keyframe& pKF) const;
 
     // Loop Edges
-    void AddLoopEdge(Keyframe pKF);
-    KeyframeIdSet GetLoopEdges();
+    void AddLoopEdge(const Keyframe& pKF);
+    KeyframeIdSet GetLoopEdges() const;
 
     // MapPoint observation functions
     Pt create_monocular_map_point(const vec3f& worldPos,
                              const KeypointIndex& refIndex,
-                             Keyframe projKeyframe, const KeypointIndex& projIndex,
+                             const Keyframe& projKeyframe, const KeypointIndex& projIndex,
                              const FeatureType& featureType);
     Pt create_map_point(const vec3f& worldPos,
                       const KeypointIndex& refIndex,
                       const FeatureType& featureType);
 
-    void add_map_point(Pt pt, const KeypointIndex& index);
+    void add_map_point(const Pt& pt, const KeypointIndex& index);
     void EraseMapPointMatch(const size_t &idx, const FeatureType& featType);
-    void EraseMapPointMatch(Pt pMP);
-    void ReplaceMapPointMatch(const size_t &idx, Pt pMP);
-    std::set<Pt> get_map_points(const FeatureType& featType);
-    std::vector<Pt> get_map_point_matches(const FeatureType& feat_type);
-    int tracked_map_points(const int &minObs);
-    Pt get_map_point(const size_t &idx, const FeatureType& featType);
+    void EraseMapPointMatch(const Pt& pMP);
+    void ReplaceMapPointMatch(const size_t &idx, const Pt& pMP);
+    std::set<Pt> get_map_points(const FeatureType& featType) const;
+    std::vector<Pt> get_map_point_matches(const FeatureType& feat_type) const;
+    int tracked_map_points(const int &minObs) const;
+    Pt get_map_point(const size_t &idx, const FeatureType& featType) const;
 
     // KeyPoint functions
     std::vector<size_t> get_features_in_area(const float &x, const float  &y, const float  &r, const FeatureType& featType) const;
@@ -134,16 +134,16 @@ public:
 
     // Set/check bad flag
     void set_bad_flag();
-    bool is_bad();
+    bool is_bad() const;
 
-    // Compute Scene Depth (q=2 median). Used in monocular.
-    float compute_scene_median_depth(const int q);
+    // Compute Scene Depth (q=2 median). Used in monocular. -1 when the keyframe has no map points.
+    float compute_scene_median_depth(const int q) const;
 
     static bool weightComp( int a, int b){
         return a>b;
     }
 
-    static bool lId(Keyframe pKF1, Keyframe pKF2){
+    static bool lId(const Keyframe& pKF1, const Keyframe& pKF2){
         return pKF1->keyId < pKF2->keyId;
     }
 
@@ -261,9 +261,10 @@ protected:
 
     shared_ptr<Map> mpMap;
 
-    std::mutex mMutexPose;
-    std::mutex mMutexConnections;
-    std::mutex mMutexFeatures;
+    // mutable: pure queries lock them and stay const
+    mutable std::mutex mMutexPose;
+    mutable std::mutex mMutexConnections;
+    mutable std::mutex mMutexFeatures;
 };
 
 inline bool KeyframeIdLess::operator()(const Keyframe& a, const Keyframe& b) const

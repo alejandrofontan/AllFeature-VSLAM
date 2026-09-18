@@ -91,16 +91,16 @@ public:
     void UpdatePoseMatrices();
 
     // Returns the camera center.
-    inline vec3f get_camera_center(){
+    inline vec3f get_camera_center() const {
         return twc;
     }
 
     // Check if a MapPoint is in the frustum of the camera
     // and fill variables of the MapPoint to be used by the tracking
-    bool is_in_frustum(Pt pMP, float viewingCosLimit);
+    bool is_in_frustum(const Pt& pMP, float viewingCosLimit) const;
 
     // Compute the cell of a keypoint (return false if outside the grid)
-    bool PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY);
+    bool PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY) const;
 
     vector<size_t> get_features_in_area(const float &x, const float  &y, const float  &r,  const FeatureType& featType) const;
 
@@ -109,7 +109,7 @@ public:
     [[nodiscard]] float get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat2f GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
 
-    float get_overlap();
+    float get_overlap() const;
 
 public:
 

@@ -188,7 +188,7 @@ void Frame::UpdatePoseMatrices()
     twc = -Rwc * tcw;
 }
 
-bool Frame::is_in_frustum(Pt pMP, float viewingCosLimit)
+bool Frame::is_in_frustum(const Pt& pMP, float viewingCosLimit) const
 {
     pMP->mbTrackInView = false;
 
@@ -290,7 +290,7 @@ vector<size_t> Frame::get_features_in_area(const float &x, const float  &y, cons
     return vIndices;
 }
 
-bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
+bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY) const
 {
     posX = round((kp.pt.x-mnMinX)*mfGridElementWidthInv);
     posY = round((kp.pt.y-mnMinY)*mfGridElementHeightInv);
@@ -521,7 +521,7 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
         return keyPtsInf.at(featType)[keyPtIdx];
     }
 
-    float Frame::get_overlap()
+    float Frame::get_overlap() const
     {
         cv::Mat1b mask(h, w, uchar(0));
         cv::Mat1b mask_0(h, w, uchar(0));

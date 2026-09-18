@@ -27,7 +27,7 @@
 namespace AF_VSLAM
 {
 
-static bool KeyframeComparison(pair<int , Keyframe> a, pair<int , Keyframe> b){
+static bool KeyframeComparison(const pair<int, Keyframe>& a, const pair<int, Keyframe>& b){
     return (a.first != b.first) ? (a.first < b.first) : (a.second->keyId < b.second->keyId);
 }
 
@@ -96,37 +96,37 @@ void KeyFrame::set_pose(const mat4f &Tcw_)
     Twc.block<3,1>(0,3) = twc;
 }
 
-mat4f KeyFrame::get_pose()
+mat4f KeyFrame::get_pose() const
 {
     unique_lock<mutex> lock(mMutexPose);
     return Tcw;
 }
 
-mat4f KeyFrame::get_pose_inverse()
+mat4f KeyFrame::get_pose_inverse() const
 {
     unique_lock<mutex> lock(mMutexPose);
     return Twc;
 }
 
-vec3f KeyFrame::get_camera_center()
+vec3f KeyFrame::get_camera_center() const
 {
     unique_lock<mutex> lock(mMutexPose);
     return twc;
 }
 
-mat3f KeyFrame::get_rotation()
+mat3f KeyFrame::get_rotation() const
 {
     unique_lock<mutex> lock(mMutexPose);
     return Tcw.block<3,3>(0,0);
 }
 
-vec3f KeyFrame::get_translation()
+vec3f KeyFrame::get_translation() const
 {
     unique_lock<mutex> lock(mMutexPose);
     return Tcw.block<3,1>(0,3);
 }
 
-void KeyFrame::AddConnection(Keyframe keyframe, const int &weight)
+void KeyFrame::AddConnection(const Keyframe& keyframe, const int &weight)
 {
     {
         unique_lock<mutex> lock(mMutexConnections);
@@ -165,7 +165,7 @@ void KeyFrame::UpdateBestCovisibles()
     orderedWeights = vector<int>(weights.begin(), weights.end());
 }
 
-map<KeyframeId,Keyframe> KeyFrame::GetConnectedKeyFrames()
+map<KeyframeId,Keyframe> KeyFrame::GetConnectedKeyFrames() const
 {
     unique_lock<mutex> lock(mMutexConnections);
     map<KeyframeId,Keyframe> connectedKeyFrames_tmp;
@@ -174,13 +174,13 @@ map<KeyframeId,Keyframe> KeyFrame::GetConnectedKeyFrames()
     return connectedKeyFrames_tmp;
 }
 
-vector<Keyframe> KeyFrame::get_covisible_keyframes()
+vector<Keyframe> KeyFrame::get_covisible_keyframes() const
 {
     unique_lock<mutex> lock(mMutexConnections);
     return orderedConnectedKeyFrames;
 }
 
-vector<Keyframe> KeyFrame::get_best_covisibility_keyframes(const int &N)
+vector<Keyframe> KeyFrame::get_best_covisibility_keyframes(const int &N) const
 {
     unique_lock<mutex> lock(mMutexConnections);
     if((int)orderedConnectedKeyFrames.size()<N)
@@ -190,14 +190,14 @@ vector<Keyframe> KeyFrame::get_best_covisibility_keyframes(const int &N)
 
 }
 
-vector<Keyframe> KeyFrame::GetCovisiblesByWeight(const int &w)
+vector<Keyframe> KeyFrame::GetCovisiblesByWeight(const int &w) const
 {
     unique_lock<mutex> lock(mMutexConnections);
 
     if(orderedConnectedKeyFrames.empty())
         return vector<Keyframe>();
 
-    vector<int>::iterator it = upper_bound(orderedWeights.begin(),orderedWeights.end(),w,KeyFrame::weightComp);
+    const auto it = upper_bound(orderedWeights.begin(),orderedWeights.end(),w,KeyFrame::weightComp);
     if(it == orderedWeights.end())
         return vector<Keyframe>();
     else
@@ -207,18 +207,16 @@ vector<Keyframe> KeyFrame::GetCovisiblesByWeight(const int &w)
     }
 }
 
-int KeyFrame::GetWeight(Keyframe keyframe)
+int KeyFrame::GetWeight(const Keyframe& keyframe) const
 {
     unique_lock<mutex> lock(mMutexConnections);
-    if(connectedKeyFrameWeights.count(keyframe->keyId))
-        return connectedKeyFrameWeights[keyframe->keyId];
-    else
-        return 0;
+    const auto it = connectedKeyFrameWeights.find(keyframe->keyId);
+    return it != connectedKeyFrameWeights.end() ? it->second : 0;
 }
 
 Pt KeyFrame::create_monocular_map_point(const vec3f& worldPos,
                             const KeypointIndex& refIndex,
-                            Keyframe projKeyframe, const KeypointIndex& projIndex,
+                            const Keyframe& projKeyframe, const KeypointIndex& projIndex,
                             const FeatureType& featureType)
 {
     auto pt = make_shared<MapPoint>(worldPos,thisKeyframe(),mpMap, featureType,
@@ -244,7 +242,7 @@ Pt KeyFrame::create_map_point(const vec3f& worldPos, const KeypointIndex& refInd
         return pt;
 }
 
-void KeyFrame::add_map_point(Pt pt, const KeypointIndex& index)
+void KeyFrame::add_map_point(const Pt& pt, const KeypointIndex& index)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     mvpMapPoints[pt->featureType][index] = pt;
@@ -256,7 +254,7 @@ void KeyFrame::EraseMapPointMatch(const size_t &idx, const FeatureType& featType
     mvpMapPoints[featType][idx] = nullptr;
 }
 
-void KeyFrame::EraseMapPointMatch(Pt pMP)
+void KeyFrame::EraseMapPointMatch(const Pt& pMP)
 {
     // The point's own lock is taken by GetIndexInKeyFrame, before ours (keyframe -> point
     // is the lock order everywhere else in this class)
@@ -267,7 +265,7 @@ void KeyFrame::EraseMapPointMatch(Pt pMP)
     mvpMapPoints[pMP->featureType][idx] = nullptr;
 }
 
-void KeyFrame::ReplaceMapPointMatch(const size_t &idx, Pt pMP)
+void KeyFrame::ReplaceMapPointMatch(const size_t &idx, const Pt& pMP)
 {
     // Runs on the local-mapping thread (MapPoint::replace, fusion) while Tracking reads the
     // same vectors: a torn shared_ptr write racing a copy corrupts the refcount
@@ -275,7 +273,7 @@ void KeyFrame::ReplaceMapPointMatch(const size_t &idx, Pt pMP)
     mvpMapPoints[pMP->featureType][idx] = pMP;
 }
 
-set<Pt> KeyFrame::get_map_points(const FeatureType& featType)
+set<Pt> KeyFrame::get_map_points(const FeatureType& featType) const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     set<Pt> s;
@@ -290,7 +288,7 @@ set<Pt> KeyFrame::get_map_points(const FeatureType& featType)
     return s;
 }
 
-int KeyFrame::tracked_map_points(const int &minObs)
+int KeyFrame::tracked_map_points(const int &minObs) const
 {
     unique_lock<mutex> lock(mMutexFeatures);
 
@@ -318,7 +316,7 @@ int KeyFrame::tracked_map_points(const int &minObs)
     return nPoints;
 }
 
-vector<Pt> KeyFrame::get_map_point_matches(const FeatureType& feat_type)
+vector<Pt> KeyFrame::get_map_point_matches(const FeatureType& feat_type) const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     if (mvpMapPoints.count(feat_type) == 0)
@@ -326,7 +324,7 @@ vector<Pt> KeyFrame::get_map_point_matches(const FeatureType& feat_type)
     return mvpMapPoints.at(feat_type);
 }
 
-Pt KeyFrame::get_map_point(const size_t &idx, const FeatureType& featType)
+Pt KeyFrame::get_map_point(const size_t &idx, const FeatureType& featType) const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return mvpMapPoints.at(featType)[idx];
@@ -425,51 +423,51 @@ void KeyFrame::update_connections()
     }
 }
 
-void KeyFrame::AddChild(Keyframe pKF)
+void KeyFrame::AddChild(const Keyframe& pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     mspChildrens.insert(pKF);
 }
 
-void KeyFrame::EraseChild(Keyframe pKF)
+void KeyFrame::EraseChild(const Keyframe& pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     mspChildrens.erase(pKF);
 }
 
-void KeyFrame::ChangeParent(Keyframe pKF)
+void KeyFrame::ChangeParent(const Keyframe& pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     mpParent = pKF;
     pKF->AddChild(thisKeyframe());
 }
 
-KeyframeIdSet KeyFrame::get_children()
+KeyframeIdSet KeyFrame::get_children() const
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     return mspChildrens;
 }
 
-Keyframe KeyFrame::get_parent()
+Keyframe KeyFrame::get_parent() const
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     return mpParent;
 }
 
-bool KeyFrame::hasChild(Keyframe pKF)
+bool KeyFrame::hasChild(const Keyframe& pKF) const
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     return mspChildrens.count(pKF);
 }
 
-void KeyFrame::AddLoopEdge(Keyframe pKF)
+void KeyFrame::AddLoopEdge(const Keyframe& pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     mbNotErase = true;
     mspLoopEdges.insert(pKF);
 }
 
-KeyframeIdSet KeyFrame::GetLoopEdges()
+KeyframeIdSet KeyFrame::GetLoopEdges() const
 {
     unique_lock<mutex> lockCon(mMutexConnections);
     return mspLoopEdges;
@@ -611,13 +609,13 @@ void KeyFrame::set_bad_flag()
     place_recognition_->erase(thisKeyframe());
 }
 
-bool KeyFrame::is_bad()
+bool KeyFrame::is_bad() const
 {
     unique_lock<mutex> lock(mMutexConnections);
     return mbBad;
 }
 
-void KeyFrame::EraseConnection(Keyframe keyframe)
+void KeyFrame::EraseConnection(const Keyframe& keyframe)
 {
     bool bUpdate = false;
     {
@@ -684,7 +682,7 @@ bool KeyFrame::is_in_image(const float &x, const float &y) const
     return (x>=mnMinX && x<mnMaxX && y>=mnMinY && y<mnMaxY);
 }
 
-float KeyFrame::compute_scene_median_depth(const int q)
+float KeyFrame::compute_scene_median_depth(const int q) const
 {
     std::map<FeatureType, std::vector<Pt>> vpMapPoints;
     mat4f Tcw_;
@@ -695,21 +693,14 @@ float KeyFrame::compute_scene_median_depth(const int q)
         Tcw_ = Tcw;
     }
 
+    // Read the snapshot, not the member (the loop used to re-read mvpMapPoints unlocked)
     vector<float> vDepths;
-    vec3f Rcw2 = Tcw_.block<1,3>(2,0).transpose();
-    float zcw = Tcw_(2,3);
-    for(auto& [ft, N_] : N){
-        for(int i = 0; i < N_; i++)
-        {
-            if(mvpMapPoints[ft][i])
-            {
-                Pt pMP = mvpMapPoints[ft][i];
-                vec3f x3Dw = pMP->get_world_pos();
-                float z = Rcw2.dot(x3Dw)+zcw;
-                vDepths.push_back(z);
-            }
-        }
-    }
+    const vec3f Rcw2 = Tcw_.block<1,3>(2,0).transpose();
+    const float zcw = Tcw_(2,3);
+    for(const auto& [ft, points] : vpMapPoints)
+        for(const Pt& pMP : points)
+            if(pMP)
+                vDepths.push_back(Rcw2.dot(pMP->get_world_pos()) + zcw);
     // No map points (a fresh or heavily culled keyframe): -1, which every caller treats as
     // "skip" -- (size-1)/q would underflow and index out of bounds
     if(vDepths.empty())
@@ -757,7 +748,7 @@ float KeyFrame::compute_scene_median_depth(const int q)
         invfy_ = invfy;
     }
 
-    void KeyFrame::getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_)
+    void KeyFrame::getFullPose(mat4f &Twc_, mat3f &Rwc_, vec3f &twc_, mat4f &Tcw_, mat3f &Rcw_, vec3f &tcw_) const
     {
         unique_lock<mutex> lock(mMutexPose);
         Twc_ = Twc;

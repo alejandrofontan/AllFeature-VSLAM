@@ -51,50 +51,50 @@ public:
     }
 
     void set_world_pos(const vec3f &XYZ_);
-    vec3f get_world_pos();
+    vec3f get_world_pos() const;
 
-    vec3f get_normal();
-    Keyframe GetReferenceKeyFrame();
+    vec3f get_normal() const;
+    Keyframe GetReferenceKeyFrame() const;
 
-    std::map<KeyframeId,shared_ptr<Observation>> get_observations();
+    std::map<KeyframeId,shared_ptr<Observation>> get_observations() const;
 
     // Two observation counts. number_of_observations() is the WEIGHTED count the quality
     // gates use (map-point culling, KeyFrame::tracked_map_points): an observation with
     // sensor depth (RGB-D, inv_depth > 0) counts twice, see increasePointObservability.
     // num_observing_keyframes() is the plain number of keyframes observing the point
     // (EraseObservation's discard rule, BA edge sizing).
-    int number_of_observations();
-    int num_observing_keyframes();
-    void increasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex);
-    void decreasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex);
+    int number_of_observations() const;
+    int num_observing_keyframes() const;
+    void increasePointObservability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
+    void decreasePointObservability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
 
-    void add_observation(Keyframe projKeyframe, const KeypointIndex& projIndex);
-    void EraseObservation(Keyframe projKeyframe);
+    void add_observation(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
+    void EraseObservation(const Keyframe& projKeyframe);
 
-    int GetIndexInKeyFrame(Keyframe pKF);
-    bool is_in_keyframe(Keyframe keyframe);
+    int GetIndexInKeyFrame(const Keyframe& pKF) const;
+    bool is_in_keyframe(const Keyframe& keyframe) const;
 
     void set_bad_flag();
-    bool is_bad();
+    bool is_bad() const;
 
-    void replace(Pt pMP);
-    Pt get_replaced();
+    void replace(const Pt& pMP);
+    Pt get_replaced() const;
 
     void increase_visible(int n=1);
     void increase_found(int n=1);
-    float get_found_ratio();
+    float get_found_ratio() const;
 
     Pt ComputeDistinctiveDescriptors();
 
-    cv::Mat get_descriptor();
+    cv::Mat get_descriptor() const;
 
     void UpdateNormalAndDepth();
 
-    float get_min_distance_invariance();
-    float get_max_distance_invariance();
+    float get_min_distance_invariance() const;
+    float get_max_distance_invariance() const;
 
-    float PredictSize(const float &currentDist);
-    float PredictSigma(const float &currentDist);
+    float PredictSize(const float &currentDist) const;
+    float PredictSigma(const float &currentDist) const;
 
 public:
     PtId ptId;
@@ -177,8 +177,9 @@ protected:
 
      shared_ptr<Map> mpMap;
 
-     std::mutex mMutexPos;
-     std::mutex mMutexFeatures;
+     // mutable: pure queries lock them and stay const
+     mutable std::mutex mMutexPos;
+     mutable std::mutex mMutexFeatures;
 };
 
 } //namespace ORB_SLAM

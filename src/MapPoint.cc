@@ -52,25 +52,25 @@ void MapPoint::set_world_pos(const vec3f &XYZ_)
     XYZ = XYZ_;
 }
 
-vec3f MapPoint::get_world_pos()
+vec3f MapPoint::get_world_pos() const
 {
     unique_lock<mutex> lock(mMutexPos);
     return XYZ;
 }
 
-vec3f MapPoint::get_normal()
+vec3f MapPoint::get_normal() const
 {
     unique_lock<mutex> lock(mMutexPos);
     return normalVector;
 }
 
-Keyframe MapPoint::GetReferenceKeyFrame()
+Keyframe MapPoint::GetReferenceKeyFrame() const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return mpRefKF;
 }
 
-void MapPoint::add_observation(Keyframe projKeyframe,  const KeypointIndex& projIndex)
+void MapPoint::add_observation(const Keyframe& projKeyframe, const KeypointIndex& projIndex)
 {
     {
         unique_lock<mutex> lock(mMutexFeatures);
@@ -83,7 +83,7 @@ void MapPoint::add_observation(Keyframe projKeyframe,  const KeypointIndex& proj
     ComputeDistinctiveDescriptors()->UpdateNormalAndDepth();
 }
 
-int MapPoint::num_observing_keyframes()
+int MapPoint::num_observing_keyframes() const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return int(observations.size());
@@ -91,20 +91,20 @@ int MapPoint::num_observing_keyframes()
 
 // An observation with sensor depth (RGB-D, inv_depth > 0) counts twice in nObs: it
 // constrains the point's position, not only its bearing (ORB-SLAM2's stereo/RGB-D rule).
-void MapPoint::increasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex){
+void MapPoint::increasePointObservability(const Keyframe& projKeyframe, const KeypointIndex& projIndex){
     if(projKeyframe->inv_depth.at(featureType)[projIndex] > 0.0f)
         nObs += 2;
     else
         nObs++;
 }
 
-void MapPoint::decreasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex){
+void MapPoint::decreasePointObservability(const Keyframe& projKeyframe, const KeypointIndex& projIndex){
     if(projKeyframe->inv_depth.at(featureType)[projIndex] > 0.0f)
         nObs-=2;
     else
         nObs--;
 }
-void MapPoint::EraseObservation(Keyframe projKeyframe)
+void MapPoint::EraseObservation(const Keyframe& projKeyframe)
 {
     bool removePoint = false;
     {
@@ -138,13 +138,13 @@ void MapPoint::EraseObservation(Keyframe projKeyframe)
         ComputeDistinctiveDescriptors()->UpdateNormalAndDepth();
 }
 
-map<KeyframeId, Obs> MapPoint::get_observations()
+map<KeyframeId, Obs> MapPoint::get_observations() const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return observations;
 }
 
-int MapPoint::number_of_observations()
+int MapPoint::number_of_observations() const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return nObs;
@@ -169,14 +169,14 @@ void MapPoint::set_bad_flag()
     mpMap->EraseMapPoint(thisPt());
 }
 
-Pt MapPoint::get_replaced()
+Pt MapPoint::get_replaced() const
 {
     unique_lock<mutex> lock1(mMutexFeatures);
     unique_lock<mutex> lock2(mMutexPos);
     return mpReplaced;
 }
 
-void MapPoint::replace(Pt pMP)
+void MapPoint::replace(const Pt& pMP)
 {
     if(pMP->ptId == this->ptId)
         return;
@@ -217,7 +217,7 @@ void MapPoint::replace(Pt pMP)
     mpMap->EraseMapPoint(thisPt());
 }
 
-bool MapPoint::is_bad()
+bool MapPoint::is_bad() const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     unique_lock<mutex> lock2(mMutexPos);
@@ -236,7 +236,7 @@ void MapPoint::increase_found(int n)
     mnFound+=n;
 }
 
-float MapPoint::get_found_ratio()
+float MapPoint::get_found_ratio() const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return static_cast<float>(mnFound)/mnVisible;
@@ -306,7 +306,7 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
     return thisPt();
 }
 
-cv::Mat MapPoint::get_descriptor()
+cv::Mat MapPoint::get_descriptor() const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     // Shared header, not a clone: mDescriptor is only ever REBOUND under this mutex
@@ -315,16 +315,14 @@ cv::Mat MapPoint::get_descriptor()
     return mDescriptor;
 }
 
-int MapPoint::GetIndexInKeyFrame(Keyframe keyframe)
+int MapPoint::GetIndexInKeyFrame(const Keyframe& keyframe) const
 {
     unique_lock<mutex> lock(mMutexFeatures);
-    if(observations.count(keyframe->keyId))
-        return observations[keyframe->keyId]->projIndex;
-    else
-        return -1;
+    const auto it = observations.find(keyframe->keyId);
+    return it != observations.end() ? static_cast<int>(it->second->projIndex) : -1;
 }
 
-bool MapPoint::is_in_keyframe(Keyframe keyframe)
+bool MapPoint::is_in_keyframe(const Keyframe& keyframe) const
 {
     unique_lock<mutex> lock(mMutexFeatures);
     return (observations.count(keyframe->keyId));
@@ -385,25 +383,25 @@ void MapPoint::UpdateNormalAndDepth()
     }
 }
 
-float MapPoint::get_min_distance_invariance()
+float MapPoint::get_min_distance_invariance() const
 {
     unique_lock<mutex> lock(mMutexPos);
     return 0.8f * minDistance;
 }
 
-float MapPoint::get_max_distance_invariance()
+float MapPoint::get_max_distance_invariance() const
 {
     unique_lock<mutex> lock(mMutexPos);
     return 1.2f * maxDistance;
 }
 
-float MapPoint::PredictSize(const float &currentDist)
+float MapPoint::PredictSize(const float &currentDist) const
 {
     unique_lock<mutex> lock(mMutexPos);
     return refSize * refDistance / currentDist;
 }
 
-float MapPoint::PredictSigma(const float &currentDist)
+float MapPoint::PredictSigma(const float &currentDist) const
 {
     unique_lock<mutex> lock(mMutexPos);
     return refSigma * refDistance / currentDist;
