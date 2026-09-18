@@ -21,7 +21,8 @@
 #ifndef FRAME_H
 #define FRAME_H
 
-#include<vector>
+#include <array>
+#include <vector>
 
 #include "MapPoint.h"
 #include "Image.h"
@@ -49,16 +50,16 @@ typedef shared_ptr<AF_VSLAM::KeyFrame> Keyframe;
 class Frame
 {
 public:
-    Frame();
-
-    // Copy constructor.
-    Frame(const Frame &frame);
-
-    // Copy assignment -- delegates to the copy constructor (via destroy + placement-new) so
-    // assignment always behaves exactly like construction, instead of duplicating its deep-copy
-    // logic (mK/mDistCoef/descriptors cloning, mGrid population, conditional Tcw/pose handling)
-    // in a second implementation that could silently drift out of sync with it.
-    Frame& operator=(const Frame &frame);
+    // Copies are memberwise. Every cv::Mat member (mK, mDistCoef, descriptors, image) is
+    // only ever rebound at construction, never written in place afterwards, so the shallow
+    // header copy cv::Mat's own copy performs is exactly the sharing the old hand-written
+    // copy constructor implemented for descriptors -- and KeyFrame's constructor clones its
+    // own descriptors. The default constructor yields an empty frame (Tcw zero = no pose).
+    Frame() = default;
+    Frame(const Frame&) = default;
+    Frame& operator=(const Frame&) = default;
+    Frame(Frame&&) = default;
+    Frame& operator=(Frame&&) = default;
 
     // Constructor for mono cameras.
     Frame(const Image & img, const double &timeStamp,
@@ -136,7 +137,7 @@ public:
     std::map<FeatureType, shared_ptr<FeatureExtractor>> featureExtractorLeft;
 
     // Frame timestamp.
-    double timestamp;
+    double timestamp{0.0};
 
     // Calibration matrix and OpenCV distortion parameters.
     cv::Mat mK;
@@ -148,21 +149,21 @@ public:
     static float invfx;
     static float invfy;
     cv::Mat mDistCoef;
-    int w;
-    int h;
+    int w{0};
+    int h{0};
 
     // Stereo baseline multiplied by fx.
-    float mbf;
+    float mbf{0.0f};
 
     // Stereo baseline in meters.
-    float mb;
+    float mb{0.0f};
 
     // Threshold close/far points. Close points are inserted from 1 view.
     // Far points are inserted as in the monocular case from 2 views.
-    float mThDepth;
+    float mThDepth{0.0f};
 
     // Number of KeyPoints.
-    int Ntotal;
+    int Ntotal{0};
     std::map<FeatureType, int> N;
 
     // Keypoints as extracted (distorted pixel coordinates: visualization, and the index
@@ -197,14 +198,15 @@ public:
     // Keypoints are assigned to cells in a grid to reduce matching complexity when projecting MapPoints.
     static float mfGridElementWidthInv;
     static float mfGridElementHeightInv;
-    std::map<FeatureType, std::vector<std::size_t>[FRAME_GRID_COLS][FRAME_GRID_ROWS]> mGrid;
+    using Grid = std::array<std::array<std::vector<std::size_t>, FRAME_GRID_ROWS>, FRAME_GRID_COLS>;   // [col][row]
+    std::map<FeatureType, Grid> mGrid;
 
     // Camera pose.
     mat4f Tcw{mat4f::Zero()};
 
     // Current and Next Frame id.
     static long unsigned int nNextId;
-    FrameId frame_id;
+    FrameId frame_id{0};
 
     // Reference Keyframe.
     Keyframe ref_keyframe;
@@ -253,11 +255,11 @@ private:
     // Assign keypoints to the grid for speed up feature matching (called in the constructor).
     void AssignFeaturesToGrid();
 
-    // Rotation, translation and camera center
-    mat3f Rcw;
-    vec3f tcw;
-    mat3f Rwc;
-    vec3f twc;
+    // Rotation, translation and camera center (derived from Tcw by set_pose)
+    mat3f Rcw{mat3f::Identity()};
+    vec3f tcw{vec3f::Zero()};
+    mat3f Rwc{mat3f::Identity()};
+    vec3f twc{vec3f::Zero()};
 };
 
 }// namespace ORB_SLAM

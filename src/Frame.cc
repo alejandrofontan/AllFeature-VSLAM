@@ -39,51 +39,6 @@ float Frame::cx, Frame::cy, Frame::fx, Frame::fy, Frame::invfx, Frame::invfy;
 float Frame::mnMinX, Frame::mnMinY, Frame::mnMaxX, Frame::mnMaxY;
 float Frame::mfGridElementWidthInv, Frame::mfGridElementHeightInv;
 
-Frame::Frame()
-{}
-
-//Copy Constructor
-Frame::Frame(const Frame &frame)
-    :featureTypes(frame.featureTypes), place_recognition(frame.place_recognition), image(frame.image), global_descriptor(frame.global_descriptor),
-     featureExtractorLeft(frame.featureExtractorLeft),
-     timestamp(frame.timestamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()), w(frame.w), h(frame.h),
-     mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
-     keypoints(frame.keypoints),
-     inv_depth(frame.inv_depth), sigma2invDepth(frame.sigma2invDepth),
-     keypoint_colors(frame.keypoint_colors), pts(frame.pts), outliers(frame.outliers), frame_id(frame.frame_id), ref_keyframe(frame.ref_keyframe),
-     sizeTolerance(frame.sizeTolerance),
-     keyPtsSigma2(frame.keyPtsSigma2),keyPtsInf(frame.keyPtsInf),keyPtsSize(frame.keyPtsSize),
-     maxKeyPtSize(frame.maxKeyPtSize),maxKeyPtSigma(frame.maxKeyPtSigma)
-{
-    for (FeatureType ft : featureTypes)
-        for(int i = 0;i<FRAME_GRID_COLS;i++)
-            for(int j=0; j<FRAME_GRID_ROWS; j++)
-                mGrid[ft][i][j] = frame.mGrid.at(ft)[i][j];
-
-    // Shared headers, not deep copies (~0.6 MB/frame saved on lastFrame = Frame(currentFrame)):
-    // a Frame's descriptor matrices are only ever rebound at construction, never written in
-    // place afterwards, and KeyFrame's constructor clones its own copy explicitly — so copies
-    // of a Frame can safely alias the source buffers.
-    for (auto const& [featType, desc] : frame.descriptors){
-            descriptors[featType] = desc;
-    }
-
-    if(frame.Tcw(3,3) == 1.0f)
-        set_pose(frame.Tcw);
-}
-
-// Copy assignment: destroy the current object and placement-new a fresh copy via the copy
-// constructor above, so assignment can never drift out of sync with construction's deep-copy
-// logic (see the comment on the declaration in Frame.h).
-Frame& Frame::operator=(const Frame &frame)
-{
-    if (this != &frame) {
-        this->~Frame();
-        new (this) Frame(frame);
-    }
-    return *this;
-}
-
 Frame::Frame(const Image & img, const double &timeStamp,
              const std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
              shared_ptr<PlaceRecognition> place_recognition, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth)
