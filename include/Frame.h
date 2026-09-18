@@ -94,11 +94,6 @@ public:
         return twc;
     }
 
-    // Returns inverse of rotation
-    inline mat3f get_rotation_inverse(){
-        return Rwc;
-    }
-
     // Check if a MapPoint is in the frustum of the camera
     // and fill variables of the MapPoint to be used by the tracking
     bool is_in_frustum(Pt pMP, float viewingCosLimit);
@@ -108,23 +103,10 @@ public:
 
     vector<size_t> get_features_in_area(const float &x, const float  &y, const float  &r,  const FeatureType& featType) const;
 
-    // Search a match for each keypoint in the left image to a keypoint in the right image.
-    // If there is a match, depth is computed and the right coordinate associated to the left keypoint is stored.
-    void ComputeStereoMatches(const FeatureType& featureType);
-
-    // Associate a "right" coordinate to a keypoint if there is valid depth in the depthmap.
-    void ComputeStereoFromRGBD(const cv::Mat &imDepth);
-
-    // Backprojects a keypoint (if stereo/depth info available) into 3D world coordinates.
-    vec3f UnprojectStereo(const int &i);
-
     [[nodiscard]] float GetKeyPtSize(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] float GetKeyPt1DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] mat2f GetKeyPt2DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] mat3f GetKeyPt3DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] float get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat2f GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] mat3f GetKeyPt3DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
 
     float get_overlap();
 
@@ -150,15 +132,14 @@ public:
     // stores it in placecell (System::place_cell), keyed by frame_id.
     Eigen::VectorXf global_descriptor;
 
-    // Feature extractor. The right is used only in the stereo case.
-    std::map<FeatureType, shared_ptr<FeatureExtractor>> featureExtractorLeft, featureExtractorRight;
+    // Feature extractors, one per feature type.
+    std::map<FeatureType, shared_ptr<FeatureExtractor>> featureExtractorLeft;
 
     // Frame timestamp.
     double timestamp;
 
     // Calibration matrix and OpenCV distortion parameters.
-    cv::Mat mK; // Remove ???????????????????????
-    mat3f K;
+    cv::Mat mK;
 
     static float fx;
     static float fy;
@@ -184,16 +165,10 @@ public:
     int Ntotal;
     std::map<FeatureType, int> N;
 
-    // Vector of keypoints (original for visualization) and undistorted (actually used by the system).
-    // In the stereo case, keypoints is redundant as images must be rectified.
-    // In the RGB-D case, RGB images can be distorted.
-    std::map<FeatureType, std::vector<cv::KeyPoint>> mvKeys, mvKeysRight;
+    // Keypoints as extracted (distorted pixel coordinates: visualization, and the index
+    // into the depth/color images) and undistorted (what the system works with).
+    std::map<FeatureType, std::vector<cv::KeyPoint>> mvKeys;
     std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
-
-    // Corresponding stereo coordinate and depth for each keypoint.
-    // "mono" keypoints have a negative value.
-    std::map<FeatureType, std::vector<float>> mvuRight;
-    std::map<FeatureType, std::vector<float>> mvDepth;
 
     // Inverse depth (1/depth) per keypoint, from the RGB-D sensor's depth image.
     // 0 where no valid depth is available (monocular, or a missing/invalid depth pixel).
@@ -210,8 +185,8 @@ public:
     std::map<FeatureType, std::vector<cv::Vec3b>> keypoint_colors;
 
 
-    // ORB descriptor, each row associated to a keypoint.
-    std::map<FeatureType, cv::Mat> descriptors, descriptorsRight;
+    // Descriptors, each row associated to a keypoint.
+    std::map<FeatureType, cv::Mat> descriptors;
 
     // MapPoints associated to keypoints, NULL pointer if no association.
     std::map<FeatureType, std::vector<Pt>> pts;
@@ -236,7 +211,6 @@ public:
 
     // Scale pyramid info.
     float sizeTolerance{};
-    float invSizeTolerance{};
     std::map<FeatureType, vector<mat2f>> keyPtsSigma2{};
     std::map<FeatureType, vector<mat2f>> keyPtsInf{};
     std::map<FeatureType, vector<float>> keyPtsSize{};
@@ -250,8 +224,6 @@ public:
     static float mnMaxY;
 
     static bool mbInitialComputations;
-
-    int numMatchedInliers{0};
 
 private:
 

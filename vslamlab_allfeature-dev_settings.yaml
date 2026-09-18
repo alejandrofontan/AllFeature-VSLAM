@@ -47,10 +47,9 @@ Viewer.ViewpointF: 500
 #--------------------------------------------------------------------------------------------
 # Optimizer Parameters
 #--------------------------------------------------------------------------------------------
-# Chi-square outlier thresholds (95% for 2/3-DoF residuals). thHuber_* are derived
-# from these (sqrt) at load time -- there is no separate Huber key to set.
+# Chi-square outlier thresholds (95% for the 2-DoF reprojection / 3-DoF RGB-D residuals).
+# thHuber_* are derived from these (sqrt) at load time -- there is no separate Huber key to set.
 Optimizer.Chi2Mono: 5.991
-Optimizer.Chi2Stereo: 7.815
 Optimizer.Chi2RGBD: 7.815
 
 # RGB-D depth-channel measurement information (1/variance) for the inverse-depth

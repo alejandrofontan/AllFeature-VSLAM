@@ -37,18 +37,17 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> 
     featureTypes(F.featureTypes), cache_matched_pairs(F.cache_matched_pairs), cache_matched_pairs_feat_type(F.cache_matched_pairs_feat_type),
     frame_id(F.frame_id),  timestamp(F.timestamp), mnGridCols(FRAME_GRID_COLS), mnGridRows(FRAME_GRID_ROWS),
     mfGridElementWidthInv(F.mfGridElementWidthInv), mfGridElementHeightInv(F.mfGridElementHeightInv),
-    mnFuseTargetForKF(0), mnBALocalForKF(0), mnBAFixedForKF(0),
-    mnLoopQuery(0), mnLoopWords(0), mnRelocQuery(0), mnRelocWords(0), mnBAGlobalForKF(0),
+    mnFuseTargetForKF(0), mnBALocalForKF(0), mnBAFixedForKF(0), mnBAGlobalForKF(0),
     fx(F.fx), fy(F.fy), cx(F.cx), cy(F.cy), invfx(F.invfx), invfy(F.invfy),
     mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), mvKeys(F.mvKeys), keypoints(F.keypoints),
-    mvuRight(F.mvuRight), mvDepth(F.mvDepth), inv_depth(F.inv_depth), sigma2invDepth(F.sigma2invDepth),
+    inv_depth(F.inv_depth), sigma2invDepth(F.sigma2invDepth),
     keypoint_colors(F.keypoint_colors), image(F.image), global_descriptor(F.global_descriptor), sizeTolerance(F.sizeTolerance),
     keyPtsSigma2(F.keyPtsSigma2),keyPtsInf(F.keyPtsInf),keyPtsSize(F.keyPtsSize),
     maxKeyPtSize(F.maxKeyPtSize),maxKeyPtSigma(F.maxKeyPtSigma),
     mnMinX(F.mnMinX), mnMinY(F.mnMinY), mnMaxX(F.mnMaxX), mnMaxY(F.mnMaxY),
     mK(F.mK), mvpMapPoints(F.pts), place_recognition_(std::move(place_recognition)),
     mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
-    mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap)
+    mbToBeErased(false), mbBad(false), mpMap(pMap)
 {
     keyId = nNextId++;
     for(auto& [ft, N_] : N){
@@ -95,9 +94,6 @@ void KeyFrame::set_pose(const mat4f &Tcw_)
     Twc = mat4f::Identity();
     Twc.block<3,3>(0,0) = Rwc;
     Twc.block<3,1>(0,3) = twc;
-
-    vec4f center{mHalfBaseline, 0.0f , 0.0f, 1.0f};
-    Cw = Twc * center;
 }
 
 mat4f KeyFrame::get_pose()
@@ -117,13 +113,6 @@ vec3f KeyFrame::get_camera_center()
     unique_lock<mutex> lock(mMutexPose);
     return twc;
 }
-
-vec4f KeyFrame::GetStereoCenter()
-{
-    unique_lock<mutex> lock(mMutexPose);
-    return Cw;
-}
-
 
 mat3f KeyFrame::get_rotation()
 {
@@ -596,7 +585,6 @@ void KeyFrame::set_bad_flag()
             }
 
         mpParent->EraseChild(thisKeyframe());
-        Tcp = Tcw * mpParent->get_pose_inverse();
         mbBad = true;
     }
 
@@ -677,26 +665,6 @@ bool KeyFrame::is_in_image(const float &x, const float &y) const
     return (x>=mnMinX && x<mnMaxX && y>=mnMinY && y<mnMaxY);
 }
 
-vec3f KeyFrame::UnprojectStereo([[maybe_unused]] int i)
-{
-    std::cout << "This function (KeyFrame::UnprojectStereo) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
-    std::terminate();
-    // const float z = mvDepth[i];
-    // if(z>0)
-    // {
-    //     const float u = mvKeys[i].pt.x;
-    //     const float v = mvKeys[i].pt.y;
-    //     const float x = (u-cx)*z*invfx;
-    //     const float y = (v-cy)*z*invfy;
-    //     vec3f x3Dc{x, y, z};
-
-    //     unique_lock<mutex> lock(mMutexPose);
-    //     return Twc.block<3,3>(0,0) * x3Dc + Twc.block<3,1>(0,3);
-    // }
-    // else
-    //     return vec3f{0.0f,0.0f,-1.0f};
-}
-
 float KeyFrame::compute_scene_median_depth(const int q)
 {
     std::map<FeatureType, std::vector<Pt>> vpMapPoints;
@@ -740,19 +708,6 @@ float KeyFrame::compute_scene_median_depth(const int q)
         return 0.5f * (keyPtsSigma2.at(featType)[keyPtIdx](0,0) + keyPtsSigma2.at(featType)[keyPtIdx](1,1));
     }
 
-    mat2f KeyFrame::GetKeyPt2DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
-    {
-        return keyPtsSigma2.at(featType)[keyPtIdx];
-    }
-
-    mat3f KeyFrame::GetKeyPt3DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
-    {
-        mat3f sigma2Matrix{mat3f::Zero()};
-        sigma2Matrix.block<2,2>(0,0) = keyPtsSigma2.at(featType)[keyPtIdx];
-        sigma2Matrix(2,2) = GetKeyPt1DSigma2(keyPtIdx, featType);
-        return sigma2Matrix;
-    }
-
     float KeyFrame::get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return 0.5f * (keyPtsInf.at(featType)[keyPtIdx](0,0) + keyPtsInf.at(featType)[keyPtIdx](1,1));
@@ -761,14 +716,6 @@ float KeyFrame::compute_scene_median_depth(const int q)
     mat2f KeyFrame::GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return keyPtsInf.at(featType)[keyPtIdx];
-    }
-
-    mat3f KeyFrame::GetKeyPt3DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
-    {
-        mat3f infMatrix{mat3f::Zero()};
-        infMatrix.block<2,2>(0,0) = keyPtsInf.at(featType)[keyPtIdx];
-        infMatrix(2,2) = get_keypt_1Dinf(keyPtIdx, featType);
-        return infMatrix;
     }
 
     float KeyFrame::GetKeyPt1DSigma(const KeypointIndex &keyPtIdx, const FeatureType& featType) const

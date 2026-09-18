@@ -30,11 +30,6 @@
 #include <omp.h>
 #endif
 
-#include <vector>
-#include <utility>
-#include <type_traits>
-#include <opencv2/features2d.hpp>
-
 namespace AF_VSLAM
 {
 
@@ -50,13 +45,13 @@ Frame::Frame()
 //Copy Constructor
 Frame::Frame(const Frame &frame)
     :featureTypes(frame.featureTypes), place_recognition(frame.place_recognition), image(frame.image), global_descriptor(frame.global_descriptor),
-     featureExtractorLeft(frame.featureExtractorLeft), featureExtractorRight(frame.featureExtractorRight),
+     featureExtractorLeft(frame.featureExtractorLeft),
      timestamp(frame.timestamp), mK(frame.mK.clone()), mDistCoef(frame.mDistCoef.clone()), w(frame.w), h(frame.h),
      mbf(frame.mbf), mb(frame.mb), mThDepth(frame.mThDepth), N(frame.N), mvKeys(frame.mvKeys),
-     mvKeysRight(frame.mvKeysRight), keypoints(frame.keypoints),  mvuRight(frame.mvuRight),
-     mvDepth(frame.mvDepth), inv_depth(frame.inv_depth), sigma2invDepth(frame.sigma2invDepth),
+     keypoints(frame.keypoints),
+     inv_depth(frame.inv_depth), sigma2invDepth(frame.sigma2invDepth),
      keypoint_colors(frame.keypoint_colors), pts(frame.pts), outliers(frame.outliers), frame_id(frame.frame_id), ref_keyframe(frame.ref_keyframe),
-     sizeTolerance(frame.sizeTolerance),invSizeTolerance(frame.invSizeTolerance),
+     sizeTolerance(frame.sizeTolerance),
      keyPtsSigma2(frame.keyPtsSigma2),keyPtsInf(frame.keyPtsInf),keyPtsSize(frame.keyPtsSize),
      maxKeyPtSize(frame.maxKeyPtSize),maxKeyPtSigma(frame.maxKeyPtSigma)
 {
@@ -71,9 +66,6 @@ Frame::Frame(const Frame &frame)
     // of a Frame can safely alias the source buffers.
     for (auto const& [featType, desc] : frame.descriptors){
             descriptors[featType] = desc;
-    }
-    for (auto const& [featType, desc] : frame.descriptorsRight){
-            descriptorsRight[featType] = desc;
     }
 
     if(frame.Tcw(3,3) == 1.0f)
@@ -96,7 +88,7 @@ Frame::Frame(const Image & img, const double &timeStamp,
              const std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
              shared_ptr<PlaceRecognition> place_recognition, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth)
     :place_recognition(place_recognition),
-    featureExtractorLeft(extractor), featureExtractorRight(),
+    featureExtractorLeft(extractor),
     timestamp(timeStamp), mK(K.clone()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
 {
     // Frame ID
@@ -111,7 +103,6 @@ Frame::Frame(const Image & img, const double &timeStamp,
 
     // Scale Level Info (assumes every feature type shares the same pyramid scale factor)
     sizeTolerance = featureExtractorLeft.begin()->second->GetScaleFactor();
-    invSizeTolerance = 1.0f / sizeTolerance;
 
     // Feature extraction
     ExtractFeatures(0, img);
@@ -122,10 +113,8 @@ Frame::Frame(const Image & img, const double &timeStamp,
     GetDepth(img);
     GetColors(img);
 
-    // Set no stereo information
+    // No map-point associations yet
     for(auto& [ft, N_] : N){
-        mvuRight[ft] = vector<float>(N_, -1);
-        mvDepth[ft] = vector<float>(N_, -1);
         pts[ft] = vector<Pt>(N_, static_cast<Pt>(nullptr));
         outliers[ft] = vector<bool>(N_, false);
     }
@@ -291,12 +280,7 @@ bool Frame::is_in_frustum(Pt pMP, float viewingCosLimit)
     // Data used by the tracking
     pMP->mbTrackInView = true;
     pMP->track_proj_x = u;
-    pMP->track_proj_xR = u - mbf*invz;
     pMP->track_proj_y = v;
-
-    pMP->trackSigma = pMP->PredictSigma(dist);
-    pMP->trackSize = pMP->PredictSize(dist);
-    pMP->trackViewCos = viewCos;
 
     return true;
 }
@@ -563,25 +547,6 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
     }
 }
 
-    void Frame::ComputeStereoMatches(const FeatureType&)
-    {
-        std::cout << "This function (Frame::ComputeStereoMatches) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
-        std::terminate();
-    }
-
-
-    void Frame::ComputeStereoFromRGBD(const cv::Mat &)
-    {
-        std::cout << "This function (Frame::ComputeStereoFromRGBD) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
-        std::terminate();
-    }
-
-    vec3f Frame::UnprojectStereo(const int &)
-    {
-        std::cout << "This function (Frame::UnprojectStereo) has not been modified yet to work with AnyFeature-VSLAM"<< endl;
-        std::terminate();
-    }
-
     float Frame::GetKeyPtSize(const KeypointIndex &keyPtIdx, const FeatureType& featType) const {
         return keyPtsSize.at(featType)[keyPtIdx];
     }
@@ -589,19 +554,6 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
     float Frame::GetKeyPt1DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return 0.5f * (keyPtsSigma2.at(featType)[keyPtIdx](0,0) + keyPtsSigma2.at(featType)[keyPtIdx](1,1));
-    }
-
-    mat2f Frame::GetKeyPt2DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
-    {
-        return keyPtsSigma2.at(featType)[keyPtIdx];
-    }
-
-    mat3f Frame::GetKeyPt3DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
-    {
-        mat3f sigma2Matrix{mat3f::Zero()};
-        sigma2Matrix.block<2,2>(0,0) = keyPtsSigma2.at(featType)[keyPtIdx];
-        sigma2Matrix(2,2) = GetKeyPt1DSigma2(keyPtIdx, featType);
-        return sigma2Matrix;
     }
 
     float Frame::get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
@@ -612,14 +564,6 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
     mat2f Frame::GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
     {
         return keyPtsInf.at(featType)[keyPtIdx];
-    }
-
-    mat3f Frame::GetKeyPt3DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
-    {
-        mat3f infMatrix{mat3f::Zero()};
-        infMatrix.block<2,2>(0,0) = keyPtsInf.at(featType)[keyPtIdx];
-        infMatrix(2,2) = get_keypt_1Dinf(keyPtIdx, featType);
-        return infMatrix;
     }
 
     float Frame::get_overlap()

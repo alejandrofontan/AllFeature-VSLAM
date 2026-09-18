@@ -67,7 +67,6 @@ public:
     mat4f get_pose();
     mat4f get_pose_inverse();
     vec3f get_camera_center();
-    vec4f GetStereoCenter();
     mat3f get_rotation();
     vec3f get_translation();
     void getFullIntrinsics(float &fx, float &fy, float &cx, float &cy, float& invfx, float& invfy) const;
@@ -125,7 +124,6 @@ public:
 
     // KeyPoint functions
     std::vector<size_t> get_features_in_area(const float &x, const float  &y, const float  &r, const FeatureType& featType) const;
-    vec3f UnprojectStereo(int i);
 
     // Image
     bool is_in_image(const float &x, const float &y) const;
@@ -151,11 +149,8 @@ public:
 
     [[nodiscard]] float GetKeyPtSize(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] float GetKeyPt1DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] mat2f GetKeyPt2DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] mat3f GetKeyPt3DSigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] float get_keypt_1Dinf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] mat2f GetKeyPt2DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] mat3f GetKeyPt3DInf(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] float GetKeyPt1DSigma(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
 
     // The following variables are accesed from only 1 thread or never change (no mutex needed).
@@ -184,14 +179,6 @@ public:
     long unsigned int mnBALocalForKF;
     long unsigned int mnBAFixedForKF;
 
-    // Variables used by the keyframe database
-    long unsigned int mnLoopQuery;
-    int mnLoopWords;
-    float mLoopScore;
-    long unsigned int mnRelocQuery;
-    int mnRelocWords;
-    float mRelocScore;
-
     // Variables used by loop closing
     mat4f TcwGBA;
     mat4f TcwBefGBA;
@@ -206,8 +193,6 @@ public:
     // KeyPoints, stereo coordinate and descriptors (all associated by an index)
     const std::map<FeatureType, std::vector<cv::KeyPoint>> mvKeys;
     const std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
-    const std::map<FeatureType, std::vector<float>> mvuRight; // negative value for monocular points
-    const std::map<FeatureType, std::vector<float>> mvDepth; // negative value for monocular points
     const std::map<FeatureType, std::vector<float>> inv_depth; // inverse depth; 0 where no valid depth
     const std::map<FeatureType, std::vector<float>> sigma2invDepth; // variance of inv_depth; 0 where no valid depth
     const std::map<FeatureType, std::vector<cv::Vec3b>> keypoint_colors; // BGR under each keypoint (Frame::GetColors); map points created here inherit it
@@ -224,9 +209,6 @@ public:
     cv::Mat image;
     Eigen::VectorXf global_descriptor;
 
-    // Pose relative to parent (this is computed when bad flag is activated)
-    mat4f Tcp;
-
     // Scale
     float sizeTolerance{};
     std::map<FeatureType, vector<mat2f>> keyPtsSigma2{};
@@ -241,8 +223,7 @@ public:
     const int mnMaxX;
     const int mnMaxY;
 
-    const cv::Mat mK; // Remove ???????????????????????
-    mat3f K;
+    const cv::Mat mK;
 
     // The following variables need to be accessed trough a mutex to be thread safe.
 protected:
@@ -251,8 +232,6 @@ protected:
     mat4f Tcw;
     mat4f Twc;
     vec3f twc;
-
-    vec4f Cw; // Stereo middel point. Only for visualization
 
     // MapPoints associated to keypoints
     std::map<FeatureType, std::vector<Pt>> mvpMapPoints;
@@ -280,8 +259,6 @@ protected:
     bool mbToBeErased;
     bool mbBad;
 
-    float mHalfBaseline; // Only for visualization
-
     shared_ptr<Map> mpMap;
 
     std::mutex mMutexPose;
@@ -293,8 +270,6 @@ inline bool KeyframeIdLess::operator()(const Keyframe& a, const Keyframe& b) con
 {
     return a->keyId < b->keyId;
 }
-
-//typedef AF_VSLAM::Keyframe Keyframe;
 
 } //namespace ORB_SLAM
 

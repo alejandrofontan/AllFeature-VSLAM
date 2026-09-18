@@ -46,7 +46,6 @@ class MapPoint: public std::enable_shared_from_this<MapPoint>
 public:
     MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType,
              const cv::Vec3b& color = cv::Vec3b(0, 0, 0));
-    MapPoint(const vec3f &XYZ_,  shared_ptr<Map> pMap, Frame* pFrame, const int &idxF, const FeatureType& featureType);
     std::shared_ptr<MapPoint> thisPt() {
         return shared_from_this();
     }
@@ -81,9 +80,6 @@ public:
     void increase_visible(int n=1);
     void increase_found(int n=1);
     float get_found_ratio();
-    inline int GetFound(){
-        return mnFound;
-    }
 
     Pt ComputeDistinctiveDescriptors();
 
@@ -102,7 +98,6 @@ public:
 
     static long unsigned int nNextId;
     long int mnFirstKFid;
-    long int mnFirstFrame;
     int nObs;
 
     // Variables used by the tracking. Default-initialized: they are scratch written by
@@ -113,12 +108,7 @@ public:
     // -1 keeps never-projected points deterministically outside get_overlap's bounds check.
     float track_proj_x{-1.0f};
     float track_proj_y{-1.0f};
-    float track_proj_xR{-1.0f};
     bool mbTrackInView{false};
-
-    float trackSize{0.0f};
-    float trackSigma{1.0f};
-    float trackViewCos{0.0f};
 
     FrameId idLastFrameSeen{0};
 

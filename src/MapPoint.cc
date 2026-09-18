@@ -31,7 +31,7 @@ mutex MapPoint::mGlobalMutex;
 
 MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType,
                    const cv::Vec3b& color):
-    mnFirstKFid(pRefKF->keyId), mnFirstFrame(pRefKF->frame_id), nObs(0),
+    mnFirstKFid(pRefKF->keyId), nObs(0),
     idLastFrameSeen(0), mnBALocalForKF(0), mnFuseCandidateForKF(0), mnLoopPointForKF(0), mnCorrectedByKF(0),
     mnCorrectedReference(0), mnBAGlobalForKF(0), featureType(featureType), color(color), minDistance(0), maxDistance(0),
     mpRefKF(pRefKF), mnVisible(1), mnFound(1), mbBad(false), mpReplaced(static_cast<Pt>(NULL)), mpMap(pMap)
@@ -47,36 +47,6 @@ MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, con
     ref_keyframe = mpRefKF;
     refIndex = -1;
 
-}
-
-MapPoint::MapPoint(const vec3f &XYZ_, shared_ptr<Map> pMap, Frame* pFrame, const int &idxF, const FeatureType& featureType):
-    mnFirstKFid(-1), mnFirstFrame(pFrame->frame_id), nObs(0), idLastFrameSeen(0),
-    mnBALocalForKF(0), mnFuseCandidateForKF(0),mnLoopPointForKF(0), mnCorrectedByKF(0),
-    mnCorrectedReference(0), mnBAGlobalForKF(0), featureType(featureType), color(0, 0, 0),
-    mpRefKF(static_cast<Keyframe>(NULL)), mnVisible(1),
-    mnFound(1), mbBad(false), mpReplaced(NULL), mpMap(pMap)
-{
-
-    XYZ = XYZ_;
-    vec3f twc = pFrame->get_camera_center();
-
-    vec3f PC = XYZ - twc;
-    const float dist = PC.norm();
-    normalVector = PC / dist;
-
-    const float levelScaleFactor =  pFrame->GetKeyPtSize(idxF, featureType);
-
-    maxDistance = dist * levelScaleFactor;
-    minDistance = maxDistance / pFrame->maxKeyPtSize;
-
-    pFrame->descriptors[featureType].row(idxF).copyTo(mDescriptor);
-
-    // MapPoints can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
-    unique_lock<mutex> lock(mpMap->mMutexPointCreation);
-    ptId = nNextId++;
-
-    ref_keyframe = nullptr;
-    refIndex = -1;
 }
 
 void MapPoint::set_world_pos(const vec3f &XYZ_)
@@ -123,15 +93,17 @@ int MapPoint::num_observing_keyframes()
     return int(observations.size());
 }
 
+// An observation with sensor depth (RGB-D, inv_depth > 0) counts twice in nObs: it
+// constrains the point's position, not only its bearing (ORB-SLAM2's stereo/RGB-D rule).
 void MapPoint::increasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex){
-    if(projKeyframe->mvuRight.at(featureType)[projIndex] >= 0)
+    if(projKeyframe->inv_depth.at(featureType)[projIndex] > 0.0f)
         nObs += 2;
     else
         nObs++;
 }
 
 void MapPoint::decreasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex){
-    if(projKeyframe->mvuRight.at(featureType)[projIndex] >= 0)
+    if(projKeyframe->inv_depth.at(featureType)[projIndex] > 0.0f)
         nObs-=2;
     else
         nObs--;
