@@ -20,39 +20,47 @@
 
 #include "LoopClosing.h"
 
-#include "Sim3Solver.h"
-
-#include "Converter.h"
-
-#include "Optimizer.h"
-
-#include "FeatureMatcher.h"
-
 #include <algorithm>
 #include <chrono>
+#include <iostream>
+#include <list>
+#include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
 
+#include "Converter.h"
+#include "FeatureMatcher.h"
+#include "LocalMapping.h"
+#include "MapDrawer.h"
+#include "Optimizer.h"
+#include "Sim3Solver.h"
+#include "afvslam_log.hpp"
 
 namespace AF_VSLAM
 {
 
-    LoopConnections::LoopConnections(const KeyframeId & keyframeId, const Keyframe& keyframe, const map<KeyframeId,Keyframe>& connections):
-            keyframeId(keyframeId), keyframe(keyframe), connections(connections){}
-
-LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<PlaceRecognition> place_recognition,
-    std::shared_ptr<LocalMapping> local_mapper, std::shared_ptr<MapDrawer> map_drawer,
-    const bool bFixScale,
-    const std::vector<FeatureType>& feat_types,
-    int image_width, int image_height):
-    featureType(place_recognition->verification_feature()), feat_types(feat_types), mpMap(pMap),
+LoopClosing::LoopClosing(std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognition> place_recognition,
+                         std::shared_ptr<LocalMapping> local_mapper, std::shared_ptr<MapDrawer> map_drawer,
+                         const bool fix_scale, const std::vector<FeatureType>& feature_types,
+                         const int image_width, const int image_height):
+    verification_feature_(place_recognition->verification_feature()),
+    feature_types_(feature_types),
+    fix_scale_(fix_scale),
+    map_(std::move(map)),
+    place_recognition_(std::move(place_recognition)),
+    local_mapper_(std::move(local_mapper)),
     map_drawer_(std::move(map_drawer)),
-    place_recognition(std::move(place_recognition)), local_mapper_(std::move(local_mapper)),
-    mpMatchedKF(NULL), mbRunningGBA(false), mbFinishedGBA(true),
-    mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), mnFullBAIdx(0),
-    image_width(image_width), image_height(image_height)
+    matcher_(std::make_shared<FeatureMatcher>(image_width, image_height, feature_types, "LoopClosing", 0.8, true))
 {
-    matcher = std::make_shared<FeatureMatcher>(image_width, image_height, feat_types, "LoopClosing", 0.8, true);
+}
+
+LoopClosing::~LoopClosing()
+{
+    // A completed global BA leaves its thread joinable (a superseded one was detached by
+    // correct_loop); System::Shutdown waits for is_gba_running() to clear before this runs
+    if(gba_thread_.joinable())
+        gba_thread_.join();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -70,42 +78,33 @@ void LoopClosing::LoadParameters(const cv::FileStorage& fSettings)
 
     read_if_present("LoopClosing.CovisibilityConsistencyThreshold", params.covisibility_consistency_threshold);
     read_if_present("LoopClosing.MinKeyframesBetweenLoops", params.min_keyframes_between_loops);
+    read_if_present("LoopClosing.Sim3MinMatches", params.sim3_min_matches);
+    read_if_present("LoopClosing.Sim3MinInliers", params.sim3_min_inliers);
+    read_if_present("LoopClosing.LoopMinMatches", params.loop_min_matches);
+    read_if_present("LoopClosing.FuseRadius", params.fuse_radius);
+    read_if_present("LoopClosing.GbaIterations", params.gba_iterations);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void LoopClosing::Run()
+void LoopClosing::run()
 {
     {
         std::lock_guard<std::mutex> lock(finish_mutex_);
         finished_ = false;
     }
 
-    while(1)
+    while(true)
     {
-        // Check if there are keyframes in the queue
-        if(has_new_keyframes())
+        // One queued keyframe per iteration: candidates, geometric verification, correction
+        if(has_new_keyframes() && detect_loop() && compute_sim3() && search_loop_map_points())
         {
-            // Detect loop candidates and check covisibility consistency
-
-            if(detect_loop())
-            {
-               // Compute similarity transformation [sR|t]
-               // In the stereo/RGBD case s=1
-               if(ComputeSim3())
-               {
-                   std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
-
-                   // Perform loop fusion and pose graph optimization
-                   CorrectLoop();
-
-                   ++numOfLoopClosures;
-                   map_drawer_->AddLoopClosureKeyframe(current_keyframe_->get_pose_inverse());
-
-                   std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
-                   double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
-                   loopClosingTime.push_back(t_duration);
-               }
-            }
+            const auto t_start = std::chrono::steady_clock::now();
+            correct_loop();
+            map_drawer_->AddLoopClosureKeyframe(current_keyframe_->get_pose_inverse());
+            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
+            AF_INFO("[LoopClosing] loop closed: keyframes " << current_keyframe_->keyId << " <-> " << matched_keyframe_->keyId
+                    << " in " << seconds << " s (correction + essential graph; the global BA runs in its own thread)");
+            std::cout.flush();
         }
 
         reset_if_requested();
@@ -113,7 +112,7 @@ void LoopClosing::Run()
         if(is_finish_requested())
             break;
 
-        usleep(5000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
     set_finished();
@@ -125,7 +124,7 @@ void LoopClosing::insert_keyframe(const Keyframe& keyframe)
 {
     // Without an active VPR backend this thread never runs (System's constructor): a
     // queued keyframe would never be drained and would stay alive, culled or not.
-    if(!place_recognition->is_active())
+    if(!place_recognition_->is_active())
         return;
 
     std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
@@ -149,7 +148,7 @@ bool LoopClosing::detect_loop()
         new_keyframes_.pop_front();
         // Keyframe culling must not delete the keyframe while this thread works on it.
         // SetErase lifts the guard (a culling deferred meanwhile is applied then); on
-        // success ComputeSim3/CorrectLoop keep it until the loop is closed or rejected.
+        // success compute_sim3/correct_loop keep it until the loop is closed or rejected.
         current_keyframe_->SetNotErase();
     }
 
@@ -161,10 +160,10 @@ bool LoopClosing::detect_loop()
     loop_candidates_.clear();
     const KeyframeId min_keyframes_between_loops = static_cast<KeyframeId>(params.min_keyframes_between_loops);
     if(current_keyframe_->keyId >= last_loop_keyframe_id_ + min_keyframes_between_loops)
-        loop_candidates_ = consistent_loop_candidates(place_recognition->detect_loop_candidates(current_keyframe_));
+        loop_candidates_ = consistent_loop_candidates(place_recognition_->detect_loop_candidates(current_keyframe_));
 
     // Into the database only after its own query
-    place_recognition->add(current_keyframe_);
+    place_recognition_->add(current_keyframe_);
 
     if(loop_candidates_.empty())
     {
@@ -248,506 +247,452 @@ std::vector<Keyframe> LoopClosing::consistent_loop_candidates(const std::vector<
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-bool LoopClosing::ComputeSim3()
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// # Sim3 verification
+
+// RANSAC schedule of the per-candidate Sim3 solvers and the Sim3 optimization threshold
+static constexpr double sim3_ransac_probability = 0.99;
+static constexpr int sim3_ransac_min_inliers = 20;
+static constexpr int sim3_ransac_max_iterations = 300;
+static constexpr int sim3_ransac_iterations_per_round = 5;   // rounds alternate over the candidates
+static constexpr float sim3_optimization_chi2 = 10.0f;       // Optimizer::OptimizeSim3 outlier threshold
+
+bool LoopClosing::compute_sim3()
 {
-    // For each consistent loop candidate we try to compute a Sim3
-
-    const int nInitialCandidates = loop_candidates_.size();
-
-    // We compute first ORB matches for each candidate
-    // If enough matches are found, we setup a Sim3Solver
-
-    vector<Sim3Solver*> vpSim3Solvers;
-    vpSim3Solvers.resize(nInitialCandidates);
-
-    vector<vector<Pt>> vvpMapPointMatches;
-    vvpMapPointMatches.resize(nInitialCandidates);
-
-    vector<bool> vbDiscarded;
-    vbDiscarded.resize(nInitialCandidates);
-
-    int nCandidates=0; //candidates with enough matches
-
-    for(int i=0; i<nInitialCandidates; i++)
+    // One Sim3 solver per candidate with enough feature matches to the current keyframe.
+    // Only verification_feature_'s matches drive the Sim3: the other feature types are
+    // matched (match cache) but unused downstream.
+    struct Candidate
     {
-        Keyframe pKF = loop_candidates_[i];
+        Keyframe keyframe;
+        std::vector<Pt> matches;               // per keypoint of the current keyframe: the candidate's map point matched to it, or null
+        std::unique_ptr<Sim3Solver> solver;    // null once the candidate is discarded
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(loop_candidates_.size());
+    int num_alive = 0;
 
-        // avoid that local mapping erase it while it is being processed in this thread
-        pKF->SetNotErase();
+    const size_t num_current_keypoints = current_keyframe_->get_map_point_matches(verification_feature_).size();
+    for(const Keyframe& keyframe : loop_candidates_)
+    {
+        // Keyframe culling must not delete a candidate while it is being verified
+        keyframe->SetNotErase();
 
-        if(pKF->is_bad())
+        Candidate candidate{keyframe, {}, nullptr};
+        if(!keyframe->is_bad())
         {
-            vbDiscarded[i] = true;
-            continue;
-        }
+            std::map<FeatureType, std::vector<std::pair<size_t,size_t>>> matched_pairs;
+            matcher_->match_keyframes_for_compute_sim3(current_keyframe_, keyframe, matched_pairs, feature_types_);
+            const std::vector<std::pair<size_t,size_t>>& pairs = matched_pairs[verification_feature_];
 
-        std::map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs;
-        matcher->match_keyframes_for_compute_sim3(current_keyframe_, pKF, matched_pairs, feat_types);
+            // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
+            const std::vector<Pt> candidate_points = keyframe->get_map_point_matches(verification_feature_);
+            candidate.matches.assign(num_current_keypoints, nullptr);
+            for(const auto& [current_index, candidate_index] : pairs)
+                candidate.matches[current_index] = candidate_points[candidate_index];
 
-        // TO DO
-        // Currently we use only one feature type downstream
-        int nmatches=0;
-        vvpMapPointMatches[i] = vector<Pt>(current_keyframe_->get_map_point_matches(featureType).size(),static_cast<Pt>(NULL));
-        for (const auto& matches : matched_pairs[featureType]) {
-            vvpMapPointMatches[i][matches.first] = pKF->get_map_point_matches(featureType)[matches.second];
-            nmatches++;
+            if(static_cast<int>(pairs.size()) >= params.sim3_min_matches)
+            {
+                candidate.solver = std::make_unique<Sim3Solver>(current_keyframe_, keyframe, candidate.matches,
+                                                                verification_feature_, fix_scale_);
+                candidate.solver->set_ransac_parameters(sim3_ransac_probability, sim3_ransac_min_inliers,
+                                                        sim3_ransac_max_iterations);
+                num_alive++;
+            }
         }
-
-        if(nmatches<20)
-        {
-            vbDiscarded[i] = true;
-            continue;
-        }
-        else
-        {
-            Sim3Solver* pSolver = new Sim3Solver(current_keyframe_,pKF,vvpMapPointMatches[i],featureType, mbFixScale);
-            pSolver->set_ransac_parameters(0.99,20,300);
-            vpSim3Solvers[i] = pSolver;
-        }
-
-        nCandidates++;
+        candidates.push_back(std::move(candidate));
     }
 
-    bool bMatch = false;
-
-    // Perform alternatively RANSAC iterations for each candidate
-    // until one is succesful or all fail
-    while(nCandidates>0 && !bMatch)
+    // Alternate RANSAC rounds over the surviving candidates until one Sim3 passes the
+    // optimization or every candidate has exhausted its iteration budget
+    bool matched = false;
+    while(num_alive > 0 && !matched)
     {
-        for(int i=0; i<nInitialCandidates; i++)
+        for(Candidate& candidate : candidates)
         {
-            if(vbDiscarded[i])
+            if(!candidate.solver)
                 continue;
 
-            Keyframe pKF = loop_candidates_[i];
+            std::vector<bool> inliers;
+            int num_inliers = 0;
+            bool no_more = false;
+            const cv::Mat Scm = candidate.solver->iterate(sim3_ransac_iterations_per_round, no_more, inliers, num_inliers);
 
-            // Perform 5 Ransac Iterations
-            vector<bool> vbInliers;
-            int nInliers;
-            bool bNoMore;
-
-            Sim3Solver* pSolver = vpSim3Solvers[i];
-            cv::Mat Scm  = pSolver->iterate(5,bNoMore,vbInliers,nInliers);
-
-            // If Ransac reachs max. iterations discard keyframe
-            if(bNoMore)
-            {
-                vbDiscarded[i]=true;
-                nCandidates--;
-            }
-
-            // If RANSAC returns a Sim3 optimize with all correspondences
             if(!Scm.empty())
             {
-                vector<Pt> vpMapPointMatches(vvpMapPointMatches[i].size(), static_cast<Pt>(NULL));
-                for(size_t j=0, jend=vbInliers.size(); j<jend; j++)
+                // RANSAC consensus: optimize the Sim3 over the candidate's inlier matches
+                // (OptimizeSim3 nulls the matches it rejects)
+                std::vector<Pt> inlier_matches(candidate.matches.size(), nullptr);
+                for(size_t j = 0; j < inliers.size(); j++)
+                    if(inliers[j])
+                        inlier_matches[j] = candidate.matches[j];
+
+                g2o::Sim3 g2o_Scm(candidate.solver->GetEstimatedRotation().cast<double>(),
+                                  candidate.solver->GetEstimatedTranslation().cast<double>(),
+                                  candidate.solver->GetEstimatedScale());
+                const int num_optimized_inliers = Optimizer::OptimizeSim3(current_keyframe_, candidate.keyframe, inlier_matches,
+                                                                          g2o_Scm, sim3_optimization_chi2, fix_scale_,
+                                                                          verification_feature_);
+                if(num_optimized_inliers >= params.sim3_min_inliers)
                 {
-                    if(vbInliers[j])
-                       vpMapPointMatches[j]=vvpMapPointMatches[i][j];
-                }
-
-                mat3f R = pSolver->GetEstimatedRotation();
-                vec3f t = pSolver->GetEstimatedTranslation();
-                const float s = pSolver->GetEstimatedScale();
-
-                g2o::Sim3 gScm(R.cast<double>(),t.cast<double>(),s);
-                const int nInliers = Optimizer::OptimizeSim3(current_keyframe_, pKF, vpMapPointMatches, gScm, 10, mbFixScale, featureType);
-
-                // If optimization is succesful stop ransacs and continue
-                if(nInliers>=20)
-                {
-                    bMatch = true;
-                    mpMatchedKF = pKF;
-                    g2o::Sim3 gSmw(pKF->get_rotation().cast<double>(),pKF->get_translation().cast<double>(),1.0);
-                    mg2oScw = gScm*gSmw;
-                    mScw = Converter::to_matrix4f(mg2oScw);
-
-                    mvpCurrentMatchedPoints = vpMapPointMatches;
+                    matched = true;
+                    matched_keyframe_ = candidate.keyframe;
+                    // World -> current keyframe through the loop side: Scm * Smw
+                    const g2o::Sim3 g2o_Smw(candidate.keyframe->get_rotation().cast<double>(),
+                                            candidate.keyframe->get_translation().cast<double>(), 1.0);
+                    g2o_Scw_ = g2o_Scm * g2o_Smw;
+                    Scw_ = Converter::to_matrix4f(g2o_Scw_);
+                    loop_matched_points_ = std::move(inlier_matches);
                     break;
                 }
             }
-        }
-    }
 
-    if(!bMatch)
-    {
-        for(int i=0; i<nInitialCandidates; i++)
-             loop_candidates_[i]->SetErase();
-        current_keyframe_->SetErase();
-        return false;
-    }
-
-    // Retrieve MapPoints seen in Loop Keyframe and neighbors
-    vector<Keyframe> vpLoopConnectedKFs = mpMatchedKF->get_covisible_keyframes();
-    vpLoopConnectedKFs.push_back(mpMatchedKF);
-    mvpLoopMapPoints.clear();
-    map<PtId, Keyframe> pt_to_keyframe_id;
-    for(vector<Keyframe>::iterator vit=vpLoopConnectedKFs.begin(); vit!=vpLoopConnectedKFs.end(); vit++)
-    {
-        Keyframe pKF = *vit;
-        map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs = matcher->match_keyframes(current_keyframe_, pKF, feat_types);
-
-        vector<Pt> vpMapPoints = pKF->get_map_point_matches(featureType);
-        for(size_t i=0, iend=vpMapPoints.size(); i<iend; i++)
-        {
-            Pt pMP = vpMapPoints[i];
-            if(pMP)
+            // Iteration budget exhausted without an accepted Sim3: discard
+            if(no_more)
             {
-                if(!pMP->is_bad() && pMP->mnLoopPointForKF!=current_keyframe_->keyId)
-                {
-                    mvpLoopMapPoints.push_back(pMP);
-                    pMP->mnLoopPointForKF=current_keyframe_->keyId;
-                    pt_to_keyframe_id[pMP->ptId] = pKF;
-                }
+                candidate.solver.reset();
+                num_alive--;
             }
         }
     }
 
-    // Find more matches projecting with the computed Sim3
-    matcher->search_by_projection_for_compute_sim3(current_keyframe_, mScw,
-        mvpLoopMapPoints, mvpCurrentMatchedPoints, pt_to_keyframe_id);
-
-    // If enough matches accept Loop
-    int nTotalMatches = 0;
-    for(size_t i=0; i<mvpCurrentMatchedPoints.size(); i++)
-    {
-        if(mvpCurrentMatchedPoints[i])
-            nTotalMatches++;
-    }
-
-    if(nTotalMatches>=40)
-    {
-        for(int i=0; i<nInitialCandidates; i++)
-            if(loop_candidates_[i]!=mpMatchedKF)
-                loop_candidates_[i]->SetErase();
-        return true;
-    }
-    else
-    {
-        for(int i=0; i<nInitialCandidates; i++)
-            loop_candidates_[i]->SetErase();
-        current_keyframe_->SetErase();
-        return false;
-    }
-
+    if(!matched)
+        release_loop_candidates(false);
+    return matched;
 }
 
-void LoopClosing::CorrectLoop()
+// Map points seen by the matched keyframe and its covisibles, projected into the current
+// keyframe with the loop Sim3 to find matches beyond the RANSAC inliers. The loop is
+// accepted when enough points match; the erase guards of the candidates are lifted
+// either way (matched keyframe excepted on acceptance).
+bool LoopClosing::search_loop_map_points()
 {
-    cout << "Loop detected!" << endl;
+    std::vector<Keyframe> loop_keyframes = matched_keyframe_->get_covisible_keyframes();
+    loop_keyframes.push_back(matched_keyframe_);
 
-    // Send a stop signal to Local Mapping
-    // Avoid new keyframes are inserted while correcting the loop
+    loop_map_points_.clear();
+    std::map<PtId, Keyframe> point_keyframe;   // the loop keyframe each point was collected from
+    for(const Keyframe& keyframe : loop_keyframes)
+    {
+        // Side effect only: fills the current keyframe's match cache for this keyframe,
+        // which search_by_projection_for_compute_sim3 reads (the pairs themselves are not needed)
+        matcher_->match_keyframes(current_keyframe_, keyframe, feature_types_);
+
+        for(const Pt& point : keyframe->get_map_point_matches(verification_feature_))
+        {
+            if(!point || point->is_bad() || point->mnLoopPointForKF == current_keyframe_->keyId)
+                continue;
+            loop_map_points_.push_back(point);
+            point->mnLoopPointForKF = current_keyframe_->keyId;   // collected once per loop
+            point_keyframe[point->ptId] = keyframe;
+        }
+    }
+
+    matcher_->search_by_projection_for_compute_sim3(current_keyframe_, Scw_, loop_map_points_, loop_matched_points_, point_keyframe);
+
+    const long num_matches = std::count_if(loop_matched_points_.begin(), loop_matched_points_.end(),
+                                           [](const Pt& point) { return point != nullptr; });
+    const bool accepted = num_matches >= params.loop_min_matches;
+    release_loop_candidates(accepted);
+    return accepted;
+}
+
+// Lifts the erase guards set for the verification: every candidate's, except the matched
+// keyframe's when the loop is accepted, and the current keyframe's when it is rejected
+// (an accepted loop keeps both guarded until correct_loop pins them with the loop edge)
+void LoopClosing::release_loop_candidates(const bool loop_accepted)
+{
+    for(const Keyframe& candidate : loop_candidates_)
+        if(!loop_accepted || candidate != matched_keyframe_)
+            candidate->SetErase();
+    if(!loop_accepted)
+        current_keyframe_->SetErase();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// # Loop correction
+void LoopClosing::correct_loop()
+{
+    AF_INFO("[LoopClosing] loop detected: keyframe " << current_keyframe_->keyId << " -> " << matched_keyframe_->keyId);
+    std::cout.flush();
+
+    // Pause Local Mapping: no keyframe may be inserted while the map is corrected
     local_mapper_->request_stop();
 
-    // If a Global Bundle Adjustment is running, abort it
-    if(isRunningGBA())
+    // A running global BA belongs to a superseded loop: make it abort and drop its result
     {
-        unique_lock<mutex> lock(mMutexGBA);
-        mbStopGBA = true;
-
-        mnFullBAIdx = true;
-
-        if(mpThreadGBA)
+        std::lock_guard<std::mutex> lock(gba_mutex_);
+        if(gba_running_)
         {
-            mpThreadGBA->detach();
-            delete mpThreadGBA;
+            gba_stop_ = true;
+            ++gba_generation_;
+            if(gba_thread_.joinable())
+                gba_thread_.detach();   // exits on its own once g2o sees gba_stop_ (or its generation check fails)
         }
     }
 
     // Wait until Local Mapping has effectively stopped
     while(!local_mapper_->is_stopped())
-    {
-        usleep(1000);
-    }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    // Ensure current keyframe is updated
+    // Refresh the current keyframe's covisibility before propagating the correction
     current_keyframe_->update_connections();
 
-    // Retrive keyframes connected to the current keyframe and compute corrected Sim3 pose by propagation
-    mvpCurrentConnectedKFs = current_keyframe_->get_covisible_keyframes();
-    mvpCurrentConnectedKFs.push_back(current_keyframe_);
+    // The current keyframe and its covisibles get the corrected pose Scw, propagated
+    // through their relative poses; both versions feed the essential-graph optimization
+    std::vector<Keyframe> connected_keyframes = current_keyframe_->get_covisible_keyframes();
+    connected_keyframes.push_back(current_keyframe_);
 
-    KeyFrameAndPose CorrectedSim3, NonCorrectedSim3;
-    CorrectedSim3[current_keyframe_]=mg2oScw;
-    mat4f Twc = current_keyframe_->get_pose_inverse();
-
+    KeyframePoses corrected_poses, uncorrected_poses;
+    corrected_poses[current_keyframe_] = g2o_Scw_;
+    const mat4f Twc = current_keyframe_->get_pose_inverse();
 
     {
-        // Get Map Mutex
-        unique_lock<mutex> lock(mpMap->map_update_mutex_);
+        std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
 
-        for(vector<Keyframe>::iterator vit=mvpCurrentConnectedKFs.begin(), vend=mvpCurrentConnectedKFs.end(); vit!=vend; vit++)
+        for(const Keyframe& keyframe : connected_keyframes)
         {
-            Keyframe pKFi = *vit;
-
-            mat4f Tiw = pKFi->get_pose();
-
-            if(pKFi!=current_keyframe_)
+            const mat4f Tiw = keyframe->get_pose();
+            if(keyframe != current_keyframe_)
             {
-                mat4f Tic = Tiw * Twc;
-                mat3f Ric = Tic.block<3,3>(0,0);
-                vec3f tic = Tic.block<3,1>(0,3);
-                g2o::Sim3 g2oSic(Ric.cast<double>(),tic.cast<double>(),1.0);
-                g2o::Sim3 g2oCorrectedSiw = g2oSic*mg2oScw;
-                //Pose corrected with the Sim3 of the loop closure
-                CorrectedSim3[pKFi]=g2oCorrectedSiw;
+                // Corrected: relative pose to the current keyframe composed with Scw
+                const mat4f Tic = Tiw * Twc;
+                const mat3f Ric = Tic.block<3,3>(0,0);
+                const vec3f tic = Tic.block<3,1>(0,3);
+                const g2o::Sim3 g2o_Sic(Ric.cast<double>(), tic.cast<double>(), 1.0);
+                corrected_poses[keyframe] = g2o_Sic * g2o_Scw_;
             }
-
-            mat3f Riw = Tiw.block<3,3>(0,0);
-            vec3f tiw = Tiw.block<3,1>(0,3);
-            g2o::Sim3 g2oSiw(Riw.cast<double>(),tiw.cast<double>(),1.0);
-            //Pose without correction
-            NonCorrectedSim3[pKFi]=g2oSiw;
+            const mat3f Riw = Tiw.block<3,3>(0,0);
+            const vec3f tiw = Tiw.block<3,1>(0,3);
+            uncorrected_poses[keyframe] = g2o::Sim3(Riw.cast<double>(), tiw.cast<double>(), 1.0);
         }
 
-        // Correct all MapPoints obsrved by current keyframe and neighbors, so that they align with the other side of the loop
-        for(KeyFrameAndPose::iterator mit=CorrectedSim3.begin(), mend=CorrectedSim3.end(); mit!=mend; mit++)
+        // Map points seen by these keyframes (every feature type: the essential-graph
+        // optimization later assumes all of a corrected keyframe's points were moved):
+        // un-project with the old pose, re-project with the corrected one, once each
+        for(const auto& [keyframe, g2o_corrected_Siw] : corrected_poses)
         {
-            Keyframe pKFi = mit->first;
-            g2o::Sim3 g2oCorrectedSiw = mit->second;
-            g2o::Sim3 g2oCorrectedSwi = g2oCorrectedSiw.inverse();
+            const g2o::Sim3 g2o_corrected_Swi = g2o_corrected_Siw.inverse();
+            const g2o::Sim3& g2o_Siw = uncorrected_poses[keyframe];
 
-            g2o::Sim3 g2oSiw =NonCorrectedSim3[pKFi];
-
-            vector<Pt> vpMPsi = pKFi->get_map_point_matches(featureType);
-            for(size_t iMP=0, endMPi = vpMPsi.size(); iMP<endMPi; iMP++)
+            for(const FeatureType feature_type : keyframe->featureTypes)
             {
-                Pt pMPi = vpMPsi[iMP];
-                if(!pMPi)
-                    continue;
-                if(pMPi->is_bad())
-                    continue;
-                if(pMPi->mnCorrectedByKF==current_keyframe_->keyId)
-                    continue;
-
-                // Project with non-corrected pose and project back with corrected pose
-                vec3f P3Dw = pMPi->get_world_pos();
-                Eigen::Matrix<double,3,1> eigP3Dw = P3Dw.cast<double>();
-                Eigen::Matrix<double,3,1> eigCorrectedP3Dw = g2oCorrectedSwi.map(g2oSiw.map(eigP3Dw));
-
-                pMPi->set_world_pos(eigCorrectedP3Dw.cast<float>());
-                pMPi->mnCorrectedByKF = current_keyframe_->keyId;
-                pMPi->mnCorrectedReference = pKFi->keyId;
-                pMPi->UpdateNormalAndDepth();
-            }
-
-            // Update keyframe pose with corrected Sim3. First transform Sim3 to SE3 (scale translation)
-            Eigen::Matrix3d eigR = g2oCorrectedSiw.rotation().toRotationMatrix();
-            Eigen::Vector3d eigt = g2oCorrectedSiw.translation();
-            double s = g2oCorrectedSiw.scale();
-
-            eigt *=(1./s); //[R t/s;0 1]
-
-            mat4f correctedTiw = Converter::to_matrix4f(eigR,eigt);
-
-            pKFi->set_pose(correctedTiw);
-
-            // Make sure connections are updated
-            pKFi->update_connections();
-        }
-
-        // Start Loop Fusion
-        // Update matched map points and replace if duplicated
-        for(size_t i=0; i<mvpCurrentMatchedPoints.size(); i++)
-        {
-            if(mvpCurrentMatchedPoints[i])
-            {
-                Pt pLoopMP = mvpCurrentMatchedPoints[i];
-                Pt pCurMP = current_keyframe_->get_map_point(i, featureType);
-                if(pCurMP)
-                    pCurMP->replace(pLoopMP);
-                else
+                for(const Pt& point : keyframe->get_map_point_matches(feature_type))
                 {
-                    current_keyframe_->add_map_point(pLoopMP,KeypointIndex (i));
-                    pLoopMP->add_observation(current_keyframe_,KeypointIndex (i));
+                    if(!point || point->is_bad() || point->mnCorrectedByKF == current_keyframe_->keyId)
+                        continue;
+                    const Eigen::Vector3d corrected = g2o_corrected_Swi.map(g2o_Siw.map(point->get_world_pos().cast<double>()));
+                    point->set_world_pos(corrected.cast<float>());
+                    point->mnCorrectedByKF = current_keyframe_->keyId;
+                    point->mnCorrectedReference = keyframe->keyId;
+                    point->UpdateNormalAndDepth();
                 }
             }
+
+            // Keyframe pose from the corrected Sim3: [R t/s; 0 1]
+            const Eigen::Matrix3d R = g2o_corrected_Siw.rotation().toRotationMatrix();
+            const Eigen::Vector3d t = g2o_corrected_Siw.translation() / g2o_corrected_Siw.scale();
+            keyframe->set_pose(Converter::to_matrix4f(R, t));
+            keyframe->update_connections();
         }
 
+        // Loop fusion: the loop-side points matched into the current keyframe replace its
+        // own (or fill the keypoints that had none)
+        for(size_t i = 0; i < loop_matched_points_.size(); i++)
+        {
+            const Pt& loop_point = loop_matched_points_[i];
+            if(!loop_point)
+                continue;
+            const Pt current_point = current_keyframe_->get_map_point(i, verification_feature_);
+            if(current_point)
+                current_point->replace(loop_point);
+            else
+            {
+                current_keyframe_->add_map_point(loop_point, KeypointIndex(i));
+                loop_point->add_observation(current_keyframe_, KeypointIndex(i));
+            }
+        }
     }
 
-    // Project MapPoints observed in the neighborhood of the loop keyframe
-    // into the current keyframe and neighbors using corrected poses.
-    // Fuse duplications.
-    SearchAndFuse(CorrectedSim3);
+    // Project the loop-side points into the corrected keyframes and fuse the duplicates
+    search_and_fuse(corrected_poses);
 
+    // The fusion linked both sides of the loop in the covisibility graph: those links are
+    // the loop edges of the essential graph
+    std::map<KeyframeId, LoopConnections> loop_connections = loop_connections_after_fusion(connected_keyframes);
+    Optimizer::OptimizeEssentialGraph(map_, matched_keyframe_, current_keyframe_, uncorrected_poses, corrected_poses,
+                                      loop_connections, fix_scale_);
+    map_->InformNewBigChange();
 
-    // After the MapPoint fusion, new links in the covisibility graph will appear attaching both sides of the loop
-    map<KeyframeId,LoopConnections> loopConnections{};
+    // Loop edge (also pins both keyframes: never culled)
+    matched_keyframe_->AddLoopEdge(current_keyframe_);
+    current_keyframe_->AddLoopEdge(matched_keyframe_);
 
-    for(const auto& pKFi: mvpCurrentConnectedKFs)
+    // Global BA in its own thread; Local Mapping resumes meanwhile. A previous BA has
+    // either finished (joinable, join returns at once) or was detached above.
+    if(gba_thread_.joinable())
+        gba_thread_.join();
     {
-        vector<Keyframe> vpPreviousNeighbors = pKFi->get_covisible_keyframes();
-
-        // Update connections. Detect new links.
-        pKFi->update_connections();
-        loopConnections.insert(std::make_pair(pKFi->keyId, LoopConnections(pKFi->keyId, pKFi, pKFi->GetConnectedKeyFrames())));
-
-        for(auto& vit_prev: vpPreviousNeighbors)
-        {
-            loopConnections[pKFi->keyId].connections.erase(vit_prev->keyId);
-        }
-        for(auto& vit2: mvpCurrentConnectedKFs)
-        {
-            loopConnections[pKFi->keyId].connections.erase(vit2->keyId);
-        }
+        std::lock_guard<std::mutex> lock(gba_mutex_);
+        gba_running_ = true;
+        gba_stop_ = false;
+        gba_thread_ = std::thread(&LoopClosing::run_global_bundle_adjustment, this, current_keyframe_->keyId);
     }
 
-    // Optimize graph
-    Optimizer::OptimizeEssentialGraph(mpMap, mpMatchedKF, current_keyframe_, NonCorrectedSim3, CorrectedSim3, loopConnections, mbFixScale);
-
-    mpMap->InformNewBigChange();
-
-    // Add loop edge
-    mpMatchedKF->AddLoopEdge(current_keyframe_);
-    current_keyframe_->AddLoopEdge(mpMatchedKF);
-
-    // Launch a new thread to perform Global Bundle Adjustment
-    mbRunningGBA = true;
-    mbFinishedGBA = false;
-    mbStopGBA = false;
-    mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this,current_keyframe_->keyId);
-
-    // Loop closed. release Local Mapping.
     local_mapper_->release();
 
     last_loop_keyframe_id_ = current_keyframe_->keyId;
 }
 
-void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap)
+// Covisibility links each corrected keyframe gained through the fusion: its connections
+// now, minus the ones it had before and minus the corrected keyframes themselves
+std::map<KeyframeId, LoopConnections> LoopClosing::loop_connections_after_fusion(const std::vector<Keyframe>& connected_keyframes)
 {
-
-    for(KeyFrameAndPose::const_iterator mit=CorrectedPosesMap.begin(), mend=CorrectedPosesMap.end(); mit!=mend;mit++)
+    std::map<KeyframeId, LoopConnections> loop_connections;
+    for(const Keyframe& keyframe : connected_keyframes)
     {
-        Keyframe pKF = mit->first;
+        const std::vector<Keyframe> previous_neighbors = keyframe->get_covisible_keyframes();
+        keyframe->update_connections();
 
-        g2o::Sim3 g2oScw = mit->second;
-        mat4f cvScw = Converter::to_matrix4f(g2oScw);
-
-        vector<Pt> vpReplacePoints(mvpLoopMapPoints.size(),static_cast<Pt>(NULL));
-        matcher->fuse_map_points_to_keyframe(pKF,cvScw,mvpLoopMapPoints,4.0f,vpReplacePoints, featureType);
-
-        // Get Map Mutex
-        unique_lock<mutex> lock(mpMap->map_update_mutex_);
-        const int nLP = mvpLoopMapPoints.size();
-        for(int i=0; i<nLP;i++)
-        {
-            Pt pRep = vpReplacePoints[i];
-            if(pRep)
-            {
-                pRep->replace(mvpLoopMapPoints[i]);
-            }
-        }
+        LoopConnections& links = loop_connections[keyframe->keyId];
+        links.keyframe = keyframe;
+        links.connections = keyframe->GetConnectedKeyFrames();
+        for(const Keyframe& neighbor : previous_neighbors)
+            links.connections.erase(neighbor->keyId);
+        for(const Keyframe& corrected : connected_keyframes)
+            links.connections.erase(corrected->keyId);
     }
+    return loop_connections;
 }
 
-
-void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
+// Projects the loop-side map points into every corrected keyframe (with its corrected
+// pose) and merges the duplicates found there into the loop-side points
+void LoopClosing::search_and_fuse(const KeyframePoses& corrected_poses)
 {
-    cout << "Starting Global Bundle Adjustment" << endl;
-
-    int idx =  mnFullBAIdx;
-    Optimizer::global_bundle_adjustment(mpMap,10,&mbStopGBA,nLoopKF,false);
-
-    // Update all MapPoints and KeyFrames
-    // Local Mapping was active during BA, that means that there might be new keyframes
-    // not included in the Global BA and they are not consistent with the updated map.
-    // We need to propagate the correction through the spanning tree
+    for(const auto& [corrected_keyframe, g2o_Scw] : corrected_poses)
     {
-        unique_lock<mutex> lock(mMutexGBA);
-        if(idx!=mnFullBAIdx)
+        Keyframe keyframe = corrected_keyframe;   // fuse_map_points_to_keyframe takes a non-const reference
+        const mat4f Scw = Converter::to_matrix4f(g2o_Scw);
+
+        std::vector<Pt> replaced_points(loop_map_points_.size(), nullptr);
+        matcher_->fuse_map_points_to_keyframe(keyframe, Scw, loop_map_points_, params.fuse_radius, replaced_points,
+                                              verification_feature_);
+
+        std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
+        for(size_t i = 0; i < loop_map_points_.size(); i++)
+            if(replaced_points[i])
+                replaced_points[i]->replace(loop_map_points_[i]);
+    }
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// # Global bundle adjustment
+bool LoopClosing::is_gba_running() const
+{
+    std::lock_guard<std::mutex> lock(gba_mutex_);
+    return gba_running_;
+}
+
+// Runs in gba_thread_ (launched by correct_loop). Local Mapping keeps working during the
+// BA, so what it creates meanwhile is not part of it: apply_gba_correction propagates the
+// result to those keyframes and points.
+void LoopClosing::run_global_bundle_adjustment(const KeyframeId loop_keyframe_id)
+{
+    AF_INFO("[LoopClosing] global bundle adjustment started (loop keyframe " << loop_keyframe_id << ")");
+    std::cout.flush();
+
+    int generation = 0;
+    {
+        std::lock_guard<std::mutex> lock(gba_mutex_);
+        generation = gba_generation_;
+    }
+
+    Optimizer::global_bundle_adjustment(map_, params.gba_iterations, &gba_stop_, loop_keyframe_id, false);
+
+    {
+        std::lock_guard<std::mutex> lock(gba_mutex_);
+        // Superseded by a newer loop closure (correct_loop bumped the generation): the
+        // result belongs to an outdated map, and the new BA owns the running flag (issue #35)
+        if(generation != gba_generation_)
             return;
 
-        if(!mbStopGBA)
-        {
-            cout << "Global Bundle Adjustment finished" << endl;
-            cout << "Updating map ..." << endl;
-            local_mapper_->request_stop();
-            // Wait until Local Mapping has effectively stopped
+        if(!gba_stop_)
+            apply_gba_correction(loop_keyframe_id);
 
-            while(!local_mapper_->is_stopped() && !local_mapper_->is_finished())
-            {
-                usleep(1000);
-            }
-
-            // Get Map Mutex
-            unique_lock<mutex> lock(mpMap->map_update_mutex_);
-
-            // Correct keyframes starting at map first keyframe
-            list<Keyframe> lpKFtoCheck(mpMap->keyframe_origins_.begin(),mpMap->keyframe_origins_.end());
-
-            while(!lpKFtoCheck.empty())
-            {
-                Keyframe pKF = lpKFtoCheck.front();
-                const KeyframeIdSet sChilds = pKF->get_children();
-                mat4f Twc = pKF->get_pose_inverse();
-                for(auto sit=sChilds.begin();sit!=sChilds.end();sit++)
-                {
-                    Keyframe pChild = *sit;
-                    if(pChild->mnBAGlobalForKF!=nLoopKF)
-                    {
-                        mat4f Tchildc = pChild->get_pose() * Twc;
-                        pChild->TcwGBA = Tchildc * pKF->TcwGBA;//*Tcorc*pKF->mTcwGBA;
-                        pChild->mnBAGlobalForKF=nLoopKF;
-
-                    }
-                    lpKFtoCheck.push_back(pChild);
-                }
-
-                pKF->TcwBefGBA = pKF->get_pose();
-                pKF->set_pose(pKF->TcwGBA);
-                lpKFtoCheck.pop_front();
-            }
-
-            // Correct MapPoints
-            const vector<Pt> vpMPs = mpMap->get_all_map_points();
-
-            for(size_t i=0; i<vpMPs.size(); i++)
-            {
-                Pt pMP = vpMPs[i];
-
-                if(pMP->is_bad())
-                    continue;
-
-                if(pMP->mnBAGlobalForKF==nLoopKF)
-                {
-                    // If optimized by Global BA, just update
-                    pMP->set_world_pos(pMP->PosGBA);
-                }
-                else
-                {
-                    // Update according to the correction of its reference keyframe
-                    Keyframe pRefKF = pMP->GetReferenceKeyFrame();
-
-                    if(pRefKF->mnBAGlobalForKF!=nLoopKF)
-                        continue;
-
-                    // Map to non-corrected camera
-                    mat3f Rcw = pRefKF->TcwBefGBA.block<3,3>(0,0);
-                    vec3f tcw = pRefKF->TcwBefGBA.block<3,1>(0,3);
-                    vec3f Xc = Rcw*pMP->get_world_pos()+tcw;
-
-                    // Backproject using corrected camera
-                    mat4f Twc = pRefKF->get_pose_inverse();
-                    mat3f Rwc = Twc.block<3,3>(0,0);
-                    vec3f twc = Twc.block<3,1>(0,3);
-
-                    pMP->set_world_pos(Rwc*Xc+twc);
-                }
-            }
-
-            mpMap->InformNewBigChange();
-
-            local_mapper_->release();
-
-            cout << "Map updated!" << endl;
-        }
-
-        mbFinishedGBA = true;
-        mbRunningGBA = false;
+        gba_running_ = false;
     }
 }
+
+// Under gba_mutex_. Pauses Local Mapping, writes the optimized poses and positions, and
+// propagates the correction to what was created during the BA: a keyframe not in the BA
+// inherits its spanning-tree parent's correction through their relative pose, a point
+// not in the BA its reference keyframe's.
+void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
+{
+    AF_INFO("[LoopClosing] global bundle adjustment finished, updating the map ...");
+    std::cout.flush();
+
+    local_mapper_->request_stop();
+    while(!local_mapper_->is_stopped() && !local_mapper_->is_finished())
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
+
+    // Keyframes, breadth-first from the map origins along the spanning tree
+    std::list<Keyframe> pending(map_->keyframe_origins_.begin(), map_->keyframe_origins_.end());
+    while(!pending.empty())
+    {
+        const Keyframe keyframe = pending.front();
+        pending.pop_front();
+
+        const mat4f Twc = keyframe->get_pose_inverse();
+        for(const Keyframe& child : keyframe->get_children())
+        {
+            if(child->mnBAGlobalForKF != loop_keyframe_id)
+            {
+                const mat4f Tchild_parent = child->get_pose() * Twc;
+                child->TcwGBA = Tchild_parent * keyframe->TcwGBA;
+                child->mnBAGlobalForKF = loop_keyframe_id;
+            }
+            pending.push_back(child);
+        }
+
+        keyframe->TcwBefGBA = keyframe->get_pose();
+        keyframe->set_pose(keyframe->TcwGBA);
+    }
+
+    // Map points: optimized ones take their BA position, the others follow their reference keyframe
+    for(const Pt& point : map_->get_all_map_points())
+    {
+        if(point->is_bad())
+            continue;
+
+        if(point->mnBAGlobalForKF == loop_keyframe_id)
+        {
+            point->set_world_pos(point->PosGBA);
+            continue;
+        }
+
+        const Keyframe reference = point->GetReferenceKeyFrame();
+        if(reference->mnBAGlobalForKF != loop_keyframe_id)
+            continue;
+
+        // Un-project with the reference's pose before the BA, re-project with the corrected one
+        const mat4f& Tcw = reference->TcwBefGBA;
+        const vec3f Xc = Tcw.block<3,3>(0,0) * point->get_world_pos() + Tcw.block<3,1>(0,3);
+        const mat4f Twc = reference->get_pose_inverse();
+        point->set_world_pos(Twc.block<3,3>(0,0) * Xc + Twc.block<3,1>(0,3));
+    }
+
+    map_->InformNewBigChange();
+    local_mapper_->release();
+
+    AF_INFO("[LoopClosing] map updated");
+    std::cout.flush();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // # Reset protocol
@@ -755,7 +700,7 @@ void LoopClosing::request_reset()
 {
     // Without an active VPR backend this thread never runs, so nobody would ever clear
     // the request (the caller would spin forever); there is nothing to reset either.
-    if(!place_recognition->is_active())
+    if(!place_recognition_->is_active())
         return;
 
     {
@@ -790,14 +735,14 @@ void LoopClosing::reset_if_requested()
     // candidates; the vectors would also keep the old map's keyframes and points alive.
     consistent_groups_.clear();
     loop_candidates_.clear();
-    mvpCurrentConnectedKFs.clear();
-    mvpCurrentMatchedPoints.clear();
-    mvpLoopMapPoints.clear();
+    loop_matched_points_.clear();
+    loop_map_points_.clear();
     current_keyframe_.reset();
-    mpMatchedKF.reset();
+    matched_keyframe_.reset();
 
     reset_requested_ = false;
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // # Finish protocol
@@ -824,5 +769,6 @@ bool LoopClosing::is_finished() const
     std::lock_guard<std::mutex> lock(finish_mutex_);
     return finished_;
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-} //namespace ORB_SLAM
+} // namespace AF_VSLAM

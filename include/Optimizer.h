@@ -79,8 +79,8 @@ public:
 
     // if bFixScale is true, 6DoF optimization (stereo,rgbd), 7DoF otherwise (mono)
     void static OptimizeEssentialGraph(shared_ptr<Map>pMap, Keyframe pLoopKF, Keyframe pCurKF,
-                                       const LoopClosing::KeyFrameAndPose &NonCorrectedSim3,
-                                       const LoopClosing::KeyFrameAndPose &CorrectedSim3,
+                                       const LoopClosing::KeyframePoses &NonCorrectedSim3,
+                                       const LoopClosing::KeyframePoses &CorrectedSim3,
                                        std::map<KeyframeId, LoopConnections> &loopConnections,
                                        const bool &bFixScale);
 

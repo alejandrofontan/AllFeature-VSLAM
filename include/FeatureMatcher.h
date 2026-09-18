@@ -116,7 +116,7 @@ public:
 
     /// Projects candidate map points into a keyframe using a Sim3 and validates projections
     /// against cached matches. Writes accepted matches into @p pts_matched.
-    /// @return Number of new map point assignments. Used in: LoopClosing::ComputeSim3
+    /// @return Number of new map point assignments. Used in: LoopClosing::search_loop_map_points
     const float radiusTh_factor = 12.0f;
     int search_by_projection_for_compute_sim3(const Keyframe& keyframe, const mat4f& Scw,
         const vector<Pt>& pts, vector<Pt>& pts_matched,

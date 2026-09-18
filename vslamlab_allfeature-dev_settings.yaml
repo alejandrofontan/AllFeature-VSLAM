@@ -202,3 +202,8 @@ LocalMapping.KeyframeCullingCentred: 1           # 1 = correlation of mean-centr
 #--------------------------------------------------------------------------------------------
 LoopClosing.CovisibilityConsistencyThreshold: 3 # a loop candidate's covisibility group must be retrieved by this many consecutive keyframes
 LoopClosing.MinKeyframesBetweenLoops: 10        # no loop detection for this many keyframes after a loop closure (and at the start of a map)
+LoopClosing.Sim3MinMatches: 20                  # candidates with fewer feature matches to the current keyframe get no Sim3 solver
+LoopClosing.Sim3MinInliers: 20                  # inliers of the optimized Sim3 that accept a candidate
+LoopClosing.LoopMinMatches: 40                  # loop-side map points matched into the current keyframe (RANSAC inliers + projection search) that accept the loop
+LoopClosing.FuseRadius: 4.0                     # projection search radius (px) when fusing the loop-side points into the corrected keyframes
+LoopClosing.GbaIterations: 10                   # global bundle adjustment iterations after a loop closure

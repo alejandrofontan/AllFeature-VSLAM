@@ -651,7 +651,7 @@ map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_
 /// @param pts_matched   Output vector (indexed by keypoint); filled with accepted map points.
 /// @param pt_to_keyframe_id  Maps each map-point ID to the keyframe it was originally observed in.
 /// @return Number of new map point assignments written into @p pts_matched.
-/// @note Used in: LoopClosing::ComputeSim3
+/// @note Used in: LoopClosing::search_loop_map_points
 int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyframe, const mat4f& Scw,
     const vector<Pt>& pts, vector<Pt>& pts_matched,
     const map<PtId, Keyframe>& pt_to_keyframe_id)

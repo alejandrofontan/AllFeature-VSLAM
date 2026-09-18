@@ -203,12 +203,12 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //Initialize the Loop Closing thread and launch. Without an active VPR backend the object
     //is still constructed (other threads hold pointers to it and enqueue keyframes) but its
     //thread never starts: LoopClosing starts with finished_ = true, so Shutdown()'s
-    //is_finished()/isRunningGBA() waits pass immediately.
+    //is_finished()/is_gba_running() waits pass immediately.
     loopCloser =  make_shared<LoopClosing>(mpMap, place_recognition, localMapper, mapDrawer,
         mSensor!=MONOCULAR, featureTypes,
         tracker->get_image_width(), tracker->get_image_height());
     if(place_recognition->is_active())
-        mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::Run, loopCloser);
+        mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::run, loopCloser);
 
     //Initialize the Viewer thread and launch
     if(activateVisualization)
@@ -404,7 +404,7 @@ void System::Shutdown()
     }
 
     // Wait until all thread have effectively stopped
-    while(!localMapper->is_finished() || !loopCloser->is_finished() || loopCloser->isRunningGBA())
+    while(!localMapper->is_finished() || !loopCloser->is_finished() || loopCloser->is_gba_running())
     {
         usleep(5000);
     }
@@ -629,9 +629,6 @@ void System::SaveStatistics(const std::string &filename){
     // double medianLocalMapppingTime{};
     // AF_VSLAM::vectorMedian(medianLocalMapppingTime,localMapper->localMappingTime);
 
-    // double medianLoopClosingTime{};
-    // AF_VSLAM::vectorMedian(medianLoopClosingTime,loopCloser->loopClosingTime);
-
     // long long finalVirtualMemUsed{virtualMemUsed.back()};
     // long long firstVirtualMemUsed{virtualMemUsed.front()};
     // long long maxVirtualMemUsed{0};
@@ -642,8 +639,8 @@ void System::SaveStatistics(const std::string &filename){
     // f.open(statisticsFile.c_str());
     // f << fixed;
     // f << setprecision(0) << numKeyframes << " " << numPts << " " << numObservations << " " << setprecision(3) << numObservationsPerPt  <<
-    // " " << setprecision(9) << median_tracking_time << " " << medianLocalMapppingTime << " " << medianLoopClosingTime <<
-    // " " << tracker->num_tracked_frames_ <<" " << loopCloser->numOfLoopClosures << setprecision(0) <<
+    // " " << setprecision(9) << median_tracking_time << " " << medianLocalMapppingTime <<
+    // " " << tracker->num_tracked_frames_ << setprecision(0) <<
     // " " << firstVirtualMemUsed <<" " << maxVirtualMemUsed << " " << finalVirtualMemUsed <<
     // endl;
 
@@ -658,10 +655,8 @@ void System::SaveStatistics(const std::string &filename){
 
     // node["profiling"]["median_tracking_time"] = median_tracking_time;
     // node["profiling"]["medianLocalMapppingTime"] = medianLocalMapppingTime;
-    // node["profiling"]["medianLoopClosingTime"] = medianLoopClosingTime;
 
     // node["recall"]["num_tracked_frames_"] = tracker->num_tracked_frames_;
-    // node["recall"]["loopCloser->numOfLoopClosures"] = loopCloser->numOfLoopClosures;
 
     // node["memory"]["firstVirtualMemUsed"] = firstVirtualMemUsed;
     // node["memory"]["maxVirtualMemUsed"] = maxVirtualMemUsed;
