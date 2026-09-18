@@ -196,3 +196,9 @@ LocalMapping.KeyframeCullingMinKeyframes: 5      # never cull below this many al
 LocalMapping.KeyframeCullingScope: "map"         # marginalise over "map" (all alive keyframes) or "local" (current keyframe + its covisible keyframes)
 LocalMapping.KeyframeCullingMaxPerCall: 5        # at most this many culls per call (0 = unlimited): a raised threshold thins the map gradually instead of in one burst
 LocalMapping.KeyframeCullingCentred: 1           # 1 = correlation of mean-centred descriptors (recommended: removes MegaLoc's ~0.37 common-mode floor), 0 = raw cosine
+
+#--------------------------------------------------------------------------------------------
+# Loop Closing parameters (values shown are the compiled-in defaults; every key is optional)
+#--------------------------------------------------------------------------------------------
+LoopClosing.CovisibilityConsistencyThreshold: 3 # a loop candidate's covisibility group must be retrieved by this many consecutive keyframes
+LoopClosing.MinKeyframesBetweenLoops: 10        # no loop detection for this many keyframes after a loop closure (and at the start of a map)

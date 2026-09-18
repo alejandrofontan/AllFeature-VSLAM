@@ -184,17 +184,16 @@ std::vector<Keyframe> PlaceRecognitionMegaLoc::retrieve(const Eigen::Ref<const E
     return candidates;
 }
 
-std::vector<Keyframe> PlaceRecognitionMegaLoc::detect_loop_candidates(const Keyframe& keyframe, const float /*min_score*/)
+std::vector<Keyframe> PlaceRecognitionMegaLoc::detect_loop_candidates(const Keyframe& keyframe)
 {
     std::set<KeyframeId> excluded{keyframe->keyId};
     for(const auto& [id, connected] : keyframe->GetConnectedKeyFrames())
         excluded.insert(id);
-    // The fixed floor alone gates candidates. LoopClosing's adaptive reference score
-    // (lowest similarity to a covisible keyframe) is deliberately IGNORED for this
-    // backend: it exists to calibrate BoW's scene-dependent scores, while MegaLoc's
-    // cosine is globally calibrated -- and with covisibles scoring ~0.75-0.9, the
-    // adaptive bar would reject genuine revisits seen from a different viewpoint,
-    // direction, or season (which legitimately score ~0.6-0.7).
+    // The fixed floor alone gates candidates. Classic ORB-SLAM2 raised the bar to the
+    // lowest BoW score among the keyframe's covisibles, a calibration for BoW's
+    // scene-dependent scores; MegaLoc's cosine is globally calibrated, and with
+    // covisibles scoring ~0.75-0.9 that adaptive bar would reject genuine revisits seen
+    // from a different viewpoint, direction, or season (which legitimately score ~0.6-0.7).
     const Eigen::VectorXf* query = place_cell_->descriptor(keyframe->frame_id);
     if(!query)
         return {};

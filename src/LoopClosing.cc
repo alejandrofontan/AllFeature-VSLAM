@@ -28,6 +28,7 @@
 
 #include "FeatureMatcher.h"
 
+#include <algorithm>
 #include <chrono>
 #include <mutex>
 #include <thread>
@@ -47,13 +48,30 @@ LoopClosing::LoopClosing(shared_ptr<Map>pMap, shared_ptr<PlaceRecognition> place
     featureType(place_recognition->verification_feature()), feat_types(feat_types), mpMap(pMap),
     map_drawer_(std::move(map_drawer)),
     place_recognition(std::move(place_recognition)), local_mapper_(std::move(local_mapper)),
-    mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
+    mpMatchedKF(NULL), mbRunningGBA(false), mbFinishedGBA(true),
     mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), mnFullBAIdx(0),
     image_width(image_width), image_height(image_height)
 {
-    mnCovisibilityConsistencyTh = 3;
     matcher = std::make_shared<FeatureMatcher>(image_width, image_height, feat_types, "LoopClosing", 0.8, true);
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// # Parameters
+LoopClosingParameters LoopClosing::params{};
+
+void LoopClosing::LoadParameters(const cv::FileStorage& fSettings)
+{
+    auto read_if_present = [&fSettings](const char* key, auto& field)
+    {
+        const cv::FileNode node = fSettings[key];
+        if(!node.empty())
+            node >> field;
+    };
+
+    read_if_present("LoopClosing.CovisibilityConsistencyThreshold", params.covisibility_consistency_threshold);
+    read_if_present("LoopClosing.MinKeyframesBetweenLoops", params.min_keyframes_between_loops);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void LoopClosing::Run()
 {
@@ -69,8 +87,7 @@ void LoopClosing::Run()
         {
             // Detect loop candidates and check covisibility consistency
 
-            if(DetectLoop())
-            //if(DetectLoop() && false)
+            if(detect_loop())
             {
                // Compute similarity transformation [sR|t]
                // In the stereo/RGBD case s=1
@@ -82,7 +99,7 @@ void LoopClosing::Run()
                    CorrectLoop();
 
                    ++numOfLoopClosures;
-                   map_drawer_->AddLoopClosureKeyframe(mpCurrentKF->get_pose_inverse());
+                   map_drawer_->AddLoopClosureKeyframe(current_keyframe_->get_pose_inverse());
 
                    std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
                    double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
@@ -122,137 +139,120 @@ bool LoopClosing::has_new_keyframes() const
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-bool LoopClosing::DetectLoop()
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// # Loop detection
+bool LoopClosing::detect_loop()
 {
     {
         std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
-        mpCurrentKF = new_keyframes_.front();
+        current_keyframe_ = new_keyframes_.front();
         new_keyframes_.pop_front();
-        // Avoid that a keyframe can be erased while it is being process by this thread
-        mpCurrentKF->SetNotErase();
+        // Keyframe culling must not delete the keyframe while this thread works on it.
+        // SetErase lifts the guard (a culling deferred meanwhile is applied then); on
+        // success ComputeSim3/CorrectLoop keep it until the loop is closed or rejected.
+        current_keyframe_->SetNotErase();
     }
 
-    //If the map contains less than 10 KF or less than 10 KF have passed from last loop detection
-    if(mpCurrentKF->keyId < mLastLoopKFid+10)
+    // Candidates retrieved by the VPR backend (covisible keyframes excluded), kept only
+    // when their covisibility group was also retrieved by the previous keyframes. No
+    // detection right after a loop closure, nor for the first keyframes of a map (both
+    // gates share the counter: keyIds start at 0); the consistency groups are left as
+    // they are meanwhile.
+    loop_candidates_.clear();
+    const KeyframeId min_keyframes_between_loops = static_cast<KeyframeId>(params.min_keyframes_between_loops);
+    if(current_keyframe_->keyId >= last_loop_keyframe_id_ + min_keyframes_between_loops)
+        loop_candidates_ = consistent_loop_candidates(place_recognition->detect_loop_candidates(current_keyframe_));
+
+    // Into the database only after its own query
+    place_recognition->add(current_keyframe_);
+
+    if(loop_candidates_.empty())
     {
-        place_recognition->add(mpCurrentKF);
-        mpCurrentKF->SetErase();
+        current_keyframe_->SetErase();
         return false;
     }
+    return true;
+}
 
-    // Compute the reference similarity score: the lowest score to a connected keyframe
-    // in the covisibility graph. Passed to detect_loop_candidates as a calibration aid
-    // for scene-dependent-score backends; the MegaLoc backend ignores it (fixed floor).
-    const vector<Keyframe> vpConnectedKeyFrames = mpCurrentKF->get_covisible_keyframes();
-    float minScore = 1;
-    for(size_t i=0; i<vpConnectedKeyFrames.size(); i++)
+// True when the two sorted id lists share a keyframe
+static bool share_keyframe(const std::vector<KeyframeId>& a, const std::vector<KeyframeId>& b)
+{
+    auto ia = a.begin();
+    auto ib = b.begin();
+    while(ia != a.end() && ib != b.end())
     {
-        Keyframe pKF = vpConnectedKeyFrames[i];
-        if(pKF->is_bad())
-            continue;
-
-        const float score = place_recognition->score(*mpCurrentKF, *pKF);
-
-        if(score<minScore)
-            minScore = score;
+        if(*ia == *ib)
+            return true;
+        if(*ia < *ib)
+            ++ia;
+        else
+            ++ib;
     }
-
-    // Query the database imposing the minimum score
-    vector<Keyframe> vpCandidateKFs = place_recognition->detect_loop_candidates(mpCurrentKF, minScore);
-
-    // If there are no loop candidates, just add new keyframe and return false
-    if(vpCandidateKFs.empty())
-    {
-        place_recognition->add(mpCurrentKF);
-        mvConsistentGroups.clear();
-        mpCurrentKF->SetErase();
-        return false;
-    }
-
-    // For each loop candidate check consistency with previous loop candidates
-    // Each candidate expands a covisibility group (keyframes connected to the loop candidate in the covisibility graph)
-    // A group is consistent with a previous group if they share at least a keyframe
-    // We must detect a consistent loop in several consecutive keyframes to accept it
-    mvpEnoughConsistentCandidates.clear();
-
-    vector<ConsistentGroup> vCurrentConsistentGroups;
-    vector<bool> vbConsistentGroup(mvConsistentGroups.size(),false);
-    for(size_t i=0, iend=vpCandidateKFs.size(); i<iend; i++)
-    {
-        Keyframe pCandidateKF = vpCandidateKFs[i];
-
-        map<KeyframeId, Keyframe> spCandidateGroup = pCandidateKF->GetConnectedKeyFrames();
-        spCandidateGroup[pCandidateKF->keyId] = pCandidateKF;
-
-        bool bEnoughConsistent = false;
-        bool bConsistentForSomeGroup = false;
-        for(size_t iG=0, iendG=mvConsistentGroups.size(); iG<iendG; iG++)
-        {
-            map<KeyframeId,Keyframe> sPreviousGroup = mvConsistentGroups[iG].first;
-
-            bool bConsistent = false;
-            for(auto& sit: spCandidateGroup)
-            {
-                if(sPreviousGroup.count(sit.first))
-                {
-                    bConsistent=true;
-                    bConsistentForSomeGroup=true;
-                    break;
-                }
-            }
-
-            if(bConsistent)
-            {
-                int nPreviousConsistency = mvConsistentGroups[iG].second;
-                int nCurrentConsistency = nPreviousConsistency + 1;
-                if(!vbConsistentGroup[iG])
-                {
-                    ConsistentGroup cg = make_pair(spCandidateGroup,nCurrentConsistency);
-                    vCurrentConsistentGroups.push_back(cg);
-                    vbConsistentGroup[iG]=true; //this avoid to include the same group more than once
-                }
-                if(nCurrentConsistency>=mnCovisibilityConsistencyTh && !bEnoughConsistent)
-                {
-                    mvpEnoughConsistentCandidates.push_back(pCandidateKF);
-                    bEnoughConsistent=true; //this avoid to insert the same candidate more than once
-                }
-            }
-        }
-
-        // If the group is not consistent with any previous group insert with consistency counter set to zero
-        if(!bConsistentForSomeGroup)
-        {
-            ConsistentGroup cg = make_pair(spCandidateGroup,0);
-            vCurrentConsistentGroups.push_back(cg);
-        }
-    }
-
-    // Update Covisibility Consistent Groups
-    mvConsistentGroups = vCurrentConsistentGroups;
-
-
-    // Add Current Keyframe to database
-    place_recognition->add(mpCurrentKF);
-
-    if(mvpEnoughConsistentCandidates.empty())
-    {
-        mpCurrentKF->SetErase();
-        return false;
-    }
-    else
-    {
-        return true;
-    }
-
-    mpCurrentKF->SetErase();
     return false;
 }
+
+// Covisibility-consistency vote (ORB-SLAM2). Each candidate expands to its covisibility
+// group: the candidate plus the keyframes connected to it. A group is consistent with a
+// group kept from the previous keyframe when the two share a keyframe; it then inherits
+// that group's consistency count plus one, and a count reaching
+// params.covisibility_consistency_threshold makes the candidate a loop candidate. The
+// groups built here replace consistent_groups_ for the next keyframe (no candidates ->
+// no groups). Rules kept from the original: a previous group passes its count to the
+// first candidate consistent with it only, so the same group is never carried twice;
+// a candidate consistent with several previous groups is stored once per group, and
+// enters the result once; a candidate consistent with no previous group starts a new
+// group with count 0.
+std::vector<Keyframe> LoopClosing::consistent_loop_candidates(const std::vector<Keyframe>& candidates)
+{
+    std::vector<Keyframe> loop_candidates;
+    std::vector<ConsistentGroup> current_groups;
+    std::vector<bool> carried(consistent_groups_.size(), false);   // previous group already passed on
+
+    for(const Keyframe& candidate : candidates)
+    {
+        // Covisibility group as sorted ids (GetConnectedKeyFrames is ordered by id)
+        ConsistentGroup group;
+        for(const auto& [id, keyframe] : candidate->GetConnectedKeyFrames())
+            group.keyframes.push_back(id);
+        group.keyframes.insert(std::lower_bound(group.keyframes.begin(), group.keyframes.end(), candidate->keyId),
+                               candidate->keyId);
+
+        bool consistent_with_some_group = false;
+        bool enough_consistent = false;
+        for(size_t i = 0; i < consistent_groups_.size(); i++)
+        {
+            const ConsistentGroup& previous = consistent_groups_[i];
+            if(!share_keyframe(group.keyframes, previous.keyframes))
+                continue;
+            consistent_with_some_group = true;
+
+            const int consistency = previous.consistency + 1;
+            if(!carried[i])
+            {
+                current_groups.push_back(ConsistentGroup{group.keyframes, consistency});
+                carried[i] = true;
+            }
+            if(consistency >= params.covisibility_consistency_threshold && !enough_consistent)
+            {
+                loop_candidates.push_back(candidate);
+                enough_consistent = true;
+            }
+        }
+
+        if(!consistent_with_some_group)
+            current_groups.push_back(std::move(group));
+    }
+
+    consistent_groups_ = std::move(current_groups);
+    return loop_candidates;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 bool LoopClosing::ComputeSim3()
 {
     // For each consistent loop candidate we try to compute a Sim3
 
-    const int nInitialCandidates = mvpEnoughConsistentCandidates.size();
+    const int nInitialCandidates = loop_candidates_.size();
 
     // We compute first ORB matches for each candidate
     // If enough matches are found, we setup a Sim3Solver
@@ -270,7 +270,7 @@ bool LoopClosing::ComputeSim3()
 
     for(int i=0; i<nInitialCandidates; i++)
     {
-        Keyframe pKF = mvpEnoughConsistentCandidates[i];
+        Keyframe pKF = loop_candidates_[i];
 
         // avoid that local mapping erase it while it is being processed in this thread
         pKF->SetNotErase();
@@ -282,12 +282,12 @@ bool LoopClosing::ComputeSim3()
         }
 
         std::map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs;
-        matcher->match_keyframes_for_compute_sim3(mpCurrentKF, pKF, matched_pairs, feat_types);
+        matcher->match_keyframes_for_compute_sim3(current_keyframe_, pKF, matched_pairs, feat_types);
 
         // TO DO
         // Currently we use only one feature type downstream
         int nmatches=0;
-        vvpMapPointMatches[i] = vector<Pt>(mpCurrentKF->get_map_point_matches(featureType).size(),static_cast<Pt>(NULL));
+        vvpMapPointMatches[i] = vector<Pt>(current_keyframe_->get_map_point_matches(featureType).size(),static_cast<Pt>(NULL));
         for (const auto& matches : matched_pairs[featureType]) {
             vvpMapPointMatches[i][matches.first] = pKF->get_map_point_matches(featureType)[matches.second];
             nmatches++;
@@ -300,7 +300,7 @@ bool LoopClosing::ComputeSim3()
         }
         else
         {
-            Sim3Solver* pSolver = new Sim3Solver(mpCurrentKF,pKF,vvpMapPointMatches[i],featureType, mbFixScale);
+            Sim3Solver* pSolver = new Sim3Solver(current_keyframe_,pKF,vvpMapPointMatches[i],featureType, mbFixScale);
             pSolver->set_ransac_parameters(0.99,20,300);
             vpSim3Solvers[i] = pSolver;
         }
@@ -319,7 +319,7 @@ bool LoopClosing::ComputeSim3()
             if(vbDiscarded[i])
                 continue;
 
-            Keyframe pKF = mvpEnoughConsistentCandidates[i];
+            Keyframe pKF = loop_candidates_[i];
 
             // Perform 5 Ransac Iterations
             vector<bool> vbInliers;
@@ -351,7 +351,7 @@ bool LoopClosing::ComputeSim3()
                 const float s = pSolver->GetEstimatedScale();
 
                 g2o::Sim3 gScm(R.cast<double>(),t.cast<double>(),s);
-                const int nInliers = Optimizer::OptimizeSim3(mpCurrentKF, pKF, vpMapPointMatches, gScm, 10, mbFixScale, featureType);
+                const int nInliers = Optimizer::OptimizeSim3(current_keyframe_, pKF, vpMapPointMatches, gScm, 10, mbFixScale, featureType);
 
                 // If optimization is succesful stop ransacs and continue
                 if(nInliers>=20)
@@ -372,8 +372,8 @@ bool LoopClosing::ComputeSim3()
     if(!bMatch)
     {
         for(int i=0; i<nInitialCandidates; i++)
-             mvpEnoughConsistentCandidates[i]->SetErase();
-        mpCurrentKF->SetErase();
+             loop_candidates_[i]->SetErase();
+        current_keyframe_->SetErase();
         return false;
     }
 
@@ -385,7 +385,7 @@ bool LoopClosing::ComputeSim3()
     for(vector<Keyframe>::iterator vit=vpLoopConnectedKFs.begin(); vit!=vpLoopConnectedKFs.end(); vit++)
     {
         Keyframe pKF = *vit;
-        map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs = matcher->match_keyframes(mpCurrentKF, pKF, feat_types);
+        map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs = matcher->match_keyframes(current_keyframe_, pKF, feat_types);
 
         vector<Pt> vpMapPoints = pKF->get_map_point_matches(featureType);
         for(size_t i=0, iend=vpMapPoints.size(); i<iend; i++)
@@ -393,10 +393,10 @@ bool LoopClosing::ComputeSim3()
             Pt pMP = vpMapPoints[i];
             if(pMP)
             {
-                if(!pMP->is_bad() && pMP->mnLoopPointForKF!=mpCurrentKF->keyId)
+                if(!pMP->is_bad() && pMP->mnLoopPointForKF!=current_keyframe_->keyId)
                 {
                     mvpLoopMapPoints.push_back(pMP);
-                    pMP->mnLoopPointForKF=mpCurrentKF->keyId;
+                    pMP->mnLoopPointForKF=current_keyframe_->keyId;
                     pt_to_keyframe_id[pMP->ptId] = pKF;
                 }
             }
@@ -404,7 +404,7 @@ bool LoopClosing::ComputeSim3()
     }
 
     // Find more matches projecting with the computed Sim3
-    matcher->search_by_projection_for_compute_sim3(mpCurrentKF, mScw,
+    matcher->search_by_projection_for_compute_sim3(current_keyframe_, mScw,
         mvpLoopMapPoints, mvpCurrentMatchedPoints, pt_to_keyframe_id);
 
     // If enough matches accept Loop
@@ -418,15 +418,15 @@ bool LoopClosing::ComputeSim3()
     if(nTotalMatches>=40)
     {
         for(int i=0; i<nInitialCandidates; i++)
-            if(mvpEnoughConsistentCandidates[i]!=mpMatchedKF)
-                mvpEnoughConsistentCandidates[i]->SetErase();
+            if(loop_candidates_[i]!=mpMatchedKF)
+                loop_candidates_[i]->SetErase();
         return true;
     }
     else
     {
         for(int i=0; i<nInitialCandidates; i++)
-            mvpEnoughConsistentCandidates[i]->SetErase();
-        mpCurrentKF->SetErase();
+            loop_candidates_[i]->SetErase();
+        current_keyframe_->SetErase();
         return false;
     }
 
@@ -462,15 +462,15 @@ void LoopClosing::CorrectLoop()
     }
 
     // Ensure current keyframe is updated
-    mpCurrentKF->update_connections();
+    current_keyframe_->update_connections();
 
     // Retrive keyframes connected to the current keyframe and compute corrected Sim3 pose by propagation
-    mvpCurrentConnectedKFs = mpCurrentKF->get_covisible_keyframes();
-    mvpCurrentConnectedKFs.push_back(mpCurrentKF);
+    mvpCurrentConnectedKFs = current_keyframe_->get_covisible_keyframes();
+    mvpCurrentConnectedKFs.push_back(current_keyframe_);
 
     KeyFrameAndPose CorrectedSim3, NonCorrectedSim3;
-    CorrectedSim3[mpCurrentKF]=mg2oScw;
-    mat4f Twc = mpCurrentKF->get_pose_inverse();
+    CorrectedSim3[current_keyframe_]=mg2oScw;
+    mat4f Twc = current_keyframe_->get_pose_inverse();
 
 
     {
@@ -483,7 +483,7 @@ void LoopClosing::CorrectLoop()
 
             mat4f Tiw = pKFi->get_pose();
 
-            if(pKFi!=mpCurrentKF)
+            if(pKFi!=current_keyframe_)
             {
                 mat4f Tic = Tiw * Twc;
                 mat3f Ric = Tic.block<3,3>(0,0);
@@ -518,7 +518,7 @@ void LoopClosing::CorrectLoop()
                     continue;
                 if(pMPi->is_bad())
                     continue;
-                if(pMPi->mnCorrectedByKF==mpCurrentKF->keyId)
+                if(pMPi->mnCorrectedByKF==current_keyframe_->keyId)
                     continue;
 
                 // Project with non-corrected pose and project back with corrected pose
@@ -527,7 +527,7 @@ void LoopClosing::CorrectLoop()
                 Eigen::Matrix<double,3,1> eigCorrectedP3Dw = g2oCorrectedSwi.map(g2oSiw.map(eigP3Dw));
 
                 pMPi->set_world_pos(eigCorrectedP3Dw.cast<float>());
-                pMPi->mnCorrectedByKF = mpCurrentKF->keyId;
+                pMPi->mnCorrectedByKF = current_keyframe_->keyId;
                 pMPi->mnCorrectedReference = pKFi->keyId;
                 pMPi->UpdateNormalAndDepth();
             }
@@ -554,13 +554,13 @@ void LoopClosing::CorrectLoop()
             if(mvpCurrentMatchedPoints[i])
             {
                 Pt pLoopMP = mvpCurrentMatchedPoints[i];
-                Pt pCurMP = mpCurrentKF->get_map_point(i, featureType);
+                Pt pCurMP = current_keyframe_->get_map_point(i, featureType);
                 if(pCurMP)
                     pCurMP->replace(pLoopMP);
                 else
                 {
-                    mpCurrentKF->add_map_point(pLoopMP,KeypointIndex (i));
-                    pLoopMP->add_observation(mpCurrentKF,KeypointIndex (i));
+                    current_keyframe_->add_map_point(pLoopMP,KeypointIndex (i));
+                    pLoopMP->add_observation(current_keyframe_,KeypointIndex (i));
                 }
             }
         }
@@ -595,24 +595,24 @@ void LoopClosing::CorrectLoop()
     }
 
     // Optimize graph
-    Optimizer::OptimizeEssentialGraph(mpMap, mpMatchedKF, mpCurrentKF, NonCorrectedSim3, CorrectedSim3, loopConnections, mbFixScale);
+    Optimizer::OptimizeEssentialGraph(mpMap, mpMatchedKF, current_keyframe_, NonCorrectedSim3, CorrectedSim3, loopConnections, mbFixScale);
 
     mpMap->InformNewBigChange();
 
     // Add loop edge
-    mpMatchedKF->AddLoopEdge(mpCurrentKF);
-    mpCurrentKF->AddLoopEdge(mpMatchedKF);
+    mpMatchedKF->AddLoopEdge(current_keyframe_);
+    current_keyframe_->AddLoopEdge(mpMatchedKF);
 
     // Launch a new thread to perform Global Bundle Adjustment
     mbRunningGBA = true;
     mbFinishedGBA = false;
     mbStopGBA = false;
-    mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this,mpCurrentKF->keyId);
+    mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this,current_keyframe_->keyId);
 
     // Loop closed. release Local Mapping.
     local_mapper_->release();
 
-    mLastLoopKFid = mpCurrentKF->keyId;
+    last_loop_keyframe_id_ = current_keyframe_->keyId;
 }
 
 void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap)
@@ -783,17 +783,17 @@ void LoopClosing::reset_if_requested()
         std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
         new_keyframes_.clear();
     }
-    mLastLoopKFid = 0;
+    last_loop_keyframe_id_ = 0;
 
     // Loop-detection state of the wiped map. Keyframe ids restart at 0 after a reset, so
     // stale consistency groups (keyed by id) could vote for the new map's first
     // candidates; the vectors would also keep the old map's keyframes and points alive.
-    mvConsistentGroups.clear();
-    mvpEnoughConsistentCandidates.clear();
+    consistent_groups_.clear();
+    loop_candidates_.clear();
     mvpCurrentConnectedKFs.clear();
     mvpCurrentMatchedPoints.clear();
     mvpLoopMapPoints.clear();
-    mpCurrentKF.reset();
+    current_keyframe_.reset();
     mpMatchedKF.reset();
 
     reset_requested_ = false;

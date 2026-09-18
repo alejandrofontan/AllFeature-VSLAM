@@ -52,6 +52,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     Optimizer::LoadParameters(fsSettings);
     Tracking::LoadParameters(fsSettings);
     LocalMapping::LoadParameters(fsSettings);
+    LoopClosing::LoadParameters(fsSettings);
     placecell_settings = PlaceCellSettings::Load(fsSettings);
 
     ////////////////////////////////////////////////////////////////////////////////

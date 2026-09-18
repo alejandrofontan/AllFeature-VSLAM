@@ -29,8 +29,11 @@
 
 #include "PlaceRecognition.h"
 
-#include <thread>
 #include <mutex>
+#include <thread>
+#include <vector>
+
+#include <opencv2/core/core.hpp>
 
 #include "g2o/types/types_seven_dof_expmap.h"
 
@@ -39,6 +42,24 @@ namespace AF_VSLAM
 
 class LocalMapping;
 class MapDrawer;
+
+// Same pattern as TrackingParameters/LocalMappingParameters: compiled-in defaults,
+// overridden only by keys present in the settings file, so settings YAMLs without a
+// LoopClosing.* block keep working unchanged.
+struct LoopClosingParameters
+{
+    // detect_loop()
+    int covisibility_consistency_threshold{3}; // a candidate's covisibility group must be seen in this many consecutive keyframes
+    int min_keyframes_between_loops{10};       // no loop detection for this many keyframes after a loop closure (and at the start of a map)
+};
+
+// A loop candidate's covisibility group (its id plus its connected keyframes' ids,
+// sorted) and the number of consecutive keyframes whose candidates hit it.
+struct ConsistentGroup
+{
+    std::vector<KeyframeId> keyframes;
+    int consistency{0};
+};
 
 class LoopConnections{
 public:
@@ -53,7 +74,6 @@ class LoopClosing
 {
 public:
 
-    typedef std::pair<std::map<KeyframeId,Keyframe>,int> ConsistentGroup;
     typedef map<Keyframe ,g2o::Sim3,std::less<Keyframe>,
             Eigen::aligned_allocator<std::pair<Keyframe const, g2o::Sim3> > > KeyFrameAndPose;
 
@@ -68,11 +88,15 @@ public:
         const bool bFixScale, const std::vector<FeatureType>& feat_types,
         int image_width, int image_height);
 
+    // Tunable parameters, loaded from the settings YAML at System startup
+    static LoopClosingParameters params;
+    static void LoadParameters(const cv::FileStorage& fSettings);
+
     // Main function
     void Run();
 
     // Keyframe queue, fed by LocalMapping (process_keyframe, after each keyframe's
-    // mapping iteration) and drained by Run() (DetectLoop). Without an active VPR
+    // mapping iteration) and drained by Run() (detect_loop). Without an active VPR
     // backend the thread never runs (System's constructor), so insert_keyframe drops
     // the keyframe instead of queueing it forever.
     void insert_keyframe(const Keyframe& keyframe);
@@ -109,7 +133,13 @@ public:
 
 protected:
 
-    bool DetectLoop();
+    // Loop detection, one queued keyframe per call: pops it into current_keyframe_,
+    // retrieves its loop candidates from the VPR backend, and keeps the ones whose
+    // covisibility group has been retrieved by consecutive keyframes
+    // (consistent_loop_candidates). True when loop_candidates_ is non-empty: ComputeSim3
+    // then verifies them geometrically. Every keyframe joins the VPR database here.
+    bool detect_loop();
+    std::vector<Keyframe> consistent_loop_candidates(const std::vector<Keyframe>& candidates);
 
     bool ComputeSim3();
 
@@ -143,21 +173,20 @@ protected:
     mutable std::mutex new_keyframes_mutex_;   // guards new_keyframes_
     std::list<Keyframe> new_keyframes_;
 
-    // Loop detector parameters
-    float mnCovisibilityConsistencyTh;
+    // Loop detector state (detect_loop): the keyframe being processed, the covisibility
+    // groups retrieved for the previous keyframe with their consistency counts, and the
+    // candidates that passed the consistency vote (input of ComputeSim3)
+    Keyframe current_keyframe_;
+    std::vector<ConsistentGroup> consistent_groups_;
+    std::vector<Keyframe> loop_candidates_;
+    KeyframeId last_loop_keyframe_id_{0};   // keyId of the last closed loop's keyframe
 
-    // Loop detector variables
-    Keyframe  mpCurrentKF;
     Keyframe  mpMatchedKF;
-    std::vector<ConsistentGroup> mvConsistentGroups;
-    std::vector<Keyframe> mvpEnoughConsistentCandidates;
     std::vector<Keyframe> mvpCurrentConnectedKFs;
     std::vector<Pt> mvpCurrentMatchedPoints;
     std::vector<Pt> mvpLoopMapPoints;
     mat4f mScw;
     g2o::Sim3 mg2oScw;
-
-    long unsigned int mLastLoopKFid;
 
     // Variables related to Global Bundle Adjustment
     bool mbRunningGBA;

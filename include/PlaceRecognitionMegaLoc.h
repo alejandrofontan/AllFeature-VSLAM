@@ -14,7 +14,7 @@
  * (Frame::global_descriptor holds that query). Retrieval is brute-force cosine
  * similarity over the keyframe database, followed by the same covisibility
  * accumulation and 0.75-of-best pruning classic ORB-SLAM2 applied to BoW scores, so
- * the consumers (Tracking::relocalize, LoopClosing::DetectLoop) see the same
+ * the consumers (Tracking::relocalize, LoopClosing::detect_loop) see the same
  * candidate semantics with a different similarity.
  *
  * keyframe_information() (Tracking::need_new_keyframe, every tracked frame) embeds the
@@ -81,7 +81,7 @@ public:
 
     float score(const KeyFrame& a, const KeyFrame& b) const override;
 
-    std::vector<Keyframe> detect_loop_candidates(const Keyframe& keyframe, float min_score) override;
+    std::vector<Keyframe> detect_loop_candidates(const Keyframe& keyframe) override;
     std::vector<Keyframe> detect_relocalization_candidates(Frame& frame) override;
     std::optional<KeyframeInformation> keyframe_information(Frame& frame, const std::vector<Keyframe>& window,
                                                             bool centred) override;

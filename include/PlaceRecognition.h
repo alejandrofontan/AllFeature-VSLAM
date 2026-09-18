@@ -84,12 +84,10 @@ public:
     // cosine in [-1,1] for MegaLoc). 0 if either is missing.
     virtual float score(const KeyFrame& a, const KeyFrame& b) const = 0;
 
-    // Loop candidates for a keyframe: not covisible with it, similar enough,
-    // accumulated over covisibility groups and pruned to the best ones. min_score is
-    // LoopClosing's adaptive reference (lowest similarity among the keyframe's
-    // covisibles), a calibration aid for backends with scene-dependent scores (the
-    // late BoW backend); MegaLoc ignores it (globally calibrated cosine, fixed floor).
-    virtual std::vector<Keyframe> detect_loop_candidates(const Keyframe& keyframe, float min_score) = 0;
+    // Loop candidates for a keyframe: not covisible with it, similar enough (the
+    // backend's own floor), accumulated over covisibility groups and pruned to the best
+    // ones. The keyframe is queried BEFORE LoopClosing adds it to the database.
+    virtual std::vector<Keyframe> detect_loop_candidates(const Keyframe& keyframe) = 0;
 
     // Relocalization candidates for a (lost) frame; compute(frame) must have run.
     virtual std::vector<Keyframe> detect_relocalization_candidates(Frame& frame) = 0;
@@ -134,7 +132,7 @@ public:
     void erase(const Keyframe&) override {}
     void clear() override {}
     float score(const KeyFrame&, const KeyFrame&) const override { return 0.0f; }
-    std::vector<Keyframe> detect_loop_candidates(const Keyframe&, float) override { return {}; }
+    std::vector<Keyframe> detect_loop_candidates(const Keyframe&) override { return {}; }
     std::vector<Keyframe> detect_relocalization_candidates(Frame&) override { return {}; }
     std::optional<KeyframeInformation> keyframe_information(Frame&, const std::vector<Keyframe>&, bool) override { return std::nullopt; }
 };
