@@ -57,13 +57,16 @@ public:
     Keyframe GetReferenceKeyFrame();
 
     std::map<KeyframeId,shared_ptr<Observation>> get_observations();
+
+    // Two observation counts. number_of_observations() is the WEIGHTED count the quality
+    // gates use (map-point culling, KeyFrame::tracked_map_points): an observation with
+    // sensor depth (RGB-D, inv_depth > 0) counts twice, see increasePointObservability.
+    // num_observing_keyframes() is the plain number of keyframes observing the point
+    // (EraseObservation's discard rule, BA edge sizing).
     int number_of_observations();
     int num_observing_keyframes();
     void increasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex);
     void decreasePointObservability(Keyframe projKeyframe, const KeypointIndex& projIndex);
-
-    Keyframe GetCurrentRefKeyframe();
-    void SetRefIndex(const KeypointIndex& refIndex_);
 
     void add_observation(Keyframe projKeyframe, const KeypointIndex& projIndex);
     void EraseObservation(Keyframe projKeyframe);
@@ -145,16 +148,23 @@ protected:
 
      // Best descriptor to fast matching
      cv::Mat mDescriptor;
-     Keyframe ref_keyframe;
-     KeypointIndex refIndex;
 
+     // Distance, keypoint size and sigma at the reference keyframe (UpdateNormalAndDepth);
+     // PredictSize/PredictSigma scale them to the current viewing distance
      float refDistance;
      float refSize;
      float refSigma;
      float minDistance;
      float maxDistance;
 
-     // Reference KeyFrame
+     // refSize is a constant, not the reference keypoint's own size as in stock ORB-SLAM2
+     // (kept deliberately, 2026-09-18: the size-independent projection-search radius is the
+     // tuned behaviour; re-evaluate with an A/B run before changing it)
+     static constexpr float reference_keypoint_size{1.5f};
+
+     // Reference keyframe: the creating keyframe, re-pointed to another observer when it
+     // stops observing the point (EraseObservation). The single source for the point's
+     // scale/normal reference and for the loop-closing / GBA corrections.
      Keyframe mpRefKF;
 
      // Tracking counters

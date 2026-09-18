@@ -43,10 +43,6 @@ MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, con
     // MapPoints can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
     unique_lock<mutex> lock(mpMap->mMutexPointCreation);
     ptId = nNextId++;
-
-    ref_keyframe = mpRefKF;
-    refIndex = -1;
-
 }
 
 void MapPoint::set_world_pos(const vec3f &XYZ_)
@@ -81,8 +77,7 @@ void MapPoint::add_observation(Keyframe projKeyframe,  const KeypointIndex& proj
         if(observations.count(projKeyframe->keyId))
             return;
 
-        observations[projKeyframe->keyId] = make_shared<Observation>(projKeyframe, projIndex,
-                                                                    ref_keyframe , refIndex);
+        observations[projKeyframe->keyId] = make_shared<Observation>(projKeyframe, projIndex);
         increasePointObservability(projKeyframe,projIndex);
     }
     ComputeDistinctiveDescriptors()->UpdateNormalAndDepth();
@@ -90,6 +85,7 @@ void MapPoint::add_observation(Keyframe projKeyframe,  const KeypointIndex& proj
 
 int MapPoint::num_observing_keyframes()
 {
+    unique_lock<mutex> lock(mMutexFeatures);
     return int(observations.size());
 }
 
@@ -108,14 +104,6 @@ void MapPoint::decreasePointObservability(Keyframe projKeyframe, const KeypointI
     else
         nObs--;
 }
-Keyframe MapPoint::GetCurrentRefKeyframe(){
-    return ref_keyframe;
-}
-
-void MapPoint::SetRefIndex(const KeypointIndex& refIndex_){
-    refIndex = refIndex_;
-}
-
 void MapPoint::EraseObservation(Keyframe projKeyframe)
 {
     bool removePoint = false;
@@ -138,8 +126,9 @@ void MapPoint::EraseObservation(Keyframe projKeyframe)
             if(mpRefKF->keyId == projKeyframe->keyId && !observations.empty())
                 mpRefKF = observations.begin()->second->projKeyframe;
 
-            // If only 2 observations or less, discard point
-            removePoint = (num_observing_keyframes() <= 2);
+            // If only 2 observations or less, discard point (mMutexFeatures is held: read the
+            // size directly, num_observing_keyframes() would re-lock)
+            removePoint = (observations.size() <= 2);
         }
     }
 
@@ -267,18 +256,13 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
     if(observations_tmp.empty())
         return thisPt();
 
-    vector<KeypointIndex> projIndexes{};
-    vector<Keyframe> projKeyframes{};
     vector<cv::Mat> descriptors;
     descriptors.reserve(observations_tmp.size());
     for(auto& obs: observations_tmp)
     {
         Keyframe projKeyframe = obs.second->projKeyframe;
-        if(!projKeyframe->is_bad()){
+        if(!projKeyframe->is_bad())
             descriptors.push_back(projKeyframe->descriptors.at(featureType).row(obs.second->projIndex));
-            projIndexes.push_back(obs.second->projIndex);
-            projKeyframes.push_back(projKeyframe);
-        }
     }
 
     if(descriptors.empty())
@@ -318,8 +302,6 @@ Pt MapPoint::ComputeDistinctiveDescriptors()
     {
         unique_lock<mutex> lock(mMutexFeatures);
         mDescriptor = descriptors[BestIdx].clone();
-        refIndex = projIndexes[BestIdx];
-        ref_keyframe = projKeyframes[BestIdx];
     }
     return thisPt();
 }
@@ -350,10 +332,10 @@ bool MapPoint::is_in_keyframe(Keyframe keyframe)
 
 void MapPoint::UpdateNormalAndDepth()
 {
-    map<KeyframeId , Obs> observations_tmp = get_observations();
-    if(observations_tmp.empty())
-        return;
-
+    // One snapshot of observations AND the reference keyframe: EraseObservation re-points
+    // mpRefKF concurrently, and indexing an older snapshot with the live reference used to
+    // default-construct a null observation (operator[]) and dereference it
+    map<KeyframeId , Obs> observations_tmp;
     Keyframe refKeyframe_;
     vec3f XYZ_;
     {
@@ -362,9 +344,17 @@ void MapPoint::UpdateNormalAndDepth()
         if(mbBad)
             return;
 
+        observations_tmp = observations;
         refKeyframe_ = mpRefKF;
         XYZ_ = XYZ;
     }
+    if(observations_tmp.empty())
+        return;
+
+    const auto ref_obs = observations_tmp.find(refKeyframe_->keyId);
+    if(ref_obs == observations_tmp.end())
+        return;
+    const KeypointIndex keyPtIdx = ref_obs->second->projIndex;
 
     vec3f normal{vec3f::Zero()};
     int n = 0;
@@ -379,14 +369,13 @@ void MapPoint::UpdateNormalAndDepth()
 
     vec3f PC = XYZ_ - refKeyframe_->get_camera_center();
     const float dist = PC.norm();
-    const float levelScaleFactor =  refKeyframe_->GetKeyPtSize(observations_tmp[refKeyframe_->keyId]->projIndex, featureType);
+    const float levelScaleFactor = refKeyframe_->GetKeyPtSize(keyPtIdx, featureType);
 
-    KeypointIndex keyPtIdx = observations_tmp[refKeyframe_->keyId]->projIndex;
     {
         unique_lock<mutex> lock3(mMutexPos);
 
         refDistance = dist;
-        refSize  = 1.5; // refKeyframe_->GetKeyPtSize(keyPtIdx, featureType);
+        refSize  = reference_keypoint_size;
         refSigma = refKeyframe_->GetKeyPt1DSigma(keyPtIdx, featureType);
 
         maxDistance = dist * levelScaleFactor;

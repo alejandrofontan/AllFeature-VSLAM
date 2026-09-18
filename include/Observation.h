@@ -16,18 +16,11 @@ namespace AF_VSLAM {
     public:
         Observation() = default;
 
-        Observation(Keyframe projKeyframe, const KeypointIndex &projIndex,
-                    Keyframe ref_keyframe , const KeypointIndex &refIndex);
+        Observation(Keyframe projKeyframe, const KeypointIndex &projIndex);
 
-        // Observations are matched respect to a reference keyframe and projected to a projection keyframe
-        // ref : reference keyframe
-        // proj : projection keyframe
-
+        // The keyframe observing the map point and the index of its keypoint there
         Keyframe projKeyframe{};
         KeypointIndex projIndex{};
-
-        Keyframe ref_keyframe{};
-        KeypointIndex refIndex{};
     };
 
     typedef shared_ptr<Observation> Obs;

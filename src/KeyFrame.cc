@@ -248,28 +248,31 @@ void KeyFrame::add_map_point(Pt pt, const KeypointIndex& index)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     mvpMapPoints[pt->featureType][index] = pt;
-
-    if (keyId == pt->GetCurrentRefKeyframe()->keyId)
-        pt->SetRefIndex(index);
 }
 
 void KeyFrame::EraseMapPointMatch(const size_t &idx, const FeatureType& featType)
 {
     unique_lock<mutex> lock(mMutexFeatures);
-    mvpMapPoints[featType][idx]=static_cast<Pt>(NULL);
+    mvpMapPoints[featType][idx] = nullptr;
 }
 
 void KeyFrame::EraseMapPointMatch(Pt pMP)
 {
-    int idx = pMP->GetIndexInKeyFrame(thisKeyframe());
-    if(idx>=0)
-        mvpMapPoints[pMP->featureType][idx]=static_cast<Pt>(NULL);
+    // The point's own lock is taken by GetIndexInKeyFrame, before ours (keyframe -> point
+    // is the lock order everywhere else in this class)
+    const int idx = pMP->GetIndexInKeyFrame(thisKeyframe());
+    if(idx < 0)
+        return;
+    unique_lock<mutex> lock(mMutexFeatures);
+    mvpMapPoints[pMP->featureType][idx] = nullptr;
 }
-
 
 void KeyFrame::ReplaceMapPointMatch(const size_t &idx, Pt pMP)
 {
-    mvpMapPoints[pMP->featureType][idx]=pMP;
+    // Runs on the local-mapping thread (MapPoint::replace, fusion) while Tracking reads the
+    // same vectors: a torn shared_ptr write racing a copy corrupts the refcount
+    unique_lock<mutex> lock(mMutexFeatures);
+    mvpMapPoints[pMP->featureType][idx] = pMP;
 }
 
 set<Pt> KeyFrame::get_map_points(const FeatureType& featType)
@@ -325,6 +328,7 @@ vector<Pt> KeyFrame::get_map_point_matches(const FeatureType& feat_type)
 
 Pt KeyFrame::get_map_point(const size_t &idx, const FeatureType& featType)
 {
+    unique_lock<mutex> lock(mMutexFeatures);
     return mvpMapPoints.at(featType)[idx];
 }
 
@@ -506,29 +510,45 @@ void KeyFrame::set_bad_flag()
         }
     }
 
-    for(auto& connectedKeyFrame: connectedKeyFrames)
-        connectedKeyFrame.second->EraseConnection(thisKeyframe());
-
-    for (auto const& [ft, mapPoints] : mvpMapPoints) {
-        for(size_t i = 0; i < mapPoints.size(); i++){
-            if(mapPoints[i]){
-                mapPoints[i]->EraseObservation(thisKeyframe());
-            }
-        }
+    // Snapshots: other threads mutate both containers (update_connections, add_map_point)
+    // while the erase calls below run without our locks -- and those calls lock the other
+    // keyframes / the points, so they cannot run under ours
+    std::map<KeyframeId, Keyframe> connected;
+    std::map<FeatureType, std::vector<Pt>> map_points;
+    {
+        unique_lock<mutex> lock(mMutexConnections);
+        connected = connectedKeyFrames;
     }
+    {
+        unique_lock<mutex> lock(mMutexFeatures);
+        map_points = mvpMapPoints;
+    }
+
+    for(const auto& [id, keyframe] : connected)
+        keyframe->EraseConnection(thisKeyframe());
+
+    for(const auto& [ft, points] : map_points)
+        for(const Pt& point : points)
+            if(point)
+                point->EraseObservation(thisKeyframe());
 
     {
         unique_lock<mutex> lock(mMutexConnections);
         unique_lock<mutex> lock1(mMutexFeatures);
 
+        // connectedKeyFrames used to be left behind (the weights map was cleared twice
+        // instead), pinning every neighbour of a culled keyframe
         connectedKeyFrameWeights.clear();
+        connectedKeyFrames.clear();
         orderedConnectedKeyFrames.clear();
-        connectedKeyFrameWeights.clear();
         orderedWeights.clear();
 
-        // Update Spanning Tree
+        // Update Spanning Tree. A keyframe culled before its first update_connections has no
+        // parent (this fork culls far more aggressively than stock); its children then keep
+        // their parent pointer to this keyframe instead of being re-hung
         KeyframeIdSet sParentCandidates;
-        sParentCandidates.insert(mpParent);
+        if(mpParent)
+            sParentCandidates.insert(mpParent);
 
         // Assign at each iteration one children with a parent (the pair with highest covisibility weight)
         // Include that children as new parent candidate for the rest
@@ -578,13 +598,12 @@ void KeyFrame::set_bad_flag()
         }
 
         // If a children has no covisibility links with any parent candidate, assign to the original parent of this KF
-        if(!mspChildrens.empty())
-            for(auto sit=mspChildrens.begin(); sit!=mspChildrens.end(); sit++)
-            {
-                (*sit)->ChangeParent(mpParent);
-            }
-
-        mpParent->EraseChild(thisKeyframe());
+        if(mpParent)
+        {
+            for(const Keyframe& child : mspChildrens)
+                child->ChangeParent(mpParent);
+            mpParent->EraseChild(thisKeyframe());
+        }
         mbBad = true;
     }
 
@@ -691,6 +710,11 @@ float KeyFrame::compute_scene_median_depth(const int q)
             }
         }
     }
+    // No map points (a fresh or heavily culled keyframe): -1, which every caller treats as
+    // "skip" -- (size-1)/q would underflow and index out of bounds
+    if(vDepths.empty())
+        return -1.0f;
+
     // nth_element places exactly the element sort() would put at this position — O(n) not
     // O(n log n), and this runs once per covisible neighbor in CreateNewMapPoints.
     const size_t nth = (vDepths.size()-1)/q;
