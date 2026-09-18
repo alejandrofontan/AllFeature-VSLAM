@@ -134,7 +134,7 @@ public:
     Eigen::VectorXf global_descriptor;
 
     // Feature extractors, one per feature type.
-    std::map<FeatureType, shared_ptr<FeatureExtractor>> featureExtractorLeft;
+    std::map<FeatureType, shared_ptr<FeatureExtractor>> feature_extractors;
 
     // Frame timestamp.
     double timestamp{0.0};
@@ -163,12 +163,12 @@ public:
     float mThDepth{0.0f};
 
     // Number of KeyPoints.
-    int Ntotal{0};
+    int num_keypoints_total{0};
     std::map<FeatureType, int> N;
 
     // Keypoints as extracted (distorted pixel coordinates: visualization, and the index
     // into the depth/color images) and undistorted (what the system works with).
-    std::map<FeatureType, std::vector<cv::KeyPoint>> mvKeys;
+    std::map<FeatureType, std::vector<cv::KeyPoint>> raw_keypoints;
     std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
 
     // Inverse depth (1/depth) per keypoint, from the RGB-D sensor's depth image.
@@ -177,7 +177,7 @@ public:
 
     // Variance of inv_depth, from a quadratic depth-sensor noise model (sigma_depth = k*depth^2,
     // standard for RGB-D/ToF sensors) propagated through inv_depth=1/depth. 0 wherever inv_depth is 0.
-    std::map<FeatureType, std::vector<float>> sigma2invDepth;
+    std::map<FeatureType, std::vector<float>> sigma2_inv_depth;
 
     // Image color (OpenCV-native BGR) under each keypoint, sampled once at construction. The
     // only place a pixel is ever read for a keypoint: the image is not retained afterwards
@@ -196,23 +196,23 @@ public:
     std::map<FeatureType,std::vector<bool>> outliers;
 
     // Keypoints are assigned to cells in a grid to reduce matching complexity when projecting MapPoints.
-    static float mfGridElementWidthInv;
-    static float mfGridElementHeightInv;
+    static float grid_element_width_inv;
+    static float grid_element_height_inv;
     using Grid = std::array<std::array<std::vector<std::size_t>, FRAME_GRID_ROWS>, FRAME_GRID_COLS>;   // [col][row]
-    std::map<FeatureType, Grid> mGrid;
+    std::map<FeatureType, Grid> grid;
 
     // Camera pose.
     mat4f Tcw{mat4f::Zero()};
 
     // Current and Next Frame id.
-    static long unsigned int nNextId;
+    static long unsigned int next_id;
     FrameId frame_id{0};
 
     // Reference Keyframe.
     Keyframe ref_keyframe;
 
     // Scale pyramid info.
-    float sizeTolerance{};
+    float size_tolerance{};
     std::map<FeatureType, vector<mat2f>> keyPtsSigma2{};
     std::map<FeatureType, vector<mat2f>> keyPtsInf{};
     std::map<FeatureType, vector<float>> keyPtsSize{};
@@ -220,12 +220,12 @@ public:
     float maxKeyPtSigma{};
 
     // Undistorted Image Bounds (computed once).
-    static float mnMinX;
-    static float mnMaxX;
-    static float mnMinY;
-    static float mnMaxY;
+    static float min_x;
+    static float max_x;
+    static float min_y;
+    static float max_y;
 
-    static bool mbInitialComputations;
+    static bool initial_computations;
 
 private:
 
@@ -234,7 +234,7 @@ private:
     // (called in the constructor).
     void undistort_keypoints();
 
-    // Populate inv_depth (and sigma2invDepth) by sampling img.depthImg at each keypoint's (distorted)
+    // Populate inv_depth (and sigma2_inv_depth) by sampling img.depthImg at each keypoint's (distorted)
     // pixel coordinates, matching how the depth image itself is indexed (called in the constructor).
     void get_depth(const Image& img);
 

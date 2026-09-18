@@ -346,10 +346,10 @@ bool LoopClosing::search_loop_map_points()
 
         for(const Pt& point : keyframe->get_map_point_matches(verification_feature_))
         {
-            if(!point || point->is_bad() || point->mnLoopPointForKF == current_keyframe_->keyId)
+            if(!point || point->is_bad() || point->loop_point_for_keyframe == current_keyframe_->keyId)
                 continue;
             loop_map_points_.push_back(point);
-            point->mnLoopPointForKF = current_keyframe_->keyId;   // collected once per loop
+            point->loop_point_for_keyframe = current_keyframe_->keyId;   // collected once per loop
             point_keyframe[point->ptId] = keyframe;
         }
     }
@@ -446,12 +446,12 @@ void LoopClosing::correct_loop()
             {
                 for(const Pt& point : keyframe->get_map_point_matches(feature_type))
                 {
-                    if(!point || point->is_bad() || point->mnCorrectedByKF == current_keyframe_->keyId)
+                    if(!point || point->is_bad() || point->corrected_by_keyframe == current_keyframe_->keyId)
                         continue;
                     const Eigen::Vector3d corrected = g2o_corrected_Swi.map(g2o_Siw.map(point->get_world_pos().cast<double>()));
                     point->set_world_pos(corrected.cast<float>());
-                    point->mnCorrectedByKF = current_keyframe_->keyId;
-                    point->mnCorrectedReference = keyframe->keyId;
+                    point->corrected_by_keyframe = current_keyframe_->keyId;
+                    point->corrected_reference = keyframe->keyId;
                     point->update_normal_and_depth();
                 }
             }
@@ -611,17 +611,17 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
         const mat4f Twc = keyframe->get_pose_inverse();
         for(const Keyframe& child : keyframe->get_children())
         {
-            if(child->mnBAGlobalForKF != loop_keyframe_id)
+            if(child->ba_global_for_keyframe != loop_keyframe_id)
             {
                 const mat4f Tchild_parent = child->get_pose() * Twc;
-                child->TcwGBA = Tchild_parent * keyframe->TcwGBA;
-                child->mnBAGlobalForKF = loop_keyframe_id;
+                child->Tcw_gba = Tchild_parent * keyframe->Tcw_gba;
+                child->ba_global_for_keyframe = loop_keyframe_id;
             }
             pending.push_back(child);
         }
 
-        keyframe->TcwBefGBA = keyframe->get_pose();
-        keyframe->set_pose(keyframe->TcwGBA);
+        keyframe->Tcw_before_gba = keyframe->get_pose();
+        keyframe->set_pose(keyframe->Tcw_gba);
     }
 
     // Map points: optimized ones take their BA position, the others follow their reference keyframe
@@ -630,18 +630,18 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
         if(point->is_bad())
             continue;
 
-        if(point->mnBAGlobalForKF == loop_keyframe_id)
+        if(point->ba_global_for_keyframe == loop_keyframe_id)
         {
-            point->set_world_pos(point->PosGBA);
+            point->set_world_pos(point->position_gba);
             continue;
         }
 
         const Keyframe reference = point->get_reference_keyframe();
-        if(reference->mnBAGlobalForKF != loop_keyframe_id)
+        if(reference->ba_global_for_keyframe != loop_keyframe_id)
             continue;
 
         // Un-project with the reference's pose before the BA, re-project with the corrected one
-        const mat4f& Tcw = reference->TcwBefGBA;
+        const mat4f& Tcw = reference->Tcw_before_gba;
         const vec3f Xc = Tcw.block<3,3>(0,0) * point->get_world_pos() + Tcw.block<3,1>(0,3);
         const mat4f Twc = reference->get_pose_inverse();
         point->set_world_pos(Twc.block<3,3>(0,0) * Xc + Twc.block<3,1>(0,3));

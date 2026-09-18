@@ -805,7 +805,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f&
         for(const size_t idx : vIndices)
         {
             //const float keyPtSize = pKF->get_keypoint_size(KeypointIndex (idx), featType);
-            //if((keyPtSize < predictedSize / pKF->sizeTolerance) || (keyPtSize > predictedSize * pKF->sizeTolerance))
+            //if((keyPtSize < predictedSize / pKF->size_tolerance) || (keyPtSize > predictedSize * pKF->size_tolerance))
             //    continue;
 
             const cv::Mat &descriptor = keyframe->descriptors.at(feat_type).row(idx);
@@ -878,9 +878,9 @@ int FeatureMatcher::search_by_projection(Frame &CurrentFrame, Keyframe pKF, cons
                 const float u = CurrentFrame.fx*xc*invzc+CurrentFrame.cx;
                 const float v = CurrentFrame.fy*yc*invzc+CurrentFrame.cy;
 
-                if(u<CurrentFrame.mnMinX || u>CurrentFrame.mnMaxX)
+                if(u<CurrentFrame.min_x || u>CurrentFrame.max_x)
                     continue;
-                if(v<CurrentFrame.mnMinY || v>CurrentFrame.mnMaxY)
+                if(v<CurrentFrame.min_y || v>CurrentFrame.max_y)
                     continue;
 
                 // Compute predicted scale level

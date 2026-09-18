@@ -210,9 +210,9 @@ void FrameDrawer::update(Tracking *pTracker)
     pTracker->gray_image_.copyTo(mIm);
     pTracker->mask_image_.copyTo(mMask);
     imName = pTracker->image_name_;
-    mvCurrentKeys = pTracker->current_frame_.mvKeys;
-    for (auto const& [featType, mvKeys] : mvCurrentKeys) {
-        N[featType] = mvKeys.size();
+    mvCurrentKeys = pTracker->current_frame_.raw_keypoints;
+    for (auto const& [featType, raw_keypoints] : mvCurrentKeys) {
+        N[featType] = raw_keypoints.size();
         mvbVO[featType] = vector<bool>(N[featType],false);
         mvbMap[featType] = vector<bool>(N[featType],false);
     }
@@ -220,7 +220,7 @@ void FrameDrawer::update(Tracking *pTracker)
 
     if(pTracker->last_processed_state_==TrackingState::NOT_INITIALIZED)
     {
-        mvIniKeys = pTracker->initial_frame_.mvKeys;
+        mvIniKeys = pTracker->initial_frame_.raw_keypoints;
         matches_per_feature_ = pTracker->matches_per_feature_;
     }
     else if(pTracker->last_processed_state_==TrackingState::OK)

@@ -162,29 +162,29 @@ public:
     std::map<FrameId, std::vector<cv::DMatch>> cache_matched_pairs{};
     std::map<FrameId, std::map<FeatureType, std::vector<cv::DMatch>>> cache_matched_pairs_feat_type{};
 
-    static long unsigned int nNextId;
+    static long unsigned int next_id;
     KeyframeId keyId;
     const long unsigned int frame_id;
 
     const double timestamp;
 
     // Grid (to speed up feature matching)
-    const int mnGridCols;
-    const int mnGridRows;
-    const float mfGridElementWidthInv;
-    const float mfGridElementHeightInv;
+    const int grid_cols;
+    const int grid_rows;
+    const float grid_element_width_inv;
+    const float grid_element_height_inv;
 
     // Variables used by the tracking
-    long unsigned int mnFuseTargetForKF;
+    long unsigned int fuse_target_for_keyframe;
 
     // Variables used by the local mapping
-    long unsigned int mnBALocalForKF;
-    long unsigned int mnBAFixedForKF;
+    long unsigned int ba_local_for_keyframe;
+    long unsigned int ba_fixed_for_keyframe;
 
     // Variables used by loop closing
-    mat4f TcwGBA;
-    mat4f TcwBefGBA;
-    long unsigned int mnBAGlobalForKF;
+    mat4f Tcw_gba;
+    mat4f Tcw_before_gba;
+    long unsigned int ba_global_for_keyframe;
 
     // Calibration parameters
     const float fx, fy, cx, cy, invfx, invfy, mbf, mb, mThDepth;
@@ -193,10 +193,10 @@ public:
     const std::map<FeatureType, int> N;
 
     // KeyPoints, stereo coordinate and descriptors (all associated by an index)
-    const std::map<FeatureType, std::vector<cv::KeyPoint>> mvKeys;
+    const std::map<FeatureType, std::vector<cv::KeyPoint>> raw_keypoints;
     const std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
     const std::map<FeatureType, std::vector<float>> inv_depth; // inverse depth; 0 where no valid depth
-    const std::map<FeatureType, std::vector<float>> sigma2invDepth; // variance of inv_depth; 0 where no valid depth
+    const std::map<FeatureType, std::vector<float>> sigma2_inv_depth; // variance of inv_depth; 0 where no valid depth
     const std::map<FeatureType, std::vector<cv::Vec3b>> keypoint_colors; // BGR under each keypoint (Frame::get_colors); map points created here inherit it
     std::map<FeatureType, cv::Mat> descriptors;
 
@@ -212,7 +212,7 @@ public:
     Eigen::VectorXf global_descriptor;
 
     // Scale
-    float sizeTolerance{};
+    float size_tolerance{};
     std::map<FeatureType, vector<mat2f>> keyPtsSigma2{};
     std::map<FeatureType, vector<mat2f>> keyPtsInf{};
     std::map<FeatureType, vector<float>> keyPtsSize{};
@@ -220,10 +220,10 @@ public:
     float maxKeyPtSigma{};
 
     // Image bounds and calibration
-    const int mnMinX;
-    const int mnMinY;
-    const int mnMaxX;
-    const int mnMaxY;
+    const int min_x;
+    const int min_y;
+    const int max_x;
+    const int max_y;
 
     const cv::Mat mK;
 
@@ -236,37 +236,37 @@ protected:
     vec3f twc;
 
     // MapPoints associated to keypoints
-    std::map<FeatureType, std::vector<Pt>> mvpMapPoints;
+    std::map<FeatureType, std::vector<Pt>> map_points_;
 
     // Visual place recognition backend (owns the keyframe database this keyframe is
     // registered in; erased from it in set_bad_flag)
     shared_ptr<PlaceRecognition> place_recognition_;
 
     // Grid over the image to speed up feature matching
-    std::map<FeatureType, std::vector< std::vector <std::vector<size_t>>>> mGrid;
+    std::map<FeatureType, std::vector< std::vector <std::vector<size_t>>>> grid_;
 
-    std::map<KeyframeId, Keyframe> connectedKeyFrames;
-    std::map<KeyframeId,int> connectedKeyFrameWeights;
-    std::vector<Keyframe> orderedConnectedKeyFrames;
-    std::vector<int> orderedWeights;
+    std::map<KeyframeId, Keyframe> connected_keyframes_;
+    std::map<KeyframeId,int> connected_keyframe_weights_;
+    std::vector<Keyframe> ordered_connected_keyframes_;
+    std::vector<int> ordered_weights_;
 
     // Spanning Tree and Loop Edges
-    bool mbFirstConnection;
-    Keyframe mpParent;
-    KeyframeIdSet mspChildrens;
-    KeyframeIdSet mspLoopEdges;
+    bool first_connection_;
+    Keyframe parent_;
+    KeyframeIdSet children_;
+    KeyframeIdSet loop_edges_;
 
     // Bad flags
-    bool mbNotErase;
-    bool mbToBeErased;
-    bool mbBad;
+    bool not_erase_;
+    bool to_be_erased_;
+    bool bad_;
 
-    shared_ptr<Map> mpMap;
+    shared_ptr<Map> map_;
 
     // mutable: pure queries lock them and stay const
-    mutable std::mutex mMutexPose;
-    mutable std::mutex mMutexConnections;
-    mutable std::mutex mMutexFeatures;
+    mutable std::mutex pose_mutex_;
+    mutable std::mutex connections_mutex_;
+    mutable std::mutex features_mutex_;
 };
 
 inline bool KeyframeIdLess::operator()(const Keyframe& a, const Keyframe& b) const

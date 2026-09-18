@@ -69,13 +69,13 @@ void Optimizer::LoadParameters(const cv::FileStorage &fSettings)
 }
 
 // Per-observation information (1/variance) for the RGB-D inverse-depth residual, from
-// Frame/KeyFrame::sigma2invDepth (Frame::get_depth's quadratic depth-noise model) instead of the
+// Frame/KeyFrame::sigma2_inv_depth (Frame::get_depth's quadratic depth-noise model) instead of the
 // single global params.invDepthInfo placeholder every observation used to share. Falls back to
 // that placeholder if sigma2 is non-positive -- shouldn't happen in practice, since Frame::get_depth
-// always sets sigma2invDepth alongside inv_depth, but keeps this safe if that invariant ever breaks.
-static double RGBDInvDepthInformation(float sigma2invDepth)
+// always sets sigma2_inv_depth alongside inv_depth, but keeps this safe if that invariant ever breaks.
+static double RGBDInvDepthInformation(float sigma2_inv_depth)
 {
-    return sigma2invDepth > 0.0f ? 1.0 / sigma2invDepth : Optimizer::params.invDepthInfo;
+    return sigma2_inv_depth > 0.0f ? 1.0 / sigma2_inv_depth : Optimizer::params.invDepthInfo;
 }
 
 // Builds and registers a binary (point + pose) g2o edge shared by the mono/RGBD
@@ -249,7 +249,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
                 Eigen::Matrix<double,3,1> obs3D;
                 obs3D << kpUn.pt.x, kpUn.pt.y, invDepth_i;
 
-                const float sigma2invDepth_i = pKF->sigma2invDepth.at(featType)[obs.second->projIndex];
+                const float sigma2invDepth_i = pKF->sigma2_inv_depth.at(featType)[obs.second->projIndex];
                 mat3f infMat = mat3f::Zero();
                 infMat.block<2,2>(0,0) = pKF->get_keypoint_information_2d(obs.second->projIndex, featType);
                 infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepth_i));
@@ -299,8 +299,8 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
         }
         else
         {
-            pKF->TcwGBA = Converter::to_matrix4f(SE3quat);
-            pKF->mnBAGlobalForKF = nLoopKF;
+            pKF->Tcw_gba = Converter::to_matrix4f(SE3quat);
+            pKF->ba_global_for_keyframe = nLoopKF;
         }
     }
 
@@ -324,8 +324,8 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
         }
         else
         {
-            pMP->PosGBA = vPoint->estimate().cast<float>();
-            pMP->mnBAGlobalForKF = nLoopKF;
+            pMP->position_gba = vPoint->estimate().cast<float>();
+            pMP->ba_global_for_keyframe = nLoopKF;
         }
     }
 
@@ -425,12 +425,12 @@ int Optimizer::pose_optimization(Frame *pFrame, const bool useDepthChannel)
     }
 
     {
-    unique_lock<mutex> lock(MapPoint::mGlobalMutex);
+    unique_lock<mutex> lock(MapPoint::global_mutex);
     for (auto& [ft, pts] : pFrame->pts) {
         const int N_ft = pFrame->N.at(ft);
         const auto& keypointsFt = pFrame->keypoints.at(ft);
         const auto& invDepthFt = pFrame->inv_depth.at(ft);
-        const auto& sigma2invDepthFt = pFrame->sigma2invDepth.at(ft);
+        const auto& sigma2invDepthFt = pFrame->sigma2_inv_depth.at(ft);
         auto& edgesMonoFt = vpEdgesMono.at(ft);
         auto& idxMonoFt = vnIndexEdgeMono.at(ft);
         auto& edgesRGBDFt = vpEdgesRGBD.at(ft);
@@ -589,14 +589,14 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
     list<Keyframe> lLocalKeyFrames;
 
     lLocalKeyFrames.push_back(pKF);
-    pKF->mnBALocalForKF = pKF->keyId;
+    pKF->ba_local_for_keyframe = pKF->keyId;
 
     vector<Keyframe> vNeighKFs = pKF->get_best_covisibility_keyframes(10);
 
     for(int i=0, iend=vNeighKFs.size(); i<iend; i++)
     {
         Keyframe pKFi = vNeighKFs[i];
-        pKFi->mnBALocalForKF = pKF->keyId;
+        pKFi->ba_local_for_keyframe = pKF->keyId;
         if(!pKFi->is_bad())
             lLocalKeyFrames.push_back(pKFi);
     }
@@ -612,10 +612,10 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
                 Pt pMP = *vit;
                 if(pMP)
                     if(!pMP->is_bad())
-                        if(pMP->mnBALocalForKF!=pKF->keyId)
+                        if(pMP->ba_local_for_keyframe!=pKF->keyId)
                         {
                             llocalPts.push_back(pMP);
-                            pMP->mnBALocalForKF=pKF->keyId;
+                            pMP->ba_local_for_keyframe=pKF->keyId;
                         }
             }
         }
@@ -630,9 +630,9 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
         {
             Keyframe pKFi = obs.second->projKeyframe;
 
-            if(pKFi->mnBALocalForKF!=pKF->keyId && pKFi->mnBAFixedForKF != pKF->keyId)
+            if(pKFi->ba_local_for_keyframe!=pKF->keyId && pKFi->ba_fixed_for_keyframe != pKF->keyId)
             {
-                pKFi->mnBAFixedForKF=pKF->keyId;
+                pKFi->ba_fixed_for_keyframe=pKF->keyId;
                 if(!pKFi->is_bad())
                     lFixedCameras.push_back(pKFi);
             }
@@ -715,7 +715,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
                     Eigen::Matrix<double,3,1> obs3D;
                     obs3D << kpUn.pt.x, kpUn.pt.y, invDepth_i;
 
-                    const float sigma2invDepth_i = pKFi->sigma2invDepth.at(featType)[obs.second->projIndex];
+                    const float sigma2invDepth_i = pKFi->sigma2_inv_depth.at(featType)[obs.second->projIndex];
                     mat3f infMat = mat3f::Zero();
                     infMat.block<2,2>(0,0) = pKFi->get_keypoint_information_2d(obs.second->projIndex, featType);
                     infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepth_i));
@@ -1040,9 +1040,9 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
             continue;
 
         int nIDr;
-        if(pMP->mnCorrectedByKF==pCurKF->keyId)
+        if(pMP->corrected_by_keyframe==pCurKF->keyId)
         {
-            nIDr = pMP->mnCorrectedReference;
+            nIDr = pMP->corrected_reference;
         }
         else
         {

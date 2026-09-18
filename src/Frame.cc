@@ -33,21 +33,21 @@
 namespace AF_VSLAM
 {
 
-long unsigned int Frame::nNextId=0;
-bool Frame::mbInitialComputations=true;
+long unsigned int Frame::next_id=0;
+bool Frame::initial_computations=true;
 float Frame::cx, Frame::cy, Frame::fx, Frame::fy, Frame::invfx, Frame::invfy;
-float Frame::mnMinX, Frame::mnMinY, Frame::mnMaxX, Frame::mnMaxY;
-float Frame::mfGridElementWidthInv, Frame::mfGridElementHeightInv;
+float Frame::min_x, Frame::min_y, Frame::max_x, Frame::max_y;
+float Frame::grid_element_width_inv, Frame::grid_element_height_inv;
 
 Frame::Frame(const Image & img, const double &timeStamp,
              const std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
              shared_ptr<PlaceRecognition> place_recognition, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth)
     :place_recognition(place_recognition),
-    featureExtractorLeft(extractor),
+    feature_extractors(extractor),
     timestamp(timeStamp), mK(K.clone()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
 {
     // Frame ID
-    frame_id = nNextId++;
+    frame_id = next_id++;
     w = img.img.cols;
     h = img.img.rows;
 
@@ -57,11 +57,11 @@ Frame::Frame(const Image & img, const double &timeStamp,
         image = img.img;
 
     // Scale Level Info (assumes every feature type shares the same pyramid scale factor)
-    sizeTolerance = featureExtractorLeft.begin()->second->GetScaleFactor();
+    size_tolerance = feature_extractors.begin()->second->GetScaleFactor();
 
     // Feature extraction
     extract_features(0, img);
-    if(Ntotal == 0)
+    if(num_keypoints_total == 0)
         return;
 
     undistort_keypoints();
@@ -75,12 +75,12 @@ Frame::Frame(const Image & img, const double &timeStamp,
     }
 
     // This is done only for the first Frame (or after a change in the calibration)
-    if(mbInitialComputations)
+    if(initial_computations)
     {
         compute_image_bounds(img.grayImg);
 
-        mfGridElementWidthInv = static_cast<float>(FRAME_GRID_COLS) / static_cast<float>(mnMaxX - mnMinX);
-        mfGridElementHeightInv = static_cast<float>(FRAME_GRID_ROWS) / static_cast<float>(mnMaxY - mnMinY);
+        grid_element_width_inv = static_cast<float>(FRAME_GRID_COLS) / static_cast<float>(max_x - min_x);
+        grid_element_height_inv = static_cast<float>(FRAME_GRID_ROWS) / static_cast<float>(max_y - min_y);
 
         fx = K.at<float>(0,0);
         fy = K.at<float>(1,1);
@@ -89,7 +89,7 @@ Frame::Frame(const Image & img, const double &timeStamp,
         invfx = 1.0f / fx;
         invfy = 1.0f / fy;
 
-        mbInitialComputations = false;
+        initial_computations = false;
     }
 
     mb = mbf / fx;
@@ -104,7 +104,7 @@ void Frame::assign_features_to_grid()
 
         for(unsigned int i=0; i<FRAME_GRID_COLS;i++){
             for (unsigned int j=0; j<FRAME_GRID_ROWS;j++){
-                mGrid[ft][i][j].reserve(nReserve);
+                grid[ft][i][j].reserve(nReserve);
             }
         }
 
@@ -113,7 +113,7 @@ void Frame::assign_features_to_grid()
             const cv::KeyPoint &kp = keypoints.at(ft)[i];
             int nGridPosX, nGridPosY;
             if(pos_in_grid(kp,nGridPosX,nGridPosY)){
-                mGrid[ft][nGridPosX][nGridPosY].push_back(i);
+                grid[ft][nGridPosX][nGridPosY].push_back(i);
             }
         }
     }
@@ -122,12 +122,12 @@ void Frame::assign_features_to_grid()
 void Frame::extract_features(int, const Image& img)
 {
     featureTypes.clear();
-    Ntotal = 0;
+    num_keypoints_total = 0;
 
     // 1) Stable job list
     std::vector<std::pair<FeatureType, shared_ptr<FeatureExtractor>>> jobs;
-    jobs.reserve(featureExtractorLeft.size());
-    for (auto& [ft, extractor] : featureExtractorLeft) {
+    jobs.reserve(feature_extractors.size());
+    for (auto& [ft, extractor] : feature_extractors) {
         jobs.emplace_back(ft, extractor);
     }
 
@@ -159,19 +159,19 @@ void Frame::extract_features(int, const Image& img)
         const auto ft = jobs[i].first;
         auto& o = outs[i];
 
-        mvKeys[ft]        = std::move(o.keys);
+        raw_keypoints[ft]        = std::move(o.keys);
         descriptors[ft]  = std::move(o.desc);
         keyPtsSigma2[ft]  = std::move(o.sigma2);
         keyPtsInf[ft]     = std::move(o.inf);
         keyPtsSize[ft]    = std::move(o.size);
 
         N[ft] = o.n;
-        Ntotal += o.n;
+        num_keypoints_total += o.n;
         featureTypes.push_back(ft);
     }
 
-    maxKeyPtSize  = featureExtractorLeft.begin()->second->GetMaxKeyPtSize();
-    maxKeyPtSigma = featureExtractorLeft.begin()->second->GetMaxKeyPtSigma();
+    maxKeyPtSize  = feature_extractors.begin()->second->GetMaxKeyPtSize();
+    maxKeyPtSigma = feature_extractors.begin()->second->GetMaxKeyPtSigma();
 }
 
 void Frame::set_pose(const mat4f& Tcw_)
@@ -190,7 +190,7 @@ void Frame::update_pose_matrices()
 
 bool Frame::is_in_frustum(const Pt& pMP, float viewingCosLimit) const
 {
-    pMP->mbTrackInView = false;
+    pMP->track_in_view = false;
 
     // 3D in absolute coordinates
     vec3f P = pMP->get_world_pos();
@@ -210,9 +210,9 @@ bool Frame::is_in_frustum(const Pt& pMP, float viewingCosLimit) const
     const float u = fx * PcX * invz + cx;
     const float v = fy * PcY * invz + cy;
 
-    if(u < mnMinX || u > mnMaxX)
+    if(u < min_x || u > max_x)
         return false;
-    if(v < mnMinY || v > mnMaxY)
+    if(v < min_y || v > max_y)
         return false;
 
     // Check distance is in the scale invariance region of the MapPoint
@@ -233,7 +233,7 @@ bool Frame::is_in_frustum(const Pt& pMP, float viewingCosLimit) const
         return false;
 
     // Data used by the tracking
-    pMP->mbTrackInView = true;
+    pMP->track_in_view = true;
     pMP->track_proj_x = u;
     pMP->track_proj_y = v;
 
@@ -245,19 +245,19 @@ vector<size_t> Frame::get_features_in_area(const float &x, const float  &y, cons
     vector<size_t> vIndices;
     vIndices.reserve(N.at(featType));
 
-    const int nMinCellX = max(0,(int)floor((x-mnMinX-r)*mfGridElementWidthInv));
+    const int nMinCellX = max(0,(int)floor((x-min_x-r)*grid_element_width_inv));
     if(nMinCellX>=FRAME_GRID_COLS)
         return vIndices;
 
-    const int nMaxCellX = min((int)FRAME_GRID_COLS-1,(int)ceil((x-mnMinX+r)*mfGridElementWidthInv));
+    const int nMaxCellX = min((int)FRAME_GRID_COLS-1,(int)ceil((x-min_x+r)*grid_element_width_inv));
     if(nMaxCellX<0)
         return vIndices;
 
-    const int nMinCellY = max(0,(int)floor((y-mnMinY-r)*mfGridElementHeightInv));
+    const int nMinCellY = max(0,(int)floor((y-min_y-r)*grid_element_height_inv));
     if(nMinCellY>=FRAME_GRID_ROWS)
         return vIndices;
 
-    const int nMaxCellY = min((int)FRAME_GRID_ROWS-1,(int)ceil((y-mnMinY+r)*mfGridElementHeightInv));
+    const int nMaxCellY = min((int)FRAME_GRID_ROWS-1,(int)ceil((y-min_y+r)*grid_element_height_inv));
     if(nMaxCellY<0)
         return vIndices;
 
@@ -265,7 +265,7 @@ vector<size_t> Frame::get_features_in_area(const float &x, const float  &y, cons
     {
         for(int iy = nMinCellY; iy<=nMaxCellY; iy++)
         {
-            const vector<size_t>& vCell = mGrid.at(featType)[ix][iy];
+            const vector<size_t>& vCell = grid.at(featType)[ix][iy];
             if(vCell.empty())
                 continue;
 
@@ -292,8 +292,8 @@ vector<size_t> Frame::get_features_in_area(const float &x, const float  &y, cons
 
 bool Frame::pos_in_grid(const cv::KeyPoint &kp, int &posX, int &posY) const
 {
-    posX = round((kp.pt.x-mnMinX)*mfGridElementWidthInv);
-    posY = round((kp.pt.y-mnMinY)*mfGridElementHeightInv);
+    posX = round((kp.pt.x-min_x)*grid_element_width_inv);
+    posY = round((kp.pt.y-min_y)*grid_element_height_inv);
 
     //Keypoint's coordinates are undistorted, which could cause to go out of the image
     if(posX<0 || posX>=FRAME_GRID_COLS || posY<0 || posY>=FRAME_GRID_ROWS)
@@ -350,11 +350,11 @@ void Frame::compute_global_descriptor()
 
 void Frame::undistort_keypoints()
 {
-    for(auto& [ft,extractor] : featureExtractorLeft)
+    for(auto& [ft,extractor] : feature_extractors)
     {
         if(mDistCoef.at<float>(0)==0.0)
         {
-            keypoints[ft] = mvKeys[ft];
+            keypoints[ft] = raw_keypoints[ft];
             continue;
         }
 
@@ -362,8 +362,8 @@ void Frame::undistort_keypoints()
         cv::Mat mat(N.at(ft),2,CV_32F);
         for(int i=0; i<N.at(ft); i++)
         {
-            mat.at<float>(i,0) = mvKeys[ft][i].pt.x;
-            mat.at<float>(i,1) = mvKeys[ft][i].pt.y;
+            mat.at<float>(i,0) = raw_keypoints[ft][i].pt.x;
+            mat.at<float>(i,1) = raw_keypoints[ft][i].pt.y;
         }
 
         // Undistort points
@@ -375,7 +375,7 @@ void Frame::undistort_keypoints()
         keypoints[ft].resize(N.at(ft));
         for(int i = 0; i < N.at(ft); i++)
         {
-            cv::KeyPoint kp = mvKeys[ft][i];
+            cv::KeyPoint kp = raw_keypoints[ft][i];
             kp.pt.x=mat.at<float>(i,0);
             kp.pt.y=mat.at<float>(i,1);
             keypoints[ft][i]=kp;
@@ -388,12 +388,12 @@ void Frame::get_depth(const Image& img)
     for(auto& [ft, N_] : N)
     {
         inv_depth[ft] = vector<float>(N_, 0.0f);
-        sigma2invDepth[ft] = vector<float>(N_, 0.0f);
+        sigma2_inv_depth[ft] = vector<float>(N_, 0.0f);
 
         if(img.depthImg.empty())
             continue;
 
-        const vector<cv::KeyPoint>& kps = mvKeys.at(ft);
+        const vector<cv::KeyPoint>& kps = raw_keypoints.at(ft);
         for(int i = 0; i < N_; i++)
         {
             // Sample at the keypoint's distorted pixel coordinates: the depth image
@@ -420,7 +420,7 @@ void Frame::get_depth(const Image& img)
             if(depth > 0.0f)
             {
                 inv_depth[ft][i] = 1.0f / depth;
-                sigma2invDepth[ft][i] = depthNoiseCoeff * depthNoiseCoeff;
+                sigma2_inv_depth[ft][i] = depthNoiseCoeff * depthNoiseCoeff;
             }
         }
     }
@@ -441,7 +441,7 @@ void Frame::get_colors(const Image& img)
         if(im.empty())
             continue;
 
-        const vector<cv::KeyPoint>& kps = mvKeys.at(ft);
+        const vector<cv::KeyPoint>& kps = raw_keypoints.at(ft);
         for(int i = 0; i < N_; i++)
         {
             // Distorted pixel coordinates: the image is indexed like the depth image in get_depth.
@@ -487,18 +487,18 @@ void Frame::compute_image_bounds(const cv::Mat &imLeft)
         cv::undistortPoints(mat,mat,mK,mDistCoef,cv::Mat(),mK);
         mat=mat.reshape(1);
 
-        mnMinX = min(mat.at<float>(0,0),mat.at<float>(2,0));
-        mnMaxX = max(mat.at<float>(1,0),mat.at<float>(3,0));
-        mnMinY = min(mat.at<float>(0,1),mat.at<float>(1,1));
-        mnMaxY = max(mat.at<float>(2,1),mat.at<float>(3,1));
+        min_x = min(mat.at<float>(0,0),mat.at<float>(2,0));
+        max_x = max(mat.at<float>(1,0),mat.at<float>(3,0));
+        min_y = min(mat.at<float>(0,1),mat.at<float>(1,1));
+        max_y = max(mat.at<float>(2,1),mat.at<float>(3,1));
 
     }
     else
     {
-        mnMinX = 0.0f;
-        mnMaxX = imLeft.cols;
-        mnMinY = 0.0f;
-        mnMaxY = imLeft.rows;
+        min_x = 0.0f;
+        max_x = imLeft.cols;
+        min_y = 0.0f;
+        max_y = imLeft.rows;
     }
 }
 

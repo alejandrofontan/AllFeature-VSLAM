@@ -99,9 +99,9 @@ public:
 public:
     PtId ptId;
 
-    static long unsigned int nNextId;
-    long int mnFirstKFid;
-    int nObs;
+    static long unsigned int next_id;
+    long int first_keyframe_id;
+    int num_observations_;
 
     // Variables used by the tracking. Default-initialized: they are scratch written by
     // Frame::is_in_frustum, but get_overlap() reads track_proj_x/y for matched points
@@ -111,23 +111,23 @@ public:
     // -1 keeps never-projected points deterministically outside get_overlap's bounds check.
     float track_proj_x{-1.0f};
     float track_proj_y{-1.0f};
-    bool mbTrackInView{false};
+    bool track_in_view{false};
 
-    FrameId idLastFrameSeen{0};
+    FrameId last_frame_seen{0};
 
     // Variables used by local mapping
-    long unsigned int mnBALocalForKF;
-    long unsigned int mnFuseCandidateForKF;
+    long unsigned int ba_local_for_keyframe;
+    long unsigned int fuse_candidate_for_keyframe;
 
     // Variables used by loop closing
-    long unsigned int mnLoopPointForKF;
-    long unsigned int mnCorrectedByKF;
-    long unsigned int mnCorrectedReference;
-    vec3f PosGBA;
-    long unsigned int mnBAGlobalForKF;
+    long unsigned int loop_point_for_keyframe;
+    long unsigned int corrected_by_keyframe;
+    long unsigned int corrected_reference;
+    vec3f position_gba;
+    long unsigned int ba_global_for_keyframe;
 
 
-    static std::mutex mGlobalMutex;
+    static std::mutex global_mutex;
     FeatureType featureType;
 
     // Image color (OpenCV-native BGR) of the reference keypoint at creation. Fixed for the
@@ -138,26 +138,26 @@ public:
 protected:
 
      // Position in absolute coordinates
-     vec3f XYZ;
+     vec3f position_;
 
      // Keyframes observing the point and associated observation
-     std::map<KeyframeId,shared_ptr<Observation>> observations;
+     std::map<KeyframeId,shared_ptr<Observation>> observations_;
 
      // Mean viewing direction
-     vec3f normalVector;
+     vec3f normal_;
 
      // Best descriptor to fast matching
-     cv::Mat mDescriptor;
+     cv::Mat descriptor_;
 
      // Distance, keypoint size and sigma at the reference keyframe (update_normal_and_depth);
      // predict_size/predict_sigma scale them to the current viewing distance
-     float refDistance;
-     float refSize;
-     float refSigma;
-     float minDistance;
-     float maxDistance;
+     float ref_distance_;
+     float ref_size_;
+     float ref_sigma_;
+     float min_distance_;
+     float max_distance_;
 
-     // refSize is a constant, not the reference keypoint's own size as in stock ORB-SLAM2
+     // ref_size_ is a constant, not the reference keypoint's own size as in stock ORB-SLAM2
      // (kept deliberately, 2026-09-18: the size-independent projection-search radius is the
      // tuned behaviour; re-evaluate with an A/B run before changing it)
      static constexpr float reference_keypoint_size{1.5f};
@@ -165,21 +165,21 @@ protected:
      // Reference keyframe: the creating keyframe, re-pointed to another observer when it
      // stops observing the point (erase_observation). The single source for the point's
      // scale/normal reference and for the loop-closing / GBA corrections.
-     Keyframe mpRefKF;
+     Keyframe ref_keyframe_;
 
      // Tracking counters
-     int mnVisible;
-     int mnFound;
+     int num_visible_;
+     int num_found_;
 
      // Bad flag (we do not currently erase MapPoint from memory)
-     bool mbBad;
-     Pt mpReplaced;
+     bool bad_;
+     Pt replaced_;
 
-     shared_ptr<Map> mpMap;
+     shared_ptr<Map> map_;
 
      // mutable: pure queries lock them and stay const
-     mutable std::mutex mMutexPos;
-     mutable std::mutex mMutexFeatures;
+     mutable std::mutex position_mutex_;
+     mutable std::mutex features_mutex_;
 };
 
 } //namespace ORB_SLAM

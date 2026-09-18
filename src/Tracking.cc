@@ -652,8 +652,8 @@ bool Tracking::track_reference_keyframe()
             const Pt& map_point = current_frame_.pts.at(ft)[i];
             if(map_point && current_frame_.outliers.at(ft)[i])
             {
-                map_point->mbTrackInView = false;
-                map_point->idLastFrameSeen = current_frame_.frame_id;
+                map_point->track_in_view = false;
+                map_point->last_frame_seen = current_frame_.frame_id;
                 current_frame_.outliers.at(ft)[i] = false;
                 current_frame_.pts.at(ft)[i] = nullptr;
             }
@@ -839,8 +839,8 @@ void Tracking::search_local_points()
         for(auto& pt : pts){
             if(pt && !pt->is_bad()){
                 pt->increase_visible();
-                pt->idLastFrameSeen = current_frame_.frame_id;
-                pt->mbTrackInView = false;
+                pt->last_frame_seen = current_frame_.frame_id;
+                pt->track_in_view = false;
             }
             else
                 pt = nullptr;
@@ -851,7 +851,7 @@ void Tracking::search_local_points()
     // (is_in_frustum fills the MapPoint variables the matcher reads)
     int num_to_match = 0;
     for(const Pt& pt : local_points_){
-        if(pt->idLastFrameSeen == current_frame_.frame_id)
+        if(pt->last_frame_seen == current_frame_.frame_id)
             continue;
         if(pt->is_bad())
             continue;
@@ -1257,8 +1257,8 @@ void Tracking::reset()
     place_recognition_->clear();
     map_->clear(); // erases all map points and keyframes
 
-    KeyFrame::nNextId = 0;
-    Frame::nNextId = 0;
+    KeyFrame::next_id = 0;
+    Frame::next_id = 0;
     state_ = TrackingState::NO_IMAGES_YET;
     initializer_ = nullptr;
 

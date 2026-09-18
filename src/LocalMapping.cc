@@ -174,7 +174,7 @@ void LocalMapping::cull_map_points()
 
         // Old enough to have been re-observed, but wasn't
         // (number_of_observations counts depth-verified observations twice)
-        const int age = current_id - int(map_point->mnFirstKFid);
+        const int age = current_id - int(map_point->first_keyframe_id);
         if(age >= params.map_point_culling_observation_test_age
            && map_point->number_of_observations() <= params.map_point_culling_min_observations)
         {
@@ -438,17 +438,17 @@ void LocalMapping::search_in_neighbors()
     std::vector<Keyframe> targets;
     for(const Keyframe& neighbor : current_keyframe_->get_best_covisibility_keyframes(params.search_in_neighbors_keyframes))
     {
-        if(neighbor->is_bad() || neighbor->mnFuseTargetForKF == current_keyframe_->keyId)
+        if(neighbor->is_bad() || neighbor->fuse_target_for_keyframe == current_keyframe_->keyId)
             continue;
-        neighbor->mnFuseTargetForKF = current_keyframe_->keyId;
+        neighbor->fuse_target_for_keyframe = current_keyframe_->keyId;
         targets.push_back(neighbor);
 
         for(const Keyframe& second : neighbor->get_best_covisibility_keyframes(params.search_in_neighbors_second_keyframes))
         {
-            if(second->is_bad() || second->mnFuseTargetForKF == current_keyframe_->keyId
+            if(second->is_bad() || second->fuse_target_for_keyframe == current_keyframe_->keyId
                || second->keyId == current_keyframe_->keyId)
                 continue;
-            second->mnFuseTargetForKF = current_keyframe_->keyId;
+            second->fuse_target_for_keyframe = current_keyframe_->keyId;
             targets.push_back(second);
         }
     }
@@ -469,9 +469,9 @@ void LocalMapping::search_in_neighbors()
             for(const Pt& candidate : target->get_map_point_matches(feature_type))
             {
                 if(!candidate || candidate->is_bad()
-                   || candidate->mnFuseCandidateForKF == current_keyframe_->keyId)
+                   || candidate->fuse_candidate_for_keyframe == current_keyframe_->keyId)
                     continue;
-                candidate->mnFuseCandidateForKF = current_keyframe_->keyId;
+                candidate->fuse_candidate_for_keyframe = current_keyframe_->keyId;
                 candidates.push_back(candidate);
             }
         }
