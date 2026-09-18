@@ -36,6 +36,43 @@ flowchart TD
 
 # AllFeature-VSLAM — `src/LoopClosing.cc`
 
+**Section:** [`# Main loop`](src/LoopClosing.cc#L73)
+```mermaid
+flowchart LR
+    SYS([System::System<br/>vpr backend active]) --> RUN[run] --> START["lock finish_mutex_<br/>finished_ = false"] --> HNK{has_new_keyframes?}
+    HNK -- no --> TAIL{"reset_if_requested ·<br/>is_finish_requested?"}
+    HNK -- yes --> DL[detect_loop]
+    DL -- no consistent candidate --> TAIL
+    DL -- loop_candidates_ --> CS[compute_sim3]
+    CS -- no Sim3 verified --> TAIL
+    CS -- "matched_keyframe_, Scw_" --> SL[search_loop_map_points]
+    SL -- too few matches --> TAIL
+    SL -- loop accepted --> CL[correct_loop] --> VIS["map_drawer_->AddLoopClosureKeyframe<br/>AF_INFO: loop closed, duration"] --> TAIL
+    CL -. launches .-> GBA([gba_thread_:<br/>run_global_bundle_adjustment])
+    TAIL -- finish requested --> SF[set_finished] --> END([thread returns])
+    TAIL -- else --> SLP["sleep 5 ms"] --> HNK
+
+    %% VSLAM-LAB logo squares: cyan #b5f3f9, periwinkle #8195fb, lavender #a59ddf
+    classDef entry fill:#8195fb,stroke:#5f74d6,color:#fff
+    classDef step fill:#b5f3f9,stroke:#7fcfd8,color:#1b2a4a
+    classDef check fill:#a59ddf,stroke:#7e75c4,color:#1b2a4a
+    classDef cmd fill:#fff,stroke:#8195fb,color:#1b2a4a
+
+    class SYS,GBA,END entry
+    class RUN,DL,CS,SL,CL,SF step
+    class HNK,TAIL check
+    class START,VIS,SLP cmd
+```
+
+```cpp
+void LoopClosing::run()
+```
+- thread body, started by System's constructor ([`System.cc`](src/System.cc#L211)) only when the VPR backend is active; with `vpr: none` it never runs and `finished_` stays at its initial `true` (see `# Finish protocol`). First statement clears `finished_` under `finish_mutex_` ([`LoopClosing.cc`](src/LoopClosing.cc#L78)) so `System::Shutdown` cannot read a stale `true` while the loop is alive.
+- one queued keyframe per iteration, as a short-circuit chain ([`LoopClosing.cc`](src/LoopClosing.cc#L84)): `has_new_keyframes` ([`LoopClosing_aux.cc`](src/LoopClosing_aux.cc#L53)) → `detect_loop` ([`LoopClosing.cc`](src/LoopClosing.cc#L109)) pops the keyframe, adds it to the VPR database and votes its candidates → `compute_sim3` ([`LoopClosing.cc`](src/LoopClosing.cc#L226)) verifies them with RANSAC + Sim3 optimization → `search_loop_map_points` ([`LoopClosing.cc`](src/LoopClosing.cc#L334)) projects the loop side into the keyframe and accepts the loop. Each stage returning `false` ends the iteration for that keyframe, having already lifted the erase guards it set (`SetErase`), so a rejected keyframe is cullable again at once.
+- on acceptance: `correct_loop` ([`LoopClosing.cc`](src/LoopClosing.cc#L381)) corrects the map around the loop and launches the global BA in `gba_thread_` ([`LoopClosing.cc`](src/LoopClosing.cc#L562)), the closed loop is handed to the viewer ([`LoopClosing.cc`](src/LoopClosing.cc#L88)) and one `AF_INFO` line reports both keyframe ids and the duration ([`LoopClosing.cc`](src/LoopClosing.cc#L90)). The duration covers correction + essential-graph optimization only; the BA runs concurrently in its own thread and reports through its own lines. This line replaces the `loopClosingTime`/`numOfLoopClosures` members, which nothing read.
+- iteration tail, keyframe or not: `reset_if_requested` ([`LoopClosing_aux.cc`](src/LoopClosing_aux.cc#L93)) then `is_finish_requested` ([`LoopClosing_aux.cc`](src/LoopClosing_aux.cc#L127)); `true` breaks the loop, so a loop closure in flight always completes before the thread exits. Otherwise the thread sleeps 5 ms ([`LoopClosing.cc`](src/LoopClosing.cc#L100)) — unconditionally, unlike `LocalMapping::run`, which only yields when its queue is empty.
+- last statement: `set_finished` ([`LoopClosing_aux.cc`](src/LoopClosing_aux.cc#L133)) publishes the exit that `System::Shutdown` waits for ([`System.cc`](src/System.cc#L407)) alongside `is_gba_running` ([`LoopClosing_aux.cc`](src/LoopClosing_aux.cc#L62)): the thread returning does not stop a running global BA, so `Shutdown` waits for that separately, and `~LoopClosing` ([`LoopClosing.cc`](src/LoopClosing.cc#L64)) joins the finished BA thread.
+
 **Section:** [`# Keyframe queue`](src/LoopClosing.cc#L106)
 ```mermaid
 flowchart LR

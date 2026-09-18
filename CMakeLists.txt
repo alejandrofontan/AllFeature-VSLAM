@@ -22,6 +22,7 @@ set(SRCS_ALLFEATURE
         src/LocalMapping.cc
         src/LocalMapping_aux.cc
         src/LoopClosing.cc
+        src/LoopClosing_aux.cc
         src/FeatureMatcher.cpp
         src/BruteForceMatcher.cpp
         src/FrameDrawer.cc
