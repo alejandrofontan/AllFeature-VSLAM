@@ -18,3 +18,6 @@ megaloc_models/
 superpoint_models/
 lightglue_models/
 .cache/
+
+# MkDocs build output (pixi run docs-build)
+site/

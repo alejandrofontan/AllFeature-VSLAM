@@ -1,0 +1,83 @@
+site_name: AllFeature-VSLAM
+site_description: Reference, review log, gym and notes of AllFeature-VSLAM (VSLAM-LAB dev baseline)
+site_url: https://alejandrofontan.github.io/AllFeature-VSLAM/
+repo_url: https://github.com/alejandrofontan/AllFeature-VSLAM
+repo_name: alejandrofontan/AllFeature-VSLAM
+edit_uri: edit/main/docs/
+docs_dir: docs
+exclude_docs: |
+  tools/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: dark mode
+    - scheme: slate
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: light mode
+
+# Navigation is built from the docs/ tree (one chapter per directory, README.md as the chapter
+# index, page titles from the H1), so a new note, entry or reference page needs no edit here.
+# The order below fixes the chapter order; pages inside a chapter stay alphabetical.
+nav:
+  - Overview: index.md
+  - Reference: reference/
+  - Review: review/
+  - Gym: gym/
+  - Notes: notes/
+  - Plans: plans/
+
+plugins:
+  - search
+  - mermaid2:
+      arguments:
+        securityLevel: loose      # needed for `click` links inside diagrams
+        theme: neutral
+  - literate-nav
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid_custom
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/alejandrofontan/AllFeature-VSLAM

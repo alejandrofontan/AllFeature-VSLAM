@@ -113,5 +113,22 @@ build = { cmd = "./build.sh" }
 # setup = everything a fresh clone needs to run: fetch the models, then compile
 setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "download-superpoint-models", "download-lightglue-models", "build"] }
 
+# docs env = MkDocs site only (no CUDA/torch): `pixi run docs-serve`, `pixi run docs-build`
+[feature.docs.dependencies]
+python = "3.12.*"
+mkdocs-material = "*"
+mkdocs-mermaid2-plugin = "*"
+mkdocs-literate-nav = "*"
+
+[feature.docs.tasks]
+docs-serve = { cmd = "mkdocs serve", env = { DISABLE_MKDOCS_2_WARNING = "true" } }
+docs-build = { cmd = "mkdocs build --strict", env = { DISABLE_MKDOCS_2_WARNING = "true" } }
+docs-links = { cmd = "python docs/tools/resolve_links.py" }
+docs-settings = { cmd = "python docs/tools/settings_keys.py" }
+docs-checklists = { cmd = "python docs/tools/review_checklist.py --all" }
+# everything a docs commit should pass: fresh line numbers, fresh settings page, strict site build
+docs-check = { cmd = "python docs/tools/resolve_links.py --check && python docs/tools/settings_keys.py --check && mkdocs build --strict", env = { DISABLE_MKDOCS_2_WARNING = "true" } }
+
 [environments]
 build = ["build"]
+docs = { features = ["docs"], no-default-feature = true }
