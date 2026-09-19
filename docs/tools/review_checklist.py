@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Create or refresh the function checklist of a review page (docs/review/<File>.md).
+
+A review page declares its sources in its header:
+
+    - **Sources:** `src/Tracking.cc`, `src/Tracking_aux.cc`, `include/Tracking.h`
+
+This tool lists every function *defined* in the `.cc`/`.cpp` sources (`Class::name(` at column 0,
+constructors and destructors included) and rewrites the table under `## Checklist`, keeping the
+`State` and `Notes` cells of functions that are still there. Functions that disappeared keep their
+row with state `gone` so notes are never lost; new functions start as `unread`.
+
+States: `unread` · `ok` · `question` · `bug` · `redesign` · `gone`.
+
+Usage:
+    python docs/tools/review_checklist.py docs/review/Tracking.md          # refresh one page
+    python docs/tools/review_checklist.py --all                            # every page under docs/review
+    python docs/tools/review_checklist.py --new Tracking src/Tracking.cc src/Tracking_aux.cc include/Tracking.h
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import pathlib
+import re
+import subprocess
+import sys
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+REPO_URL = "https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/"
+REVIEW_DIR = REPO_ROOT / "docs" / "review"
+STATES = ("unread", "ok", "question", "bug", "redesign", "gone")
+
+DEF_RE = re.compile(
+    r"^(?:[A-Za-z_][\w:<>,\*& ]*\s+)?"          # optional return type
+    r"(?P<cls>[A-Za-z_]\w*)::(?P<name>~?[A-Za-z_]\w*)\s*\("
+)
+SOURCES_RE = re.compile(r"^- \*\*Sources:\*\*\s*(.+)$", re.M)
+CHECKLIST_RE = re.compile(r"(?ms)^## Checklist\s*\n(?P<body>.*?)(?=^## |\Z)")
+ROW_RE = re.compile(r"^\|\s*`(?P<fn>[^`]+)`\s*\|.*?\|\s*(?P<state>\w+)\s*\|(?P<notes>[^|]*)\|\s*$")
+
+
+def git_head() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, text=True).strip()
+    except Exception:
+        return "unknown"
+
+
+def definitions(path: pathlib.Path) -> list[tuple[str, int]]:
+    out = []
+    for i, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+        if line[:1].isspace() or line.startswith(("//", "#", "}")):
+            continue
+        m = DEF_RE.match(line)
+        if m and not re.match(r"^(return|if|else|for|while|case|using|typedef)\b", line):
+            out.append((f"{m['cls']}::{m['name']}", i))
+    return out
+
+
+def existing_rows(page_text: str) -> dict[str, tuple[str, str]]:
+    m = CHECKLIST_RE.search(page_text)
+    rows: dict[str, tuple[str, str]] = {}
+    if not m:
+        return rows
+    for line in m["body"].splitlines():
+        r = ROW_RE.match(line)
+        if r and r["state"] in STATES:
+            rows[r["fn"]] = (r["state"], r["notes"].strip())
+    return rows
+
+
+def build_table(sources: list[str], old: dict[str, tuple[str, str]]) -> str:
+    lines = ["| Function | Source | State | Notes |", "|---|---|---|---|"]
+    seen: set[str] = set()
+    for s in sources:
+        p = REPO_ROOT / s
+        if p.suffix not in (".cc", ".cpp"):
+            continue
+        for fn, ln in definitions(p):
+            seen.add(fn)
+            state, notes = old.get(fn, ("unread", ""))
+            if state == "gone":
+                state = "unread" if not notes else "ok"  # it is back; keep the notes
+            # the title is the pattern docs/tools/resolve_links.py searches for when refreshing the line
+            lines.append(f"| `{fn}` | [{p.name}#L{ln}]({REPO_URL}{s}#L{ln} \"{fn}(\") | {state} | {notes} |")
+    for fn, (state, notes) in old.items():
+        if fn not in seen:
+            lines.append(f"| `{fn}` | — | gone | {notes} |")
+    return "\n".join(lines) + "\n"
+
+
+def refresh(page: pathlib.Path) -> None:
+    text = page.read_text()
+    m = SOURCES_RE.search(text)
+    if not m:
+        sys.exit(f"{page}: no '- **Sources:**' line in the header")
+    sources = [s.strip(" `") for s in m.group(1).split(",")]
+    table = build_table(sources, existing_rows(text))
+    if CHECKLIST_RE.search(text):
+        text = CHECKLIST_RE.sub(lambda _: f"## Checklist\n\n{table}\n", text, count=1)
+    else:
+        text = text.rstrip("\n") + f"\n\n## Checklist\n\n{table}\n"
+    page.write_text(text)
+    print(f"{page.relative_to(REPO_ROOT)}: checklist refreshed ({table.count(chr(10)) - 3} functions)")
+
+
+def new_page(name: str, sources: list[str]) -> pathlib.Path:
+    page = REVIEW_DIR / f"{name}.md"
+    if page.exists():
+        sys.exit(f"{page} already exists; use it as the argument instead of --new")
+    srcs = ", ".join(f"`{s}`" for s in sources)
+    today = dt.date.today().isoformat()
+    text = (
+        f"# Review — {name}\n\n"
+        f"- **Sources:** {srcs}\n"
+        f"- **Reviewer:** Alejandro Fontan\n"
+        f"- **Last reviewed at:** `{git_head()}` ({today}) — checklist created, nothing read yet\n\n"
+        f"Reading notes for these files. The checklist is regenerated by `docs/tools/review_checklist.py`\n"
+        f"(states and notes are preserved); the notes below are append-only and dated, each pinned to the\n"
+        f"commit that was read. Tags: `→ #<issue>`, `→ reference`, `→ paper:<file>.tex`, `→ gym`.\n\n"
+        f"## Checklist\n\n"
+        f"## Notes\n\n"
+        f"### {today} — checklist created (at `{git_head()}`)\n\n"
+        f"No findings yet.\n"
+    )
+    page.write_text(text)
+    refresh(page)
+    return page
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("pages", nargs="*", help="review pages to refresh")
+    ap.add_argument("--all", action="store_true", help="refresh every page under docs/review")
+    ap.add_argument("--new", nargs="+", metavar=("NAME", "SOURCE"), help="create docs/review/NAME.md for SOURCE files")
+    args = ap.parse_args()
+    if args.new:
+        if len(args.new) < 2:
+            ap.error("--new needs a NAME and at least one SOURCE")
+        new_page(args.new[0], args.new[1:])
+        return 0
+    pages = [p for p in REVIEW_DIR.glob("*.md") if p.name != "README.md"] if args.all else [pathlib.Path(p) for p in args.pages]
+    if not pages:
+        ap.error("give review pages, --all, or --new")
+    for p in pages:
+        refresh(p)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
