@@ -102,7 +102,8 @@ def render() -> str:
             block = b
             lines += ["", f"## {block}", "", "| Key | Dev YAML value | Read in | Page | Description (YAML comment) |", "|---|---|---|---|---|"]
         val, comment = yaml.get(k, ("*(not in the YAML)*", ""))
-        where = ", ".join(f"[{pathlib.Path(s).name}#L{ln}]({REPO_URL}{s}#L{ln} \"\\\"{k}\\\"\")" for s, ln in reads.get(k, [])) or "*(read nowhere)*"
+        # the title is the resolver's search pattern (a Markdown title cannot contain quotes, so the bare key)
+        where = ", ".join(f"[{pathlib.Path(s).name}#L{ln}]({REPO_URL}{s}#L{ln} \"{k}\")" for s, ln in reads.get(k, [])) or "*(read nowhere)*"
         pages = ", ".join(sorted({page_link(s) for s, _ in reads.get(k, [])})) or "—"
         lines.append(f"| `{k}` | `{val}` | {where} | {pages} | {comment} |")
     unread = [k for k in yaml if k not in reads]

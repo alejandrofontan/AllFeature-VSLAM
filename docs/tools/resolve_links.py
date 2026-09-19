@@ -91,6 +91,7 @@ def process(doc: pathlib.Path, check: bool, checklist_only: bool = False) -> tup
     src = doc.read_text()
     changed = 0
     unresolved: list[str] = []
+    skipped: list[str] = []
 
     def repl(m: re.Match) -> str:
         nonlocal changed
@@ -99,6 +100,12 @@ def process(doc: pathlib.Path, check: bool, checklist_only: bool = False) -> tup
         target = REPO_ROOT / path
         lines = lines_of(target)
         if lines is None:
+            # a target inside a submodule that is not checked out (CI clones without submodules):
+            # nothing to verify, keep the link as written
+            sub = REPO_ROOT / pathlib.Path(path).parts[0] / pathlib.Path(path).parts[1] if len(pathlib.Path(path).parts) > 2 else None
+            if path.startswith("Thirdparty/") and sub is not None and sub.is_dir() and not any(sub.iterdir()):
+                skipped.append(f"{doc}: {path} (submodule not checked out)")
+                return m.group(0)
             unresolved.append(f"{doc}: {path} does not exist ({text})")
             return m.group(0)
         if line2 is not None:  # ranges are kept as written
@@ -135,6 +142,8 @@ def process(doc: pathlib.Path, check: bool, checklist_only: bool = False) -> tup
         n_links = len(LINK_RE.findall(src))
     if new != src and not check:
         doc.write_text(new)
+    for s in skipped:
+        print("  skipped:", s)
     return changed, n_links, unresolved
 
 
