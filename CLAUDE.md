@@ -132,5 +132,5 @@ Cross-cutting components: `Feature`/`FeatureExtractor`/`FeatureMatcher` (multi-f
 ## Notes
 
 - License: GPLv3 (inherited from ORB-SLAM2)
-- `../ORB-SLAM2` next to this checkout is the stock ORB-SLAM2 reference copy the reference pages compare against
+- `../ORB-SLAM2-DEV` next to this checkout (a plain `--depth 1` clone of `raulmur/ORB_SLAM2`, gitignored by the parent) is the stock ORB-SLAM2 source the reference pages compare against; `../ORB-SLAM2` is the conda-packaged baseline and has no sources
 - `bin/`, `lib/`, `build/` and `*_models/` are build/runtime artifacts, not source — never assume content there is checked in

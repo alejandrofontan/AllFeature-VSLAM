@@ -44,7 +44,9 @@ python docs/tools/review_checklist.py docs/review/LocalMapping.md   # after the 
 python docs/tools/review_checklist.py --all
 ```
 
-The tool lists every function defined in the `.cc`/`.cpp` sources, keeps the `State` and `Notes`
+The tool lists every member function defined in the `.cc`/`.cpp` sources (`Class::name(` at
+column 0, constructors and destructors included; file-local free functions and header-only inline
+methods are not listed — mention them in a note if they matter), keeps the `State` and `Notes`
 cells of functions still present, adds new ones as `unread`, and keeps vanished ones as `gone` so
 their notes survive. Edit only the `State` and `Notes` cells by hand.
 

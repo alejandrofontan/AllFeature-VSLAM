@@ -64,9 +64,11 @@ Rules of thumb:
   header, so default arguments and `const` match the definition.
 - **Bullets, not prose.** One idea per bullet. A bullet that needs more than three lines is two
   bullets.
-- **Say what, then why it differs.** Every function that has a stock ORB-SLAM2 counterpart
-  (`../ORB-SLAM2` next to this checkout is the reference copy) gets a "differs from ORB-SLAM2"
-  bullet when the behaviour differs; nothing when it does not.
+- **Say what, then why it differs.** Every function that has a stock ORB-SLAM2 counterpart gets a
+  "differs from ORB-SLAM2" bullet when the behaviour differs; nothing when it does not. The
+  reference copy is a plain clone of `raulmur/ORB_SLAM2` at `../ORB-SLAM2-DEV` (i.e.
+  `VSLAM-LAB/Baselines/ORB-SLAM2-DEV`, gitignored by the parent; `../ORB-SLAM2` is the conda-packaged
+  baseline and has no sources). A bullet written without the side-by-side read says so.
 - **Settings are documented where they are read.** The per-file settings table at the bottom is
   the source for the site's settings page; the function bullet that uses the key links back to the
   table row is not required, naming the key is enough.

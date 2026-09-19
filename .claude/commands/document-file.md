@@ -27,9 +27,13 @@ find its callers inside the family and outside it (`grep -rn "name(" src include
 functions not in the graph (setup, reset, accessors).
 
 ### 3. Check the stock ORB-SLAM2 counterpart
-For each function with an ORB-SLAM2 namesake, open the counterpart in `../ORB-SLAM2/src/` (the
-reference copy next to this checkout; if it is missing, say so in your final message and skip this
-step). Where the behaviour differs, note what and why; where it does not, note nothing.
+For each function with an ORB-SLAM2 namesake, open the counterpart in `../ORB-SLAM2-DEV/src/` (a
+plain clone of `raulmur/ORB_SLAM2` next to this checkout, `VSLAM-LAB/Baselines/ORB-SLAM2-DEV`; if
+it is missing, `git clone --depth 1 https://github.com/raulmur/ORB_SLAM2.git ../ORB-SLAM2-DEV`
+recreates it — `../ORB-SLAM2` is the conda-packaged baseline and has no sources). Where the
+behaviour differs, note what and why; where it does not, note nothing. Never write a "differs from
+ORB-SLAM2" bullet from memory: if the counterpart could not be read, say so in the final message
+and leave the bullet out.
 
 ### 4. Collect the settings keys
 `grep -n 'read_if_present\|fSettings\["' <sources>`: every key read by the family, its compiled

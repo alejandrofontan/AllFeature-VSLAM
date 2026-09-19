@@ -107,6 +107,10 @@ def process(doc: pathlib.Path, check: bool, checklist_only: bool = False) -> tup
             changed += out != m.group(0)
             return out
         current = int(line) if line else None
+        if current is None and not title:  # whole-file link: nothing to refresh, only normalise the URL
+            out = f"[{text}]({REPO_URL}{path})"
+            changed += out != m.group(0)
+            return out
         found = find_line(lines, text, title, current)
         if found is None:
             if (text.strip("`") == pathlib.Path(path).name or text_is_file_line) and not title:

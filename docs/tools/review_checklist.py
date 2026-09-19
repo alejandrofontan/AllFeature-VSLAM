@@ -102,7 +102,7 @@ def refresh(page: pathlib.Path) -> None:
     else:
         text = text.rstrip("\n") + f"\n\n## Checklist\n\n{table}\n"
     page.write_text(text)
-    print(f"{page.relative_to(REPO_ROOT)}: checklist refreshed ({table.count(chr(10)) - 3} functions)")
+    print(f"{page.relative_to(REPO_ROOT)}: checklist refreshed ({table.count(chr(10)) - 2} functions)")
 
 
 def new_page(name: str, sources: list[str]) -> pathlib.Path:
