@@ -140,7 +140,8 @@ def main() -> int:
             ap.error("--new needs a NAME and at least one SOURCE")
         new_page(args.new[0], args.new[1:])
         return 0
-    pages = [p for p in REVIEW_DIR.glob("*.md") if p.name != "README.md"] if args.all else [pathlib.Path(p) for p in args.pages]
+    # resolve(): the report line prints the page relative to REPO_ROOT, as resolve_links.py does
+    pages = [p for p in REVIEW_DIR.glob("*.md") if p.name != "README.md"] if args.all else [pathlib.Path(p).resolve() for p in args.pages]
     if not pages:
         ap.error("give review pages, --all, or --new")
     for p in pages:
