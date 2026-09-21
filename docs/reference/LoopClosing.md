@@ -360,9 +360,9 @@ flowchart LR
 ```cpp
 void LoopClosing::request_reset()
 ```
-- caller side of the round trip: raises `reset_requested_` under `reset_mutex_`, then blocks (5 ms polls of `is_reset_requested`) until the loop-closing thread has performed the reset. Blocking matters: `Tracking::reset` wipes the VPR database and the map right after this call ([`Tracking.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1257 "place_recognition_->clear();")), so the loop-closing thread must have dropped every reference to the old map first.
+- caller side of the round trip: raises `reset_requested_` under `reset_mutex_`, then blocks (5 ms polls of `is_reset_requested`) until the loop-closing thread has performed the reset. Blocking matters: `Tracking::reset` wipes the VPR database and the map right after this call ([`Tracking.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1218 "place_recognition_->clear();")), so the loop-closing thread must have dropped every reference to the old map first.
 - early-returns when the VPR backend is inactive (`vpr: none`): the thread was never started, so nobody would ever clear the request and the caller would spin forever. There is nothing to reset in that case either.
-- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1253 "loop_closing_->request_reset();"), after LocalMapping's `request_reset` has returned.
+- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1214 "loop_closing_->request_reset();"), after LocalMapping's `request_reset` has returned.
 
 ### `is_reset_requested`
 

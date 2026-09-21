@@ -15,7 +15,6 @@
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 #include <opencv2/core/core.hpp>
@@ -67,8 +66,6 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     int log_keyframe_information = params.log_keyframe_information ? 1 : 0;   // cv::FileStorage has no bool reader
     read_if_present("Tracking.LogKeyframeInformation", log_keyframe_information);
     params.log_keyframe_information = (log_keyframe_information != 0);
-    read_if_present("Tracking.MinMedianFlow", params.min_median_flow);
-    read_if_present("Tracking.MinSharedPointsForFlow", params.min_shared_points_for_flow);
     read_if_present("Tracking.RefMatchesRatio", params.ref_matches_ratio);
     read_if_present("Tracking.MinInliersForKeyframe", params.min_inliers_for_keyframe);
     read_if_present("Tracking.MinObservationsHigh", params.min_observations_high);
@@ -973,10 +970,7 @@ bool Tracking::need_new_keyframe()
                 line << " info=n/a";
             if(params.log_keyframe_information)
             {
-                // Pixel flow to the last frame: kept as a diagnostic only, no longer a gate
-                const std::optional<float> median_flow = median_flow_from_last_frame();
-                line << " flow=" << (median_flow ? std::to_string(*median_flow) : std::string("n/a"))
-                     << " inliers=" << num_inlier_matches_ << " refMatches=" << num_ref_matches
+                line << " inliers=" << num_inlier_matches_ << " refMatches=" << num_ref_matches
                      << " medianRecentInliers=" << median_recent_inliers
                      << std::setprecision(2) << " overlap=" << overlap
                      << " weak=" << weak_tracking << " lowOverlap=" << low_overlap
@@ -1053,39 +1047,6 @@ void Tracking::wait_for_idle_local_mapper() const
 {
     while(local_mapper_->has_new_keyframes() || !local_mapper_->accepts_keyframes())
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-}
-
-std::optional<float> Tracking::median_flow_from_last_frame() const
-{
-    // Collect pixel positions of last frame's map points, then measure how far the
-    // same points moved in the current frame. Scale-free (pure 2D), cheap (two
-    // linear passes), and needs no extra bookkeeping in the matchers.
-    std::unordered_map<const MapPoint*, cv::Point2f> last_positions;
-    for (const auto& [ft, points] : last_frame_.pts) {
-        const auto& keypoints = last_frame_.keypoints.at(ft);
-        for (size_t i = 0; i < points.size(); i++)
-            if (points[i])
-                last_positions[points[i].get()] = keypoints[i].pt;
-    }
-
-    std::vector<float> flows;
-    for (const auto& [ft, points] : current_frame_.pts) {
-        const auto& keypoints = current_frame_.keypoints.at(ft);
-        for (size_t i = 0; i < points.size(); i++) {
-            if (!points[i])
-                continue;
-            const auto it = last_positions.find(points[i].get());
-            if (it != last_positions.end())
-                flows.push_back(static_cast<float>(cv::norm(keypoints[i].pt - it->second)));
-        }
-    }
-
-    if (flows.size() < static_cast<size_t>(params.min_shared_points_for_flow))
-        return std::nullopt;
-
-    const auto mid = flows.begin() + flows.size() / 2;
-    std::nth_element(flows.begin(), mid, flows.end());
-    return *mid;
 }
 
 bool Tracking::relocalize()

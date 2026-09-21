@@ -104,8 +104,6 @@ struct TrackingParameters
     // need_new_keyframe()
     float keyframe_min_information{0.05f}; // unexplained information (placecell, [0,1]) below which the local map already explains the view: no keyframe
     bool log_keyframe_information{false};  // one diagnostic line per tracked frame with the information, the flow, the triggers, and the decision
-    float min_median_flow{1.0f};        // px; below this the camera counts as static (diagnostic only: no longer gates keyframes)
-    int min_shared_points_for_flow{20}; // the flow estimate needs at least this many shared points
     float ref_matches_ratio{0.9f};      // weak tracking: inliers < ratio x reference-KF tracked points...
     int min_inliers_for_keyframe{15};   // ...but above this floor (below it suggests loss, not a keyframe)
     int min_observations_high{3};       // reference-KF match counting: min observations per point
@@ -250,11 +248,6 @@ protected:
     // dequeued yet); the busy flag covers processing in progress. Call with the map
     // mutex RELEASED — Local Mapping needs it.
     void wait_for_idle_local_mapper() const;
-
-    // Median pixel displacement of map points shared between current_frame_ and last_frame_.
-    // Scale-free stationarity signal for need_new_keyframe; empty if too few shared
-    // points to be meaningful (the gate then stays inactive).
-    std::optional<float> median_flow_from_last_frame() const;
 
     // Load intrinsics/distortion/fps for the settings' cam_mono camera from the
     // calibration yaml (hard error if the camera is missing); applies the
