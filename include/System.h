@@ -34,6 +34,7 @@
 #include "Map.h"
 #include "LocalMapping.h"
 #include "LoopClosing.h"
+#include "KeyframeInformation.h"
 #include "PlaceCellSettings.h"
 #include "PlaceRecognition.h"
 #include "Viewer.h"
@@ -106,13 +107,17 @@ public:
     // Binary PLY of every good map point, colored with the point's own image color (MapPoint::color).
     void SavePointCloudVSLAMLAB(const string &filename);
 
-    // placecell diagnostics (PlaceCell.Dump): the store's kernel (.npy), views.csv, the
-    // recorder's CSVs, profile.csv and the three visualizer plots as PNGs, written into
-    // `directory` (created if needed). No-op without a placecell store (vpr: none) or
-    // with PlaceCell.Dump: 0. Call after Shutdown().
+    // placecell diagnostics (PlaceCell.Dump): the information store's kernel (.npy),
+    // views.csv, the recorder's CSVs, profile.csv and the three visualizer plots as PNGs,
+    // written into `directory` (created if needed); when the vpr: megaloc retrieval store
+    // is a different object (InformationKernel: covisibility) its dump goes to
+    // `directory`/retrieval_megaloc. No-op without any store or with PlaceCell.Dump: 0.
+    // Call after Shutdown().
     void SavePlaceCellDiagnostics(const std::string& directory);
 
-    // placecell store as seen by the Viewer (visualizer panels): null without vpr: megaloc.
+    // The keyframe INFORMATION store as seen by the Viewer (visualizer panels): the
+    // kernel Tracking's insertion bands and the information culler read
+    // (LocalMapping.InformationKernel); null when the system has no information kernel.
     // Non-owning; System outlives the Viewer (Shutdown joins its thread).
     const placecell::PlaceCell* GetPlaceCell() const;
     const PlaceCellSettings& GetPlaceCellSettings() const { return placecell_settings; }
@@ -158,11 +163,16 @@ private:
     // keyframe database, relocalization and loop-detection candidates.
     std::shared_ptr<PlaceRecognition> place_recognition{};
 
-    // placecell store (vpr: megaloc only, null otherwise): MegaLoc embedder + the
-    // global descriptors of every keyframe, keyed by frame_id. Owned here, injected
-    // into PlaceRecognitionMegaLoc, and shared with LocalMapping (VPR matrix); future
-    // placecell integrations (graph management) share the same object.
+    // placecell retrieval store (vpr: megaloc only, null otherwise): MegaLoc embedder +
+    // the global descriptors of every keyframe, keyed by frame_id. Owned here, injected
+    // into PlaceRecognitionMegaLoc and, with InformationKernel: megaloc, wrapped by
+    // keyframe_information below (one store for retrieval and information).
     std::shared_ptr<placecell::MegaLocPlaceCell> place_cell{};
+
+    // Keyframe information kernel (KeyframeInformation.h, LocalMapping.InformationKernel):
+    // Tracking's insertion bands and LocalMapping's information culler read it. Null when
+    // the system has no information kernel (megaloc kernel without vpr: megaloc).
+    std::shared_ptr<KeyframeInformation> keyframe_information{};
 
     // PlaceCell.* settings (print manager / profiler / recorder / visualizer), loaded
     // once at construction; consulted here (Options, profile print, dump) and by the

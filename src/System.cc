@@ -1,6 +1,7 @@
 #include "System.h"
 #include "Converter.h"
 #include "FeatureMatcher.h"
+#include "KeyframeInformation.h"
 #include "Optimizer.h"
 #include "PlaceRecognitionMegaLoc.h"
 
@@ -67,7 +68,10 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:
     //                      see PlaceRecognitionMegaLocParameters
     //   PlaceCell.*:       placecell's print manager / profiler / recorder / visualizer
-    //                      (PlaceCellSettings.h)
+    //                      (PlaceCellSettings.h), applied to every placecell store
+    //   LocalMapping.InformationKernel: the keyframe information kernel built after the
+    //                      VPR backend (KeyframeInformation.h): "megaloc" wraps the
+    //                      retrieval store, "covisibility" owns an item-mode store
     // A request that cannot be satisfied (missing model, unknown backend) is a hard error.
     std::string vpr_method{"megaloc"};
     std::string feature_vpr_name{};
@@ -105,6 +109,21 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         }
     }
 
+    // placecell's diagnostic managers (PlaceCell.* keys), shared by every store the system
+    // builds. The Logger is process-wide: its level is applied through Options
+    // (PLACECELL_VERBOSITY in the environment wins, by placecell's contract); the Profiler
+    // and the Recorder belong to each store.
+    placecell::PlaceCell::Options placecell_options{};
+    placecell_options.profile = placecell_settings.profile;
+    placecell_options.record = placecell_settings.record;
+    placecell_options.report_on_destruction = false;   // printed explicitly in Shutdown() (PlaceCell.PrintProfile)
+    if(const auto level = placecell::Logger::parse(placecell_settings.verbosity))
+        placecell_options.verbosity = *level;
+    else
+        AF_WARN("[System] PlaceCell.Verbosity '" << placecell_settings.verbosity
+                << "' is not a placecell log level (off|error|warn|info|debug|trace or 0-5) — keeping placecell's default");
+    placecell::Logger::instance().set_show_elapsed(placecell_settings.log_elapsed);
+
     if(vpr_method == "none"){
         AF_INFO("[System] VPR: none (disabled by settings) — no loop closing, no relocalization; a tracking loss is permanent");
         place_recognition = make_shared<PlaceRecognitionNone>(vpr_feature);
@@ -126,23 +145,9 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 + megaloc_onnx + " ...");
         std::cout.flush();
 
-        // placecell's diagnostic managers (PlaceCell.* keys). The Logger is process-wide:
-        // its level is applied through Options (PLACECELL_VERBOSITY in the environment
-        // wins, by placecell's contract); the Profiler and the Recorder belong to the store.
-        placecell::PlaceCell::Options placecell_options{};
-        placecell_options.name = "placecell";
-        placecell_options.profile = placecell_settings.profile;
-        placecell_options.record = placecell_settings.record;
-        placecell_options.report_on_destruction = false;   // printed explicitly in Shutdown() (PlaceCell.PrintProfile)
-        if(const auto level = placecell::Logger::parse(placecell_settings.verbosity))
-            placecell_options.verbosity = *level;
-        else
-            AF_WARN("[System] PlaceCell.Verbosity '" << placecell_settings.verbosity
-                    << "' is not a placecell log level (off|error|warn|info|debug|trace or 0-5) — keeping placecell's default");
-        placecell::Logger::instance().set_show_elapsed(placecell_settings.log_elapsed);
-
         try {
             // Engine build/load + CUDA warmup happen in the embedder constructor
+            placecell_options.name = "megaloc";
             place_cell = make_shared<placecell::MegaLocPlaceCell>(megaloc_onnx, megaloc_precision, placecell_options);
         } catch (const std::exception& e) {
             AF_ERROR("[System] MegaLoc backend setup failed: " + std::string(e.what()));
@@ -153,6 +158,36 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 << ": " << place_cell->embedder().engine_path() << ", " << place_cell->embedder().descriptor_dim()
                 << "-d, min similarity " << megaloc_params.min_similarity
                 << ", max candidates " << megaloc_params.max_candidates << ")");
+        std::cout.flush();
+    }
+    else{
+        AF_ERROR("[System] Unknown vpr backend '" + vpr_method + "' (options: megaloc, none)");
+        exit(-1);
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////
+    // Keyframe information kernel (KeyframeInformation.h): what Tracking's insertion
+    // bands and LocalMapping's information culler read. Built after the VPR backend
+    // because the megaloc kernel is that backend's store.
+    const std::string& information_kernel = LocalMapping::params.information_kernel;
+    if(information_kernel == "covisibility"){
+        placecell_options.name = "covisibility";
+        keyframe_information = make_shared<KeyframeInformationCovisibility>(placecell_options);
+        AF_INFO("[System] keyframe information kernel: covisibility (shared map points, "
+                << (LocalMapping::params.keyframe_culling_centred ? "centred" : "raw")
+                << " cosine; tau " << LocalMapping::params.keyframe_culling_max_unexplained.load() << ")");
+    }
+    else if(place_cell){
+        keyframe_information = make_shared<KeyframeInformationMegaLoc>(place_cell);
+        AF_INFO("[System] keyframe information kernel: megaloc (the retrieval store, "
+                << (LocalMapping::params.keyframe_culling_centred ? "centred" : "raw")
+                << " cosine; tau " << LocalMapping::params.keyframe_culling_max_unexplained.load() << ")");
+    }
+    else
+        AF_INFO("[System] keyframe information kernel: none (InformationKernel: megaloc needs vpr: megaloc) — "
+                "keyframe insertion by the tracking triggers only, information culling falls back to the heuristic");
+
+    if(keyframe_information || place_cell){
         AF_INFO("[System] placecell diagnostics: verbosity "
                 << placecell::Logger::name(placecell::Logger::instance().level())
                 << (placecell::Logger::instance().level_from_environment() ? " (PLACECELL_VERBOSITY)" : "")
@@ -163,10 +198,6 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 << " | visualize " << (placecell_settings.visualize ? "on" : "off")
                 << (placecell_settings.visualize && !activateVisualization ? " (no Viewer: verbose:0)" : ""));
         std::cout.flush();
-    }
-    else{
-        AF_ERROR("[System] Unknown vpr backend '" + vpr_method + "' (options: megaloc, none)");
-        exit(-1);
     }
 
     //Create the Map
@@ -226,8 +257,10 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     tracker->set_loop_closing(loopCloser);
 
     localMapper->set_loop_closer(loopCloser);
-    if(place_cell)
-        localMapper->set_placecell(place_cell);   // keyframe descriptors for the online VPR matrix
+    if(keyframe_information){
+        tracker->set_keyframe_information(keyframe_information);       // insertion bands, decision history
+        localMapper->set_keyframe_information(keyframe_information);   // keyframe registration, refresh, information culling
+    }
 }
 
 mat4f System::TrackStereo(const cv::Mat &, const cv::Mat &, const double &)
@@ -418,23 +451,35 @@ void System::Shutdown()
     if(viewer)
         pangolin::BindToContext(viewer->GetWindowTitle());
 
-    // Every placecell caller has stopped: the profile table is complete
-    if(place_cell && placecell_settings.print_profile)
+    // Every placecell caller has stopped: the profile tables are complete (one per store;
+    // with InformationKernel: megaloc the information store IS the retrieval store)
+    if(placecell_settings.print_profile && (keyframe_information || place_cell))
     {
         std::cout.flush();   // keep the (stdout) AF_ lines before the (stderr) table when redirected
-        place_cell->print_profile();
+        if(keyframe_information)
+            keyframe_information->place_cell().print_profile();
+        if(place_cell && (!keyframe_information || &keyframe_information->place_cell() != place_cell.get()))
+            place_cell->print_profile();
     }
 }
 
 void System::SavePlaceCellDiagnostics(const std::string& directory)
 {
-    if(!place_cell || !placecell_settings.dump)
+    if(!placecell_settings.dump || (!keyframe_information && !place_cell))
         return;
+
+    // The information store gets the full dump + plots; a distinct retrieval store
+    // (vpr: megaloc with InformationKernel: covisibility) its kernel / views / profile only
+    const placecell::PlaceCell* information_store = keyframe_information ? &keyframe_information->place_cell() : nullptr;
+    const placecell::PlaceCell* retrieval_store = (place_cell && place_cell.get() != information_store) ? place_cell.get() : nullptr;
+    const placecell::PlaceCell& main_store = information_store ? *information_store : *retrieval_store;
 
     AF_INFO("Saving placecell diagnostics to " << directory << " ...");
     try {
         // Kernel (.npy, raw + centred), views.csv, recorder CSVs, profile.csv
-        place_cell->dump(directory);
+        main_store.dump(directory);
+        if(information_store && retrieval_store)
+            retrieval_store->dump(directory + "/retrieval_megaloc");
 
         // The three plots at their full-size defaults (the Viewer panels are smaller);
         // windows stay off (renders to cv::Mat and cv::imwrite only, headless-safe)
@@ -443,7 +488,7 @@ void System::SavePlaceCellDiagnostics(const std::string& directory)
         viz_options.max_hz = 0.0;
         viz_options.kernel.centred = placecell_settings.visualize_centred;
         viz_options.history.last_n = static_cast<size_t>(std::max(0, placecell_settings.visualize_history_last_n));
-        placecell::viz::Visualizer visualizer(*place_cell, viz_options);
+        placecell::viz::Visualizer visualizer(main_store, viz_options);
         visualizer.update(true);
         visualizer.save(directory);
     } catch (const std::exception& e) {
@@ -455,7 +500,7 @@ void System::SavePlaceCellDiagnostics(const std::string& directory)
 
 const placecell::PlaceCell* System::GetPlaceCell() const
 {
-    return place_cell.get();
+    return keyframe_information ? &keyframe_information->place_cell() : nullptr;
 }
 
 void System::SetSequenceInfo(const size_t nImages, const bool useMasks)

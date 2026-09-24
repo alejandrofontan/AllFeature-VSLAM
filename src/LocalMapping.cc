@@ -147,8 +147,11 @@ void LocalMapping::process_new_keyframe()
 
     map_->add_keyframe(current_keyframe_);
 
-    // The online keyframe VPR kernel needs no explicit growth here anymore: placecell
-    // grew it when compute_global_descriptor() stored this keyframe's descriptor.
+    // Register the keyframe in the information kernel so it explains the next frames
+    // right away (megaloc: no-op, compute_global_descriptor() already stored the
+    // descriptor; covisibility: its current map-point set)
+    if(keyframe_information_)
+        keyframe_information_->on_keyframe_processed(current_keyframe_);
 }
 
 void LocalMapping::cull_map_points()
@@ -508,13 +511,14 @@ void LocalMapping::local_bundle_adjustment()
 void LocalMapping::cull_keyframes()
 {
     if(params.keyframe_culling_method == "information"){
-        // The information method needs the online kernel, i.e. an image-embedding VPR backend
-        // (vpr: megaloc). Without stored descriptors, degrade to the heuristic once, loudly.
-        if(!place_cell_ || place_cell_->size() == 0){
+        // The information method needs the keyframe information kernel (KeyframeInformation.h).
+        // Without one, degrade to the heuristic once, loudly.
+        if(!keyframe_information_ || keyframe_information_->place_cell().size() == 0){
             static bool warned{false};
             if(!warned){
-                AF_WARN("[LocalMapping] KeyframeCullingMethod: information requested but keyframes carry no global "
-                        "descriptor (vpr is not megaloc) — falling back to the heuristic culling; set vpr: megaloc to use it");
+                AF_WARN("[LocalMapping] KeyframeCullingMethod: information requested but the system has no keyframe "
+                        "information kernel (InformationKernel: megaloc needs vpr: megaloc) — falling back to the heuristic "
+                        "culling; set vpr: megaloc or InformationKernel: covisibility to use it");
                 warned = true;
             }
             cull_keyframes_heuristic();
@@ -583,26 +587,37 @@ void LocalMapping::cull_keyframes_heuristic()
 void LocalMapping::cull_keyframes_information()
 {
     // The joint-information culling maths ("gram-greedy") lives in placecell
-    // (PlaceCell::cull_keyframes); this adapter supplies the host side: parameters,
-    // the covisibility window for the local scope, reconciliation of externally
-    // removed keyframes, execution of each cull (set_bad_flag), and logging.
-    if(!place_cell_)
+    // (PlaceCell::cull_keyframes); this adapter supplies the host side: the kernel's
+    // refresh, parameters, the covisibility window for the local scope, reconciliation
+    // of externally removed keyframes, execution of each cull (set_bad_flag), and logging.
+    if(!keyframe_information_)
         return;
+    placecell::PlaceCell& place_cell = keyframe_information_->place_cell();
 
     // Resolve every stored row back to a keyframe. A row that no longer resolves (or
     // resolves to a bad keyframe) was removed outside this culler (e.g. by the
     // heuristic method) -- tell placecell so it becomes culling history there too.
     std::unordered_map<FrameId, Keyframe> keyframe_by_frame_id;
+    std::vector<Keyframe> alive_keyframes;
     for(const Keyframe& keyframe : map_->GetAllKeyFrames())
-        keyframe_by_frame_id.emplace(keyframe->frame_id, keyframe);
-    for(const placecell::PlaceCell::ExternalId id : place_cell_->external_ids())
     {
-        if(place_cell_->is_culled(id))
+        keyframe_by_frame_id.emplace(keyframe->frame_id, keyframe);
+        if(!keyframe->is_bad())
+            alive_keyframes.push_back(keyframe);
+    }
+    for(const placecell::PlaceCell::ExternalId id : place_cell.external_ids())
+    {
+        if(place_cell.is_culled(id))
             continue;
         const auto it = keyframe_by_frame_id.find(FrameId(id));
         if(it == keyframe_by_frame_id.end() || it->second->is_bad())
-            place_cell_->set_culled(id);
+            place_cell.set_culled(id);
     }
+
+    // Bring the kernel up to date with the map (covisibility: every alive keyframe's
+    // current map-point set, after this cycle's point culling / creation / fusion;
+    // megaloc: nothing to do)
+    keyframe_information_->refresh(alive_keyframes);
 
     placecell::PlaceCell::CullParameters cull_parameters;
     cull_parameters.method = "gram-greedy";
@@ -633,7 +648,7 @@ void LocalMapping::cull_keyframes_information()
     };
 
     const placecell::PlaceCell::CullReport report =
-        place_cell_->cull_keyframes(cull_parameters, try_cull, local_scope ? &window : nullptr);
+        place_cell.cull_keyframes(cull_parameters, try_cull, local_scope ? &window : nullptr);
 
     auto fmt = [](double x) { std::ostringstream s; s << std::fixed << std::setprecision(3) << x; return s.str(); };
     for(const auto& culled : report.culled){

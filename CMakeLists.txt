@@ -41,6 +41,7 @@ set(SRCS_ALLFEATURE
         src/FeatureExtractor.cpp
         src/Utils.cpp
         src/PlaceRecognitionMegaLoc.cc
+        src/KeyframeInformation.cc
         src/PlaceCellSettings.cc
         src/Image.cpp
         src/Feature.cpp

@@ -12,11 +12,13 @@
  * LocalMappingParameters: compiled-in defaults, overridden only by keys present in the
  * file, so settings YAMLs without a PlaceCell.* block keep working unchanged.
  *
- * Only meaningful with `vpr: megaloc` (the placecell store exists only then). System
- * loads them once, turns them into placecell::PlaceCell::Options when constructing the
- * store, prints the profile table at shutdown (PrintProfile), dumps kernel + history +
- * plots next to the run's results (Dump), and the Viewer renders the three visualizer
- * images in a second Pangolin window (Visualize).
+ * Apply to every placecell store the system builds: the `vpr: megaloc` retrieval store
+ * and the keyframe information store (LocalMapping.InformationKernel — the same object
+ * for `megaloc`, an own item-mode store for `covisibility`). System loads them once,
+ * turns them into placecell::PlaceCell::Options when constructing the stores, prints the
+ * profile table(s) at shutdown (PrintProfile), dumps kernel + history + plots of the
+ * information store next to the run's results (Dump), and the Viewer renders that
+ * store's three visualizer images in a second Pangolin window (Visualize).
  *
  * This header deliberately includes nothing from placecell so System.h / Viewer.h stay
  * light; the conversion to placecell types happens in System.cc.

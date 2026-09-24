@@ -916,10 +916,11 @@ bool Tracking::need_new_keyframe()
         recent_inliers_history_.pop_front();
 
     // Information the current view would add to the local map: its unexplained
-    // information v in [0,1] given the local keyframes, on the same global-descriptor
-    // kernel (and centring) keyframe culling marginalises (placecell). Costs one MegaLoc
-    // embedding per tracked frame; the embedding is cached in current_frame_ so a
-    // keyframe made from this frame is not embedded twice. Three bands, sharing the
+    // information v in [0,1] given the local keyframes, on the same kernel (and centring)
+    // keyframe culling marginalises (KeyframeInformation.h, LocalMapping.InformationKernel:
+    // megaloc = one MegaLoc embedding per tracked frame, cached in current_frame_ so a
+    // keyframe made from it is not embedded twice; covisibility = the frame's tracked map
+    // points against the keyframes' point sets, no embedding). Three bands, sharing the
     // culler's budget tau (LocalMapping.KeyframeCullingMaxUnexplained):
     //   v <  keyframe_min_information : redundant — the local map already explains the view;
     //                                   no keyframe (replaces the pixel-flow stationarity gate:
@@ -931,25 +932,28 @@ bool Tracking::need_new_keyframe()
     //                                   unique information v > tau, so it is not a cull
     //                                   candidate on its own account)
     //   in between                    : the tracking-health triggers above decide.
-    // Without an information measure (vpr: none) only the tracking triggers decide.
+    // Without an information measure (no keyframe_information_) only the tracking
+    // triggers decide.
     const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load();
-    const std::optional<KeyframeInformation> information =
-        place_recognition_->keyframe_information(current_frame_, local_keyframes_, LocalMapping::params.keyframe_culling_centred);
+    const std::optional<KeyframeInformationValue> information = keyframe_information_
+        ? keyframe_information_->information(current_frame_, local_keyframes_, LocalMapping::params.keyframe_culling_centred)
+        : std::nullopt;
     last_keyframe_information_ = information ? std::optional<float>(information->unexplained) : std::nullopt;
     const bool redundant = information && information->unexplained < params.keyframe_min_information;
     const bool novel = information && information->unexplained > tau;
 
-    // Thresholds in force, for the backend's decision history (placecell Recorder):
-    // recorded as a step wherever they change (Viewer slider), ignored otherwise.
-    place_recognition_->record_keyframe_thresholds(tau, params.keyframe_min_information);
+    // Thresholds in force, for the decision history (placecell Recorder): recorded as a
+    // step wherever they change (Viewer slider), ignored otherwise.
+    if(keyframe_information_)
+        keyframe_information_->record_thresholds(tau, params.keyframe_min_information);
 
-    // Decision sink: the backend's decision history (placecell Recorder, drawn as
-    // insertion markers on the information plot), the insertion line (always) and the
-    // per-frame diagnostic line (Tracking.LogKeyframeInformation), all carrying the
-    // information value.
+    // Decision sink: the decision history (placecell Recorder, drawn as insertion markers
+    // on the information plot), the insertion line (always) and the per-frame diagnostic
+    // line (Tracking.LogKeyframeInformation), all carrying the information value.
     const auto decide = [&](const bool insert, const std::string& reason) -> bool
     {
-        place_recognition_->record_keyframe_decision(current_frame_.frame_id, insert, last_keyframe_information_, reason);
+        if(keyframe_information_)
+            keyframe_information_->record_decision(current_frame_.frame_id, insert, last_keyframe_information_, reason);
         if(insert || params.log_keyframe_information)
         {
             std::ostringstream line;
@@ -1216,6 +1220,8 @@ void Tracking::reset()
     AF_INFO("reset: clearing keyframe database and map...");
     std::cout.flush();
     place_recognition_->clear();
+    if(keyframe_information_)
+        keyframe_information_->clear();   // no-op for the megaloc kernel (same store as place_recognition_)
     map_->clear(); // erases all map points and keyframes
 
     KeyFrame::next_id = 0;

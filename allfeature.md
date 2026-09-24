@@ -22,8 +22,10 @@ flowchart TD
     LC <--> MAP
     VW -.-> MAP
     TRK <--> VPR[("PlaceRecognition<br/>megaloc | none<br/>(placecell)")]
-    LM <--> VPR
     LC <--> VPR
+    TRK <--> KI[("KeyframeInformation<br/>megaloc | covisibility<br/>(placecell)")]
+    LM <--> KI
+    VW -.-> KI
     TRK --> OPT["Optimizer (g2o)<br/>pose · local BA · Sim3 · essential graph · global BA"]
     LM --> OPT
     LC --> OPT
@@ -36,6 +38,7 @@ flowchart TD
     click LM "docs/reference/LocalMapping.md"
     click LC "docs/reference/LoopClosing.md"
     click VW "docs/reference/Viewer.md"
+    click KI "docs/reference/KeyframeInformation.md"
 
     %% VSLAM-LAB logo squares: cyan #b5f3f9, periwinkle #8195fb, lavender #a59ddf
     classDef entry fill:#8195fb,stroke:#5f74d6,color:#fff
@@ -47,7 +50,7 @@ flowchart TD
     class CLI entry
     class SYS,TRK,LM,LC,VW step
     class OPT,FM cmd
-    class MAP,VPR store
+    class MAP,VPR,KI store
 ```
 
 ## Pages
@@ -59,6 +62,7 @@ flowchart TD
 | [LocalMapping](docs/reference/LocalMapping.md) | `src/LocalMapping.cc`, `src/LocalMapping_aux.cc`, `include/LocalMapping.h` | local-mapping |
 | [LoopClosing](docs/reference/LoopClosing.md) | `src/LoopClosing.cc`, `src/LoopClosing_aux.cc`, `include/LoopClosing.h` | loop-closing (+ GBA thread) |
 | [Viewer](docs/reference/Viewer.md) | `src/Viewer.cc`, `include/Viewer.h` (+ `FrameDrawer`, `MapDrawer`) | viewer |
+| [KeyframeInformation](docs/reference/KeyframeInformation.md) | `src/KeyframeInformation.cc`, `include/KeyframeInformation.h` | tracking (query) · local-mapping (register, refresh, cull) |
 
 Components without a page yet (next in line, one per review session): `Frame` / `KeyFrame` /
 `MapPoint` / `Map`, `FeatureExtractor` / `FeatureMatcher` / `BruteForceMatcher`, `Optimizer`,

@@ -17,14 +17,14 @@
  * the consumers (Tracking::relocalize, LoopClosing::detect_loop) see the same
  * candidate semantics with a different similarity.
  *
- * keyframe_information() (Tracking::need_new_keyframe, every tracked frame) embeds the
- * frame through placecell's read-only MegaLocPlaceCell::unexplained_information and
- * caches the embedding in Frame::global_descriptor; KeyFrame inherits it, so
- * compute(KeyFrame&) stores that descriptor instead of embedding the image again.
+ * With `LocalMapping.InformationKernel: megaloc` the same store also answers the keyframe
+ * information queries (KeyframeInformationMegaLoc, KeyframeInformation.h): that query
+ * embeds every tracked frame and caches the embedding in Frame::global_descriptor;
+ * KeyFrame inherits it, so compute(KeyFrame&) stores that descriptor instead of
+ * embedding the image again.
  *
  * Threading: compute() is called from the LocalMapping thread (keyframes) and the
- * tracking thread (relocalization query, keyframe information); placecell serialises
- * internally. The database has its own mutex; queries take a snapshot and score
+ * tracking thread (relocalization query); placecell serialises internally. The database has its own mutex; queries take a snapshot and score
  * outside the lock.
  */
 
@@ -83,13 +83,6 @@ public:
 
     std::vector<Keyframe> detect_loop_candidates(const Keyframe& keyframe) override;
     std::vector<Keyframe> detect_relocalization_candidates(Frame& frame) override;
-    std::optional<KeyframeInformation> keyframe_information(Frame& frame, const std::vector<Keyframe>& window,
-                                                            bool centred) override;
-
-    // Forwarded to the store's placecell::Recorder (no-ops while PlaceCell.Record is off)
-    void record_keyframe_thresholds(float tau, float min_information) override;
-    void record_keyframe_decision(FrameId frame_id, bool inserted, std::optional<float> unexplained,
-                                  const std::string& reason) override;
 
     const PlaceRecognitionMegaLocParameters& parameters() const { return params_; }
     const placecell::MegaLocPlaceCell& place_cell() const { return *place_cell_; }

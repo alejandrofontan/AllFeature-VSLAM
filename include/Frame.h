@@ -127,8 +127,8 @@ public:
 
     // Transient global descriptor of the frame (MegaLoc: 8448-d unit vector; size 0
     // when VPR is inactive), computed on the tracking thread by the keyframe-information
-    // query (Tracking::need_new_keyframe) or a relocalization query, whichever comes
-    // first — never twice. Keyframe descriptors do NOT live here: a KeyFrame made from
+    // query (Tracking::need_new_keyframe with LocalMapping.InformationKernel: megaloc) or
+    // a relocalization query, whichever comes first — never twice. Keyframe descriptors do NOT live here: a KeyFrame made from
     // this frame carries this copy only until PlaceRecognitionMegaLoc::compute(KeyFrame&)
     // stores it in placecell (System::place_cell), keyed by frame_id.
     Eigen::VectorXf global_descriptor;

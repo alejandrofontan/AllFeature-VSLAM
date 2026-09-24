@@ -34,6 +34,7 @@
 #include "Frame.h"
 #include "FrameDrawer.h"
 #include "Initializer.h"
+#include "KeyframeInformation.h"
 #include "PlaceRecognition.h"
 #include "LocalMapping.h"
 #include "LoopClosing.h"
@@ -144,6 +145,10 @@ public:
     void set_local_mapper(std::shared_ptr<LocalMapping> local_mapper) { local_mapper_ = std::move(local_mapper); }
     void set_loop_closing(std::shared_ptr<LoopClosing> loop_closing) { loop_closing_ = std::move(loop_closing); }
     void set_viewer(std::shared_ptr<Viewer> viewer) { viewer_ = std::move(viewer); }
+    // Keyframe information kernel (KeyframeInformation.h); null = no information measure
+    // (LocalMapping.InformationKernel: megaloc without vpr: megaloc): the tracking-health
+    // triggers alone decide keyframe insertion.
+    void set_keyframe_information(std::shared_ptr<KeyframeInformation> keyframe_information) { keyframe_information_ = std::move(keyframe_information); }
 
 public:
     VerbosityLevel verbosity{LOW};
@@ -271,6 +276,11 @@ protected:
     // themselves in its database)
     std::shared_ptr<PlaceRecognition> place_recognition_;
 
+    // Keyframe information kernel: unexplained information of the current view given
+    // the local keyframes (need_new_keyframe), decision history for the plots. Null when
+    // the system has no information measure.
+    std::shared_ptr<KeyframeInformation> keyframe_information_{};
+
     // Initialization (only for monocular)
     std::shared_ptr<Initializer> initializer_;
 
@@ -320,7 +330,7 @@ protected:
     FrameId last_emergency_keyframe_id_{0};
 
     // Unexplained information of the last tracked frame given the local map (see
-    // need_new_keyframe); nullopt when the VPR backend has no information measure.
+    // need_new_keyframe); nullopt when the system has no information measure.
     std::optional<float> last_keyframe_information_{};
 
     // Last Frame, KeyFrame and Relocalisation Info

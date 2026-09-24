@@ -1,22 +1,23 @@
 # `src/LocalMapping.cc`
 
 The map back-end. `LocalMapping::run` is the body of the local-mapping thread started by
-[`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L201 "mptLocalMapping = make_shared<thread>"):
+[`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L232 "mptLocalMapping = make_shared<thread>"):
 it drains the keyframe queue that Tracking fills and, for every keyframe, computes its global
 descriptor, culls the map points on probation, creates new map points (from sensor depth and by
 two-view triangulation), fuses duplicates with the covisible neighbours, runs the local bundle
 adjustment, culls redundant keyframes and hands the keyframe to LoopClosing. It owns the queue
 (`new_keyframes_`), the probation list (`recent_map_points_`), its own `FeatureMatcher`, and a
-shared pointer to the placecell store (`place_cell_`) that the information culler marginalises.
+shared pointer to the keyframe information kernel (`keyframe_information_`,
+[`KeyframeInformation`](KeyframeInformation.md)) whose placecell store the information culler marginalises.
 The stop / reset / finish protocols that LoopClosing, Tracking and System drive live in
 `src/LocalMapping_aux.cc` together with `LoadParameters` and the profiling output. The sources
 carry no `// #` section banners, so this page groups the functions by call-graph order.
 
 ## Call graph
 
-- **[`run`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L43)** — [`set_accept_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L140), [`has_new_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L80), [`process_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L86), [`stop_if_requested`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L92), [`is_stopped`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L104), [`reset_if_requested`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L173), [`is_finish_requested`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L201), [`set_finished`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L207)
-- **[`process_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L86)** — [`process_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L114), [`cull_map_points`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L154), [`create_new_map_points`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L189) → [`cache_neighbor_matches`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L324), [`create_depth_seeded_points`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L397); [`search_in_neighbors`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L428), [`local_bundle_adjustment`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L497), [`cull_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L508) → [`cull_keyframes_heuristic`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L529) | [`cull_keyframes_information`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L583); `LoopClosing::insert_keyframe`; [`log_profile`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L223)
-- **Called from other threads** — queue: [`insert_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L74), [`accepts_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L134), [`set_insertion_lock`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L146) (Tracking); stop: [`request_stop`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L86), [`is_stop_requested`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L110), [`release`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L116) (LoopClosing); reset: [`request_reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L156), [`is_reset_requested`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L167) (Tracking); finish: [`request_finish`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L195), [`is_finished`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L215) (System)
+- **[`run`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L43)** — [`set_accept_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L152), [`has_new_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L92), [`process_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L86), [`stop_if_requested`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L104), [`is_stopped`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L116), [`reset_if_requested`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L185), [`is_finish_requested`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L213), [`set_finished`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L219)
+- **[`process_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L86)** — [`process_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L114), [`cull_map_points`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L157), [`create_new_map_points`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L192) → [`cache_neighbor_matches`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L327), [`create_depth_seeded_points`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L400); [`search_in_neighbors`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L431), [`local_bundle_adjustment`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L500), [`cull_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L511) → [`cull_keyframes_heuristic`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L533) | [`cull_keyframes_information`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L587); `LoopClosing::insert_keyframe`; [`log_profile`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L235)
+- **Called from other threads** — queue: [`insert_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L86), [`accepts_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L146), [`set_insertion_lock`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L158) (Tracking); stop: [`request_stop`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L98), [`is_stop_requested`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L122), [`release`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L128) (LoopClosing); reset: [`request_reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L168), [`is_reset_requested`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L179) (Tracking); finish: [`request_finish`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L207), [`is_finished`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L227) (System)
 - Not in the graph (setup): [`LocalMapping`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L36) (constructor), [`LoadParameters`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L27)
 
 ## Flow
@@ -36,7 +37,7 @@ flowchart TD
     SIN --> LBA["<b>local_bundle_adjustment</b>"]
     LBA --> CK{"<b>cull_keyframes</b><br/>KeyframeCullingMethod"}
     CK -- heuristic --> CKH["<b>cull_keyframes_heuristic</b>"]
-    CK -- "information (place_cell_ non-empty)" --> CKI["<b>cull_keyframes_information</b><br/>placecell::PlaceCell::cull_keyframes"]
+    CK -- "information (keyframe_information_ with rows)" --> CKI["<b>cull_keyframes_information</b><br/>· KeyframeInformation::refresh<br/>· placecell::PlaceCell::cull_keyframes"]
     CKH --> LC([LoopClosing::insert_keyframe])
     CKI --> LC
     LC --> TAIL
@@ -82,12 +83,12 @@ LocalMapping::LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureTy
                            const int image_width, const int image_height)
 ```
 - stores the map and builds this thread's own `FeatureMatcher` (labelled `"LocalMapping"`) for the
-  given feature types and image size. The loop closer, viewer and placecell store are injected
-  afterwards through `set_loop_closer` / `set_viewer` / `set_placecell` (header inlines), because
-  `LoopClosing` is constructed after `LocalMapping` and the viewer and store are optional.
-- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L200 "localMapper = make_shared<LocalMapping>"),
+  given feature types and image size. The loop closer, viewer and keyframe information kernel are
+  injected afterwards through `set_loop_closer` / `set_viewer` / `set_keyframe_information` (header
+  inlines), because `LoopClosing` is constructed after `LocalMapping` and the viewer and kernel are optional.
+- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L231 "localMapper = make_shared<LocalMapping>"),
   which then starts [`run`](#run) on its own `std::thread` and wires the three setters
-  ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L228 "localMapper->set_loop_closer") — `set_placecell` only when a store exists, i.e. `vpr: megaloc`).
+  ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L259 "localMapper->set_loop_closer") — `set_keyframe_information` only when the system has an information kernel).
 
 ### `run`
 
@@ -102,7 +103,7 @@ void LocalMapping::run()
   finish request. Then [`reset_if_requested`](#reset_if_requested), publish "idle", break on a finish
   request, and sleep 3 ms only when the queue is empty, so a queued keyframe is processed at once.
 - Tracking reads the busy flag to choose between a normal and an emergency insertion
-  ([`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1004 "if(local_mapper_->accepts_keyframes())"))
+  ([`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1008 "if(local_mapper_->accepts_keyframes())"))
   and to wait after an emergency insertion
   ([`Tracking::track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L242 "while(!local_mapper_->accepts_keyframes())")).
 - differs from ORB-SLAM2: the busy flag is toggled once per iteration around the whole
@@ -137,10 +138,13 @@ void LocalMapping::process_new_keyframe()
 ```
 - pops the front keyframe into `current_keyframe_` (under `new_keyframes_mutex_`), computes its
   global descriptor ([`KeyFrame::compute_global_descriptor`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyFrame.cc#L70) → the VPR backend; for `megaloc` this stores the
-  descriptor in placecell, which grows the keyframe kernel by itself), registers the keyframe as an
+  descriptor in placecell, which grows the retrieval kernel by itself), registers the keyframe as an
   observer of every map point Tracking matched into it ([`MapPoint::add_observation`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/MapPoint.cc#L73), which also refreshes the
   point's descriptor and normal/depth), updates the covisibility graph
-  ([`KeyFrame::update_connections`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyFrame.cc#L333)) and inserts the keyframe into the map.
+  ([`KeyFrame::update_connections`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyFrame.cc#L333)), inserts the keyframe into the map and registers it in the
+  information kernel ([`KeyframeInformation::on_keyframe_processed`](KeyframeInformation.md#on_keyframe_processed): the
+  `covisibility` kernel stores the keyframe's current map-point set so it explains the next frames right away; `megaloc` has
+  nothing left to do).
 - a matched point that already observes this keyframe (created *with* it by the initializer) is
   not re-registered; it enters the probation list `recent_map_points_` instead.
 - runs per feature type over `current_keyframe_->featureTypes`; each `get_map_point_matches` call is
@@ -277,9 +281,10 @@ void LocalMapping::local_bundle_adjustment()
 void LocalMapping::cull_keyframes()
 ```
 - dispatch on `KeyframeCullingMethod`: `information` →
-  [`cull_keyframes_information`](#cull_keyframes_information) when a placecell store exists and holds at
-  least one descriptor, else [`cull_keyframes_heuristic`](#cull_keyframes_heuristic) with a one-time
-  `AF_WARN` (the information method needs `vpr: megaloc`); anything else → the heuristic.
+  [`cull_keyframes_information`](#cull_keyframes_information) when the system has an information kernel
+  whose store holds at least one row, else [`cull_keyframes_heuristic`](#cull_keyframes_heuristic) with a
+  one-time `AF_WARN` (the `megaloc` kernel needs `vpr: megaloc`; `covisibility` always exists); anything
+  else → the heuristic.
 - differs from ORB-SLAM2: stock has the heuristic only.
 - settings: `LocalMapping.KeyframeCullingMethod` (`heuristic`).
 - called from: [`process_keyframe`](#process_keyframe).
@@ -308,12 +313,17 @@ void LocalMapping::cull_keyframes_heuristic()
 void LocalMapping::cull_keyframes_information()
 ```
 - host adapter for the joint-information culler in placecell
-  ([`placecell::PlaceCell::cull_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/Thirdparty/placecell/include/placecell/placecell.h#L251 "struct CullParameters")): the maths ("gram-greedy" on the
-  keyframe similarity kernel, optionally double-centred) lives there; this function supplies
-  parameters, the window, the cull callback and the logging.
+  ([`placecell::PlaceCell::cull_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/Thirdparty/placecell/include/placecell/placecell.h#L313 "struct CullParameters")): the maths ("gram-greedy" on the
+  keyframe similarity kernel, optionally double-centred) lives there; this function supplies the
+  kernel's refresh, parameters, the window, the cull callback and the logging. The store is the
+  information kernel's ([`KeyframeInformation::place_cell`](KeyframeInformation.md#place_cell)).
 - reconciliation first: every stored row (`external_ids`, keyed by `frame_id`) that no longer
   resolves to a live keyframe was removed outside this culler (heuristic method, loop closing) and
   is marked culled in placecell (`set_culled`) so it becomes culling history there too.
+- then [`KeyframeInformation::refresh`](KeyframeInformation.md#refresh) with the map's non-bad keyframes: the
+  `covisibility` kernel re-sends every alive keyframe's current map-point set (after this cycle's point
+  culling, creation and fusion), so the kernel the culler marginalises is the map's covisibility of this
+  moment; `megaloc` does nothing (descriptors do not move).
 - parameters: `max_unexplained` = `KeyframeCullingMaxUnexplained` (τ, atomic — the Viewer's "Cull Max
   Unexplained" slider writes it live, [`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L369 "keyframe_culling_max_unexplained.store")), `centred` =
   `KeyframeCullingCentred`, `min_keyframes`, `protect_last` = max(`KeyframeCullingMinAge`, 1) so the
@@ -326,14 +336,16 @@ void LocalMapping::cull_keyframes_information()
   cull, alive count) and one summary per call with culls; when nothing is culled and the history
   holds keyframes above τ (threshold lowered after earlier culls), reports that once per change.
 - the same τ and centring drive keyframe *insertion* in
-  [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L935 "const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load()"),
+  [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L937 "const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load()"),
   so insertion and culling maintain one invariant from both ends. Design background:
   [`docs/notes/2026-08-28_place_recognition_megaloc.md`](../notes/2026-08-28_place_recognition_megaloc.md),
   [`docs/notes/2026-09-03_keyframe_information_policy.md`](../notes/2026-09-03_keyframe_information_policy.md).
 - differs from ORB-SLAM2: no counterpart.
-- settings: `LocalMapping.KeyframeCullingMaxUnexplained` (0.3), `LocalMapping.KeyframeCullingMinAge` (5),
+- settings: `LocalMapping.InformationKernel` (`megaloc`), `LocalMapping.KeyframeCullingMaxUnexplained` (0.3;
+  0.7 for `covisibility` when the key is absent), `LocalMapping.KeyframeCullingMinAge` (5),
   `LocalMapping.KeyframeCullingMinKeyframes` (5), `LocalMapping.KeyframeCullingScope` (`map`),
-  `LocalMapping.KeyframeCullingMaxPerCall` (5), `LocalMapping.KeyframeCullingCentred` (1).
+  `LocalMapping.KeyframeCullingMaxPerCall` (5), `LocalMapping.KeyframeCullingCentred` (1; 0 for `covisibility`
+  when the key is absent).
 - called from: [`cull_keyframes`](#cull_keyframes).
 
 ## Keyframe queue and busy flag
@@ -345,7 +357,7 @@ void LocalMapping::insert_keyframe(const Keyframe& keyframe)
 ```
 - appends to `new_keyframes_` under `new_keyframes_mutex_`. Nothing else: the keyframe is processed
   by [`run`](#run) on the local-mapping thread.
-- called from: [`Tracking::create_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1039 "local_mapper_->insert_keyframe(keyframe)") (wrapped in
+- called from: [`Tracking::create_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1043 "local_mapper_->insert_keyframe(keyframe)") (wrapped in
   [`set_insertion_lock`](#set_insertion_lock)), and
   [`Tracking::create_initial_map`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L551 "local_mapper_->insert_keyframe(keyframe_ini)") for the two initial keyframes.
 - differs from ORB-SLAM2: the `mbAbortBA = true` side effect is gone (no BA interruption).
@@ -357,7 +369,7 @@ bool LocalMapping::has_new_keyframes() const
 ```
 - `!new_keyframes_.empty()` under the queue mutex (`mutable`, so the query is `const`).
 - called from: [`run`](#run) (twice per iteration: to process, and to decide whether to sleep) and
-  [`Tracking::wait_for_idle_local_mapper`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1046), which spins until the
+  [`Tracking::wait_for_idle_local_mapper`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1050), which spins until the
   queue is empty *and* the thread is idle (sequential mode).
 
 ### `accepts_keyframes`
@@ -367,9 +379,9 @@ bool LocalMapping::accepts_keyframes() const
 ```
 - the busy flag under `accept_mutex_`: `false` from the start of a [`run`](#run) iteration until
   its work is done.
-- called from: [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1004 "if(local_mapper_->accepts_keyframes())") (busy → only an
+- called from: [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1008 "if(local_mapper_->accepts_keyframes())") (busy → only an
   emergency keyframe may be inserted), [`Tracking::track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L242 "while(!local_mapper_->accepts_keyframes())") (wait after an
-  emergency insertion), [`Tracking::wait_for_idle_local_mapper`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1046).
+  emergency insertion), [`Tracking::wait_for_idle_local_mapper`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1050).
 
 ### `set_accept_keyframes`
 
@@ -387,7 +399,7 @@ bool LocalMapping::set_insertion_lock(const bool locked)
 - under `stop_mutex_`: refuses (`false`) to lock when the thread is already stopped; otherwise sets
   `insertion_locked_`, which [`stop_if_requested`](#stop_if_requested) honours by deferring a pending
   stop until the lock is released.
-- called from: [`Tracking::create_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1031 "if(!local_mapper_->set_insertion_lock(true))") around
+- called from: [`Tracking::create_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1035 "if(!local_mapper_->set_insertion_lock(true))") around
   `insert_keyframe`; a `false` return skips the insertion (a loop closure holds the mapper).
 - differs from ORB-SLAM2: replaces `SetNotStop(bool)`; same contract, returns the refusal instead of
   relying on the caller to check `isStopped()` first.
@@ -460,7 +472,7 @@ void LocalMapping::request_reset()
 - raises `reset_requested_` under `reset_mutex_`, then blocks (3 ms polls of
   [`is_reset_requested`](#is_reset_requested)) until the local-mapping thread has performed the reset.
   Blocking matters: `Tracking::reset` clears the map right after this returns.
-- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1210 "local_mapper_->request_reset()").
+- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1214 "local_mapper_->request_reset()").
 
 ### `is_reset_requested`
 
@@ -476,8 +488,8 @@ void LocalMapping::reset_if_requested()
 ```
 - thread side, once per [`run`](#run) iteration: when a reset is pending, clears the keyframe
   queue (under its own mutex), the probation list and the four timing histograms, then clears the
-  request. The placecell store is *not* cleared here: `PlaceRecognitionMegaLoc::clear`, called from
-  `Tracking::reset`, does that.
+  request. The placecell stores are *not* cleared here: `PlaceRecognitionMegaLoc::clear` and
+  `KeyframeInformation::clear`, called from `Tracking::reset`, do that.
 - differs from ORB-SLAM2: also resets the profiling histograms.
 
 ## Finish protocol (shutdown)
@@ -489,7 +501,7 @@ void LocalMapping::request_finish()
 ```
 - raises `finish_requested_` under `finish_mutex_`; [`run`](#run) exits at its next check, also
   from inside the stop idle loop.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L397 "localMapper->request_finish()").
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L430 "localMapper->request_finish()").
 
 ### `is_finish_requested`
 
@@ -515,7 +527,7 @@ bool LocalMapping::is_finished() const
 ```
 - `finished_` under `finish_mutex_`. Starts `true` (`finished_{true}`) and is cleared by
   [`run`](#run)'s first statement.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L407 "while(!localMapper->is_finished()") (spin, then join the
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L440 "while(!localMapper->is_finished()") (spin, then join the
   thread), [`LoopClosing::apply_gba_correction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L599 "!local_mapper_->is_finished()"),
   [`release`](#release).
 
@@ -527,12 +539,15 @@ bool LocalMapping::is_finished() const
 void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
 ```
 - fills the static `LocalMapping::params` (`LocalMappingParameters`,
-  [`LocalMapping.h`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/LocalMapping.h#L59 "struct LocalMappingParameters")) from the
+  [`LocalMapping.h`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/LocalMapping.h#L56 "struct LocalMappingParameters")) from the
   `LocalMapping.*` keys present in the settings file; a missing key keeps the compiled default.
-  `KeyframeCullingMethod` and `KeyframeCullingScope` are validated against their option lists
-  (`AF_ERROR` otherwise); `KeyframeCullingCentred` is read as an int (`cv::FileStorage` has no bool
-  reader); `KeyframeCullingMaxUnexplained` goes through the atomic's load/store.
-- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L54 "LocalMapping::LoadParameters(fsSettings)"), before any thread starts.
+  `KeyframeCullingMethod`, `InformationKernel` and `KeyframeCullingScope` are validated against their
+  option lists (`AF_ERROR` otherwise); `KeyframeCullingCentred` is read as an int (`cv::FileStorage` has
+  no bool reader); `KeyframeCullingMaxUnexplained` goes through the atomic's load/store. `InformationKernel`
+  is read first: with `covisibility` the compiled defaults of `KeyframeCullingMaxUnexplained` (0.7) and
+  `KeyframeCullingCentred` (0) replace the `megaloc` ones (0.3, 1) before those keys are read, so an absent
+  key means "the default of this kernel".
+- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L55 "LocalMapping::LoadParameters(fsSettings)"), before any thread starts.
 - settings: the whole table below.
 
 ### `log_profile`
@@ -563,9 +578,10 @@ void LocalMapping::log_profile()
 | `LocalMapping.SearchInNeighborsRadius` | 5.0 | [`LoadParameters`](#loadparameters) | projection search radius (px) for fusion |
 | `LocalMapping.KeyframeCullingRedundancyRatio` | 0.9 | [`LoadParameters`](#loadparameters) | heuristic: cull above this fraction of redundant points ([`cull_keyframes_heuristic`](#cull_keyframes_heuristic)) |
 | `LocalMapping.KeyframeCullingMinObservations` | 3 | [`LoadParameters`](#loadparameters) | heuristic: a point is redundant with this many other observers |
-| `LocalMapping.KeyframeCullingMaxUnexplained` | 0.3 | [`LoadParameters`](#loadparameters) | τ: culling budget and insertion novelty threshold; live via the Viewer slider ([`cull_keyframes_information`](#cull_keyframes_information)) |
+| `LocalMapping.InformationKernel` | `megaloc` | [`LoadParameters`](#loadparameters) | keyframe information kernel for culling and insertion: `megaloc` (the `vpr: megaloc` store) or `covisibility` (shared map points) — [`KeyframeInformation`](KeyframeInformation.md) |
+| `LocalMapping.KeyframeCullingMaxUnexplained` | 0.3 (`covisibility`: 0.7) | [`LoadParameters`](#loadparameters) | τ: culling budget and insertion novelty threshold; live via the Viewer slider ([`cull_keyframes_information`](#cull_keyframes_information)) |
 | `LocalMapping.KeyframeCullingMinAge` | 5 | [`LoadParameters`](#loadparameters) | information: the last this-many keyframes are never culled |
 | `LocalMapping.KeyframeCullingMinKeyframes` | 5 | [`LoadParameters`](#loadparameters) | information: never cull below this many alive keyframes |
 | `LocalMapping.KeyframeCullingScope` | `map` | [`LoadParameters`](#loadparameters) | information: marginalise over all alive keyframes or the covisible window |
 | `LocalMapping.KeyframeCullingMaxPerCall` | 5 | [`LoadParameters`](#loadparameters) | information: culls per call (0 = unlimited) |
-| `LocalMapping.KeyframeCullingCentred` | 1 | [`LoadParameters`](#loadparameters) | information: double-centred kernel (1) or raw cosine (0) |
+| `LocalMapping.KeyframeCullingCentred` | 1 (`covisibility`: 0) | [`LoadParameters`](#loadparameters) | information: double-centred kernel (1) or raw cosine (0) |

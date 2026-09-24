@@ -49,6 +49,7 @@ PAGE_OF = {
     "System": "System", "Viewer": "Viewer", "Optimizer": "Optimizer",
     "PlaceCellSettings": "System", "SegmentationSettings": "System",
     "PlaceRecognitionMegaLoc": "PlaceRecognition", "PlaceRecognition": "PlaceRecognition",
+    "KeyframeInformation": "KeyframeInformation",
 }
 
 

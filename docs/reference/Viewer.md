@@ -80,8 +80,8 @@ Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
 - stores the non-owning `System*` (System owns the Viewer and joins its thread, so it always outlives it) and the shared drawers and tracker; starts with `mbFinished = true`, `mbStopped = true`, so `isFinished`/`is_stopped` answer "idle" until `Run` clears them.
 - reads the calibration with yaml-cpp: the camera whose `cam_name` equals the settings' `cam_mono`, its `fps` (values below 1 become 30) and `image_dimension`. `mT = 1000/fps`, `image_width`, `image_height` are stored but nothing in this file reads them afterwards ([`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L66 "float fps = cam")).
 - reads the viewpoint keys with `cv::FileStorage`: `Viewer.ViewpointX/Y/Z/F` unconditionally through the `cv::FileNode` float conversion (no missing-key guard), `Viewer.Multisampling` only if present, clamped at 0 ([`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L83 "mViewpointX = fSettings")). Both blocks are echoed with `AF_CONFIG_*`.
-- builds the window title `VSLAM-LAB | AllFeature-VSLAM ( <feature names> )`; `System::Shutdown` reads it back through `GetWindowTitle` to rebind the GL context after the thread has been joined ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L419 "BindToContext(viewer->GetWindowTitle())")).
-- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L216 "viewer = make_shared<Viewer>"), only when `activateVisualization` (`verbose:1`); the same block starts the thread on `Run` and hands the viewer to `Tracking` and `LocalMapping` (`set_viewer`), which feed the two profiling medians.
+- builds the window title `VSLAM-LAB | AllFeature-VSLAM ( <feature names> )`; `System::Shutdown` reads it back through `GetWindowTitle` to rebind the GL context after the thread has been joined ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L452 "BindToContext(viewer->GetWindowTitle())")).
+- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L247 "viewer = make_shared<Viewer>"), only when `activateVisualization` (`verbose:1`); the same block starts the thread on `Run` and hands the viewer to `Tracking` and `LocalMapping` (`set_viewer`), which feed the two profiling medians.
 - settings: `Viewer.ViewpointX`, `Viewer.ViewpointY`, `Viewer.ViewpointZ`, `Viewer.ViewpointF`, `Viewer.Multisampling` (see the table); `cam_mono` from the settings and `fps` / `image_dimension` from the calibration.
 
 ## Render loop
@@ -91,12 +91,12 @@ Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
 ```cpp
 void Viewer::Run()
 ```
-- thread body, started by [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L219 "mptViewer = make_shared<thread>"). Clears `mbFinished`/`mbStopped`, creates the main window (1.25 × 1280×720) and, when `Viewer.Multisampling > 0`, asks Pangolin for a multisampled framebuffer and logs whether the backend granted it (the shipped EGL-based X11 backend ignores the request; MSAA is enabled only when `GL_SAMPLES` reports samples). Depth test, alpha blending and point/line smoothing are enabled for the whole window.
+- thread body, started by [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L250 "mptViewer = make_shared<thread>"). Clears `mbFinished`/`mbStopped`, creates the main window (1.25 × 1280×720) and, when `Viewer.Multisampling > 0`, asks Pangolin for a multisampled framebuffer and logs whether the backend granted it (the shipped EGL-based X11 backend ignores the request; MSAA is enabled only when `GL_SAMPLES` reports samples). Depth test, alpha blending and point/line smoothing are enabled for the whole window.
 - **layout**: a left menu panel of 28 % of the width; the 3D view (`d_cam`, `Handler3D` on the render state built from `Viewer.Viewpoint*`) fills the rest; the annotated frame is a texture overlay in the 3D view's top-right corner (`d_img`, 40 % of the view width, texture re-created lazily when the frame size changes); a top-down trajectory minimap sits in the bottom-right corner (`d_top`, square in pixels; `MapDrawer::DrawTrajectoryTopView` does the orthographic fit).
 - **menu panel**, top to bottom ([`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L189 "menuModality")):
   - status: `Modality` (`System::GetModalityDescription`), `Status` (tracking state name), `Frames Tracked` (`tracker->num_tracked_frames_ / System::GetSequenceImageCount`), `Progress %` (`System::GetFramesProcessedCount` over the sequence count), `Reset` button → `system->reset()` on this thread, flag cleared at once;
   - PERFORMANCE: read-only `Tracking (ms)` and `Local Mapping (ms)` from the two medians pushed under `mutexProfileStats` by `Tracking::grab_image` and `LocalMapping::process_keyframe`;
-  - LOCAL MAPPING: slider `KF Max Unexplained` (tau), seeded from `LocalMapping::params.keyframe_culling_max_unexplained` and **written back every iteration** to that atomic, so the culler ([`LocalMapping.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L609 "cull_parameters.max_unexplained = params.keyframe_culling_max_unexplained.load()")) and the insertion policy ([`Tracking.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L935 "const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load()")) follow the slider live; this is the only settings value the viewer edits;
+  - LOCAL MAPPING: slider `KF Max Unexplained` (tau), seeded from `LocalMapping::params.keyframe_culling_max_unexplained` and **written back every iteration** to that atomic, so the culler ([`LocalMapping.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L624 "cull_parameters.max_unexplained = params.keyframe_culling_max_unexplained.load()")) and the insertion policy ([`Tracking.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L937 "const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load()")) follow the slider live; this is the only settings value the viewer edits;
   - VISUALIZATION: `Follow Camera`, `Aerial View` (switches the model-view between the configured viewpoint and a top-down look-at), `Dark Theme` (clear colour and `ViewerStyle::darkTheme`), `Depth Fog`; element toggles `Show Map Points` / `KeyFrames` / `Graph` / `Trajectory` / `Top View`; `PlaceCell Window` (created only when `System::GetPlaceCell()` is non-null, i.e. `vpr: megaloc`, seeded from `PlaceCell.Visualize`); `Color: Feature` / `Color: RGB` as two checkboxes behaving as radio buttons (exactly one on, seeded from `Viewer.PointColorMode`); sliders `Point Size`, `Trajectory Width`, `KeyFrame Width`, `Graph Width`, `Camera Width`, seeded from `MapDrawer::GetDefaultStyle()`.
 - **per iteration**: clear with the theme colour; copy the medians into the panel; store the slider into `LocalMapping::params`; refresh the status strings; assemble a `ViewerStyle` from the widgets (sizes not exposed as widgets, `keyFrameSize`, `cameraSize`, `fogStart`, `fogEnd`, come from the drawer defaults); fetch `Twc` from `MapDrawer::GetCurrentOpenGLCameraMatrix`, apply aerial/follow; run the reset if requested; draw camera, keyframes+graph, points, trajectory through `MapDrawer`; upload `FrameDrawer::DrawFrame()` into the overlay texture; draw the top view; `pangolin::FinishFrame()`.
 - **placecell window** (second Pangolin window, same thread, [`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L463 "const bool wantPlaceCellWindow")): while the toggle is on and no failure was recorded, the window (1500×600) with its three views and textures is created lazily on the first iteration it is wanted, together with a windowless `placecell::viz::Visualizer` (`windows = false`, because the OpenCV in the pixi env is headless; `max_hz = 0`, throttled here instead); every later iteration binds its context. If `pangolin::ShouldQuit()` reports that the user closed it, the window is destroyed and the menu toggle unticked. Otherwise, at most every `1 / PlaceCell.VisualizeMaxHz` seconds, `Visualizer::update` is called and the kernel heatmap (left), alive-information strip (bottom right) and information history (above it) are uploaded as `GL_BGR` textures at 1:1 pixels; the three textures are drawn, the frame finished and the main context rebound. Any exception disables the window for the rest of the run with one `AF_WARN`. Unticking the toggle closes the window on the next iteration. Panel geometry (kernel side from the window height minus the title strip, plots split 64/36 of the remaining width) is fixed at `Run` start from `PlaceCell.VisualizeCentred` and `PlaceCell.VisualizeHistoryLastN`.
@@ -113,7 +113,7 @@ Used by `Tracking::reset` to freeze drawing while the map is wiped: the viewer t
 void Viewer::request_stop()
 ```
 - sets `mbStopRequested` under `mMutexStop`, unless the viewer is already stopped (then the request is a no-op and the caller's `is_stopped` wait passes at once).
-- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1203 "viewer_->request_stop()"), which then polls [`is_stopped`](#is_stopped) every 3 ms before touching the map.
+- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1207 "viewer_->request_stop()"), which then polls [`is_stopped`](#is_stopped) every 3 ms before touching the map.
 
 ### `is_stopped`
 
@@ -136,7 +136,7 @@ bool Viewer::Stop()
 void Viewer::release()
 ```
 - clears `mbStopped` under `mMutexStop`; `Run`'s spin sees `is_stopped() == false` and resumes drawing.
-- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1244 "viewer_->release()"), after the map, the VPR database and the ids have been reset.
+- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1250 "viewer_->release()"), after the map, the VPR database and the ids have been reset.
 
 ## Finish protocol
 
@@ -148,7 +148,7 @@ Used by `System::Shutdown` to end the thread before joining it.
 void Viewer::RequestFinish()
 ```
 - sets `mbFinishRequested` under `mMutexFinish`. `Run` notices at the end of its current iteration; a parked (stopped) viewer is not woken by this, `Stop` merely stops re-parking once the request is set.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L401 "viewer->RequestFinish()"), which then polls [`isFinished`](#isfinished) every 5 ms and joins the thread afterwards.
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L434 "viewer->RequestFinish()"), which then polls [`isFinished`](#isfinished) every 5 ms and joins the thread afterwards.
 
 ### `CheckFinish`
 
@@ -170,7 +170,7 @@ void Viewer::SetFinish()
 bool Viewer::isFinished()
 ```
 - `mbFinished` under `mMutexFinish`. Starts `true` (constructor), cleared by `Run`'s first statement, set by [`SetFinish`](#setfinish).
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L402 "while(!viewer->isFinished())").
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L435 "while(!viewer->isFinished())").
 
 ## Settings read by this file
 

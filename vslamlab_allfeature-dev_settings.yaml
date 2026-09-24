@@ -10,7 +10,7 @@ feature_vpr: "orb32" # local feature that verifies retrieved candidates (reloc P
                      # must be in features; defaults to the first feature.
 megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # vpr: megaloc — exported by Thirdparty/placecell/tools/export_megaloc.py
 megaloc_precision: "fp16"                            # TensorRT engine precision: "fp16" | "fp32"
-segmentation: "efficientvit" # online semantic segmentation: "efficientvit" | "none"
+segmentation: "none" # online semantic segmentation: "efficientvit" | "none"
 debug: false
 max_frame_wait: 0.2  # s; the mono/rgbd executables replay the sequence at its own rate (sleep for the rest of the
                      # timestamp gap after tracking a frame); this caps that pause so holes in the recording do not
@@ -98,8 +98,8 @@ Tracking.BestCovisibleKeyframes: 10   # covisible neighbors considered per keyfr
 Tracking.ViewingCosLimit: 0.5         # frustum viewing-angle limit for local-point candidates
 
 # Keyframe policy. Information = unexplained information of the current view given the local map
-# (placecell, same MegaLoc kernel and centring as keyframe culling; [0,1], 1 = nothing in the local
-# map resembles the view). Three bands: below KeyframeMinInformation the view is redundant and no
+# (placecell, on the kernel LocalMapping.InformationKernel selects — the same kernel and centring as
+# keyframe culling; [0,1], 1 = nothing in the local map resembles the view). Three bands: below KeyframeMinInformation the view is redundant and no
 # keyframe is inserted (replaces the old pixel-flow stationarity gate); above
 # LocalMapping.KeyframeCullingMaxUnexplained (tau, the culler's budget: one shared key) the view is
 # novel and a keyframe is inserted even if tracking is fine; in between the tracking triggers below decide.
@@ -157,7 +157,7 @@ PlaceCell.Visualize: 1            # [0] open a window with the kernel heatmap, t
                                   # min-information lines, insertions and culls) and the alive unique-information strip;
                                   # Viewer toggle "PlaceCell Window" (closing the window unticks it)
 PlaceCell.VisualizeMaxHz: 2.0     # [2.0] re-render the panels at most this often (a render is O(keyframes^2) for the centred kernel)
-PlaceCell.VisualizeCentred: 1     # [1] kernel heatmap of the centred kernel (what the culler marginalises); 0 = raw cosine
+PlaceCell.VisualizeCentred: 0     # [1] kernel heatmap of the centred kernel (what the culler marginalises with KeyframeCullingCentred 1); 0 = raw cosine (the covisibility kernel)
 PlaceCell.VisualizeHistoryLastN: 0 # [0] information history shows only the last N queries (0 = all)
 
 #--------------------------------------------------------------------------------------------
@@ -182,17 +182,26 @@ LocalMapping.SearchInNeighborsRadius: 5.0         # projection search radius (pi
 
 LocalMapping.KeyframeCullingMethod: information
 
+# Keyframe information kernel, read by the information culler AND Tracking's insertion bands (KeyframeInformation.h):
+#   "megaloc"      [default] the vpr: megaloc store's MegaLoc cosine (centred; no kernel at all with vpr: none)
+#   "covisibility" cosine of the keyframes' shared map points, K_ij = |P_i & P_j| / sqrt(|P_i| |P_j|): exactly 0 for
+#                  keyframes that share nothing, so raw (uncentred); independent of vpr. When KeyframeCullingMaxUnexplained /
+#                  KeyframeCullingCentred are ABSENT they default per kernel (megaloc 0.3 / 1, covisibility 0.7 / 0).
+LocalMapping.InformationKernel: "covisibility"
+
 # heuristic
 LocalMapping.KeyframeCullingRedundancyRatio: 0.9 # cull when more than this fraction of a keyframe's points is redundant
 LocalMapping.KeyframeCullingMinObservations: 3   # a point is redundant when this many OTHER keyframes observe it
 
-# information (compiled-in defaults: MaxUnexplained 0.3, MinAge 5, MinKeyframes 5, Scope map, MaxPerCall 5, Centred 1)
-LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # tau, shared by culling and insertion: every keyframe ever inserted must stay at least (1 - tau) explained by the alive keyframes, and a view more than tau unexplained by the local map becomes a keyframe (Viewer slider "KF Max Unexplained")
+# information (compiled-in defaults: MaxUnexplained 0.3 [covisibility 0.7], MinAge 5, MinKeyframes 5, Scope map, MaxPerCall 5, Centred 1 [covisibility 0])
+LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # tau, shared by culling and insertion: every keyframe ever inserted must stay at least (1 - tau) explained by the alive keyframes, and a view more than tau unexplained by the local map becomes a keyframe (Viewer slider "KF Max Unexplained"); with one explainer v = 1 - s^2, so on the covisibility kernel 0.7 means "shares less than ~55% of its points"
 LocalMapping.KeyframeCullingMinAge: 5            # keyframes younger than this many keyframes are never culled
 LocalMapping.KeyframeCullingMinKeyframes: 5      # never cull below this many alive keyframes
 LocalMapping.KeyframeCullingScope: "map"         # marginalise over "map" (all alive keyframes) or "local" (current keyframe + its covisible keyframes)
 LocalMapping.KeyframeCullingMaxPerCall: 5        # at most this many culls per call (0 = unlimited): a raised threshold thins the map gradually instead of in one burst
-LocalMapping.KeyframeCullingCentred: 1           # 1 = correlation of mean-centred descriptors (recommended: removes MegaLoc's ~0.37 common-mode floor), 0 = raw cosine
+
+LocalMapping.KeyframeCullingCentred: 0           # 1 = correlation of mean-centred descriptors (recommended for megaloc: removes its ~0.37 common-mode floor), 0 = raw cosine (covisibility: unrelated keyframes are exactly 0 already)
+# LocalMapping.KeyframeCullingCentred: 1           # 1 = correlation of mean-centred descriptors (recommended for megaloc: removes its ~0.37 common-mode floor), 0 = raw cosine (covisibility: unrelated keyframes are exactly 0 already)
 
 #--------------------------------------------------------------------------------------------
 # Loop Closing parameters (values shown are the compiled-in defaults; every key is optional)

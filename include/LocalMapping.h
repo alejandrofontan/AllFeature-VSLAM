@@ -32,11 +32,8 @@
 #include <Eigen/Core>
 #include <opencv2/core/core.hpp>
 
-// placecell (Thirdparty/placecell): stores the keyframes' global descriptors, keyed by
-// frame_id. Forward declaration only -- the .cc files include the real header.
-namespace placecell { class PlaceCell; }
-
 #include "FeatureMatcher.h"
+#include "KeyframeInformation.h"
 #include "KeyFrame.h"
 #include "LoopClosing.h"
 #include "Map.h"
@@ -59,9 +56,18 @@ class Viewer;
 struct LocalMappingParameters
 {
     // cull_keyframes(): "heuristic" (ORB-SLAM2-style point redundancy, default) or
-    // "information" (joint information on the online MegaLoc similarity kernel; needs
-    // vpr: megaloc — falls back to heuristic with a one-time warning otherwise)
+    // "information" (joint information on the keyframe information kernel below; falls
+    // back to heuristic with a one-time warning when the system has no such kernel)
     std::string keyframe_culling_method{"heuristic"};
+
+    // The keyframe information kernel (KeyframeInformation.h) that the information
+    // culler AND Tracking's insertion bands read: "megaloc" (the vpr: megaloc store's
+    // MegaLoc cosine, centred; no kernel at all without vpr: megaloc) or "covisibility"
+    // (cosine of the keyframes' shared map points, raw; independent of vpr). The two
+    // kernels live on different scales, so KeyframeCullingMaxUnexplained and
+    // KeyframeCullingCentred take a per-kernel default when their keys are absent.
+    std::string information_kernel{"megaloc"};
+    static constexpr float keyframe_culling_max_unexplained_covisibility{0.7f};   // tau default for the covisibility kernel (starting point, untuned)
 
     // cull_map_points()
     float map_point_culling_min_found_ratio{0.25f}; // cull when found/visible drops below this
@@ -106,7 +112,7 @@ public:
 
     void set_loop_closer(std::shared_ptr<LoopClosing> loop_closer) { loop_closer_ = std::move(loop_closer); }
     void set_viewer(std::shared_ptr<Viewer> viewer) { viewer_ = std::move(viewer); }
-    void set_placecell(std::shared_ptr<placecell::PlaceCell> place_cell) { place_cell_ = std::move(place_cell); }
+    void set_keyframe_information(std::shared_ptr<KeyframeInformation> keyframe_information) { keyframe_information_ = std::move(keyframe_information); }
 
     // Main function: runs on the Local Mapping thread. One process_keyframe() per
     // queued keyframe; the stop/reset/finish protocols are honored between iterations.
@@ -199,13 +205,13 @@ protected:
     std::list<Keyframe> new_keyframes_;
     Keyframe current_keyframe_;
 
-    // placecell store: the keyframes' global descriptors AND the keyframe x keyframe
-    // VPR similarity kernel (raw cosine, grown by placecell on every stored keyframe;
-    // rows are never removed when a keyframe is culled -- culled keyframes stay as the
-    // culling "history"). Null when the VPR backend does not store global descriptors
-    // (vpr: none). Kernel rows map back to keyframes via
-    // place_cell_->external_ids() (frame_id) -- see cull_keyframes_information.
-    std::shared_ptr<placecell::PlaceCell> place_cell_{};
+    // Keyframe information kernel (KeyframeInformation.h, LocalMapping.InformationKernel):
+    // its placecell store holds one row per keyframe ever processed (rows are never
+    // removed when a keyframe is culled -- culled keyframes stay as the culling
+    // "history"), keyed by frame_id. process_new_keyframe registers each keyframe,
+    // cull_keyframes_information refreshes the alive ones and culls on it. Null when the
+    // system has no information kernel (megaloc kernel without vpr: megaloc).
+    std::shared_ptr<KeyframeInformation> keyframe_information_{};
     std::list<Pt> recent_map_points_;
 
     bool stopped_{false};

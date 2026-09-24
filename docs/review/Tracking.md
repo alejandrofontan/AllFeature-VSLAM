@@ -28,11 +28,11 @@ commit that was read. Tags: `→ #<issue>`, `→ reference`, `→ paper:<file>.t
 | `Tracking::update_local_points` | [Tracking.cc#L808](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L808 "Tracking::update_local_points(") | unread |  |
 | `Tracking::search_local_points` | [Tracking.cc#L831](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L831 "Tracking::search_local_points(") | unread |  |
 | `Tracking::need_new_keyframe` | [Tracking.cc#L866](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L866 "Tracking::need_new_keyframe(") | unread |  |
-| `Tracking::create_new_keyframe` | [Tracking.cc#L1027](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1027 "Tracking::create_new_keyframe(") | unread |  |
-| `Tracking::wait_for_idle_local_mapper` | [Tracking.cc#L1046](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1046 "Tracking::wait_for_idle_local_mapper(") | unread |  |
-| `Tracking::relocalize` | [Tracking.cc#L1052](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1052 "Tracking::relocalize(") | unread |  |
-| `Tracking::accept_relocalization_hypothesis` | [Tracking.cc#L1129](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1129 "Tracking::accept_relocalization_hypothesis(") | unread |  |
-| `Tracking::reset` | [Tracking.cc#L1195](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1195 "Tracking::reset(") | unread |  |
+| `Tracking::create_new_keyframe` | [Tracking.cc#L1031](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1031 "Tracking::create_new_keyframe(") | unread |  |
+| `Tracking::wait_for_idle_local_mapper` | [Tracking.cc#L1050](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1050 "Tracking::wait_for_idle_local_mapper(") | unread |  |
+| `Tracking::relocalize` | [Tracking.cc#L1056](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1056 "Tracking::relocalize(") | unread |  |
+| `Tracking::accept_relocalization_hypothesis` | [Tracking.cc#L1133](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1133 "Tracking::accept_relocalization_hypothesis(") | unread |  |
+| `Tracking::reset` | [Tracking.cc#L1199](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1199 "Tracking::reset(") | unread |  |
 | `Tracking::load_camera_parameters` | [Tracking_aux.cc#L20](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L20 "Tracking::load_camera_parameters(") | unread |  |
 | `Tracking::get_feature_extractor` | [Tracking_aux.cc#L97](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L97 "Tracking::get_feature_extractor(") | unread |  |
 | `Tracking::run_tracking_stage` | [Tracking_aux.cc#L106](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L106 "Tracking::run_tracking_stage(") | unread |  |

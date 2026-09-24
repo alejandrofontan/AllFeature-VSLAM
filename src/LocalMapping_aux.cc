@@ -37,6 +37,18 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     if(params.keyframe_culling_method != "heuristic" && params.keyframe_culling_method != "information")
         AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingMethod '" + params.keyframe_culling_method + "' (options: heuristic, information)");
 
+    // Information kernel first: tau and the centring take a per-kernel default below
+    // when their keys are absent (the covisibility cosine has no common-mode floor and
+    // lives on a different scale than MegaLoc's)
+    read_if_present("LocalMapping.InformationKernel", params.information_kernel);
+    if(params.information_kernel != "megaloc" && params.information_kernel != "covisibility")
+        AF_ERROR("[LocalMapping] Unknown LocalMapping.InformationKernel '" + params.information_kernel + "' (options: megaloc, covisibility)");
+    if(params.information_kernel == "covisibility")
+    {
+        params.keyframe_culling_max_unexplained.store(LocalMappingParameters::keyframe_culling_max_unexplained_covisibility);
+        params.keyframe_culling_centred = false;
+    }
+
     read_if_present("LocalMapping.MapPointCullingMinFoundRatio", params.map_point_culling_min_found_ratio);
     read_if_present("LocalMapping.MapPointCullingMinObservations", params.map_point_culling_min_observations);
     read_if_present("LocalMapping.MapPointCullingObservationTestAge", params.map_point_culling_observation_test_age);
