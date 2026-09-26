@@ -96,6 +96,7 @@ struct LocalMappingParameters
     int keyframe_culling_min_keyframes{5};         // never cull below this many alive keyframes
     std::string keyframe_culling_scope{"map"};     // explainers + candidates: "map" = all alive keyframes, "local" = current keyframe + its covisible keyframes
     int keyframe_culling_max_per_call{5};          // at most this many culls per cull_keyframes() call (0 = unlimited); spreads the response to a raised threshold over several keyframes
+    std::string keyframe_culling_objective{"unique"}; // gram-greedy ranks the feasible candidates by: "unique" = own unique information v_i, "minimax" = worst unexplained view after the cull, "total-loss" = v_i plus the rise of every other view
     bool keyframe_culling_centred{true};           // double-centre the kernel (Pearson correlation of mean-centred descriptors) instead of raw cosine
 
 };

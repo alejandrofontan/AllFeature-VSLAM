@@ -74,6 +74,15 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     if(params.keyframe_culling_scope != "map" && params.keyframe_culling_scope != "local")
         AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingScope '" + params.keyframe_culling_scope + "' (options: map, local)");
     read_if_present("LocalMapping.KeyframeCullingMaxPerCall", params.keyframe_culling_max_per_call);
+    read_if_present("LocalMapping.KeyframeCullingObjective", params.keyframe_culling_objective);
+    if(params.keyframe_culling_objective != "unique" && params.keyframe_culling_objective != "minimax"
+       && params.keyframe_culling_objective != "total-loss")
+    {
+        // Fall back rather than let placecell throw std::invalid_argument inside the mapping thread
+        AF_WARN("[LocalMapping] Unknown LocalMapping.KeyframeCullingObjective '" + params.keyframe_culling_objective
+                + "' (options: unique, minimax, total-loss); using \"unique\"");
+        params.keyframe_culling_objective = "unique";
+    }
     int centred = params.keyframe_culling_centred ? 1 : 0;   // cv::FileStorage has no bool reader
     read_if_present("LocalMapping.KeyframeCullingCentred", centred);
     params.keyframe_culling_centred = (centred != 0);

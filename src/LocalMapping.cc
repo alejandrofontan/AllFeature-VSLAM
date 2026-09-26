@@ -621,6 +621,7 @@ void LocalMapping::cull_keyframes_information()
 
     placecell::PlaceCell::CullParameters cull_parameters;
     cull_parameters.method = "gram-greedy";
+    cull_parameters.objective = params.keyframe_culling_objective;
     cull_parameters.max_unexplained = params.keyframe_culling_max_unexplained.load();   // live: Viewer slider
     cull_parameters.centred = params.keyframe_culling_centred;
     cull_parameters.min_keyframes = params.keyframe_culling_min_keyframes;

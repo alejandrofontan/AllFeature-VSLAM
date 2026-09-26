@@ -26,24 +26,24 @@ commit that was read. Tags: `→ #<issue>`, `→ reference`, `→ paper:<file>.t
 | `LocalMapping::cull_keyframes_heuristic` | [LocalMapping.cc#L533](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L533 "LocalMapping::cull_keyframes_heuristic(") | unread |  |
 | `LocalMapping::cull_keyframes_information` | [LocalMapping.cc#L587](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping.cc#L587 "LocalMapping::cull_keyframes_information(") | unread |  |
 | `LocalMapping::LoadParameters` | [LocalMapping_aux.cc#L27](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L27 "LocalMapping::LoadParameters(") | unread |  |
-| `LocalMapping::insert_keyframe` | [LocalMapping_aux.cc#L86](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L86 "LocalMapping::insert_keyframe(") | unread |  |
-| `LocalMapping::has_new_keyframes` | [LocalMapping_aux.cc#L92](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L92 "LocalMapping::has_new_keyframes(") | unread |  |
-| `LocalMapping::request_stop` | [LocalMapping_aux.cc#L98](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L98 "LocalMapping::request_stop(") | unread |  |
-| `LocalMapping::stop_if_requested` | [LocalMapping_aux.cc#L104](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L104 "LocalMapping::stop_if_requested(") | unread |  |
-| `LocalMapping::is_stopped` | [LocalMapping_aux.cc#L116](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L116 "LocalMapping::is_stopped(") | unread |  |
-| `LocalMapping::is_stop_requested` | [LocalMapping_aux.cc#L122](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L122 "LocalMapping::is_stop_requested(") | unread |  |
-| `LocalMapping::release` | [LocalMapping_aux.cc#L128](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L128 "LocalMapping::release(") | unread |  |
-| `LocalMapping::accepts_keyframes` | [LocalMapping_aux.cc#L146](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L146 "LocalMapping::accepts_keyframes(") | unread |  |
-| `LocalMapping::set_accept_keyframes` | [LocalMapping_aux.cc#L152](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L152 "LocalMapping::set_accept_keyframes(") | unread |  |
-| `LocalMapping::set_insertion_lock` | [LocalMapping_aux.cc#L158](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L158 "LocalMapping::set_insertion_lock(") | unread |  |
-| `LocalMapping::request_reset` | [LocalMapping_aux.cc#L168](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L168 "LocalMapping::request_reset(") | unread |  |
-| `LocalMapping::is_reset_requested` | [LocalMapping_aux.cc#L179](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L179 "LocalMapping::is_reset_requested(") | unread |  |
-| `LocalMapping::reset_if_requested` | [LocalMapping_aux.cc#L185](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L185 "LocalMapping::reset_if_requested(") | unread |  |
-| `LocalMapping::request_finish` | [LocalMapping_aux.cc#L207](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L207 "LocalMapping::request_finish(") | unread |  |
-| `LocalMapping::is_finish_requested` | [LocalMapping_aux.cc#L213](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L213 "LocalMapping::is_finish_requested(") | unread |  |
-| `LocalMapping::set_finished` | [LocalMapping_aux.cc#L219](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L219 "LocalMapping::set_finished(") | unread |  |
-| `LocalMapping::is_finished` | [LocalMapping_aux.cc#L227](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L227 "LocalMapping::is_finished(") | unread |  |
-| `LocalMapping::log_profile` | [LocalMapping_aux.cc#L235](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L235 "LocalMapping::log_profile(") | unread |  |
+| `LocalMapping::insert_keyframe` | [LocalMapping_aux.cc#L95](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L95 "LocalMapping::insert_keyframe(") | unread |  |
+| `LocalMapping::has_new_keyframes` | [LocalMapping_aux.cc#L101](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L101 "LocalMapping::has_new_keyframes(") | unread |  |
+| `LocalMapping::request_stop` | [LocalMapping_aux.cc#L107](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L107 "LocalMapping::request_stop(") | unread |  |
+| `LocalMapping::stop_if_requested` | [LocalMapping_aux.cc#L113](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L113 "LocalMapping::stop_if_requested(") | unread |  |
+| `LocalMapping::is_stopped` | [LocalMapping_aux.cc#L125](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L125 "LocalMapping::is_stopped(") | unread |  |
+| `LocalMapping::is_stop_requested` | [LocalMapping_aux.cc#L131](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L131 "LocalMapping::is_stop_requested(") | unread |  |
+| `LocalMapping::release` | [LocalMapping_aux.cc#L137](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L137 "LocalMapping::release(") | unread |  |
+| `LocalMapping::accepts_keyframes` | [LocalMapping_aux.cc#L155](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L155 "LocalMapping::accepts_keyframes(") | unread |  |
+| `LocalMapping::set_accept_keyframes` | [LocalMapping_aux.cc#L161](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L161 "LocalMapping::set_accept_keyframes(") | unread |  |
+| `LocalMapping::set_insertion_lock` | [LocalMapping_aux.cc#L167](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L167 "LocalMapping::set_insertion_lock(") | unread |  |
+| `LocalMapping::request_reset` | [LocalMapping_aux.cc#L177](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L177 "LocalMapping::request_reset(") | unread |  |
+| `LocalMapping::is_reset_requested` | [LocalMapping_aux.cc#L188](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L188 "LocalMapping::is_reset_requested(") | unread |  |
+| `LocalMapping::reset_if_requested` | [LocalMapping_aux.cc#L194](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L194 "LocalMapping::reset_if_requested(") | unread |  |
+| `LocalMapping::request_finish` | [LocalMapping_aux.cc#L216](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L216 "LocalMapping::request_finish(") | unread |  |
+| `LocalMapping::is_finish_requested` | [LocalMapping_aux.cc#L222](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L222 "LocalMapping::is_finish_requested(") | unread |  |
+| `LocalMapping::set_finished` | [LocalMapping_aux.cc#L228](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L228 "LocalMapping::set_finished(") | unread |  |
+| `LocalMapping::is_finished` | [LocalMapping_aux.cc#L236](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L236 "LocalMapping::is_finished(") | unread |  |
+| `LocalMapping::log_profile` | [LocalMapping_aux.cc#L244](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LocalMapping_aux.cc#L244 "LocalMapping::log_profile(") | unread |  |
 
 ## Notes
 
