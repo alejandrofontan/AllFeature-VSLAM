@@ -163,7 +163,7 @@ public:
 
     // Current Frame
     Frame current_frame_;
-    cv::Mat gray_image_;
+    cv::Mat color_image_; // current image as loaded (BGR/BGRA, or gray), after resize/crop; drawn by the viewer
     cv::Mat mask_image_; // segmentation mask of the current image (1 = static, 0 = dynamic); empty when segmentation is off
     std::string image_name_;
 

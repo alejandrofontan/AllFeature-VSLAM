@@ -83,8 +83,16 @@ cv::Mat FrameDrawer::DrawFrame()
         }
     } // destroy scoped mutex -> release mutex
 
-    if(im.channels()<3) //this should be always true
-        cvtColor(im,im,cv::COLOR_GRAY2BGR);
+    // The viewer uploads this buffer as GL_RGB. The loaded image is BGR (cv::imread order,
+    // same assumption as MapDrawer's point colors) or gray.
+    if(im.depth() != CV_8U)
+        cv::normalize(im, im, 0, 255, cv::NORM_MINMAX, CV_8U);
+    if(im.channels() == 1)
+        cv::cvtColor(im, im, cv::COLOR_GRAY2RGB);
+    else if(im.channels() == 4)
+        cv::cvtColor(im, im, cv::COLOR_BGRA2RGB);
+    else
+        cv::cvtColor(im, im, cv::COLOR_BGR2RGB);
 
     // Tint the dynamic (mask == 0) region red, same style as the export self-check
     // overlay. The viewer uploads this buffer as GL_RGB, so red is channel 0.
@@ -207,7 +215,7 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, TrackingState nState, cv::Mat &imTex
 void FrameDrawer::update(Tracking *pTracker)
 {
     unique_lock<mutex> lock(mMutex);
-    pTracker->gray_image_.copyTo(mIm);
+    pTracker->color_image_.copyTo(mIm);
     pTracker->mask_image_.copyTo(mMask);
     imName = pTracker->image_name_;
     mvCurrentKeys = pTracker->current_frame_.raw_keypoints;

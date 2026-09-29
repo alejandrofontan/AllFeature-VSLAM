@@ -120,7 +120,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     if(fix_image_size_)
         im.fix_image_size(image_width_, image_height_);
 
-    gray_image_ = im.grayImg;
+    color_image_ = im.img;
     mask_image_ = im.mask;
     image_name_ = im.imageName;
     profiler.resize_done(resize_times_);

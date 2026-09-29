@@ -75,7 +75,7 @@ flowchart TD
 ```cpp
 mat4f Tracking::grab_image(Image &im, const double timestamp)
 ```
-- the per-frame entry point: converts the image to gray (honouring the calibration's colour order), resizes it to the nominal area when `fix_image_size_` is set, keeps the gray image, the segmentation mask and the image name for the drawers, builds `current_frame_` and calls [`track`](#track). Returns `current_frame_.Tcw` (identity-less/unset when the frame did not track).
+- the per-frame entry point: converts the image to gray (honouring the calibration's colour order), resizes it to the nominal area when `fix_image_size_` is set, keeps the colour image (`color_image_`, drawn by the viewer), the segmentation mask and the image name for the drawers, builds `current_frame_` and calls [`track`](#track). Returns `current_frame_.Tcw` (identity-less/unset when the frame did not track).
 - feature extraction happens in the `Frame` constructor with one extractor per feature type; before the map exists the denser `init_feature_extractor_` set is used (`Tracking.InitExtractorFeaturesScale` times more keypoints), afterwards `feature_extractor_left_`.
 - profiling: `GrabProfiler` ([`Tracking_aux.h`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/Tracking_aux.h#L92 "struct GrabProfiler")) fills the resize / frame-creation / tracking / total histograms; the total is only counted for frames that ended in state `OK`, and the running median is pushed to the viewer when one exists.
 - called from: [`System::Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L393 "tracker->grab_image"), once per image.
