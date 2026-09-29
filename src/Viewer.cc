@@ -21,6 +21,8 @@
 #include "Viewer.h"
 #include "Utils.h"
 #include <pangolin/pangolin.h>
+#include <pangolin/display/default_font.h>
+#include <pangolin/display/widgets.h>
 #include <yaml-cpp/yaml.h>
 #include "afvslam_log.hpp"
 
@@ -30,12 +32,14 @@
 #include <placecell/viz.h>
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <exception>
 #include <iomanip>
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <vector>
 
 namespace AF_VSLAM
 {
@@ -120,6 +124,53 @@ std::string trackingStateName(const TrackingState state)
         default:                              return "?";
     }
 }
+
+// Narrowest pixel width at which no widget of `panel` clips its text, mirroring the widget
+// layout of Pangolin 0.9.1 (components/pango_display/src/widgets.cpp):
+//  - Slider: label left and value (setprecision(4)) right on one row, 2 px insets
+//  - Checkbox: box (font height) + 4 px, then the label
+//  - Button: centred label
+//  - TextInput: label on one row, value right-aligned on the next, 2 px margins
+// Slider values are sampled over their range; `textValues` are the worst-case strings the
+// text rows take at runtime (their current value is also measured).
+float min_panel_width(pangolin::View& panel, const std::vector<std::string>& textValues)
+{
+    pangolin::GlFont& font = pangolin::default_font();
+    auto textWidth = [&font](const std::string& str) { return font.Text(str).Width(); };
+    const float gap = textWidth("xx");   // space between a slider's label and value
+
+    float width = 0.0f;
+    for(pangolin::View* view : panel.views)
+    {
+        if(auto* slider = dynamic_cast<pangolin::Slider*>(view))
+        {
+            const double r0 = slider->Meta().range[0];
+            const double r1 = slider->Meta().range[1];
+            float valueWidth = 0.0f;
+            for(int i = 0; i <= 1000; ++i)
+            {
+                // Off-grid samples, so the widest 4-significant-digit forms show up
+                const double val = (i == 1000) ? r1 : r0 + (r1 - r0) * (i + 0.3183) / 1000.0;
+                std::ostringstream oss;
+                oss << std::setprecision(4) << val;
+                valueWidth = std::max(valueWidth, textWidth(oss.str()));
+            }
+            width = std::max(width, 2.0f + textWidth(slider->Meta().friendly) + gap + valueWidth + 2.0f);
+        }
+        else if(auto* checkbox = dynamic_cast<pangolin::Checkbox*>(view))
+            width = std::max(width, font.Height() + 4.0f + textWidth(checkbox->Meta().friendly) + 2.0f);
+        else if(auto* button = dynamic_cast<pangolin::Button*>(view))
+            width = std::max(width, textWidth(button->Meta().friendly) + 4.0f);
+        else if(auto* text = dynamic_cast<pangolin::TextInput*>(view))
+        {
+            width = std::max(width, 2.0f + text->gltext.Width() + 2.0f);
+            width = std::max(width, 2.0f + textWidth(text->Get()) + 2.0f);
+        }
+    }
+    for(const std::string& str : textValues)
+        width = std::max(width, 2.0f + textWidth(str) + 2.0f);
+    return std::ceil(width);
+}
 }
 
 void Viewer::Run()
@@ -131,9 +182,8 @@ void Viewer::Run()
     const float w = scaleFactor * 1280.0f;
     const float h = scaleFactor * 720.0f;
 
-    // Left panel width (fraction of window); the 3D view fills the rest, with the
-    // camera image rendered as an overlay in the 3D view's top-right corner.
-    const float panelWidth{0.28f};
+    // The left panel is sized to its widest widget once the menu vars exist (min_panel_width);
+    // the 3D view fills the rest, with the camera image as an overlay in its top-right corner.
     const float imgWidthFrac{0.40f};
 
     // Multisampled framebuffer (Viewer.Multisampling, default off): would smooth points, lines
@@ -175,13 +225,7 @@ void Viewer::Run()
     glEnable(GL_LINE_SMOOTH);
     glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
 
-    // Define Camera Render Object (for view / scene browsing)
-    pangolin::OpenGlRenderState s_cam(
-        pangolin::ProjectionMatrix((1.0f - panelWidth) * w, h ,mViewpointF,mViewpointF, (1.0f - panelWidth) * w/2.0f, h/2.0f,0.1,1000),
-        pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0)
-    );
-
-    pangolin::CreatePanel("menu").SetBounds(0.0f, 1.0f, 0.0f, panelWidth);
+    pangolin::View& d_menu = pangolin::CreatePanel("menu");
 
     const ViewerStyle defaults = mapDrawer->GetDefaultStyle();
 
@@ -250,8 +294,25 @@ void Viewer::Run()
     pangolin::Var<float> menuGraphLineWidth("menu.Graph Width", defaults.graphLineWidth, 0.5f, 5.0f);
     pangolin::Var<float> menuCamLineWidth("menu.Camera Width", defaults.cameraLineWidth, 0.5f, 8.0f);
 
+    // Panel width: the narrowest that fits every widget, in pixels, so it stays unclipped
+    // when the window is resized. Worst-case runtime strings of the text rows: every tracking
+    // state, and the frame counter up to six digits.
+    std::vector<std::string> textValues{"888888 / 888888"};
+    for(const TrackingState state : {TrackingState::SYSTEM_NOT_READY, TrackingState::NO_IMAGES_YET,
+                                      TrackingState::NOT_INITIALIZED, TrackingState::OK, TrackingState::LOST})
+        textValues.push_back(trackingStateName(state));
+    const float panelPixels = min_panel_width(d_menu, textValues);
+    d_menu.SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(panelPixels));
+    const float panelWidth = panelPixels / w;   // fraction of the initial window, for the overlays
+
+    // Define Camera Render Object (for view / scene browsing)
+    pangolin::OpenGlRenderState s_cam(
+        pangolin::ProjectionMatrix((1.0f - panelWidth) * w, h ,mViewpointF,mViewpointF, (1.0f - panelWidth) * w/2.0f, h/2.0f,0.1,1000),
+        pangolin::ModelViewLookAt(mViewpointX,mViewpointY,mViewpointZ, 0,0,0,0.0,-1.0, 0.0)
+    );
+
     pangolin::View& d_cam = pangolin::CreateDisplay()
-        .SetBounds(0.0, 1.0, panelWidth ,1.0)
+        .SetBounds(0.0, 1.0, pangolin::Attach::Pix(panelPixels), 1.0)
         .SetHandler(new pangolin::Handler3D(s_cam));
 
     pangolin::OpenGlMatrix Twc;
