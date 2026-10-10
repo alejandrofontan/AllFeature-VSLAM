@@ -7,10 +7,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_BUILD_TYPE Release)
 
-# Output directories
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
+# Vendored libraries without an explicit type (placecell, PoseLib) are linked statically into libAllFeature-VSLAM.so,
+# also when a package build passes -DBUILD_SHARED_LIBS=ON (they have no install rules of their own).
+set(BUILD_SHARED_LIBS OFF)
+
+# Output directories: bin/ and lib/ in the source tree, where build.sh and the pixi tasks expect them. A package
+# build (pixi-build compiles this checkout in place) turns it off and keeps everything in its build directory.
+option(ALLFEATURE_OUTPUT_IN_SOURCE "Write executables and libraries to bin/ and lib/ of the source tree" ON)
+if(ALLFEATURE_OUTPUT_IN_SOURCE)
+  set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
+  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
+  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
+endif()
 
 # Compiler flags. The architecture flag applies to every C/C++ target, vendored subprojects included (g2o,
 # Light_Glue_CPP and PoseLib follow it): Eigen code compiled for different targets in one process breaks alignment.
@@ -23,8 +31,15 @@ else()
 endif()
 # C/C++ only: these flags must not reach nvcc (Light_Glue_CPP's CUDA kernels)
 add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra;-Wpedantic;-O3;-march=${ALLFEATURE_MARCH}>")
-# GPU architectures of Light_Glue_CPP's CUDA kernels (native = this machine's GPU; the package passes a list)
-set(ALLFEATURE_CUDA_ARCHITECTURES "native" CACHE STRING "CUDA architectures of the Light_Glue_CPP kernels")
+# GPU architectures of Light_Glue_CPP's CUDA kernels: this machine's GPU with ALLFEATURE_NATIVE, otherwise Turing to
+# Hopper plus consumer Blackwell ("90" also embeds PTX that newer GPUs JIT-compile)
+if(ALLFEATURE_NATIVE)
+  set(ALLFEATURE_CUDA_ARCHITECTURES_DEFAULT native)
+else()
+  set(ALLFEATURE_CUDA_ARCHITECTURES_DEFAULT "75-real;80-real;86-real;89-real;90;120-real")
+endif()
+set(ALLFEATURE_CUDA_ARCHITECTURES "${ALLFEATURE_CUDA_ARCHITECTURES_DEFAULT}" CACHE STRING
+    "CUDA architectures of the Light_Glue_CPP kernels")
 
 set(SRCS_ALLFEATURE
         src/System.cc

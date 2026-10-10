@@ -5,6 +5,7 @@ channels = ["https://prefix.dev/conda-forge", "https://prefix.dev/vslamlab/vslam
 name = "AllFeature-VSLAM-DEV"
 platforms = [{ platform = "linux-64", cuda = "12.0" }]
 version = "0.1.0"
+preview = ["pixi-build"]
 
 # ------------------------------------------------------------------------------------
 # default env  = RUNTIME: everything the built executables load (per ldd) plus the
@@ -133,3 +134,86 @@ docs-check = { cmd = "python docs/tools/resolve_links.py --check && python docs/
 [environments]
 build = ["build"]
 docs = { features = ["docs"], no-default-feature = true }
+
+########################################################################################################################
+# Package: `allfeature` (the three executables, libAllFeature-VSLAM + its shared libraries, headers under
+# include/AllFeature-VSLAM/, reference settings under share/allfeature-vslamlab/), published to
+# https://prefix.dev/vslamlab/vslamlab by CI on vX.Y.Z tags (.github/workflows/conda-package.yml).
+#   pixi publish --clean --target-dir output
+# The same CMake project as build.sh, with ALLFEATURE_NATIVE off: x86-64-v3 and a fixed GPU list for the
+# Light_Glue_CPP kernels ("90" also embeds PTX for newer GPUs). No model weights are shipped: the executables resolve
+# megaloc_models/, segmentation_models/, superpoint_models/ and lightglue_models/ against the cwd, and VSLAM-LAB's
+# allfeature environment downloads them next to the settings.
+[package]
+name = "allfeature"
+version = "1.0.0"
+description = "AllFeature-VSLAM: multi-feature visual SLAM (ORB-SLAM2 lineage) with learned features, MegaLoc place recognition and online segmentation"
+authors = ["Alejandro Fontan", "Javier Civera", "Michael Milford"]
+license = "GPL-3.0-only"
+homepage = "https://github.com/alejandrofontan/AllFeature-VSLAM"
+repository = "https://github.com/alejandrofontan/AllFeature-VSLAM"
+
+[package.build]
+backend = { name = "pixi-build-cmake", version = "0.*" }
+
+[package.build.config]
+compilers = ["c", "cxx", "cuda"]
+# x86-64-v3 and the portable GPU list (CMakeLists.txt); outputs stay in the build directory, not in bin/ and lib/
+extra-args = ["-DALLFEATURE_NATIVE=OFF", "-DALLFEATURE_OUTPUT_IN_SOURCE=OFF"]
+# libtorch-heavy translation units (Light_Glue_CPP) take several GB each at -O3
+env = { CMAKE_BUILD_PARALLEL_LEVEL = "3" }
+
+[package.build-dependencies]
+python = "*"            # find_package(Python COMPONENTS Interpreter)
+cuda-version = "12.9.*"
+
+[package.host-dependencies]
+cuda-version = "12.9.*"
+cuda-cudart-dev = "*"
+cuda-crt = "*"
+cuda-driver-dev = "*"
+cuda-nvrtc-dev = "*"
+cuda-nvtx-dev = "*"
+cuda-nvml-dev = "*"
+cuda-profiler-api = "*"
+cudnn = "*"
+libcublas-dev = "*"
+libcudss-dev = "*"
+libcufile-dev = "*"
+libcufft-dev = "*"
+libcurand-dev = "*"
+libcusolver-dev = "*"
+libcusparse-dev = "*"
+cusparselt = "*"
+libnvjitlink = "*"
+libtorch = { version = "2.7.*", build = "cuda*" }   # cuda129 build: libprotobuf 6.31, like OpenCV 4.12
+tensorrt-cxx-headers = "10.3.*"   # validated TensorRT (spqr-tests channel)
+tensorrt-cxx-full = "10.3.*"
+tensorrt-cxx-onnx = "10.3.*"
+libopencv = "4.12.*"
+eigen = "3.4.*"         # vendored g2o mixes fatally with Eigen 5
+yaml-cpp = "*"
+pangolin-opengl = "*"
+brisk = "*"
+akaze = "*"
+siftgpu = "*"
+glew = "*"
+zlib = "*"
+libgl-devel = "*"
+libegl-devel = "*"
+libglvnd-devel = "*"
+libopengl-devel = "*"
+xorg-libx11 = "*"
+xorg-libxext = "*"
+libxkbcommon = "*"
+
+[package.run-dependencies]
+libtorch = { version = "2.7.*", build = "cuda*" }
+cuda-nvrtc = "*"        # torch JIT loads libnvrtc at runtime
+tensorrt-cxx-full = "10.3.*"
+tensorrt-cxx-onnx = "10.3.*"
+tensorrt-cxx-builder = "10.3.*"   # engines are built from the ONNX on the first run on each GPU
+pangolin-opengl = "*"
+brisk = "*"
+akaze = "*"
+siftgpu = "*"
