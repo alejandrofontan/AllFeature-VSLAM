@@ -1,6 +1,6 @@
 [workspace]
 authors = ["alejandrofontan <fontanvillacampa@gmail.com>"]
-channels = ["https://prefix.dev/conda-forge", "fontan", "https://repo.prefix.dev/spqr-tests"]
+channels = ["https://prefix.dev/conda-forge", "https://prefix.dev/vslamlab/vslamlab", "https://repo.prefix.dev/spqr-tests"]
 
 name = "AllFeature-VSLAM-DEV"
 platforms = [{ platform = "linux-64", cuda = "12.0" }]
@@ -38,7 +38,7 @@ huggingface_hub = "*"   # `hf` CLI for the download tasks
 
 # CUDA runtime libraries (the -dev variants also carry the headers the build needs;
 # splitting lib/header per package is a finer pass than is worth it here)
-cuda-version = "12.6.*"
+cuda-version = "12.9.*"
 cuda-cudart-dev = "*"
 cuda-nvrtc-dev = "*"    # torch JIT loads libnvrtc at runtime
 cuda-nvtx = "*"
@@ -54,7 +54,7 @@ cusparselt = "*"
 libnvjitlink = "*"
 
 # libtorch (linked by Light_Glue_CPP)
-pytorch-gpu = "*"
+pytorch-gpu = "2.7.*"   # libtorch 2.7 (Light_Glue_CPP); its cuda129 build shares libprotobuf 6.31 with OpenCV 4.12
 
 # SLAM runtime libraries
 opencv = "4.12.*"
@@ -66,10 +66,11 @@ yaml-cpp = "*"
 tensorrt-cxx = "*"
 tensorrt-cxx-full = "*"
 tensorrt-cxx-builder = "*"
-pangolin = { channel = "fontan" }
-brisk-vslamlab = { channel = "fontan" }
-akaze-vslamlab = { channel = "fontan" }
-siftgpu-vslamlab = { channel = "fontan" }
+pangolin-opengl = "*"
+# Feature libraries packaged in github.com/VSLAM-LAB/conda-recipes (prefix.dev/vslamlab/vslamlab)
+brisk = "*"
+akaze = "*"
+siftgpu = "*"
 glew = "*"
 zlib = "*"
 
