@@ -51,8 +51,11 @@ jobs:
       - name: Build
         run: pixi publish --clean --to "$PWD/channel"
 
-      # No GPU on the runner: install the package and check what can be checked without one
+      # No GPU on the runner: install the package and check what can be checked without one. TensorRT requires the
+      # __cuda virtual package, which the runner lacks; CONDA_OVERRIDE_CUDA declares it for the solver.
       - name: Test
+        env:
+          CONDA_OVERRIDE_CUDA: "12.9"
         run: |
           pkgs=(channel/linux-64/allfeature-*.conda)
           [ -f "${pkgs[0]}" ] || { echo "no package built"; exit 1; }
