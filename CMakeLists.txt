@@ -12,8 +12,19 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 
-# Compiler flags
-add_compile_options(-Wall -Wextra -Wpedantic -O3 -march=native)
+# Compiler flags. The architecture flag applies to every C/C++ target, vendored subprojects included (g2o,
+# Light_Glue_CPP and PoseLib follow it): Eigen code compiled for different targets in one process breaks alignment.
+# ALLFEATURE_NATIVE=ON tunes for this machine (build.sh); OFF targets x86-64-v3 (AVX2), as the conda package does.
+option(ALLFEATURE_NATIVE "Optimise for the build machine's CPU (-march=native) instead of x86-64-v3" OFF)
+if(ALLFEATURE_NATIVE)
+  set(ALLFEATURE_MARCH native)
+else()
+  set(ALLFEATURE_MARCH x86-64-v3)
+endif()
+# C/C++ only: these flags must not reach nvcc (Light_Glue_CPP's CUDA kernels)
+add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra;-Wpedantic;-O3;-march=${ALLFEATURE_MARCH}>")
+# GPU architectures of Light_Glue_CPP's CUDA kernels (native = this machine's GPU; the package passes a list)
+set(ALLFEATURE_CUDA_ARCHITECTURES "native" CACHE STRING "CUDA architectures of the Light_Glue_CPP kernels")
 
 set(SRCS_ALLFEATURE
         src/System.cc
@@ -90,7 +101,9 @@ add_subdirectory(${SUPERPOINT_LIGHTGLUE_DIR} ${CMAKE_BINARY_DIR}/superpoint_ligh
 add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/g2o ${CMAKE_BINARY_DIR}/g2o)
 
 # ---- PoseLib (robust estimation: replaces OpenCV USAC in FeatureMatcher) ----
-set(MARCH_NATIVE ON CACHE BOOL "" FORCE)  # match this project's -march=native flags
+set(MARCH_NATIVE ${ALLFEATURE_NATIVE} CACHE BOOL "" FORCE)  # PoseLib's own -march=native switch follows ours
+# PoseLib's install rules are unconditional, so an install also gets its static archive, headers and CMake config
+# (unused at runtime: it is linked into the library).
 add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/PoseLib ${CMAKE_BINARY_DIR}/poselib)
 # Vendored code compiles under this project's global -Wall -Wextra -Werror flags;
 # suppress diagnostics for the third-party target only so -Werror can't break it.
@@ -137,15 +150,13 @@ find_package(Python REQUIRED COMPONENTS Interpreter)
 find_package(brisk REQUIRED)
 find_package(akaze REQUIRED)
 find_package(SiftGPU CONFIG REQUIRED)
-# find_package(LightGlue) transitively re-triggers libtorch's own Caffe2Config.cmake (via
-# LightGlueConfig.cmake's find_dependency(Torch)), which mis-calls
-# find_package_handle_standard_args() with a package-name mismatch (nvtx3 vs Caffe2) -- a dev/
-# author warning from Torch's installed CMake config, not from any CMakeLists.txt in this
-# project. Scoped around just this call (not a global -Wno-dev) so any real future dev warning
-# of our own still surfaces.
-set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS ON)
-find_package(LightGlue REQUIRED HINTS "${PROJECT_SOURCE_DIR}/Thirdparty/Light_Glue_CPP/build")
-unset(CMAKE_SUPPRESS_DEVELOPER_WARNINGS)
+# ---- Light_Glue_CPP (ALIKED extractor + LightGlue matcher, libtorch + CUDA kernels) ----
+# Built in the same tree (static LightGlue::lib); it compiles LIGHTGLUE_MODELS_DIR (default: the bare
+# `lightglue_models`, resolved against the cwd at runtime) into the library and finds Torch itself, with libtorch's
+# Caffe2Config dev warning already scoped there.
+set(LIGHTGLUE_CUDA_ARCHITECTURES "${ALLFEATURE_CUDA_ARCHITECTURES}")
+add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/Light_Glue_CPP ${CMAKE_BINARY_DIR}/light_glue_cpp)
+target_compile_options(LightGlue_lib PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-w>)
 
 find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
@@ -203,4 +214,12 @@ install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mon
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib)
 
-install(DIRECTORY include/ DESTINATION include)
+# Headers under include/AllFeature-VSLAM/: they have generic names (Frame.h, System.h, Types.h, ...)
+install(DIRECTORY include/ DESTINATION include/AllFeature-VSLAM)
+
+# SuperPoint-LightGlue-TensorRT has no install rules of its own; libAllFeature-VSLAM.so links it
+install(TARGETS superpoint_lightglue_lib LIBRARY DESTINATION lib)
+
+# Reference copies of the settings (VSLAM-LAB's allfeature environment copies them next to the models)
+install(DIRECTORY settings/ DESTINATION share/allfeature-vslamlab/settings FILES_MATCHING PATTERN "*.yaml")
+install(FILES vslamlab_allfeature-dev_settings.yaml DESTINATION share/allfeature-vslamlab)

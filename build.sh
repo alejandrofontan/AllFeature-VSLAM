@@ -40,15 +40,9 @@ build_library() {
   	delete_if_exists ${source_folder}
   fi
 
-  # Light_Glue_CPP compiles LIGHTGLUE_MODELS_DIR into the library. Pass the bare folder name so the
-  # ALIKED/LightGlue weights are looked up in `lightglue_models/` relative to the process cwd, like
-  # megaloc_models/ and segmentation_models/ (the `download-lightglue-models` task fetches them).
-  # The :STRING type matters: an untyped -D value is turned into an absolute path by the
-  # project's `CACHE PATH` declaration.
-  local extra_flags=()
-  if [ "$library_name" = "Light_Glue_CPP" ]; then
-    extra_flags=(-DLIGHTGLUE_MODELS_DIR:STRING=lightglue_models)
-  fi
+  # Local builds are tuned for this machine (-march=native, CUDA kernels for this GPU); the conda package
+  # builds the same CMake project with ALLFEATURE_NATIVE off (x86-64-v3) and an explicit CUDA architecture list.
+  local extra_flags=(-DALLFEATURE_NATIVE=ON)
 
   if [ "$verbose" = true ]; then
     echo "[${library_name}][build.sh] Compile ${library_name} ... "
@@ -83,12 +77,7 @@ done
 LIBRARY_PATH=$(realpath "$0")
 LIBRARY_DIR=$(dirname "$LIBRARY_PATH")
 
-# Build Light_Glue_CPP
-library_name="Light_Glue_CPP"
-source_folder="${LIBRARY_DIR}/Thirdparty/${library_name}"
-build_library ${library_name} ${source_folder} ${verbose} ${force_build}
-
-# Build AllFeature-VSLAM
+# Build AllFeature-VSLAM (Light_Glue_CPP and the other Thirdparty libraries are CMake subdirectories)
 library_name="AllFeature-VSLAM"
 source_folder="${LIBRARY_DIR}"
 build_library ${library_name} ${source_folder} ${verbose} ${force_build}

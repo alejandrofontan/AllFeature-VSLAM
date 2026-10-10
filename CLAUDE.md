@@ -32,11 +32,11 @@ bash build.sh -f       # force: delete build/bin/lib dirs first, then rebuild ev
 bash build.sh -v       # verbose: show full cmake/ninja output (default suppresses it)
 ```
 
-Build order: `Thirdparty/Light_Glue_CPP` → main library (`cmake -G Ninja` + `cmake --build --parallel 4`, `-DCMAKE_INSTALL_PREFIX` set to its own source folder). `Thirdparty/SuperPoint-LightGlue-TensorRT`, `Thirdparty/Segmentation-TensorRT`, `Thirdparty/g2o`, `Thirdparty/PoseLib`, `Thirdparty/mimalloc` and `Thirdparty/placecell` are pulled in as CMake `add_subdirectory` from the main `CMakeLists.txt`.
+One CMake project (`cmake -G Ninja` + `cmake --build --parallel 4`, `-DCMAKE_INSTALL_PREFIX` set to its own source folder): `Thirdparty/Light_Glue_CPP`, `Thirdparty/SuperPoint-LightGlue-TensorRT`, `Thirdparty/Segmentation-TensorRT`, `Thirdparty/g2o`, `Thirdparty/PoseLib`, `Thirdparty/mimalloc` and `Thirdparty/placecell` are all `add_subdirectory` of the main `CMakeLists.txt`. `build.sh` passes `-DALLFEATURE_NATIVE=ON` (every C/C++ target, vendored ones included, built with `-march=native`; the Light_Glue_CPP CUDA kernels for this GPU via `ALLFEATURE_CUDA_ARCHITECTURES=native`). Off, the project builds for `x86-64-v3` (portable binaries); `cmake --install` lays out the executables, libraries, headers (`include/AllFeature-VSLAM/`) and reference settings (`share/allfeature-vslamlab/`).
 
-This project only builds correctly inside the `allfeature-dev` pixi environment (from the parent `VSLAM-LAB` repo) or this repo's own `build` environment (`pixi run build` here; `pixi run setup` also downloads the models). Both provide CUDA/TensorRT, libtorch, OpenCV (headless), Eigen 3.4, Pangolin, yaml-cpp and the fontan-channel feature backends — see `pixi.toml`.
+This project only builds correctly inside the `allfeature-dev` pixi environment (from the parent `VSLAM-LAB` repo) or this repo's own `build` environment (`pixi run build` here; `pixi run setup` also downloads the models). Both provide CUDA 12.9/TensorRT 10.3, libtorch 2.7, OpenCV 4.12, Eigen 3.4, Pangolin (`pangolin-opengl`), yaml-cpp and the brisk/akaze/siftgpu feature backends (prefix.dev/vslamlab/vslamlab, built from `VSLAM-LAB/conda-recipes`) — see `pixi.toml`.
 
-- **Standard:** C++17, `-Wall -Wextra -Wpedantic -Werror -O3 -march=native` (vendored code is compiled with `-w`)
+- **Standard:** C++17, `-Wall -Wextra -Wpedantic -O3 -march=native` with `ALLFEATURE_NATIVE=ON` (`-march=x86-64-v3` off); vendored code is compiled with `-w`
 - **Output:** `lib/libAllFeature-VSLAM.so`, `bin/vslamlab_allfeature_mono`, `bin/vslamlab_allfeature_rgbd`, `bin/vslamlab_allfeature_mono_stream`, plus test/benchmark binaries (`bin/test_bfmatcher_parity`, `bin/test_segmentation`, …)
 - **Build dir:** `build/` (CMake 3.16+, Ninja) — `build/`, `bin/`, `lib/` and the `*_models/` folders are gitignored
 
@@ -110,11 +110,11 @@ Cross-cutting components: `Feature`/`FeatureExtractor`/`FeatureMatcher` (multi-f
 |---|---|
 | OpenCV (headless) | image processing, classical feature detection |
 | Eigen 3.4 | linear algebra (5.x is incompatible with the vendored g2o) |
-| Pangolin (fontan channel) | 3D visualization |
+| Pangolin (conda-forge `pangolin-opengl`) | 3D visualization |
 | yaml-cpp | settings parsing in the entry points |
 | libtorch (pytorch-gpu) | LightGlue / ALIKED (via `Light_Glue_CPP`) |
 | TensorRT, CUDA 12 | SuperPoint + LightGlue, MegaLoc, EfficientViT segmentation |
-| brisk / akaze / SiftGPU (fontan channel) | classical feature backends |
+| brisk / akaze / siftgpu (prefix.dev/vslamlab/vslamlab, `VSLAM-LAB/conda-recipes`) | classical feature backends |
 | OpenMP | multi-threading (brute-force matcher, local mapping loops) |
 
 **Git submodules** (`.gitmodules`): `Thirdparty/Light_Glue_CPP` (C++ LightGlue, VSLAM-LAB fork), `Thirdparty/SuperPoint-LightGlue-TensorRT`, `Thirdparty/g2o` (`alejandrofontan/g2o` fork: RGB-D inverse-depth edges, Levenberg acceptance fix), `Thirdparty/PoseLib`, `Thirdparty/mimalloc` (process allocator), `Thirdparty/placecell` (`alejandrofontan/placecell`: keyframe-lifecycle library, MegaLoc embedder, information culling; has its own `CLAUDE.md`). `Thirdparty/Segmentation-TensorRT` is not a submodule.
