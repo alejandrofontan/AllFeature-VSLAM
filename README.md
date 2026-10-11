@@ -46,7 +46,7 @@ pixi run build && pixi run demo
 ```
 
 ## License
-**AllFeature-VSLAM** builds on [**ORB-SLAM2**](https://github.com/raulmur/ORB_SLAM2) and inherits its release under a [GPLv3 license](https://github.com/alejandrofontan/AnyFeature-VSLAM/blob/main/docs/License-gpl.txt). For a list of all other code/library dependencies (and associated licenses), please see [Dependencies.md](https://github.com/alejandrofontan/AnyFeature-VSLAM/blob/main/docs/Dependencies.md).
+**AllFeature-VSLAM** builds on [**ORB-SLAM2**](https://github.com/raulmur/ORB_SLAM2) and inherits its release under a [GPLv3 license](LICENSE). Third-party code bundled in [Thirdparty/](Thirdparty) keeps its own license.
 
 **Acknowledgments to:** [Raul Mur-Artal](http://webdiis.unizar.es/~raulmur/), [Juan D. Tardos](http://webdiis.unizar.es/~jdtardos/), [J. M. M. Montiel](http://webdiis.unizar.es/~josemari/) ([ORB-SLAM2](https://github.com/raulmur/ORB_SLAM2)), [Dorian Galvez-Lopez](http://doriangalvez.com/) ([DBoW2](https://github.com/dorian3d/DBoW2)), Carlos Campos, Richard Elvira and Juan J. Gómez Rodríguez ([ORB-SLAM3](https://github.com/UZ-SLAMLab/ORB_SLAM3)).
 
