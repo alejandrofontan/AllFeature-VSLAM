@@ -2,7 +2,7 @@
 
 - **Author:** Alejandro Fontan (planned with Claude, Fable 5.1)
 - **Created:** 2026-10-12
-- **Status:** phase 1 implemented on Linux 2026-10-12 (branch `cpu-only`): GPU backends are CMake options, `build.sh -c` / `pixi run -e cpu build` build GPU-free, byte-identical to the full build on `table_3` (`docs/notes/2026-10-12_cpu_only_build_identity.md`); macOS viewer-on-main-thread ported untested; first Mac build 2026-10-13 configured correctly (arm64, backends OFF, mimalloc zone override on) and stopped on g2o's `tr1` headers, fixed in the g2o fork (branch `cxx11-headers`, Linux output unchanged); waiting for the second Mac build (items 5, 7 and the Mac tests below)
+- **Status:** phase 1 implemented on Linux 2026-10-12 (branch `cpu-only`): GPU backends are CMake options, `build.sh -c` / `pixi run -e cpu ./build.sh -c` build GPU-free, byte-identical to the full build on `table_3` (`docs/notes/2026-10-12_cpu_only_build_identity.md`); macOS viewer-on-main-thread ported untested; first Mac build 2026-10-13 configured correctly (arm64, backends OFF, mimalloc zone override on) and stopped on g2o's `tr1` headers, fixed in the g2o fork; second build stopped on a `std::min(uint64_t, size_t)` in placecell's viz, fixed in placecell; third build 2026-10-13 links every target on the Mac; waiting for the first Mac `table_3` run (items 5, 7 and the Mac tests below)
 - **Pinned to:** AllFeature `2ce9e7f` (`cpu-only` == `dev` == `origin/main`), placecell `71cbaff` (v0.1.0), VSLAM-LAB `dev` 1804957 (+ `origin/stream-iphone` 2c0ff49)
 - **Target machine:** MacBook Pro 16" 2021, M1 Pro (6P+2E cores, 14-core GPU/Metal, NEON/FP16/DotProd, no I8MM), 16 GB unified, 1 GB swap, 16 KB pages, macOS 26.6, Xcode 27 / Apple clang 21, pixi 0.81, no Homebrew (`VSLAM-LAB/mac_spec.txt`)
 - **Session:** `claude --resume 49010428-7f8f-40f2-9f55-3a1addb2cb77` (Linux); the Mac works from its own clone
@@ -95,7 +95,7 @@ default build is bit-for-bit what it is today.
 8. Parent repo: `allfeature-dev` feature gets `osx-arm64`; `fetch-source` clones the chosen branch.
 
 **Tests.**
-- Linux: `pixi run -e cpu build` configures and builds with no CUDA/TRT/torch package in the env
+- Linux: `pixi run -e cpu ./build.sh -c` configures and builds with no CUDA/TRT/torch package in the env (the `cpu` feature defines no tasks: duplicated task names made the parent's bare `pixi run execute-mono` forward ambiguous on the first Mac run, 2026-10-13)
   (`ldd bin/vslamlab_allfeature_mono` shows none); default `pixi run build` unchanged.
 - Linux: gym sequence `eth/table_3` (`exp_gym_mono`, `orb32`, `vpr: none`, `Sequential: 1`,
   `verbose: 0`) is **byte-identical** between the CPU-only build and today's build (issue #16
@@ -106,6 +106,8 @@ default build is bit-for-bit what it is today.
 - Both: `akaze61`, `brisk48`, `kaze64` run on `table_3`.
 
 **Status 2026-10-13 (first Mac build).** The configure step on the M1 Pro is right (Apple clang 21 through the conda `cc`/`c++` wrappers, `-march=native` on arm64, the three backends OFF, the brisk/akaze warnings, OpenMP 5.1 from `llvm-openmp`, mimalloc with `MI_OSX_ZONE` + `MI_OSX_INTERPOSE` on); the build stopped at the first g2o object: the vendored g2o used `<tr1/unordered_map>` / `<tr1/memory>`, which Apple's libc++ never shipped. Fixed in the g2o fork (`alejandrofontan/g2o`, branch `cxx11-headers`: C++11 headers, `std::` instead of `std::tr1::`, five headers), the same change ORB-SLAM3-DEV made in its copy. On Linux the rebuilt full binary stays byte-identical to the pre-phase-1 references in both culling modes (g2o pours the vertex map into a pointer-ordered set before building the Hessian, so the hash-map implementation does not matter). The fork's GitHub CI (inherited from upstream g2o) fails on every platform in its "Build Introspection" step because it expects `build/g2o/config.h` while this stripped g2o writes `config.h` into the source tree; unrelated to the change, to be fixed or removed in the fork.
+
+**Status 2026-10-13 (Mac build complete).** Second build: `placecell/src/viz/viz.cpp` called `std::min` on a `std::uint64_t` query index and a `size_t` size; equal types on Linux (`unsigned long`), distinct on macOS (`unsigned long long` vs `unsigned long`), so deduction fails. Fixed in placecell (`std::min<std::size_t>`, branch `macos-build`, merged); every other `std::min`/`max`/`clamp` in the host and placecell was checked. Third build links `libg2o.dylib`, `libAllFeature-VSLAM.dylib`, the three executables and `test_bfmatcher_parity`. Apple clang warnings worth knowing: 84 × `-Wdelete-non-abstract-non-virtual-dtor` because `FeatureExtractor` has virtual methods and a non-virtual destructor (harmless through `shared_ptr` made from the derived type, made virtual on `cpu-only`), unused private fields `PnPsolver::mRansacTh` / `cws_determinant`, an unused `iteration` in `FeatureExtractor.cpp`; and the linker's `-F/opt/conda-sdks/MacOSX11.0.sdk/...` directory warning, a build-time SDK path baked into a conda package's CMake config, harmless.
 
 **Status 2026-10-12 (Linux side done).** Items 1-4, 6 and 8 implemented; the Linux tests pass
 (`docs/notes/2026-10-12_cpu_only_build_identity.md`: GPU-free build identical to the full build with

@@ -134,8 +134,10 @@ setup = { depends-on = ["download-megaloc-models", "download-segmentation-models
 setup = { depends-on = ["build"] }
 
 # cpu env = the GPU-free build and run environment with NO CUDA / TensorRT / libtorch / SiftGPU package at all (what
-# the Mac has; on Linux it proves the GPU-free configuration never touches them): `pixi run -e cpu build`,
-# `pixi run -e cpu execute-mono ...`. Model downloads are not needed for it.
+# the Mac has; on Linux it proves the GPU-free configuration never touches them). It defines no tasks: a task name
+# that exists in two features makes a bare `pixi run <task>` ambiguous, which breaks the parent framework's
+# `pixi run --frozen execute-mono` forward. Run the commands directly: `pixi run -e cpu ./build.sh -c` and
+# `pixi run -e cpu ./bin/vslamlab_allfeature_mono ...`. Model downloads are not needed for it.
 [feature.cpu.dependencies]
 python = "3.11.*"
 cxx-compiler = "*"
@@ -169,12 +171,6 @@ libgl-devel = "*"
 libegl-devel = "*"
 libglvnd-devel = "*"
 libopengl-devel = "*"
-
-[feature.cpu.tasks]
-build = { cmd = "./build.sh -c" }
-execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
-execute-rgbd = { cmd = "./bin/vslamlab_allfeature_rgbd" }
-stream = { cmd = "./bin/vslamlab_allfeature_mono_stream" }
 
 # docs env = MkDocs site only (no CUDA/torch): `pixi run docs-serve`, `pixi run docs-build`
 [feature.docs.dependencies]
