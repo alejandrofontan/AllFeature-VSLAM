@@ -3,7 +3,10 @@ authors = ["alejandrofontan <fontanvillacampa@gmail.com>"]
 channels = ["https://prefix.dev/conda-forge", "https://prefix.dev/vslamlab/vslamlab", "https://repo.prefix.dev/spqr-tests"]
 
 name = "AllFeature-VSLAM-DEV"
-platforms = [{ platform = "linux-64", cuda = "12.0" }]
+# osx-arm64 (docs/plans/mac_port.md): the GPU packages (CUDA, TensorRT, libtorch, SiftGPU) and the X11 display stack are
+# linux-64 target dependencies below, so the default / build environments resolve on the Mac without them and the
+# GPU-free build (`./build.sh -c`, ALLFEATURE_WITH_* OFF) is what gets built there.
+platforms = [{ name = "linux-64-cuda", platform = "linux-64", cuda = "12.0" }, "osx-arm64"]
 version = "0.1.0"
 preview = ["pixi-build"]
 
@@ -37,6 +40,18 @@ stream = { cmd = "./bin/vslamlab_allfeature_mono_stream" }
 python = "3.11.*"
 huggingface_hub = "*"   # `hf` CLI for the download tasks
 
+# SLAM runtime libraries (every platform)
+opencv = "4.12.*"
+yaml-cpp = "*"
+pangolin-opengl = "*"
+zlib = "*"
+
+[target.osx-arm64.dependencies]
+llvm-openmp = "*"   # Apple clang ships no OpenMP runtime; the brute-force matcher and local mapping use it
+
+# linux-64 only: GPU backends and the feature libraries packaged for linux-64 so far (brisk / akaze: osx-arm64
+# builds of github.com/VSLAM-LAB/conda-recipes pending, mac_port.md decision 2; the CMake build makes them optional)
+[target.linux-64.dependencies]
 # CUDA runtime libraries (the -dev variants also carry the headers the build needs;
 # splitting lib/header per package is a finer pass than is worth it here)
 cuda-version = "12.9.*"
@@ -57,9 +72,6 @@ libnvjitlink = "*"
 # libtorch (linked by Light_Glue_CPP)
 pytorch-gpu = "2.7.*"   # libtorch 2.7 (Light_Glue_CPP); its cuda129 build shares libprotobuf 6.31 with OpenCV 4.12
 
-# SLAM runtime libraries
-opencv = "4.12.*"
-yaml-cpp = "*"
 # TensorRT: -full carries libnvinfer/nvonnxparser (needed to LOAD engines), -builder the
 # tactics resource needed to BUILD them -- which happens at runtime, on the first run on
 # each GPU (engines are machine-specific, then cached next to the ONNX). Neither is a
@@ -67,13 +79,11 @@ yaml-cpp = "*"
 tensorrt-cxx = "*"
 tensorrt-cxx-full = "*"
 tensorrt-cxx-builder = "*"
-pangolin-opengl = "*"
 # Feature libraries packaged in github.com/VSLAM-LAB/conda-recipes (prefix.dev/vslamlab/vslamlab)
 brisk = "*"
 akaze = "*"
 siftgpu = "*"
 glew = "*"
-zlib = "*"
 
 # Display stack (Pangolin viewer)
 xorg-libxext = "*"
@@ -101,6 +111,8 @@ pkg-config = "*"
 
 # Build-only headers/tools
 eigen = "3.4.*"   # match vendored g2o's system-Eigen fallback; 5.x mixes fatally with it
+
+[feature.build.target.linux-64.dependencies]
 cuda-compiler = "*"
 cuda-nvcc = "*"
 cuda-crt = "*"
@@ -112,8 +124,57 @@ tensorrt-cxx-headers = "*"   # NvInfer.h etc. for compilation (the runtime libs 
 
 [feature.build.tasks]
 build = { cmd = "./build.sh" }
+build-cpu = { cmd = "./build.sh -c" }   # GPU-free build (build-cpu/, same bin/ and lib/): the Mac build, also testable on Linux
 # setup = everything a fresh clone needs to run: fetch the models, then compile
 setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "download-superpoint-models", "download-lightglue-models", "build"] }
+
+# macOS: no GPU backend yet (mac_port.md phases 2-5), so setup skips the model downloads; CMake defaults every
+# ALLFEATURE_WITH_* option to OFF on Apple, hence plain `build` is already the GPU-free build there
+[feature.build.target.osx-arm64.tasks]
+setup = { depends-on = ["build"] }
+
+# cpu env = the GPU-free build and run environment with NO CUDA / TensorRT / libtorch / SiftGPU package at all (what
+# the Mac has; on Linux it proves the GPU-free configuration never touches them): `pixi run -e cpu build`,
+# `pixi run -e cpu execute-mono ...`. Model downloads are not needed for it.
+[feature.cpu.dependencies]
+python = "3.11.*"
+cxx-compiler = "*"
+compilers = "*"
+cmake = "*"
+ninja = "*"
+pkg-config = "*"
+eigen = "3.4.*"
+opencv = "4.12.*"
+yaml-cpp = "*"
+pangolin-opengl = "*"
+zlib = "*"
+
+[feature.cpu.target.osx-arm64.dependencies]
+llvm-openmp = "*"
+
+[feature.cpu.target.linux-64.dependencies]
+brisk = "*"
+akaze = "*"
+xorg-libxext = "*"
+xorg-libx11 = "*"
+xorg-libxfixes = "*"
+xorg-libxrender = "*"
+xorg-libice = "*"
+xorg-libsm = "*"
+xorg-libxdmcp = "*"
+xorg-libxau = "*"
+xorg-xorgproto = "*"
+libxkbcommon = "*"
+libgl-devel = "*"
+libegl-devel = "*"
+libglvnd-devel = "*"
+libopengl-devel = "*"
+
+[feature.cpu.tasks]
+build = { cmd = "./build.sh -c" }
+execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
+execute-rgbd = { cmd = "./bin/vslamlab_allfeature_rgbd" }
+stream = { cmd = "./bin/vslamlab_allfeature_mono_stream" }
 
 # docs env = MkDocs site only (no CUDA/torch): `pixi run docs-serve`, `pixi run docs-build`
 [feature.docs.dependencies]
@@ -133,6 +194,7 @@ docs-check = { cmd = "python docs/tools/resolve_links.py --check && python docs/
 
 [environments]
 build = ["build"]
+cpu = { features = ["cpu"], no-default-feature = true }
 docs = { features = ["docs"], no-default-feature = true }
 
 ########################################################################################################################
