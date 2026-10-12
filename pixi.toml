@@ -45,12 +45,15 @@ opencv = "4.12.*"
 yaml-cpp = "*"
 pangolin-opengl = "*"
 zlib = "*"
+# Feature libraries packaged in github.com/VSLAM-LAB/conda-recipes (prefix.dev/vslamlab/vslamlab); 1.0.1 is the first
+# release with osx-arm64 (and linux-aarch64) builds: brisk on sse2neon + NEON, akaze with OpenMP on macOS too
+brisk = ">=1.0.1"
+akaze = ">=1.0.1"
 
 [target.osx-arm64.dependencies]
 llvm-openmp = "*"   # Apple clang ships no OpenMP runtime; the brute-force matcher and local mapping use it
 
-# linux-64 only: GPU backends and the feature libraries packaged for linux-64 so far (brisk / akaze: osx-arm64
-# builds of github.com/VSLAM-LAB/conda-recipes pending, mac_port.md decision 2; the CMake build makes them optional)
+# linux-64 only: the GPU backends (CUDA / TensorRT / libtorch / SiftGPU) and the X11 display stack
 [target.linux-64.dependencies]
 # CUDA runtime libraries (the -dev variants also carry the headers the build needs;
 # splitting lib/header per package is a finer pass than is worth it here)
@@ -79,9 +82,7 @@ pytorch-gpu = "2.7.*"   # libtorch 2.7 (Light_Glue_CPP); its cuda129 build share
 tensorrt-cxx = "*"
 tensorrt-cxx-full = "*"
 tensorrt-cxx-builder = "*"
-# Feature libraries packaged in github.com/VSLAM-LAB/conda-recipes (prefix.dev/vslamlab/vslamlab)
-brisk = "*"
-akaze = "*"
+# SiftGPU (CUDA), packaged in github.com/VSLAM-LAB/conda-recipes (prefix.dev/vslamlab/vslamlab)
 siftgpu = "*"
 glew = "*"
 
@@ -150,13 +151,13 @@ opencv = "4.12.*"
 yaml-cpp = "*"
 pangolin-opengl = "*"
 zlib = "*"
+brisk = ">=1.0.1"
+akaze = ">=1.0.1"
 
 [feature.cpu.target.osx-arm64.dependencies]
 llvm-openmp = "*"
 
 [feature.cpu.target.linux-64.dependencies]
-brisk = "*"
-akaze = "*"
 xorg-libxext = "*"
 xorg-libx11 = "*"
 xorg-libxfixes = "*"
