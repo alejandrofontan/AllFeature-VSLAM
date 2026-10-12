@@ -12,16 +12,16 @@ commit that was read. Tags: `→ #<issue>`, `→ reference`, `→ paper:<file>.t
 
 | Function | Source | State | Notes |
 |---|---|---|---|
-| `Viewer::Viewer` | [Viewer.cc#L43](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L43 "Viewer::Viewer(") | unread |  |
-| `Viewer::Run` | [Viewer.cc#L125](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L125 "Viewer::Run(") | unread |  |
-| `Viewer::RequestFinish` | [Viewer.cc#L557](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L557 "Viewer::RequestFinish(") | unread |  |
-| `Viewer::CheckFinish` | [Viewer.cc#L563](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L563 "Viewer::CheckFinish(") | unread |  |
-| `Viewer::SetFinish` | [Viewer.cc#L569](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L569 "Viewer::SetFinish(") | unread |  |
-| `Viewer::isFinished` | [Viewer.cc#L575](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L575 "Viewer::isFinished(") | unread |  |
-| `Viewer::request_stop` | [Viewer.cc#L581](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L581 "Viewer::request_stop(") | unread |  |
-| `Viewer::is_stopped` | [Viewer.cc#L588](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L588 "Viewer::is_stopped(") | unread |  |
-| `Viewer::Stop` | [Viewer.cc#L594](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L594 "Viewer::Stop(") | unread |  |
-| `Viewer::release` | [Viewer.cc#L612](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L612 "Viewer::release(") | unread |  |
+| `Viewer::Viewer` | [Viewer.cc#L48](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L48 "Viewer::Viewer(") | unread |  |
+| `Viewer::Run` | [Viewer.cc#L177](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L177 "Viewer::Run(") | unread |  |
+| `Viewer::RequestFinish` | [Viewer.cc#L619](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L619 "Viewer::RequestFinish(") | unread |  |
+| `Viewer::CheckFinish` | [Viewer.cc#L625](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L625 "Viewer::CheckFinish(") | unread |  |
+| `Viewer::SetFinish` | [Viewer.cc#L631](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L631 "Viewer::SetFinish(") | unread |  |
+| `Viewer::isFinished` | [Viewer.cc#L637](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L637 "Viewer::isFinished(") | unread |  |
+| `Viewer::request_stop` | [Viewer.cc#L643](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L643 "Viewer::request_stop(") | unread |  |
+| `Viewer::is_stopped` | [Viewer.cc#L650](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L650 "Viewer::is_stopped(") | unread |  |
+| `Viewer::Stop` | [Viewer.cc#L656](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L656 "Viewer::Stop(") | unread |  |
+| `Viewer::release` | [Viewer.cc#L674](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L674 "Viewer::release(") | unread |  |
 
 ## Notes
 

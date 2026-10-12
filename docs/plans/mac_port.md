@@ -2,7 +2,7 @@
 
 - **Author:** Alejandro Fontan (planned with Claude, Fable 5.1)
 - **Created:** 2026-10-12
-- **Status:** phase 0 (study) done 2026-10-12; all six decisions taken 2026-10-12 (below); phase 1 not started
+- **Status:** phase 1 implemented on Linux 2026-10-12 (branch `cpu-only`): GPU backends are CMake options, `build.sh -c` / `pixi run -e cpu build` build GPU-free, byte-identical to the full build on `table_3` (`docs/notes/2026-10-12_cpu_only_build_identity.md`); macOS viewer-on-main-thread ported untested; waiting for the first Mac build (items 5, 7 and the Mac tests below)
 - **Pinned to:** AllFeature `2ce9e7f` (`cpu-only` == `dev` == `origin/main`), placecell `71cbaff` (v0.1.0), VSLAM-LAB `dev` 1804957 (+ `origin/stream-iphone` 2c0ff49)
 - **Target machine:** MacBook Pro 16" 2021, M1 Pro (6P+2E cores, 14-core GPU/Metal, NEON/FP16/DotProd, no I8MM), 16 GB unified, 1 GB swap, 16 KB pages, macOS 26.6, Xcode 27 / Apple clang 21, pixi 0.81, no Homebrew (`VSLAM-LAB/mac_spec.txt`)
 - **Session:** `claude --resume 49010428-7f8f-40f2-9f55-3a1addb2cb77` (Linux); the Mac works from its own clone
@@ -105,8 +105,16 @@ default build is bit-for-bit what it is today.
   recorded as the Mac baseline number.
 - Both: `akaze61`, `brisk48`, `kaze64` run on `table_3`.
 
-**Commits.** one per item above (options, march, portability, viewer-on-main, mimalloc, pixi,
-parent). Reference pages touched: `System`, `FeatureMatcher`, `Viewer`, settings table.
+**Status 2026-10-12 (Linux side done).** Items 1-4, 6 and 8 implemented; the Linux tests pass
+(`docs/notes/2026-10-12_cpu_only_build_identity.md`: GPU-free build identical to the full build with
+the same toolchain, in both culling modes; the `cpu` environment's different gcc/BLAS/OpenMP/OpenCV
+build drifts in the last bits, which is expected). Beyond the plan: `brisk`/`akaze` are optional at
+configure time (`ALLFEATURE_WITH_BRISK`/`_AKAZE` when found), so the Mac builds with `orb32`/`kaze64`
+before the recipes land; `setup` on macOS skips the model downloads. Item 5 (mimalloc zone override)
+and item 7 (recipes) wait for the Mac; the exit-time segfault with the viewer on turned out to be
+pre-existing (issue #42). Mac to-do: `pixi install -e build` on the Mac from this branch, `pixi run
+build -v` (CPU-only is the Apple default), then `table_3` mono with `verbose:1`; report the configure
+log and the first run's `system_output`.
 
 ### Phase 2 — MegaLoc on ONNX Runtime (placecell + host), Linux and Mac
 
