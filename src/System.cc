@@ -3,14 +3,18 @@
 #include "FeatureMatcher.h"
 #include "KeyframeInformation.h"
 #include "Optimizer.h"
-#include "PlaceRecognitionMegaLoc.h"
+#include "PlaceRecognitionMegaLoc.h"   // header is TensorRT-free (placecell pimpl); the backend itself needs ALLFEATURE_WITH_TENSORRT
 
 #include <placecell/viz.h>
 
 #include <algorithm>
 #include <fstream>
 
+#include <chrono>
 #include <thread>
+#ifdef __APPLE__
+#include <pthread.h>
+#endif
 #include <pangolin/pangolin.h>
 #include <iomanip>
 #include <yaml-cpp/yaml.h>
@@ -129,6 +133,12 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         place_recognition = make_shared<PlaceRecognitionNone>(vpr_feature);
     }
     else if(vpr_method == "megaloc"){
+#ifndef ALLFEATURE_WITH_TENSORRT
+        (void)megaloc_params;
+        AF_ERROR("[System] vpr: megaloc is not available in this build: it needs the CMake option "
+                 "ALLFEATURE_WITH_TENSORRT=ON (docs/plans/mac_port.md). Set vpr: none or rebuild with that backend.");
+        exit(-1);
+#else
         if(!std::ifstream(megaloc_onnx).good()){
             AF_ERROR("[System] vpr: megaloc requested but the model is missing ('" + megaloc_onnx
                      + "') — let the VSLAM-LAB wrapper download it, generate it with "
@@ -159,6 +169,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 << "-d, min similarity " << megaloc_params.min_similarity
                 << ", max candidates " << megaloc_params.max_candidates << ")");
         std::cout.flush();
+#endif
     }
     else{
         AF_ERROR("[System] Unknown vpr backend '" + vpr_method + "' (options: megaloc, none)");
@@ -177,12 +188,14 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 << (LocalMapping::params.keyframe_culling_centred ? "centred" : "raw")
                 << " cosine; tau " << LocalMapping::params.keyframe_culling_max_unexplained.load() << ")");
     }
+#ifdef ALLFEATURE_WITH_TENSORRT
     else if(place_cell){
         keyframe_information = make_shared<KeyframeInformationMegaLoc>(place_cell);
         AF_INFO("[System] keyframe information kernel: megaloc (the retrieval store, "
                 << (LocalMapping::params.keyframe_culling_centred ? "centred" : "raw")
                 << " cosine; tau " << LocalMapping::params.keyframe_culling_max_unexplained.load() << ")");
     }
+#endif
     else
         AF_INFO("[System] keyframe information kernel: none (InformationKernel: megaloc needs vpr: megaloc) — "
                 "keyframe insertion by the tracking triggers only, information culling falls back to the heuristic");
@@ -247,7 +260,9 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         viewer = make_shared<Viewer>(this, frameDrawer,mapDrawer,tracker,
                                     strCalibrationFile, strSettingsFile,
                                     featureTypes);
+#ifndef __APPLE__
         mptViewer = make_shared<thread>(&Viewer::Run, viewer);
+#endif  // on macOS Cocoa needs Pangolin on the main thread: System::Run drives the Viewer there
         tracker->set_viewer(viewer);
         localMapper->set_viewer(viewer);
     }
@@ -433,13 +448,13 @@ void System::Shutdown()
     {
         viewer->RequestFinish();
         while(!viewer->isFinished())
-            usleep(5000);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
     // Wait until all thread have effectively stopped
     while(!localMapper->is_finished() || !loopCloser->is_finished() || loopCloser->is_gba_running())
     {
-        usleep(5000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
     // The threads have returned; join them so their std::thread objects are not destroyed
@@ -448,7 +463,7 @@ void System::Shutdown()
         if(thread && thread->joinable())
             thread->join();
 
-    if(viewer)
+    if(viewer && mptViewer)   // the Viewer ran in its own thread: make its context current here for the exit path
         pangolin::BindToContext(viewer->GetWindowTitle());
 
     // Every placecell caller has stopped: the profile tables are complete (one per store;
@@ -461,6 +476,33 @@ void System::Shutdown()
         if(place_cell && (!keyframe_information || &keyframe_information->place_cell() != place_cell.get()))
             place_cell->print_profile();
     }
+}
+
+void System::Run(const std::function<void()>& work)
+{
+#ifdef __APPLE__
+    if(viewer)
+    {
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, 8 * 1024 * 1024);
+        pthread_t thread;
+        const int rc = pthread_create(&thread, &attr,
+                                      [](void* pWork) -> void* { (*static_cast<const std::function<void()>*>(pWork))(); return nullptr; },
+                                      const_cast<std::function<void()>*>(&work));
+        pthread_attr_destroy(&attr);
+        if(rc != 0)
+        {
+            AF_ERROR("[System] Run: pthread_create failed (" << rc << "), running the work inline without the viewer");
+            work();
+            return;
+        }
+        viewer->Run();   // returns once Shutdown() (called by work) requests the viewer to finish
+        pthread_join(thread, nullptr);
+        return;
+    }
+#endif
+    work();
 }
 
 void System::SavePlaceCellDiagnostics(const std::string& directory)

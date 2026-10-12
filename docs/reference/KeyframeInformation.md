@@ -20,9 +20,9 @@ Design: [`docs/plans/covisibility_kernel.md`](../plans/covisibility_kernel.md).
 
 ## Call graph
 
-- **[`information`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyframeInformation.cc#L86)** (tracking thread) — `window_ids`, `placecell::PlaceCell::unexplained_information` (descriptor or item overload), `to_value`.
-- **[`on_keyframe_processed`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyframeInformation.cc#L161)** (local-mapping thread) — `observed_point_ids`, `placecell::PlaceCell::set_items`.
-- **[`refresh`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyframeInformation.cc#L171)** (local-mapping thread) — `observed_point_ids`, `placecell::PlaceCell::is_culled`, `set_items`.
+- **[`information`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyframeInformation.cc#L87)** (tracking thread) — `window_ids`, `placecell::PlaceCell::unexplained_information` (descriptor or item overload), `to_value`.
+- **[`on_keyframe_processed`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyframeInformation.cc#L163)** (local-mapping thread) — `observed_point_ids`, `placecell::PlaceCell::set_items`.
+- **[`refresh`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyframeInformation.cc#L173)** (local-mapping thread) — `observed_point_ids`, `placecell::PlaceCell::is_culled`, `set_items`.
 - Not in the graph: [`record_thresholds`](#record_thresholds), [`record_decision`](#record_decision) (Recorder feed), [`clear`](#clear), [`place_cell`](#place_cell).
 
 ## Flow

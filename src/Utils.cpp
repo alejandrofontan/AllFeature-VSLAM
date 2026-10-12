@@ -5,7 +5,6 @@
 #include <fstream>
 #include "Utils.h"
 #include <utility>
-#include "Feature_superpoint256.h"
 
 //std::mt19937 AF_VSLAM::RandomIntegerGenerator::randomIntGenerator{std::mt19937(std::random_device{}())};
 std::mutex AF_VSLAM::RandomIntegerGenerator::randomIntMutex{};

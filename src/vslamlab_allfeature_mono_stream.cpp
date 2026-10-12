@@ -60,9 +60,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Online segmentation: build/load the TensorRT engine before the SLAM
+    // Online segmentation: build/load the engine before the SLAM
     // threads exist (policy and announcements in SegmentationSettings.h).
-    std::unique_ptr<segmentation::TensorRTSeg> segmenter{};
+    std::unique_ptr<segmentation::Segmenter> segmenter{};
     try {
         segmenter = segmentationSettings.makeSegmenter();
     } catch (const std::runtime_error& e) {
@@ -90,6 +90,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Capture loop as one unit (System::Run: on macOS with the viewer on it runs in a worker thread while the
+    // Pangolin viewer owns the main thread; elsewhere inline)
+    auto processStream = [&]() {
     cv::Mat frame;
     int idx{0};
     while (true) {
@@ -115,5 +118,8 @@ int main(int argc, char** argv) {
     }
 
     cap.release();
+    };
+
+    SLAM.Run(processStream);
     return 0;
 }

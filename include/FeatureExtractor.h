@@ -67,7 +67,7 @@ namespace AF_VSLAM {
     public:
 
         FeatureExtractor(std::shared_ptr<FeatureExtractorSettings>& settings_): settings(settings_){};
-        ~FeatureExtractor() = default;
+        virtual ~FeatureExtractor() = default;
 
         std::shared_ptr<FeatureExtractorSettings> settings{};
         std::vector<double> extractorTime{};

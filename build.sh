@@ -38,39 +38,56 @@ build_library() {
 
   if [ "$force_build" = true ]; then
   	delete_if_exists ${source_folder}
+  	rm -rf "$source_folder/build-cpu"
   fi
 
   # Local builds are tuned for this machine (-march=native, CUDA kernels for this GPU); the conda package
   # builds the same CMake project with ALLFEATURE_NATIVE off (x86-64-v3) and an explicit CUDA architecture list.
   local extra_flags=(-DALLFEATURE_NATIVE=ON)
+  # -c: GPU-free build (docs/plans/mac_port.md phase 1) in its own build directory, same bin/ and lib/ outputs
+  if [ "$cpu_only" = true ]; then
+    build_folder="$source_folder/build-cpu"
+    extra_flags+=(-DALLFEATURE_WITH_SIFTGPU=OFF -DALLFEATURE_WITH_TORCH=OFF -DALLFEATURE_WITH_TENSORRT=OFF)
+  fi
 
   if [ "$verbose" = true ]; then
     echo "[${library_name}][build.sh] Compile ${library_name} ... "
   	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder "${extra_flags[@]}"
-  	cmake --build $build_folder --config Release --parallel 4
+  	cmake --build $build_folder --config Release --parallel $parallel
     #ninja -C build 2>&1 | grep "error:" | head -30
   else
     echo "[${library_name}][build.sh] Compile ${library_name} (output disabled) ... "
   	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder "${extra_flags[@]}" > /dev/null 2>&1
-  	cmake --build $build_folder --config Release --parallel 4 > /dev/null 2>&1
+  	cmake --build $build_folder --config Release --parallel $parallel > /dev/null 2>&1
   fi
 }
 
-# Check inputs
+# Parallel compile jobs: 4 on Linux; 3 on macOS (16 GB unified memory, 1 GB swap on the target laptop).
+# Override with ALLFEATURE_BUILD_JOBS.
+if [ -n "${ALLFEATURE_BUILD_JOBS:-}" ]; then
+  parallel=$ALLFEATURE_BUILD_JOBS
+elif [ "$(uname -s)" = "Darwin" ]; then
+  parallel=3
+else
+  parallel=4
+fi
+
+# Check inputs: -f force (delete build/bin/lib first), -v verbose, -c CPU-only (no CUDA/TensorRT/libtorch/SiftGPU);
+# flags may be combined (-fv, -cv, -fcv, ...)
 force_build=false
 verbose=false
+cpu_only=false
 for input in "$@"
 do
-    if [ "$input" = "-f" ]; then
-  	force_build=true
-    fi
-    if [ "$input" = "-v" ]; then
-  	verbose=true
-    fi
-    if [ "$input" = "-fv" ] || [ "$input" = "-vf" ]; then
-  	verbose=true
-    force_build=true
-    fi
+    case "$input" in
+      --cpu) cpu_only=true ;;
+      -*)
+        flags="${input#-}"
+        [[ "$flags" == *f* ]] && force_build=true
+        [[ "$flags" == *v* ]] && verbose=true
+        [[ "$flags" == *c* ]] && cpu_only=true
+        ;;
+    esac
 done
 
 # Baseline Dir

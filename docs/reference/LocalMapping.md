@@ -1,7 +1,7 @@
 # `src/LocalMapping.cc`
 
 The map back-end. `LocalMapping::run` is the body of the local-mapping thread started by
-[`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L232 "mptLocalMapping = make_shared<thread>"):
+[`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L245 "mptLocalMapping = make_shared<thread>"):
 it drains the keyframe queue that Tracking fills and, for every keyframe, computes its global
 descriptor, culls the map points on probation, creates new map points (from sensor depth and by
 two-view triangulation), fuses duplicates with the covisible neighbours, runs the local bundle
@@ -86,9 +86,9 @@ LocalMapping::LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureTy
   given feature types and image size. The loop closer, viewer and keyframe information kernel are
   injected afterwards through `set_loop_closer` / `set_viewer` / `set_keyframe_information` (header
   inlines), because `LoopClosing` is constructed after `LocalMapping` and the viewer and kernel are optional.
-- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L231 "localMapper = make_shared<LocalMapping>"),
+- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L244 "localMapper = make_shared<LocalMapping>"),
   which then starts [`run`](#run) on its own `std::thread` and wires the three setters
-  ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L259 "localMapper->set_loop_closer") — `set_keyframe_information` only when the system has an information kernel).
+  ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L274 "localMapper->set_loop_closer") — `set_keyframe_information` only when the system has an information kernel).
 
 ### `run`
 
@@ -184,7 +184,7 @@ void LocalMapping::create_new_map_points()
   against them ([`cache_neighbor_matches`](#cache_neighbor_matches)), then for each neighbour whose
   baseline over its median scene depth ([`KeyFrame::compute_scene_median_depth`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyFrame.cc#L685)) is at least
   `CreateNewMapPointsMinBaselineDepthRatio`, fetches the matched keypoint pairs per feature type
-  ([`FeatureMatcher::match_keyframes_for_triangulation`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L403)) and places each pair in 3D.
+  ([`FeatureMatcher::match_keyframes_for_triangulation`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L418)) and places each pair in 3D.
 - 3D position, in priority order: both views have sensor depth (`inv_depth > 0`) → back-project from
   each and average; one view has depth → back-project from that view; neither → linear two-view
   triangulation (SVD of the 4×4 system) only if `0 < cos(parallax) < CreateNewMapPointsMaxParallaxCos`;
@@ -210,11 +210,11 @@ void LocalMapping::create_new_map_points()
 void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors)
 ```
 - for every (neighbour, feature type) pair the current keyframe has no cached matches with yet, runs
-  the brute-force descriptor matcher ([`FeatureMatcher::serialFeatureMatching`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/FeatureMatcher.h#L65)) in an OpenMP
+  the brute-force descriptor matcher ([`FeatureMatcher::serialFeatureMatching`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/FeatureMatcher.h#L73)) in an OpenMP
   `collapse(2)` parallel loop, then stores the results serially: per feature type in both keyframes'
   `cache_matched_pairs_feat_type` (reversed for the neighbour) and stacked over feature types with
   keypoint-index offsets in `cache_matched_pairs` (reversed via
-  [`FeatureMatcher::swap_match_direction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L99)).
+  [`FeatureMatcher::swap_match_direction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L114)).
 - the cache is what `match_keyframes_for_triangulation` reads; a neighbour already cached (for
   example by the matcher itself in an earlier call) is skipped.
 - differs from ORB-SLAM2: no counterpart (stock uses the BoW feature vector to restrict matching).
@@ -249,7 +249,7 @@ void LocalMapping::search_in_neighbors()
   covisible keyframes plus, for each, its `SearchInNeighborsSecondKeyframes` best covisible
   keyframes, deduplicated with the `fuse_target_for_keyframe` mark (the current keyframe excluded).
 - per feature type: projects the current keyframe's map points into every target and fuses
-  duplicates ([`FeatureMatcher::fuse_map_points_to_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L442), radius
+  duplicates ([`FeatureMatcher::fuse_map_points_to_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L457), radius
   `SearchInNeighborsRadius`); collects the targets' map points (deduplicated with
   `fuse_candidate_for_keyframe`) and fuses them into the current keyframe; then recomputes the
   descriptor and normal/depth of every surviving match. Finally refreshes the covisibility graph.
@@ -313,7 +313,7 @@ void LocalMapping::cull_keyframes_heuristic()
 void LocalMapping::cull_keyframes_information()
 ```
 - host adapter for the joint-information culler in placecell
-  ([`placecell::PlaceCell::cull_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/Thirdparty/placecell/include/placecell/placecell.h#L313 "struct CullParameters")): the maths ("gram-greedy" on the
+  ([`placecell::PlaceCell::cull_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/Thirdparty/placecell/include/placecell/placecell.h#L320 "struct CullParameters")): the maths ("gram-greedy" on the
   keyframe similarity kernel, optionally double-centred) lives there; this function supplies the
   kernel's refresh, parameters, the window, the cull callback and the logging. The store is the
   information kernel's ([`KeyframeInformation::place_cell`](KeyframeInformation.md#place_cell)).
@@ -325,7 +325,7 @@ void LocalMapping::cull_keyframes_information()
   culling, creation and fusion), so the kernel the culler marginalises is the map's covisibility of this
   moment; `megaloc` does nothing (descriptors do not move).
 - parameters: `max_unexplained` = `KeyframeCullingMaxUnexplained` (τ, atomic — the Viewer's "Cull Max
-  Unexplained" slider writes it live, [`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L369 "keyframe_culling_max_unexplained.store")), `centred` =
+  Unexplained" slider writes it live, [`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L431 "keyframe_culling_max_unexplained.store")), `centred` =
   `KeyframeCullingCentred`, `min_keyframes`, `protect_last` = max(`KeyframeCullingMinAge`, 1) so the
   current keyframe is never culled, `max_per_call`. With `KeyframeCullingScope: local` the window is the
   current keyframe plus its covisible keyframes; with `map` the whole alive set.
@@ -333,7 +333,7 @@ void LocalMapping::cull_keyframes_information()
   that keep every view within τ) by: `unique` = the candidate's own unique information v_i (the default),
   `minimax` = the worst unexplained view after the cull, `total-loss` = v_i plus the rise of every other
   view's unexplained information. The three names are placecell's
-  ([`CullParameters::objective`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/Thirdparty/placecell/include/placecell/placecell.h#L324 "std::string objective")).
+  ([`CullParameters::objective`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/Thirdparty/placecell/include/placecell/placecell.h#L332 "std::string objective")).
 - the cull callback sets the keyframe bad and reports success only if it *is* bad afterwards; a
   keyframe whose erase is deferred by LoopClosing stays alive and placecell does not retry it within
   the call.
@@ -506,7 +506,7 @@ void LocalMapping::request_finish()
 ```
 - raises `finish_requested_` under `finish_mutex_`; [`run`](#run) exits at its next check, also
   from inside the stop idle loop.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L430 "localMapper->request_finish()").
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L445 "localMapper->request_finish()").
 
 ### `is_finish_requested`
 
@@ -532,7 +532,7 @@ bool LocalMapping::is_finished() const
 ```
 - `finished_` under `finish_mutex_`. Starts `true` (`finished_{true}`) and is cleared by
   [`run`](#run)'s first statement.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L440 "while(!localMapper->is_finished()") (spin, then join the
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L455 "while(!localMapper->is_finished()") (spin, then join the
   thread), [`LoopClosing::apply_gba_correction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L599 "!local_mapper_->is_finished()"),
   [`release`](#release).
 
@@ -554,7 +554,7 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
   is read first: with `covisibility` the compiled defaults of `KeyframeCullingMaxUnexplained` (0.7) and
   `KeyframeCullingCentred` (0) replace the `megaloc` ones (0.3, 1) before those keys are read, so an absent
   key means "the default of this kernel".
-- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L55 "LocalMapping::LoadParameters(fsSettings)"), before any thread starts.
+- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L59 "LocalMapping::LoadParameters(fsSettings)"), before any thread starts.
 - settings: the whole table below.
 
 ### `log_profile`
