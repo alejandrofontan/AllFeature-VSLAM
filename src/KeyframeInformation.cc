@@ -73,6 +73,7 @@ void KeyframeInformation::record_decision(const FrameId frame_id, const bool ins
 
 // ---- megaloc ----------------------------------------------------------------------------
 
+#ifdef ALLFEATURE_WITH_TENSORRT   // the MegaLoc component needs placecell::megaloc (CMakeLists.txt)
 KeyframeInformationMegaLoc::KeyframeInformationMegaLoc(std::shared_ptr<placecell::MegaLocPlaceCell> place_cell)
     : place_cell_(std::move(place_cell))
 {
@@ -109,6 +110,7 @@ std::optional<KeyframeInformationValue> KeyframeInformationMegaLoc::information(
 }
 
 // ---- covisibility -----------------------------------------------------------------------
+#endif // ALLFEATURE_WITH_TENSORRT
 
 KeyframeInformationCovisibility::KeyframeInformationCovisibility(const placecell::PlaceCell::Options& options)
     : place_cell_(std::make_shared<placecell::PlaceCell>(options))

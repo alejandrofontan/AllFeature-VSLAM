@@ -3,46 +3,98 @@
 #define AF_VSLAM_FEATURE_FACTORY_H
 
 #include <memory>
+#include <string>
+#include "afvslam_log.hpp"
 #include "Feature_orb32.h"
-#include "Feature_akaze61.h"
-#include "Feature_brisk48.h"
 #include "Feature_surf64.h"
 #include "Feature_kaze64.h"
+// brisk / akaze come from standalone conda packages that not every platform has yet (CMakeLists.txt)
+#ifdef ALLFEATURE_WITH_AKAZE
+#include "Feature_akaze61.h"
+#endif
+#ifdef ALLFEATURE_WITH_BRISK
+#include "Feature_brisk48.h"
+#endif
+// GPU-backed features follow the CMake backend options (ALLFEATURE_WITH_*, CMakeLists.txt): a feature
+// compiled out keeps its FeatureType value (Types.h) but has no Feature instance, so requesting it in the
+// settings is an error at startup (feature_compiled_out below) instead of a link error.
+#ifdef ALLFEATURE_WITH_SIFTGPU
 #include "Feature_sift128.h"
+#endif
+#ifdef ALLFEATURE_WITH_TORCH
 #include "Feature_aliked128.h"
+#endif
+#ifdef ALLFEATURE_WITH_TENSORRT
 #include "Feature_superpoint256.h"
+#endif
 
 // Returns a stateless singleton per feature type (every Feature virtual is const).
 // Previously returned a fresh unique_ptr per call — a heap allocation inside every
 // descriptor_distance/match dispatch, i.e. per descriptor comparison in the fuse and
 // compute_distinctive_descriptors inner loops (issue #13 addendum, factory-singletons item).
+[[noreturn]] inline void feature_compiled_out(const std::string& feature, const std::string& cmake_option) {
+    AF_ERROR("Feature '" << feature << "' is not available in this build: it needs " << cmake_option
+             << " (docs/plans/mac_port.md). Remove it from `features:` in the settings yaml or rebuild with it.");
+    std::terminate();
+}
+
 inline const AF_VSLAM::Feature& get_feature(const FeatureType& featureType) {
     static const AF_VSLAM::Orb32 orb32;
+#ifdef ALLFEATURE_WITH_AKAZE
     static const AF_VSLAM::Akaze61 akaze61;
+#endif
+#ifdef ALLFEATURE_WITH_BRISK
     static const AF_VSLAM::Brisk48 brisk48;
+#endif
     static const AF_VSLAM::Surf64 surf64;
     static const AF_VSLAM::Kaze64 kaze64;
+#ifdef ALLFEATURE_WITH_SIFTGPU
     static const AF_VSLAM::Sift128 sift128;
+#endif
+#ifdef ALLFEATURE_WITH_TORCH
     static const AF_VSLAM::Aliked128 aliked128;
+#endif
+#ifdef ALLFEATURE_WITH_TENSORRT
     static const AF_VSLAM::Superpoint256 superpoint256;
+#endif
 
     switch (featureType) {
         case FEAT_ORB32:
             return orb32;
         case FEAT_AKAZE61:
+#ifdef ALLFEATURE_WITH_AKAZE
             return akaze61;
+#else
+            feature_compiled_out("akaze61", "the akaze conda package (find_package(akaze))");
+#endif
         case FEAT_BRISK48:
+#ifdef ALLFEATURE_WITH_BRISK
             return brisk48;
+#else
+            feature_compiled_out("brisk48", "the brisk conda package (find_package(brisk))");
+#endif
         case FEAT_SURF64:
             return surf64;
         case FEAT_KAZE64:
             return kaze64;
         case FEAT_SIFT128:
+#ifdef ALLFEATURE_WITH_SIFTGPU
             return sift128;
+#else
+            feature_compiled_out("sift128", "the CMake option ALLFEATURE_WITH_SIFTGPU=ON");
+#endif
         case FEAT_ALIKED128:
+#ifdef ALLFEATURE_WITH_TORCH
             return aliked128;
+#else
+            feature_compiled_out("aliked128", "the CMake option ALLFEATURE_WITH_TORCH=ON");
+#endif
         case FEAT_SUPERPOINT256:
+#ifdef ALLFEATURE_WITH_TENSORRT
             return superpoint256;
+#else
+            feature_compiled_out("superpoint256", "the CMake option ALLFEATURE_WITH_TENSORRT=ON");
+#endif
         default:{
             std::cout <<"get_feature"<< std::endl;
             std::terminate();

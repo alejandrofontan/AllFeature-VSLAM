@@ -1,14 +1,22 @@
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <memory>
+#include <numeric>
 #include <sstream>
+#include <unordered_set>
+#include <vector>
 
 #include "afvslam_log.hpp"
 #include "BruteForceMatcher.h"
 #include "FeatureMatcher.h"
+#ifdef ALLFEATURE_WITH_TENSORRT
 #include "Feature_superpoint256.h"
+#endif
 
 #include <opencv2/core/utility.hpp>
 
@@ -45,6 +53,8 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
                                            : info.substr(p, info.find('\n', p) - p)));
     }
     for(const auto& feat_type : feature_types) {
+        (void)feat_type;   // unused when every learned / GPU backend is compiled out
+#ifdef ALLFEATURE_WITH_SIFTGPU
         if (feat_type == FEAT_SIFT128) {
             AF_INFO("Initializing SiftMatchGPU...");
             sift_match_gpu_ = SiftMatchGPU();
@@ -55,7 +65,9 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
             sift_match_gpu_.Allocate(FeatureMatcher::max_supported, 1);
             AF_INFO("SiftMatchGPU initialized.");
         }
+#endif
 
+#ifdef ALLFEATURE_WITH_TENSORRT
         if (feat_type == FEAT_SUPERPOINT256) {
             AF_INFO("Initializing SuperPoint-LightGlue...");
             const std::string& config_path = Superpoint256::getConfigYaml();
@@ -85,6 +97,8 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
 
             AF_INFO("SuperPoint-LightGlue initialized and warmed up from: " + model_dir);
         }
+#endif
+#ifdef ALLFEATURE_WITH_TORCH
         if (feat_type == FEAT_ALIKED128 || feat_type == FEAT_SIFT128) {
             AF_INFO("Initializing LightGlue...");
             // Select CUDA if available, fall back to CPU
@@ -93,6 +107,7 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
             matcher_lightglue->to(*torch_device);
             AF_INFO("LightGlue initialized.");
         }
+#endif
     }
 }
 
@@ -1072,6 +1087,7 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
             }
             case LIGHTGLUE_SIFT:
             {
+#ifdef ALLFEATURE_WITH_SIFTGPU
                 sift_match_gpu_.SetDescriptors(0, desc1.rows, desc1.ptr<float>());
                 sift_match_gpu_.SetDescriptors(1, desc2.rows, desc2.ptr<float>());
                 constexpr int max_out = 4000;
@@ -1085,6 +1101,9 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
                         static_cast<int>(match_buffer[i][1]),
                         0.0f);
                 }
+#else
+                matches = bruteforce_match_l2(desc1, desc2);   // unreachable: sift128 needs ALLFEATURE_WITH_SIFTGPU
+#endif
                 break;
             }
             case BF_HAMMING:
@@ -1104,18 +1123,27 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
 
         const AF_VSLAM::Feature& ft = get_feature(featType_);
         const MatcherType matcherType = ft.getMatcherType();
+        (void)kps1; (void)kps2;   // only the learned matchers use the keypoints (compiled out without their backend)
 
         std::vector<cv::DMatch> matches;
         switch(matcherType) {
             case LIGHTGLUE_SIFT:
             case LIGHTGLUE_ALIKED:
             {
+#ifdef ALLFEATURE_WITH_TORCH
                 matches = lightglueMatching(kps1, desc1, kps2, desc2, 0.0f);
+#else
+                matches = bruteforce_match_l2(desc1, desc2);   // unreachable: these features need ALLFEATURE_WITH_TORCH
+#endif
                 break;
             }
             case LIGHTGLUE_SUPERPOINT:
             {
+#ifdef ALLFEATURE_WITH_TENSORRT
                 matches = matcherLightglueSuperpoint(kps1, desc1, kps2, desc2, 0.0f);
+#else
+                matches = bruteforce_match_l2(desc1, desc2);   // unreachable: superpoint256 needs ALLFEATURE_WITH_TENSORRT
+#endif
                 break;
             }
             case BF_L2:

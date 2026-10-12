@@ -25,9 +25,26 @@
 #include <yaml-cpp/yaml.h>
 
 #include "afvslam_log.hpp"
+
+// The segmentation engine follows the CMake backend option ALLFEATURE_WITH_TENSORRT (CMakeLists.txt): with
+// it, `Segmenter` is the TensorRT engine of Thirdparty/Segmentation-TensorRT; without it, a stub that is
+// never constructed (makeSegmenter() returns nullptr, or throws when segmentation was requested
+// explicitly), so the entry points compile and link unchanged on a GPU-free build.
+#ifdef ALLFEATURE_WITH_TENSORRT
 #include "tensorrt_seg.hpp"
+#endif
 
 namespace segmentation {
+
+#ifdef ALLFEATURE_WITH_TENSORRT
+using Segmenter = TensorRTSeg;
+#else
+class Segmenter
+{
+  public:
+    cv::Mat inferMask(const cv::Mat&) { throw std::logic_error("segmentation: no backend compiled in"); }
+};
+#endif
 
 struct SegmentationSettings
 {
@@ -68,10 +85,18 @@ struct SegmentationSettings
     /// (fresh checkout before the model download) - the latter with a warning.
     /// An explicit request (segmentation: efficientvit, or an explicit
     /// segmentation_onnx path) whose model is missing throws instead.
-    std::unique_ptr<TensorRTSeg> makeSegmenter() const
+    std::unique_ptr<Segmenter> makeSegmenter() const
     {
         if (method == "none")
             return nullptr;
+#ifndef ALLFEATURE_WITH_TENSORRT
+        if (method_explicit || onnx_explicit)
+            throw std::runtime_error(
+                "segmentation: " + method + " is not available in this build: it needs the CMake option "
+                "ALLFEATURE_WITH_TENSORRT=ON (docs/plans/mac_port.md). Set segmentation: none or rebuild with that backend.");
+        AF_WARN("Online segmentation not compiled in (ALLFEATURE_WITH_TENSORRT=OFF) - running WITHOUT online segmentation");
+        return nullptr;
+#else
         if (!std::ifstream(onnx).good()) {
             if (onnx_explicit)
                 throw std::runtime_error("segmentation_onnx not found: '" + onnx + "'");
@@ -106,6 +131,7 @@ struct SegmentationSettings
                 << segmenter->enginePath() << ")");
         std::cout.flush();
         return segmenter;
+#endif
     }
 
 private:

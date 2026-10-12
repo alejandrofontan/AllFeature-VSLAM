@@ -6,18 +6,26 @@
 
 #include <opencv2/core/core.hpp>
 
-#include "Feature_sift128.h"
 #include "Frame.h"
 #include "KeyFrame.h"
 #include "MapPoint.h"
 
+// Learned / GPU matching backends follow the CMake backend options (CMakeLists.txt): SiftMatchGPU with
+// ALLFEATURE_WITH_SIFTGPU, LightGlue (libtorch) with ALLFEATURE_WITH_TORCH, SuperPoint-LightGlue (TensorRT)
+// with ALLFEATURE_WITH_TENSORRT. Features that need a compiled-out backend never reach this class
+// (FeatureFactory.h refuses them at startup), so the dispatch below only has to compile without them.
+#ifdef ALLFEATURE_WITH_SIFTGPU
+#include "Feature_sift128.h"
+#endif
+#ifdef ALLFEATURE_WITH_TORCH
 #include "matcher/lightglue/matcher.hpp"
-
+#endif
+#ifdef ALLFEATURE_WITH_TENSORRT
 #ifdef CHECK
 #undef CHECK
 #endif
-
 #include "light_glue.h"
+#endif
 
 namespace AF_VSLAM
 {
@@ -171,12 +179,18 @@ protected:
 
     const Descriptor_Distance_Type highest_possible_distance{std::numeric_limits<Descriptor_Distance_Type>::max()};
 
-    SiftMatchGPU sift_match_gpu_{};
     // Brute-force matching now goes through BruteForceMatcher.h (issue #13 P2), which
     // replicates the cv::BFMatcher(<norm>, crossCheck=true) semantics these members had.
+#ifdef ALLFEATURE_WITH_SIFTGPU
+    SiftMatchGPU sift_match_gpu_{};
+#endif
+#ifdef ALLFEATURE_WITH_TORCH
     std::shared_ptr<matcher::LightGlue> matcher_lightglue;
     std::shared_ptr<torch::Device> torch_device;
+#endif
+#ifdef ALLFEATURE_WITH_TENSORRT
     std::shared_ptr<SuperPointLightGlue> matcher_lightglue_superpoint;
+#endif
     int image_width;
     int image_height;
 
