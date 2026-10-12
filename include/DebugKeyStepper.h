@@ -2,6 +2,7 @@
 #define AF_VSLAM_DEBUG_KEY_STEPPER_H
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 #include <termios.h>
 #include <unistd.h>
@@ -59,7 +60,7 @@ inline std::thread startKeyAllowanceThread(std::atomic<int>& allowance,
                     allowance.fetch_add(1, std::memory_order_relaxed);
                 }
             } else {
-                usleep(1000); // 1 ms, avoid busy spinning
+                std::this_thread::sleep_for(std::chrono::milliseconds(1)); // avoid busy spinning
             }
         }
     });

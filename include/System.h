@@ -23,10 +23,10 @@
 #define SYSTEM_H
 
 #include<atomic>
+#include<functional>
 #include<string>
 #include<thread>
 #include<opencv2/core/core.hpp>
-#include <unistd.h>
 
 #include "Tracking.h"
 #include "FrameDrawer.h"
@@ -98,6 +98,12 @@ public:
     // It waits until all threads have finished.
     // This function must be called before saving the trajectory.
     void Shutdown();
+
+    // Runs `work` (the entry point's sequence loop, GBA, Shutdown and saves) to completion. On macOS with the
+    // viewer on, Pangolin/Cocoa must own the process main thread, so the Viewer loop runs here and `work`
+    // runs in a thread with an 8 MB stack (secondary threads get 512 KB on macOS, which monocular map
+    // initialization overflows); everywhere else `work` runs inline and the Viewer has its own thread.
+    void Run(const std::function<void()>& work);
 
     // Save keyframe poses in the TUM RGB-D dataset format.
     // This method works for all sensor input.

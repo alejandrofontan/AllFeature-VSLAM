@@ -1,4 +1,5 @@
 #include <iostream>
+#include <thread>
 #include <algorithm>
 #include <fstream>
 #include <chrono>
@@ -165,9 +166,9 @@ int main(int argc, char **argv)
 
     size_t nImages = imageFilenames.size();
 
-    // Online segmentation: build/load the TensorRT engine before the SLAM
+    // Online segmentation: build/load the engine before the SLAM
     // threads exist (policy and announcements in SegmentationSettings.h).
-    std::unique_ptr<segmentation::TensorRTSeg> segmenter{};
+    std::unique_ptr<segmentation::Segmenter> segmenter{};
     try {
         segmenter = segmentationSettings.makeSegmenter();
     } catch (const std::runtime_error& e) {
@@ -185,105 +186,112 @@ int main(int argc, char **argv)
 
     SLAM.SetSequenceInfo(nImages, segmenter != nullptr);
 
-    // Vector for tracking time statistics
-    std::vector<AF_VSLAM::Seconds> vTimesTrack;
-    vTimesTrack.resize(nImages);
+    // The whole sequence run (tracking loop, GBA, Shutdown, saves) as one unit: on macOS with the viewer
+    // on, System::Run executes it in a worker thread while the Pangolin viewer owns the main thread;
+    // elsewhere it runs inline (System.h).
+    auto processSequence = [&]() {
+        // Vector for tracking time statistics
+        std::vector<AF_VSLAM::Seconds> vTimesTrack;
+        vTimesTrack.resize(nImages);
 
-    std::cout << std::endl << "-------------------------------" << std::endl;
-    AF_INFO("Start processing sequence ...");
-    AF_INFO("Images in the sequence: " << nImages);
+        std::cout << std::endl << "-------------------------------" << std::endl;
+        AF_INFO("Start processing sequence ...");
+        AF_INFO("Images in the sequence: " << nImages);
 
-    // Main loop
-    std::atomic<int> allowance{0};
-    std::atomic<bool> quit{false};
-    std::thread keyThread{};
-    if (debug){
-        keyThread = startKeyAllowanceThread(allowance, quit);
-    }
-
-    for (size_t ni = 0; ni < nImages; /* ni++ happens when a frame passes */) {
-        // Wait until we have at least 1 "allowed" frame, or quit
+        // Main loop
+        std::atomic<int> allowance{0};
+        std::atomic<bool> quit{false};
+        std::thread keyThread{};
         if (debug){
-            while (!quit.load(std::memory_order_relaxed) && allowance.load(std::memory_order_relaxed) == 0){
-                usleep(1000); // 1 ms
+            keyThread = startKeyAllowanceThread(allowance, quit);
+        }
+
+        for (size_t ni = 0; ni < nImages; /* ni++ happens when a frame passes */) {
+            // Wait until we have at least 1 "allowed" frame, or quit
+            if (debug){
+                while (!quit.load(std::memory_order_relaxed) && allowance.load(std::memory_order_relaxed) == 0){
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                if (quit.load(std::memory_order_relaxed)) break;
+                allowance.store(0, std::memory_order_relaxed);
             }
-            if (quit.load(std::memory_order_relaxed)) break;
-            allowance.store(0, std::memory_order_relaxed);
-        }
 
-        // Read image from file
-        AF_VSLAM::Image im(imageFilenames[ni]);
-        if (im.img.empty()) {
-            std::cerr << "Failed to load image: '" << imageFilenames[ni] << "'" << std::endl;
+            // Read image from file
+            AF_VSLAM::Image im(imageFilenames[ni]);
+            if (im.img.empty()) {
+                std::cerr << "Failed to load image: '" << imageFilenames[ni] << "'" << std::endl;
+                ++ni;
+                continue;
+            }
+
+            im.LoadDepth(depthFilenames[ni], depth_factor);
+            if (im.depthImg.empty()) {
+                std::cerr << "Failed to load depth image: '" << depthFilenames[ni] << "'" << std::endl;
+                ++ni;
+                continue;
+            }
+
+            if (segmenter)
+                im.mask = segmenter->inferMask(im.img);
+
+            AF_VSLAM::Seconds tframe = timestamps[ni];
+
+            // Pass the image to the SLAM system
+            std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+            SLAM.Track(im,tframe);
+            std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
+
+            AF_VSLAM::Seconds ttrack = std::chrono::duration_cast<std::chrono::duration<AF_VSLAM::Seconds> >(t2 - t1).count();
+            vTimesTrack[ni] = ttrack;
+
+            // Wait to load the next frame (remainder of the timestamp gap, capped by max_frame_wait)
+            AF_VSLAM::Seconds T = 0.0;
+            if(ni < nImages-1)
+                T = timestamps[ni+1] - tframe;
+            else if(ni > 0)
+                T = tframe - timestamps[ni-1];
+
+            pacer.wait(T, ttrack);
+
+            // Advance to next image only after processing this one
             ++ni;
-            continue;
         }
 
-        im.LoadDepth(depthFilenames[ni], depth_factor);
-        if (im.depthImg.empty()) {
-            std::cerr << "Failed to load depth image: '" << depthFilenames[ni] << "'" << std::endl;
-            ++ni;
-            continue;
+        if (debug){
+            quit.store(true, std::memory_order_relaxed);
+            if (keyThread.joinable()) keyThread.join();
         }
 
-        if (segmenter)
-            im.mask = segmenter->inferMask(im.img);
+        std::string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
+        SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory_beforeGBA.csv");
 
-        AF_VSLAM::Seconds tframe = timestamps[ni];
+        // Perform Global Bundle Adjustment
+        SLAM.GBA();
 
-        // Pass the image to the SLAM system
-        std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
-        SLAM.Track(im,tframe);
-        std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
+        // Stop all threads
+        SLAM.Shutdown();
 
-        AF_VSLAM::Seconds ttrack = std::chrono::duration_cast<std::chrono::duration<AF_VSLAM::Seconds> >(t2 - t1).count();
-        vTimesTrack[ni] = ttrack;
+        // Tracking time statistics
+        std::sort(vTimesTrack.begin(),vTimesTrack.end());
+        AF_VSLAM::Seconds totaltime = 0.0;
+        for(size_t ni = 0; ni < nImages; ni++)
+        {
+            totaltime+=vTimesTrack[ni];
+        }
+        std::cout << "-------" << std::endl << std::endl;
+        std::cout << "median tracking time: " << vTimesTrack[nImages/2] << std::endl;
+        std::cout << "mean tracking time: " << totaltime/nImages << std::endl;
+        pacer.printSummary();
 
-        // Wait to load the next frame (remainder of the timestamp gap, capped by max_frame_wait)
-        AF_VSLAM::Seconds T = 0.0;
-        if(ni < nImages-1)
-            T = timestamps[ni+1] - tframe;
-        else if(ni > 0)
-            T = tframe - timestamps[ni-1];
+        // Save camera trajectory
+        SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
+        SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply");
 
-        pacer.wait(T, ttrack);
+        // placecell kernel / history / profile / plots (PlaceCell.Dump; no-op otherwise)
+        SLAM.SavePlaceCellDiagnostics(resultsPath_expId + "_placecell");
+    };
 
-        // Advance to next image only after processing this one
-        ++ni;
-    }
-
-    if (debug){
-        quit.store(true, std::memory_order_relaxed);
-        if (keyThread.joinable()) keyThread.join();
-    }
-
-    std::string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
-    SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory_beforeGBA.csv");
-
-    // Perform Global Bundle Adjustment
-    SLAM.GBA();
-
-    // Stop all threads
-    SLAM.Shutdown();
-
-    // Tracking time statistics
-    std::sort(vTimesTrack.begin(),vTimesTrack.end());
-    AF_VSLAM::Seconds totaltime = 0.0;
-    for(size_t ni = 0; ni < nImages; ni++)
-    {
-        totaltime+=vTimesTrack[ni];
-    }
-    std::cout << "-------" << std::endl << std::endl;
-    std::cout << "median tracking time: " << vTimesTrack[nImages/2] << std::endl;
-    std::cout << "mean tracking time: " << totaltime/nImages << std::endl;
-    pacer.printSummary();
-
-    // Save camera trajectory
-    SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
-    SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply");
-
-    // placecell kernel / history / profile / plots (PlaceCell.Dump; no-op otherwise)
-    SLAM.SavePlaceCellDiagnostics(resultsPath_expId + "_placecell");
+    SLAM.Run(processSequence);
 
     return 0;
 }
