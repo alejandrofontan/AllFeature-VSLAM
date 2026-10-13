@@ -249,6 +249,32 @@ pre-phase-1 reference (trajectories, point set, stripped log). **Host wiring che
 `vpr: megaloc` on `megaloc_322x322_fp16.onnx`, provider auto → `onnxruntime/cuda, fp16 weights`, runs end to end.
 T5 (full `table_3`, ORT-CUDA vs TensorRT, gym entry) is the user's run through the framework.
 
+**Status 2026-10-13 (T2/T3 on the Mac, first numbers).** AllFeature builds and links on the Mac with
+`MegaLoc=ON (onnxruntime)` (one phase-1 leftover fixed: `PlaceRecognitionMegaLoc.cc` was still under the TensorRT
+option); placecell's `megaloc-onnx` env needed `eigen = "3.4.*"` (the Mac solve took Eigen 5, which placecell's
+`find_package(Eigen3 3.3)` rejects). Measured on the M1 Pro (placecell note): CPU fp32 611 / 328 / 229 ms at 2 / 4 / 6
+threads, cosines identical to Linux; CoreML 41–48 ms for every configuration, but **the Neural Engine loses
+accuracy** (fp16 file on `ALL` or `CPUAndNeuralEngine`: 0.982 vs the 0.9955 floor) while the GPU path is exact
+(fp16 + `CPUAndGPU` 46 ms at 0.9955; fp32 + `ALL` 48 ms at 0.9953). **Mac provider decision: CoreML on the GPU**, i.e.
+the defaults (fp32 file, `ALL`) or the fp16 file with `megaloc_coreml_units: CPUAndGPU`. 17 of 545 nodes stay on
+the CPU provider in 13 partitions. CoreML session creation: 90–175 s on a first compile, **36 s** on a repeat (the compile is cached per model
+file under `megaloc_models/coreml_cache/`; the remaining 36 s are ORT's graph conversion and Core ML's load) —
+acceptable for now, to be reduced in phase 6 by cutting the 13 partitions.
+
+**Status 2026-10-13 (T6 on the Mac).** `table_3` through the framework on the M1 Pro, `orb32`, `vpr: megaloc`,
+fp16 file, provider auto → `onnxruntime/coreml`, `CPUAndGPU`: runs end to end, no tracking loss, global BA, median
+tracking 37 ms/frame; placecell's profile shows `add_image` at **60 ms median** per keyframe (347 keyframes
+embedded, 60 alive at the end — the covisibility-kernel runaway of the shipped YAML again, unrelated to the port) on
+the mapping thread, i.e. the 46 ms CoreML embed plus preprocessing and the store update. No `[LoopClosing]` line in
+the run.
+
+**Status 2026-10-13 (T5 on Linux; T5–T7 in `docs/notes/2026-10-13_megaloc_onnxruntime_host.md`).** `table_3` through
+the framework on CUDA (`configs/test_exp_megaloc_onnx.yaml`, `orb32+aliked128`): `add_image` 11.9 ms median per
+keyframe, ATE 4.39 mm (board range 4.8–6.5), no losses, **no loop on Linux either** — so the missing loop is the
+shipped YAML's keyframe policy (covisibility-kernel runaway, 350–460 keyframes inserted), not the Core ML
+descriptors. The ORT-vs-TensorRT loop comparison (decision 3) moves to a gym entry with `heuristic` culling, three
+runs per backend, before the TensorRT deletion of step 9.
+
 ## 9. After parity: TensorRT leaves (decision 3) — **new**, last step
 
 Delete `tensorrt_megaloc.{hpp,cpp}`, the `tensorrt` CMake branch, the `megaloc` pixi feature's TensorRT packages, the

@@ -13,9 +13,14 @@ megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # vpr: megaloc — the model
                                                      # (fp16 weights, float32 I/O: the file for the CUDA / CoreML providers)
 megaloc_precision: "fp16"                            # TensorRT backend only: engine precision "fp16" | "fp32" (ignored on ONNX Runtime, the file decides)
 megaloc_provider: "auto"                             # ONNX Runtime execution provider: "auto" (CUDA where built in, else CoreML on macOS, else CPU) |
-                                                     # "cuda" | "coreml" | "cpu"; an unavailable provider falls back to auto with a warning
-megaloc_threads: 4                                   # ONNX Runtime CPU-provider threads (never the core count: tracking and mapping need the rest)
-megaloc_coreml_units: "ALL"                          # CoreML compute units: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
+                                                     # "cuda" | "coreml" | "cpu"; an unavailable provider falls back to auto with a warning.
+                                                     # Measured 2026-10-13 (Thirdparty/placecell/docs/notes/2026-10-13_megaloc_onnxruntime_backend.md):
+                                                     # CUDA 8-12 ms/image (RTX 4000 Ada), CoreML 46-48 ms (M1 Pro GPU), CPU 120-230 ms (8 / 6 threads)
+megaloc_threads: 4                                   # ONNX Runtime CPU-provider threads (never the core count: tracking and mapping need the rest;
+                                                     # scaling is near-linear up to the performance cores: 6 on an M1 Pro, 8 on the workstation)
+megaloc_coreml_units: "ALL"                          # CoreML compute units: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly". The Neural Engine
+                                                     # loses accuracy (cos 0.982 vs the 0.9955 floor with the fp16 file on "ALL" / "CPUAndNeuralEngine");
+                                                     # the GPU is exact: fp32 file + "ALL" (48 ms) or the fp16 file + "CPUAndGPU" (46 ms, half the download)
 segmentation: "none" # online semantic segmentation: "efficientvit" | "none"
 debug: false
 max_frame_wait: 0.2  # s; the mono/rgbd executables replay the sequence at its own rate (sleep for the rest of the
