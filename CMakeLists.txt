@@ -134,7 +134,10 @@ if(ALLFEATURE_WITH_TORCH)
   list(APPEND SRCS_ALLFEATURE src/Feature_aliked128.cpp src/FeatureMatcher_lightglue.cpp)
 endif()
 if(ALLFEATURE_WITH_TENSORRT)
-  list(APPEND SRCS_ALLFEATURE src/Feature_superpoint256.cpp src/FeatureMatcher_superglue.cpp src/PlaceRecognitionMegaLoc.cc)
+  list(APPEND SRCS_ALLFEATURE src/Feature_superpoint256.cpp src/FeatureMatcher_superglue.cpp)
+endif()
+if(ALLFEATURE_WITH_MEGALOC)
+  list(APPEND SRCS_ALLFEATURE src/PlaceRecognitionMegaLoc.cc)
 endif()
 
 # ---- CUDA (help Torch/Caffe2 legacy FindCUDA) ----
