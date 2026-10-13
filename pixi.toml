@@ -49,6 +49,10 @@ zlib = "*"
 # release with osx-arm64 (and linux-aarch64) builds: brisk on sse2neon + NEON, akaze with OpenMP on macOS too
 brisk = ">=1.0.1"
 akaze = ">=1.0.1"
+# ONNX Runtime: the MegaLoc VPR backend (Thirdparty/placecell, vpr: megaloc) on every platform; the execution
+# provider is a runtime choice (megaloc_provider: cuda on linux-64 with the cuda129 build below, coreml / cpu on
+# osx-arm64 with the cpu build, which carries the CoreML provider) — docs/plans/megaloc_onnxruntime.md
+onnxruntime-cpp = "1.31.*"
 
 [target.osx-arm64.dependencies]
 llvm-openmp = "*"   # Apple clang ships no OpenMP runtime; the brute-force matcher and local mapping use it
@@ -59,6 +63,7 @@ llvm-openmp = "*"   # Apple clang ships no OpenMP runtime; the brute-force match
 # splitting lib/header per package is a finer pass than is worth it here)
 cuda-version = "12.9.*"
 cuda-cudart-dev = "*"
+onnxruntime-cpp = { version = "1.31.*", build = "*cuda129*" }   # CUDA execution provider (dlopens libcudart / cudnn at runtime)
 cuda-nvrtc-dev = "*"    # torch JIT loads libnvrtc at runtime
 cuda-nvtx = "*"
 cudnn = "*"
@@ -153,11 +158,13 @@ pangolin-opengl = "*"
 zlib = "*"
 brisk = ">=1.0.1"
 akaze = ">=1.0.1"
+onnxruntime-cpp = "1.31.*"   # MegaLoc on the CPU provider (osx-arm64: + CoreML); the GPU-free configuration keeps vpr: megaloc
 
 [feature.cpu.target.osx-arm64.dependencies]
 llvm-openmp = "*"
 
 [feature.cpu.target.linux-64.dependencies]
+onnxruntime-cpp = { version = "1.31.*", build = "*cpu*" }   # the CPU-only build, not the cuda one the solver would pick
 xorg-libxext = "*"
 xorg-libx11 = "*"
 xorg-libxfixes = "*"
@@ -245,6 +252,7 @@ libcusolver-dev = "*"
 libcusparse-dev = "*"
 cusparselt = "*"
 libnvjitlink = "*"
+onnxruntime-cpp = { version = "1.31.*", build = "*cuda129*" }   # MegaLoc VPR backend (placecell::megaloc)
 libtorch = { version = "2.7.*", build = "cuda*" }   # cuda129 build: libprotobuf 6.31, like OpenCV 4.12
 tensorrt-cxx-headers = "10.3.*"   # validated TensorRT (spqr-tests channel)
 tensorrt-cxx-full = "10.3.*"
@@ -269,6 +277,8 @@ libxkbcommon = "*"
 [package.run-dependencies]
 libtorch = { version = "2.7.*", build = "cuda*" }
 cuda-nvrtc = "*"        # torch JIT loads libnvrtc at runtime
+onnxruntime-cpp = { version = "1.31.*", build = "*cuda129*" }   # MegaLoc VPR backend
+cuda-cudart = "*"       # dlopened by ONNX Runtime's CUDA provider, not a declared dependency of its package
 tensorrt-cxx-full = "10.3.*"
 tensorrt-cxx-onnx = "10.3.*"
 tensorrt-cxx-builder = "10.3.*"   # engines are built from the ONNX on the first run on each GPU

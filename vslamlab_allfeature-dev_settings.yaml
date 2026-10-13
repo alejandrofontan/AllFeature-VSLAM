@@ -8,8 +8,14 @@ features: ["orb32", "aliked128"]
 vpr: "megaloc"       # visual place recognition backend: "megaloc" (default) | "none"
 feature_vpr: "orb32" # local feature that verifies retrieved candidates (reloc PnP, loop Sim3);
                      # must be in features; defaults to the first feature.
-megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # vpr: megaloc — exported by Thirdparty/placecell/tools/export_megaloc.py
-megaloc_precision: "fp16"                            # TensorRT engine precision: "fp16" | "fp32"
+megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # vpr: megaloc — the model file to load, exported by Thirdparty/placecell/tools/export_megaloc.py:
+                                                     # this fp32 file (the reference, fastest on the CPU provider) or "megaloc_models/megaloc_322x322_fp16.onnx"
+                                                     # (fp16 weights, float32 I/O: the file for the CUDA / CoreML providers)
+megaloc_precision: "fp16"                            # TensorRT backend only: engine precision "fp16" | "fp32" (ignored on ONNX Runtime, the file decides)
+megaloc_provider: "auto"                             # ONNX Runtime execution provider: "auto" (CUDA where built in, else CoreML on macOS, else CPU) |
+                                                     # "cuda" | "coreml" | "cpu"; an unavailable provider falls back to auto with a warning
+megaloc_threads: 4                                   # ONNX Runtime CPU-provider threads (never the core count: tracking and mapping need the rest)
+megaloc_coreml_units: "ALL"                          # CoreML compute units: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
 segmentation: "none" # online semantic segmentation: "efficientvit" | "none"
 debug: false
 max_frame_wait: 0.2  # s; the mono/rgbd executables replay the sequence at its own rate (sleep for the rest of the
