@@ -1,7 +1,7 @@
 # `src/LocalMapping.cc`
 
 The map back-end. `LocalMapping::run` is the body of the local-mapping thread started by
-[`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L245 "mptLocalMapping = make_shared<thread>"):
+[`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L258 "mptLocalMapping = make_shared<thread>"):
 it drains the keyframe queue that Tracking fills and, for every keyframe, computes its global
 descriptor, culls the map points on probation, creates new map points (from sensor depth and by
 two-view triangulation), fuses duplicates with the covisible neighbours, runs the local bundle
@@ -86,9 +86,9 @@ LocalMapping::LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureTy
   given feature types and image size. The loop closer, viewer and keyframe information kernel are
   injected afterwards through `set_loop_closer` / `set_viewer` / `set_keyframe_information` (header
   inlines), because `LoopClosing` is constructed after `LocalMapping` and the viewer and kernel are optional.
-- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L244 "localMapper = make_shared<LocalMapping>"),
+- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L257 "localMapper = make_shared<LocalMapping>"),
   which then starts [`run`](#run) on its own `std::thread` and wires the three setters
-  ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L274 "localMapper->set_loop_closer") — `set_keyframe_information` only when the system has an information kernel).
+  ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L287 "localMapper->set_loop_closer") — `set_keyframe_information` only when the system has an information kernel).
 
 ### `run`
 
@@ -506,7 +506,7 @@ void LocalMapping::request_finish()
 ```
 - raises `finish_requested_` under `finish_mutex_`; [`run`](#run) exits at its next check, also
   from inside the stop idle loop.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L445 "localMapper->request_finish()").
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L458 "localMapper->request_finish()").
 
 ### `is_finish_requested`
 
@@ -532,7 +532,7 @@ bool LocalMapping::is_finished() const
 ```
 - `finished_` under `finish_mutex_`. Starts `true` (`finished_{true}`) and is cleared by
   [`run`](#run)'s first statement.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L455 "while(!localMapper->is_finished()") (spin, then join the
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L468 "while(!localMapper->is_finished()") (spin, then join the
   thread), [`LoopClosing::apply_gba_correction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L599 "!local_mapper_->is_finished()"),
   [`release`](#release).
 

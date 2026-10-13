@@ -3,7 +3,7 @@
 #include "FeatureMatcher.h"
 #include "KeyframeInformation.h"
 #include "Optimizer.h"
-#include "PlaceRecognitionMegaLoc.h"   // header is TensorRT-free (placecell pimpl); the backend itself needs ALLFEATURE_WITH_TENSORRT
+#include "PlaceRecognitionMegaLoc.h"   // header is backend-free (placecell pimpl); the backend itself needs ALLFEATURE_WITH_MEGALOC
 
 #include <placecell/viz.h>
 
@@ -67,8 +67,16 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //   feature_vpr:       local feature that geometrically verifies retrieved candidates
     //                      (reloc PnP, loop Sim3); must be listed in features:;
     //                      defaults to the first feature.
-    //   megaloc_onnx:      MegaLoc model (default PlaceRecognitionMegaLoc::kDefaultOnnx)
-    //   megaloc_precision: "fp16" (default) | "fp32"
+    //   megaloc_onnx:      the MegaLoc model file to load (default PlaceRecognitionMegaLoc::
+    //                      kDefaultOnnx, the fp32 export; 'megaloc_322x322_fp16.onnx' is the
+    //                      fp16-weights twin for the CUDA / CoreML providers; the file's
+    //                      sidecar says what it is — there is no precision key)
+    //   megaloc_provider:  "auto" (default) | "cuda" | "coreml" | "cpu" — ONNX Runtime
+    //                      execution provider; auto = CUDA where built in, else CoreML
+    //                      (macOS), else CPU; an unavailable one falls back with a warning
+    //   megaloc_threads:   4 (default) — ONNX Runtime CPU-provider threads (never the core
+    //                      count: tracking and mapping need the rest)
+    //   megaloc_coreml_units: "ALL" (default) | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
     //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:
     //                      see PlaceRecognitionMegaLocParameters
     //   PlaceCell.*:       placecell's print manager / profiler / recorder / visualizer
@@ -80,14 +88,18 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     std::string vpr_method{"megaloc"};
     std::string feature_vpr_name{};
     std::string megaloc_onnx{PlaceRecognitionMegaLoc::kDefaultOnnx};
-    std::string megaloc_precision{"fp16"};
+    placecell::MegaLocEmbedder::Settings megaloc_settings{};   // provider auto, 4 threads, CoreML ALL
     PlaceRecognitionMegaLocParameters megaloc_params{};
     try {
         const YAML::Node settingsNode = YAML::LoadFile(strSettingsFile);
         if(settingsNode["vpr"]) vpr_method = settingsNode["vpr"].as<std::string>();
         if(settingsNode["feature_vpr"]) feature_vpr_name = settingsNode["feature_vpr"].as<std::string>();
         if(settingsNode["megaloc_onnx"]) megaloc_onnx = settingsNode["megaloc_onnx"].as<std::string>();
-        if(settingsNode["megaloc_precision"]) megaloc_precision = settingsNode["megaloc_precision"].as<std::string>();
+        if(settingsNode["megaloc_precision"])
+            AF_WARN("[System] megaloc_precision is no longer a setting (the model file decides: megaloc_onnx names the fp32 export or its _fp16 twin) — ignored");
+        if(settingsNode["megaloc_provider"]) megaloc_settings.provider = settingsNode["megaloc_provider"].as<std::string>();
+        if(settingsNode["megaloc_threads"]) megaloc_settings.threads = settingsNode["megaloc_threads"].as<int>();
+        if(settingsNode["megaloc_coreml_units"]) megaloc_settings.coreml_compute_units = settingsNode["megaloc_coreml_units"].as<std::string>();
         if(settingsNode["PlaceRecognition.MegaLocMinSimilarity"])
             megaloc_params.min_similarity = settingsNode["PlaceRecognition.MegaLocMinSimilarity"].as<float>();
         if(settingsNode["PlaceRecognition.MaxCandidates"])
@@ -133,10 +145,10 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         place_recognition = make_shared<PlaceRecognitionNone>(vpr_feature);
     }
     else if(vpr_method == "megaloc"){
-#ifndef ALLFEATURE_WITH_TENSORRT
-        (void)megaloc_params;
+#ifndef ALLFEATURE_WITH_MEGALOC
+        (void)megaloc_params; (void)megaloc_settings;
         AF_ERROR("[System] vpr: megaloc is not available in this build: it needs the CMake option "
-                 "ALLFEATURE_WITH_TENSORRT=ON (docs/plans/mac_port.md). Set vpr: none or rebuild with that backend.");
+                 "ALLFEATURE_WITH_MEGALOC=ON (docs/plans/mac_port.md). Set vpr: none or rebuild with that backend.");
         exit(-1);
 #else
         if(!std::ifstream(megaloc_onnx).good()){
@@ -147,26 +159,27 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
             exit(-1);
         }
         // stdout is fully buffered when redirected to a log file: flush so the
-        // announcement is visible during a 1-2 min engine build.
-        const bool engineCached = std::ifstream(megaloc_onnx + "." + megaloc_precision + ".engine").good();
+        // announcement is visible during a slow backend setup (TensorRT's engine build
+        // takes 1-2 min on first use; ONNX Runtime sessions take seconds, CoreML's first
+        // compile up to a minute).
         AF_INFO("[System] VPR: megaloc | feature_vpr: " + feature_name(vpr_feature)
                 + (feature_vpr_name.empty() ? " (defaulted: first feature)" : "")
-                + " | " + (engineCached ? "loading cached TensorRT engine for " : "building TensorRT engine (1-2 min) for ")
-                + megaloc_onnx + " ...");
+                + " | loading " + megaloc_onnx + " on ONNX Runtime (provider " + megaloc_settings.provider + ", "
+                + std::to_string(megaloc_settings.threads) + " threads) ...");
         std::cout.flush();
 
         try {
-            // Engine build/load + CUDA warmup happen in the embedder constructor
+            // Session setup + warmup happen in the embedder constructor
             placecell_options.name = "megaloc";
-            place_cell = make_shared<placecell::MegaLocPlaceCell>(megaloc_onnx, megaloc_precision, placecell_options);
+            place_cell = make_shared<placecell::MegaLocPlaceCell>(megaloc_onnx, megaloc_settings, placecell_options);
         } catch (const std::exception& e) {
             AF_ERROR("[System] MegaLoc backend setup failed: " + std::string(e.what()));
             exit(-1);
         }
         place_recognition = make_shared<PlaceRecognitionMegaLoc>(place_cell, vpr_feature, megaloc_params);
-        AF_INFO("[System] VPR: megaloc ready (engine " << (place_cell->embedder().loaded_from_cache() ? "cached" : "built")
-                << ": " << place_cell->embedder().engine_path() << ", " << place_cell->embedder().descriptor_dim()
-                << "-d, min similarity " << megaloc_params.min_similarity
+        AF_INFO("[System] VPR: megaloc ready (onnxruntime/" << place_cell->embedder().provider() << ", "
+                << place_cell->embedder().precision() << " weights: " << place_cell->embedder().model_path() << ", "
+                << place_cell->embedder().descriptor_dim() << "-d, min similarity " << megaloc_params.min_similarity
                 << ", max candidates " << megaloc_params.max_candidates << ")");
         std::cout.flush();
 #endif
@@ -188,7 +201,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 << (LocalMapping::params.keyframe_culling_centred ? "centred" : "raw")
                 << " cosine; tau " << LocalMapping::params.keyframe_culling_max_unexplained.load() << ")");
     }
-#ifdef ALLFEATURE_WITH_TENSORRT
+#ifdef ALLFEATURE_WITH_MEGALOC
     else if(place_cell){
         keyframe_information = make_shared<KeyframeInformationMegaLoc>(place_cell);
         AF_INFO("[System] keyframe information kernel: megaloc (the retrieval store, "

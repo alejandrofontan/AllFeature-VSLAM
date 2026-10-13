@@ -58,13 +58,16 @@ else()
 endif()
 option(ALLFEATURE_WITH_SIFTGPU  "SiftGPU (CUDA): the sift128 feature and its SiftMatchGPU matcher" ${ALLFEATURE_GPU_DEFAULT})
 option(ALLFEATURE_WITH_TORCH    "libtorch + Light_Glue_CPP (CUDA kernels): the aliked128 feature and the LightGlue matcher" ${ALLFEATURE_GPU_DEFAULT})
-option(ALLFEATURE_WITH_TENSORRT "TensorRT: the superpoint256 feature + SuperPoint-LightGlue matcher, online segmentation and the MegaLoc VPR backend (placecell::megaloc)" ${ALLFEATURE_GPU_DEFAULT})
-foreach(_opt ALLFEATURE_WITH_SIFTGPU ALLFEATURE_WITH_TORCH ALLFEATURE_WITH_TENSORRT)
+option(ALLFEATURE_WITH_TENSORRT "TensorRT: the superpoint256 feature + SuperPoint-LightGlue matcher and online segmentation" ${ALLFEATURE_GPU_DEFAULT})
+# The MegaLoc VPR backend (placecell::megaloc) runs on ONNX Runtime on every platform (CUDA / CoreML / CPU
+# execution providers chosen at runtime by the `megaloc_provider` setting), so it is ON everywhere.
+option(ALLFEATURE_WITH_MEGALOC "MegaLoc VPR backend (vpr: megaloc) through Thirdparty/placecell, on ONNX Runtime" ON)
+foreach(_opt ALLFEATURE_WITH_SIFTGPU ALLFEATURE_WITH_TORCH ALLFEATURE_WITH_TENSORRT ALLFEATURE_WITH_MEGALOC)
   if(${_opt})
     add_compile_definitions(${_opt})
   endif()
 endforeach()
-message(STATUS "AllFeature backends: SiftGPU=${ALLFEATURE_WITH_SIFTGPU} torch/LightGlue=${ALLFEATURE_WITH_TORCH} TensorRT=${ALLFEATURE_WITH_TENSORRT}")
+message(STATUS "AllFeature backends: SiftGPU=${ALLFEATURE_WITH_SIFTGPU} torch/LightGlue=${ALLFEATURE_WITH_TORCH} TensorRT=${ALLFEATURE_WITH_TENSORRT} MegaLoc=${ALLFEATURE_WITH_MEGALOC} (ONNX Runtime)")
 
 # brisk / akaze (standalone feature libraries from prefix.dev/vslamlab, VSLAM-LAB/conda-recipes): optional, so a
 # platform without the packages yet (osx-arm64 until their recipes are built there, docs/plans/mac_port.md
@@ -129,7 +132,10 @@ if(ALLFEATURE_WITH_TORCH)
   list(APPEND SRCS_ALLFEATURE src/Feature_aliked128.cpp src/FeatureMatcher_lightglue.cpp)
 endif()
 if(ALLFEATURE_WITH_TENSORRT)
-  list(APPEND SRCS_ALLFEATURE src/Feature_superpoint256.cpp src/FeatureMatcher_superglue.cpp src/PlaceRecognitionMegaLoc.cc)
+  list(APPEND SRCS_ALLFEATURE src/Feature_superpoint256.cpp src/FeatureMatcher_superglue.cpp)
+endif()
+if(ALLFEATURE_WITH_MEGALOC)
+  list(APPEND SRCS_ALLFEATURE src/PlaceRecognitionMegaLoc.cc)
 endif()
 
 # ---- CUDA (help Torch/Caffe2 legacy FindCUDA) ----
@@ -192,7 +198,7 @@ endif()
 # System::SavePlaceCellDiagnostics writes as PNGs (PlaceCell.* settings keys). viz only
 # needs OpenCV core/imgproc/imgcodecs here: its cv::imshow windows are never used
 # (the pixi env ships the headless OpenCV build, where imshow throws).
-set(PLACECELL_WITH_MEGALOC ${ALLFEATURE_WITH_TENSORRT})
+set(PLACECELL_WITH_MEGALOC ${ALLFEATURE_WITH_MEGALOC})
 set(PLACECELL_WITH_VIZ ON)
 set(PLACECELL_BUILD_EXAMPLES OFF)
 set(PLACECELL_BUILD_PYTHON OFF)
@@ -260,7 +266,10 @@ if(ALLFEATURE_WITH_TORCH)
   target_link_libraries(${PROJECT_NAME} LightGlue::lib)
 endif()
 if(ALLFEATURE_WITH_TENSORRT)
-  target_link_libraries(${PROJECT_NAME} superpoint_lightglue_lib placecell::megaloc)
+  target_link_libraries(${PROJECT_NAME} superpoint_lightglue_lib)
+endif()
+if(ALLFEATURE_WITH_MEGALOC)
+  target_link_libraries(${PROJECT_NAME} placecell::megaloc)
 endif()
 if(ALLFEATURE_WITH_SIFTGPU)
   target_link_libraries(${PROJECT_NAME} SiftGPU::sift_gpu)
