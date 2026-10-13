@@ -60,16 +60,14 @@ option(ALLFEATURE_WITH_SIFTGPU  "SiftGPU (CUDA): the sift128 feature and its Sif
 option(ALLFEATURE_WITH_TORCH    "libtorch + Light_Glue_CPP (CUDA kernels): the aliked128 feature and the LightGlue matcher" ${ALLFEATURE_GPU_DEFAULT})
 option(ALLFEATURE_WITH_TENSORRT "TensorRT: the superpoint256 feature + SuperPoint-LightGlue matcher and online segmentation" ${ALLFEATURE_GPU_DEFAULT})
 # The MegaLoc VPR backend (placecell::megaloc) runs on ONNX Runtime on every platform (CUDA / CoreML / CPU
-# execution providers chosen at runtime by the `megaloc_provider` setting), so it is ON everywhere;
-# ALLFEATURE_MEGALOC_BACKEND=tensorrt keeps the old engine-based backend selectable until it is deleted.
-option(ALLFEATURE_WITH_MEGALOC "MegaLoc VPR backend (vpr: megaloc) through Thirdparty/placecell" ON)
-set(ALLFEATURE_MEGALOC_BACKEND "onnxruntime" CACHE STRING "placecell MegaLoc inference backend: onnxruntime | tensorrt")
+# execution providers chosen at runtime by the `megaloc_provider` setting), so it is ON everywhere.
+option(ALLFEATURE_WITH_MEGALOC "MegaLoc VPR backend (vpr: megaloc) through Thirdparty/placecell, on ONNX Runtime" ON)
 foreach(_opt ALLFEATURE_WITH_SIFTGPU ALLFEATURE_WITH_TORCH ALLFEATURE_WITH_TENSORRT ALLFEATURE_WITH_MEGALOC)
   if(${_opt})
     add_compile_definitions(${_opt})
   endif()
 endforeach()
-message(STATUS "AllFeature backends: SiftGPU=${ALLFEATURE_WITH_SIFTGPU} torch/LightGlue=${ALLFEATURE_WITH_TORCH} TensorRT=${ALLFEATURE_WITH_TENSORRT} MegaLoc=${ALLFEATURE_WITH_MEGALOC} (${ALLFEATURE_MEGALOC_BACKEND})")
+message(STATUS "AllFeature backends: SiftGPU=${ALLFEATURE_WITH_SIFTGPU} torch/LightGlue=${ALLFEATURE_WITH_TORCH} TensorRT=${ALLFEATURE_WITH_TENSORRT} MegaLoc=${ALLFEATURE_WITH_MEGALOC} (ONNX Runtime)")
 
 # brisk / akaze (standalone feature libraries from prefix.dev/vslamlab, VSLAM-LAB/conda-recipes): optional, so a
 # platform without the packages yet (osx-arm64 until their recipes are built there, docs/plans/mac_port.md
@@ -201,7 +199,6 @@ endif()
 # needs OpenCV core/imgproc/imgcodecs here: its cv::imshow windows are never used
 # (the pixi env ships the headless OpenCV build, where imshow throws).
 set(PLACECELL_WITH_MEGALOC ${ALLFEATURE_WITH_MEGALOC})
-set(PLACECELL_MEGALOC_BACKEND ${ALLFEATURE_MEGALOC_BACKEND} CACHE STRING "placecell MegaLoc inference backend" FORCE)
 set(PLACECELL_WITH_VIZ ON)
 set(PLACECELL_BUILD_EXAMPLES OFF)
 set(PLACECELL_BUILD_PYTHON OFF)

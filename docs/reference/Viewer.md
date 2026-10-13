@@ -80,8 +80,8 @@ Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
 - stores the non-owning `System*` (System owns the Viewer and joins its thread, so it always outlives it) and the shared drawers and tracker; starts with `mbFinished = true`, `mbStopped = true`, so `isFinished`/`is_stopped` answer "idle" until `Run` clears them.
 - reads the calibration with yaml-cpp: the camera whose `cam_name` equals the settings' `cam_mono`, its `fps` (values below 1 become 30) and `image_dimension`. `mT = 1000/fps`, `image_width`, `image_height` are stored but nothing in this file reads them afterwards ([`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L71 "float fps = cam")).
 - reads the viewpoint keys with `cv::FileStorage`: `Viewer.ViewpointX/Y/Z/F` unconditionally through the `cv::FileNode` float conversion (no missing-key guard), `Viewer.Multisampling` only if present, clamped at 0 ([`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L88 "mViewpointX = fSettings")). Both blocks are echoed with `AF_CONFIG_*`.
-- builds the window title `VSLAM-LAB | AllFeature-VSLAM ( <feature names> )`; `System::Shutdown` reads it back through `GetWindowTitle` to rebind the GL context after the thread has been joined ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L483 "BindToContext(viewer->GetWindowTitle())")).
-- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L276 "viewer = make_shared<Viewer>"), only when `activateVisualization` (`verbose:1`); the same block starts the thread on `Run` and hands the viewer to `Tracking` and `LocalMapping` (`set_viewer`), which feed the two profiling medians.
+- builds the window title `VSLAM-LAB | AllFeature-VSLAM ( <feature names> )`; `System::Shutdown` reads it back through `GetWindowTitle` to rebind the GL context after the thread has been joined ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L480 "BindToContext(viewer->GetWindowTitle())")).
+- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L273 "viewer = make_shared<Viewer>"), only when `activateVisualization` (`verbose:1`); the same block starts the thread on `Run` and hands the viewer to `Tracking` and `LocalMapping` (`set_viewer`), which feed the two profiling medians.
 - settings: `Viewer.ViewpointX`, `Viewer.ViewpointY`, `Viewer.ViewpointZ`, `Viewer.ViewpointF`, `Viewer.Multisampling` (see the table); `cam_mono` from the settings and `fps` / `image_dimension` from the calibration.
 
 ## Render loop
@@ -91,7 +91,7 @@ Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
 ```cpp
 void Viewer::Run()
 ```
-- thread body, started by [`System::System`] on Linux and, on macOS, run on the main thread by [`System::Run`](System.md#run); the rest of this entry describes the body itself. Started by [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L280 "mptViewer = make_shared<thread>"). Clears `mbFinished`/`mbStopped`, creates the main window (1.25 × 1280×720) and, when `Viewer.Multisampling > 0`, asks Pangolin for a multisampled framebuffer and logs whether the backend granted it (the shipped EGL-based X11 backend ignores the request; MSAA is enabled only when `GL_SAMPLES` reports samples). Depth test, alpha blending and point/line smoothing are enabled for the whole window.
+- thread body, started by [`System::System`] on Linux and, on macOS, run on the main thread by [`System::Run`](System.md#run); the rest of this entry describes the body itself. Started by [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L277 "mptViewer = make_shared<thread>"). Clears `mbFinished`/`mbStopped`, creates the main window (1.25 × 1280×720) and, when `Viewer.Multisampling > 0`, asks Pangolin for a multisampled framebuffer and logs whether the backend granted it (the shipped EGL-based X11 backend ignores the request; MSAA is enabled only when `GL_SAMPLES` reports samples). Depth test, alpha blending and point/line smoothing are enabled for the whole window.
 - **layout**: a left menu panel as narrow as its widest widget allows, in pixels (`min_panel_width` measures every slider, checkbox and text row with the Pangolin 0.9.1 widget layout, plus the worst-case status and frame-counter strings); the 3D view (`d_cam`, `Handler3D` on the render state built from `Viewer.Viewpoint*`) fills the rest; the annotated frame is a texture overlay in the 3D view's top-right corner (`d_img`, 40 % of the view width, texture re-created lazily when the frame size changes); a top-down trajectory minimap sits in the bottom-right corner (`d_top`, square in pixels; `MapDrawer::DrawTrajectoryTopView` does the orthographic fit).
 - **menu panel**, top to bottom ([`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L234 "menuModality")):
   - status: `Modality` (`System::GetModalityDescription`), `Status` (tracking state name), `Frames Tracked` (`tracker->num_tracked_frames_ / System::GetSequenceImageCount`), `Progress %` (`System::GetFramesProcessedCount` over the sequence count), `Reset` button → `system->reset()` on this thread, flag cleared at once;
@@ -148,7 +148,7 @@ Used by `System::Shutdown` to end the thread before joining it.
 void Viewer::RequestFinish()
 ```
 - sets `mbFinishRequested` under `mMutexFinish`. `Run` notices at the end of its current iteration; a parked (stopped) viewer is not woken by this, `Stop` merely stops re-parking once the request is set.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L465 "viewer->RequestFinish()"), which then polls [`isFinished`](#isfinished) every 5 ms and joins the thread afterwards.
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L462 "viewer->RequestFinish()"), which then polls [`isFinished`](#isfinished) every 5 ms and joins the thread afterwards.
 
 ### `CheckFinish`
 
@@ -170,7 +170,7 @@ void Viewer::SetFinish()
 bool Viewer::isFinished()
 ```
 - `mbFinished` under `mMutexFinish`. Starts `true` (constructor), cleared by `Run`'s first statement, set by [`SetFinish`](#setfinish).
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L466 "while(!viewer->isFinished())").
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L463 "while(!viewer->isFinished())").
 
 ## Settings read by this file
 

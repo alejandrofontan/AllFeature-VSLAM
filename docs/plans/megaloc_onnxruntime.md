@@ -275,12 +275,20 @@ shipped YAML's keyframe policy (covisibility-kernel runaway, 350–460 keyframes
 descriptors. The ORT-vs-TensorRT loop comparison (decision 3) moves to a gym entry with `heuristic` culling, three
 runs per backend, before the TensorRT deletion of step 9.
 
-## 9. After parity: TensorRT leaves (decision 3) — **new**, last step
+## 9. After parity: TensorRT leaves (decision 3) — **done 2026-10-13**
 
-Delete `tensorrt_megaloc.{hpp,cpp}`, the `tensorrt` CMake branch, the `megaloc` pixi feature's TensorRT packages, the
-`.engine` mentions in docs; AllFeature's `ALLFEATURE_WITH_TENSORRT` keeps guarding SuperPoint + segmentation until
-phases 4–5. The ONNX export's TensorRT-specific rewrites (attention slicing) stay: they are harmless and ORT's CUDA EP
-benefits from the same clean pattern. Issue #41 is closed as "won't do" at that point.
+The user chose to skip the SLAM-level ORT-vs-TensorRT comparison (the descriptor-level parity of steps 4–5 is the
+measurement, and the TensorRT engine was effectively fp32 on the same graph) and delete TensorRT from placecell:
+`tensorrt_megaloc.{hpp,cpp}` gone, one backend in CMake (no `PLACECELL_MEGALOC_BACKEND`), the TensorRT `megaloc`
+pixi feature gone and the ONNX Runtime one renamed to `megaloc` (env `megaloc`, build dir `build-megaloc/`, tasks
+`build-megaloc`, `megaloc-test`, `megaloc-smoke`, `download-models`, `demo-viz`), `export-megaloc` standalone,
+`*.engine` ignore rule dropped. Public API: `MegaLocEmbedder::Settings{provider, threads, coreml_compute_units}`
+(no `precision`), `provider()` / `precision()` / `model_path()` (no `backend()`, `engine_path()`,
+`loaded_from_cache()`), `MegaLocPlaceCell(onnx_path[, settings][, options])`. AllFeature: no
+`ALLFEATURE_MEGALOC_BACKEND`, `megaloc_precision` removed from the settings (a leftover key logs a warning and is
+ignored), `ALLFEATURE_WITH_TENSORRT` keeps guarding SuperPoint + segmentation until phases 4–5. The export wrapper's
+attention slicing stays (it is the pattern every runtime fuses). Issue #41 (TensorRT 11 migration) stays open until
+the whole project is TensorRT-free.
 
 ## 10. The write-up (the learning deliverable)
 

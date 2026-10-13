@@ -69,9 +69,8 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //                      defaults to the first feature.
     //   megaloc_onnx:      the MegaLoc model file to load (default PlaceRecognitionMegaLoc::
     //                      kDefaultOnnx, the fp32 export; 'megaloc_322x322_fp16.onnx' is the
-    //                      fp16-weights twin for the CUDA / CoreML providers)
-    //   megaloc_precision: "fp16" (default) | "fp32" — TensorRT backend only (engine
-    //                      precision); on ONNX Runtime the file decides and the key is ignored
+    //                      fp16-weights twin for the CUDA / CoreML providers; the file's
+    //                      sidecar says what it is — there is no precision key)
     //   megaloc_provider:  "auto" (default) | "cuda" | "coreml" | "cpu" — ONNX Runtime
     //                      execution provider; auto = CUDA where built in, else CoreML
     //                      (macOS), else CPU; an unavailable one falls back with a warning
@@ -89,14 +88,15 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     std::string vpr_method{"megaloc"};
     std::string feature_vpr_name{};
     std::string megaloc_onnx{PlaceRecognitionMegaLoc::kDefaultOnnx};
-    placecell::MegaLocEmbedder::Settings megaloc_settings{};   // precision fp16, provider auto, 4 threads, CoreML ALL
+    placecell::MegaLocEmbedder::Settings megaloc_settings{};   // provider auto, 4 threads, CoreML ALL
     PlaceRecognitionMegaLocParameters megaloc_params{};
     try {
         const YAML::Node settingsNode = YAML::LoadFile(strSettingsFile);
         if(settingsNode["vpr"]) vpr_method = settingsNode["vpr"].as<std::string>();
         if(settingsNode["feature_vpr"]) feature_vpr_name = settingsNode["feature_vpr"].as<std::string>();
         if(settingsNode["megaloc_onnx"]) megaloc_onnx = settingsNode["megaloc_onnx"].as<std::string>();
-        if(settingsNode["megaloc_precision"]) megaloc_settings.precision = settingsNode["megaloc_precision"].as<std::string>();
+        if(settingsNode["megaloc_precision"])
+            AF_WARN("[System] megaloc_precision is no longer a setting (the model file decides: megaloc_onnx names the fp32 export or its _fp16 twin) — ignored");
         if(settingsNode["megaloc_provider"]) megaloc_settings.provider = settingsNode["megaloc_provider"].as<std::string>();
         if(settingsNode["megaloc_threads"]) megaloc_settings.threads = settingsNode["megaloc_threads"].as<int>();
         if(settingsNode["megaloc_coreml_units"]) megaloc_settings.coreml_compute_units = settingsNode["megaloc_coreml_units"].as<std::string>();
@@ -164,13 +164,12 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         // compile up to a minute).
         AF_INFO("[System] VPR: megaloc | feature_vpr: " + feature_name(vpr_feature)
                 + (feature_vpr_name.empty() ? " (defaulted: first feature)" : "")
-                + " | loading " + megaloc_onnx + " on " + placecell::MegaLocEmbedder::backend()
-                + " (provider " + megaloc_settings.provider + ", " + std::to_string(megaloc_settings.threads)
-                + " threads) ...");
+                + " | loading " + megaloc_onnx + " on ONNX Runtime (provider " + megaloc_settings.provider + ", "
+                + std::to_string(megaloc_settings.threads) + " threads) ...");
         std::cout.flush();
 
         try {
-            // Session/engine setup + warmup happen in the embedder constructor
+            // Session setup + warmup happen in the embedder constructor
             placecell_options.name = "megaloc";
             place_cell = make_shared<placecell::MegaLocPlaceCell>(megaloc_onnx, megaloc_settings, placecell_options);
         } catch (const std::exception& e) {
@@ -178,11 +177,9 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
             exit(-1);
         }
         place_recognition = make_shared<PlaceRecognitionMegaLoc>(place_cell, vpr_feature, megaloc_params);
-        AF_INFO("[System] VPR: megaloc ready (" << placecell::MegaLocEmbedder::backend() << "/"
-                << place_cell->embedder().provider() << ", " << place_cell->embedder().precision() << " weights, "
-                << (place_cell->embedder().loaded_from_cache() ? "loaded" : "built") << ": "
-                << place_cell->embedder().engine_path() << ", " << place_cell->embedder().descriptor_dim()
-                << "-d, min similarity " << megaloc_params.min_similarity
+        AF_INFO("[System] VPR: megaloc ready (onnxruntime/" << place_cell->embedder().provider() << ", "
+                << place_cell->embedder().precision() << " weights: " << place_cell->embedder().model_path() << ", "
+                << place_cell->embedder().descriptor_dim() << "-d, min similarity " << megaloc_params.min_similarity
                 << ", max candidates " << megaloc_params.max_candidates << ")");
         std::cout.flush();
 #endif
