@@ -400,13 +400,26 @@ mat4f System::TrackRGBD(const cv::Mat &, const cv::Mat &, const double &)
 
 mat4f System::Track(Image &im, const double &timestamp)
 {
-    std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
-
     if(mSensor!=MONOCULAR && mSensor!=RGBD)
     {
         cerr << "ERROR: you called Track but input sensor was not set to mono or RGBD." << endl;
         exit(-1);
     }
+
+    // Pause gate: block the caller (sequence loop or stream subscriber) until resumed, then relocalize
+    // rather than trust a pose from before the pause. Paused time is not tracking time.
+    if(mbPaused.load())
+    {
+        AF_INFO("Tracking paused (Viewer)");
+        std::cout.flush();
+        while(mbPaused.load())
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        AF_INFO("Tracking resumed: relocalizing");
+        std::cout.flush();
+        tracker->request_relocalization();
+    }
+
+    std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
 
     // Check reset
     {

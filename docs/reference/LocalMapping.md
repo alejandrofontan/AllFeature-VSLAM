@@ -325,7 +325,7 @@ void LocalMapping::cull_keyframes_information()
   culling, creation and fusion), so the kernel the culler marginalises is the map's covisibility of this
   moment; `megaloc` does nothing (descriptors do not move).
 - parameters: `max_unexplained` = `KeyframeCullingMaxUnexplained` (τ, atomic — the Viewer's "Cull Max
-  Unexplained" slider writes it live, [`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L431 "keyframe_culling_max_unexplained.store")), `centred` =
+  Unexplained" slider writes it live, [`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L435 "keyframe_culling_max_unexplained.store")), `centred` =
   `KeyframeCullingCentred`, `min_keyframes`, `protect_last` = max(`KeyframeCullingMinAge`, 1) so the
   current keyframe is never culled, `max_per_call`. With `KeyframeCullingScope: local` the window is the
   current keyframe plus its covisible keyframes; with `map` the whole alive set.
@@ -477,7 +477,7 @@ void LocalMapping::request_reset()
 - raises `reset_requested_` under `reset_mutex_`, then blocks (3 ms polls of
   [`is_reset_requested`](#is_reset_requested)) until the local-mapping thread has performed the reset.
   Blocking matters: `Tracking::reset` clears the map right after this returns.
-- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1214 "local_mapper_->request_reset()").
+- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1220 "local_mapper_->request_reset()").
 
 ### `is_reset_requested`
 
@@ -506,7 +506,7 @@ void LocalMapping::request_finish()
 ```
 - raises `finish_requested_` under `finish_mutex_`; [`run`](#run) exits at its next check, also
   from inside the stop idle loop.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L458 "localMapper->request_finish()").
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L471 "localMapper->request_finish()").
 
 ### `is_finish_requested`
 
@@ -532,7 +532,7 @@ bool LocalMapping::is_finished() const
 ```
 - `finished_` under `finish_mutex_`. Starts `true` (`finished_{true}`) and is cleared by
   [`run`](#run)'s first statement.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L468 "while(!localMapper->is_finished()") (spin, then join the
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L481 "while(!localMapper->is_finished()") (spin, then join the
   thread), [`LoopClosing::apply_gba_correction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L599 "!local_mapper_->is_finished()"),
   [`release`](#release).
 

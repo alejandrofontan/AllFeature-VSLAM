@@ -94,6 +94,14 @@ public:
     // Reset the system (clear map)
     void reset();
 
+    // Pause / resume tracking (the Viewer's "Pause" toggle). While paused, Track blocks its caller before
+    // the frame is processed; the Viewer, Local Mapping and Loop Closing keep running on the existing map.
+    // Resuming sends the tracker through relocalization (Tracking::request_relocalization), since the camera
+    // may have moved anywhere meanwhile. Waiting callers return at once when paused(false) is called, e.g.
+    // from a signal handler so a paused stream run can still shut down.
+    void set_paused(const bool paused) { mbPaused.store(paused); }
+    bool is_paused() const { return mbPaused.load(); }
+
     // All threads will be requested to finish.
     // It waits until all threads have finished.
     // This function must be called before saving the trajectory.
@@ -215,6 +223,9 @@ private:
     // Reset flag
     std::mutex mMutexReset;
     bool mbReset;
+
+    // Pause flag (see set_paused)
+    std::atomic<bool> mbPaused{false};
 
     // Change mode flags
     std::mutex mMutexMode;

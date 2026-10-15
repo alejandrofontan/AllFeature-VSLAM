@@ -238,6 +238,9 @@ void Viewer::Run()
     // Manual reset (clears the map and re-initializes): the flag is consumed by
     // System::Track on the main thread before the next frame is processed.
     pangolin::Var<bool> menuReset("menu.Reset", false, false);
+    // Pause / resume: System::Track blocks its caller while the flag is set (the map, this viewer and the
+    // mapping threads stay live) and relocalizes on resume.
+    pangolin::Var<bool> menuPause("menu.Pause", false, true);
 
     // Section headers: Pangolin has no header widget; an empty string var renders its label
     // in the same plain style as the status entries above.
@@ -302,6 +305,7 @@ void Viewer::Run()
     for(const TrackingState state : {TrackingState::SYSTEM_NOT_READY, TrackingState::NO_IMAGES_YET,
                                       TrackingState::NOT_INITIALIZED, TrackingState::OK, TrackingState::LOST})
         textValues.push_back(trackingStateName(state));
+    textValues.emplace_back("PAUSED");
     const float panelPixels = min_panel_width(d_menu, textValues);
     d_menu.SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(panelPixels));
     const float panelWidth = panelPixels / w;   // fraction of the initial window, for the overlays
@@ -431,7 +435,9 @@ void Viewer::Run()
         LocalMapping::params.keyframe_culling_max_unexplained.store(static_cast<float>(menuCullMaxUnexplained));
 
         // Status panel (map-size query locks the map, so refresh it sparingly)
-        menuState = trackingStateName(tracker->state_);
+        if(menuPause.GuiChanged())
+            system->set_paused(menuPause);
+        menuState = system->is_paused() ? std::string("PAUSED") : trackingStateName(tracker->state_);
         {
             const size_t nTotal = system->GetSequenceImageCount();
             const size_t nProcessed = system->GetFramesProcessedCount();

@@ -1196,6 +1196,12 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
     return true;
 }
 
+void Tracking::request_relocalization()
+{
+    if(state_ == TrackingState::OK)
+        state_ = TrackingState::LOST;
+}
+
 void Tracking::reset()
 {
     // Each step logs before it runs and flushes (stdout is fully buffered under

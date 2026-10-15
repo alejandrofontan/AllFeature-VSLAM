@@ -21,7 +21,7 @@ Sources: `src/Tracking.cc`, `src/Tracking_aux.cc`, `include/Tracking.h`, `includ
 - **[`track_local_map`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L673)** — [`update_local_map`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L716) → [`update_local_keyframes`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L725), [`update_local_points`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L808); [`search_local_points`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L831)
 - **[`need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L866)** — no callees; the decision is the [`KeyframeInformation::information`](KeyframeInformation.md#information) query plus the tracking triggers
 - **[`relocalize`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1056)** — [`accept_relocalization_hypothesis`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1133)
-- Not in the graph (setup / recovery): [`LoadParameters`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L36), [`Tracking`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L90) → [`load_camera_parameters`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L20), [`get_feature_extractor`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L97); [`reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1199)
+- Not in the graph (setup / recovery): [`LoadParameters`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L36), [`Tracking`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L90) → [`load_camera_parameters`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L20), [`get_feature_extractor`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L97); [`request_relocalization`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1199), [`reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1205)
 
 ## Flow
 
@@ -78,7 +78,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
 - the per-frame entry point: converts the image to gray (honouring the calibration's colour order), resizes it to the nominal area when `fix_image_size_` is set, keeps the colour image (`color_image_`, drawn by the viewer), the segmentation mask and the image name for the drawers, builds `current_frame_` and calls [`track`](#track). Returns `current_frame_.Tcw` (identity-less/unset when the frame did not track).
 - feature extraction happens in the `Frame` constructor with one extractor per feature type; before the map exists the denser `init_feature_extractor_` set is used (`Tracking.InitExtractorFeaturesScale` times more keypoints), afterwards `feature_extractor_left_`.
 - profiling: `GrabProfiler` ([`Tracking_aux.h`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/Tracking_aux.h#L92 "struct GrabProfiler")) fills the resize / frame-creation / tracking / total histograms; the total is only counted for frames that ended in state `OK`, and the running median is pushed to the viewer when one exists.
-- called from: [`System::Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L421 "tracker->grab_image"), once per image.
+- called from: [`System::Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L434 "tracker->grab_image"), once per image.
 - differs from ORB-SLAM2: one entry point for mono and RGB-D (`GrabImageMonocular`/`GrabImageRGBD` are gone; depth travels inside `Image` and becomes per-keypoint inverse depth in the `Frame`); the mask and the multi-feature extractor map are new.
 - settings: `Tracking.InitExtractorFeaturesScale` (4).
 
@@ -320,6 +320,14 @@ void Tracking::log_heartbeat()
 void Tracking::log_profile()
 ```
 - `PROFILING_EXHAUSTIVE` builds only: the cumulative stage histograms (resize, frame creation, tracking, reference tracking, pose optimization, local map, grab) through `AF_PROFILE`.
+
+### `request_relocalization`
+
+```cpp
+void Tracking::request_relocalization()
+```
+- `OK` → `LOST`, nothing else: the next [`track`](#track) goes through [`relocalize`](#relocalize) against the existing map instead of trusting the pose from before a pause. Any other state is left alone (an uninitialized tracker keeps initializing). Tracking thread only.
+- called from: [`System::Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L419 "tracker->request_relocalization()") when the Viewer's pause is lifted.
 
 ### `reset`
 

@@ -11,10 +11,10 @@ functions below are grouped by the call-graph order.
 ## Call graph
 
 - **[`System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L26)** (constructor) — `Optimizer::LoadParameters`, `Tracking::LoadParameters`, `LocalMapping::LoadParameters`, `LoopClosing::LoadParameters`, `PlaceCellSettings::Load`, `FeatureMatcher::setDescriptorDistanceThresholds`, then the constructors of `Map`, `FrameDrawer`, `MapDrawer`, `Tracking`, `LocalMapping`, `LoopClosing`, `Viewer`
-- **[`Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L401)** — `Tracking::grab_image`; honours a pending [`reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L450)
-- **[`GBA`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L778)** → **[`Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L456)** → **[`SaveKeyFrameTrajectoryVSLAMLAB`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L582)**, **[`SavePointCloudVSLAMLAB`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L661)** (via the free helper [`write_ply_binary`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L634)), **[`SavePlaceCellDiagnostics`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L521)** — the end-of-run sequence the entry points call in this order
-- Queries from the Viewer: [`GetPlaceCell`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L556), [`SetSequenceInfo`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L561), [`GetModalityDescription`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L567), plus the inline `GetPlaceCellSettings`, `GetSequenceImageCount`, `GetFramesProcessedCount` in `include/System.h`
-- Not called by anything in this repo today: [`TrackStereo`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L294), [`TrackRGBD`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L348) (both `std::terminate` stubs), [`MapChanged`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L437), [`GetTrackingState`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L687), [`GetTrackedMapPoints`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L693), [`GetTrackedKeyPointsUn`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L699), [`SaveStatistics`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L705), [`setImageSize`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L773)
+- **[`Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L401)** — `Tracking::grab_image`; honours the pause gate ([`set_paused`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/System.h#L102), resume → `Tracking::request_relocalization`) and a pending [`reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L463)
+- **[`GBA`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L791)** → **[`Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L469)** → **[`SaveKeyFrameTrajectoryVSLAMLAB`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L595)**, **[`SavePointCloudVSLAMLAB`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L674)** (via the free helper [`write_ply_binary`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L647)), **[`SavePlaceCellDiagnostics`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L534)** — the end-of-run sequence the entry points call in this order
+- Queries from the Viewer: [`GetPlaceCell`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L569), [`SetSequenceInfo`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L574), [`GetModalityDescription`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L580), plus the inline `GetPlaceCellSettings`, `GetSequenceImageCount`, `GetFramesProcessedCount` in `include/System.h`
+- Not called by anything in this repo today: [`TrackStereo`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L294), [`TrackRGBD`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L348) (both `std::terminate` stubs), [`MapChanged`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L450), [`GetTrackingState`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L700), [`GetTrackedMapPoints`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L706), [`GetTrackedKeyPointsUn`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L712), [`SaveStatistics`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L718), [`setImageSize`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L786)
 
 ## Flow
 
@@ -36,12 +36,13 @@ flowchart TD
     PRM --> WIRE["Map · FrameDrawer · MapDrawer<br/>FeatureMatcher::setDescriptorDistanceThresholds<br/>Tracking · LocalMapping · LoopClosing · Viewer"]
     WIRE --> THR["threads: LocalMapping::run · LoopClosing::run (vpr ≠ none) · Viewer::Run (verbose:1)"]
     THR --> LOOP{{"per frame"}}
-    LOOP --> TRACK["<b>Track</b><br/>· pending reset? → Tracking::reset<br/>· Tracking::grab_image<br/>· publish state / tracked points"]
+    LOOP --> TRACK["<b>Track</b><br/>· paused? wait, then Tracking::request_relocalization<br/>· pending reset? → Tracking::reset<br/>· Tracking::grab_image<br/>· publish state / tracked points"]
     TRACK --> LOOP
     LOOP -- sequence done --> SAVE1["<b>SaveKeyFrameTrajectoryVSLAMLAB</b><br/>(…_beforeGBA.csv)"] --> GBA["<b>GBA</b><br/>Optimizer::global_bundle_adjustment(100)"] --> SD["<b>Shutdown</b><br/>· request_finish on workers<br/>· wait is_finished / is_gba_running<br/>· join threads · print placecell profile"]
     SD --> SAVE2["<b>SaveKeyFrameTrajectoryVSLAMLAB</b> · <b>SavePointCloudVSLAMLAB</b><br/><b>SavePlaceCellDiagnostics</b>"] --> DONE([process exit])
     VIEW([Viewer thread]) -.-> Q["<b>GetPlaceCell</b> · <b>GetModalityDescription</b><br/>GetSequenceImageCount · GetFramesProcessedCount"]
     VIEW -. Reset button .-> RST["<b>reset</b>"] -.-> TRACK
+    VIEW -. Pause toggle .-> PSE["<b>set_paused</b>"] -.-> TRACK
 
     click CTOR "#system"
     click TRACK "#track"
@@ -94,7 +95,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
 ```cpp
 mat4f System::Track(Image &im, const double &timestamp)
 ```
-- the only live tracking entry point, for both `MONOCULAR` and `RGBD` (any other sensor → `cerr` + `exit(-1)`): applies a pending [`reset`](#reset) under `mMutexReset`, calls `Tracking::grab_image` on the caller's thread, and returns the camera pose `Tcw`.
+- the only live tracking entry point, for both `MONOCULAR` and `RGBD` (any other sensor → `cerr` + `exit(-1)`): waits at the pause gate while [`is_paused`](#set_paused) (50 ms sleeps on the caller's thread; the stopwatch starts afterwards, so paused time is not tracking time) and on resume calls `Tracking::request_relocalization`; then applies a pending [`reset`](#reset) under `mMutexReset`, calls `Tracking::grab_image` on the caller's thread, and returns the camera pose `Tcw`.
 - after tracking it bumps `mnFramesProcessed` (read by the Viewer HUD through `GetFramesProcessedCount`) and, under `mMutexState`, copies the tracking state and the current frame's map points / undistorted keypoints into the `mTracked*` members for [`GetTrackingState`](#gettrackingstate) and friends. The wall-clock duration of the call is appended to the public `trackingTime` vector (grows for the whole run; nothing reads it today).
 - called from: the frame loops of [`vslamlab_allfeature_mono.cpp`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_mono.cpp#L212 "SLAM.Track(im,tframe)"), [`vslamlab_allfeature_rgbd.cpp`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_rgbd.cpp#L241 "SLAM.Track(im,tframe)") and [`vslamlab_allfeature_mono_stream.cpp`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_mono_stream.cpp#L110 "SLAM.Track(im,tframe)").
 - differs from ORB-SLAM2: replaces `TrackMonocular`/`TrackRGBD` with one call taking an `Image` (gray + optional depth + optional mask) — the RGB-D executable feeds depth through `Image`, not through a second `cv::Mat`; the localization-mode block (`ActivateLocalizationMode`) is gone.
@@ -105,7 +106,16 @@ mat4f System::Track(Image &im, const double &timestamp)
 void System::reset()
 ```
 - raises `mbReset` under `mMutexReset`; the reset itself (`Tracking::reset`, which resets the map, the workers and the VPR database) runs at the start of the next [`Track`](#track) on the tracking thread, never on the caller's.
-- called from: the Viewer's "Reset" button ([`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L484 "system->reset()")).
+- called from: the Viewer's "Reset" button ([`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L490 "system->reset()")).
+
+### `set_paused`
+
+```cpp
+void System::set_paused(const bool paused)
+bool System::is_paused() const
+```
+- inline in `System.h`: store / load of the atomic `mbPaused`. While set, [`Track`](#track) blocks its caller before the frame is processed; the map, Local Mapping, Loop Closing and the Viewer stay live. Clearing it releases the caller, which relocalizes on the next frame (`Tracking::request_relocalization`: an `OK` tracker turns `LOST`, so `Tracking::track` takes `relocalize`; an uninitialized tracker stays as it is).
+- called from: the Viewer's "Pause" toggle ([`Viewer.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L439 "system->set_paused(menuPause)")), and with `false` from the SIGINT/SIGTERM handler of the two `*_arstream` entry points, so a paused stream run still leaves its loop and saves.
 
 ### `MapChanged`
 
@@ -189,7 +199,7 @@ void System::SavePlaceCellDiagnostics(const std::string& directory)
 const placecell::PlaceCell* System::GetPlaceCell() const
 ```
 - non-owning pointer to the keyframe INFORMATION store ([`KeyframeInformation::place_cell`](KeyframeInformation.md#place_cell): the kernel insertion and culling read), null when the system has no information kernel; the Viewer builds its placecell panels on it. `System` outlives the Viewer ([`Shutdown`](#shutdown) joins its thread), so the raw pointer is safe. The inline `GetPlaceCellSettings` returns the `PlaceCell.*` settings the panels obey.
-- called from: [`Viewer::Run`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L278 "system->GetPlaceCell()").
+- called from: [`Viewer::Run`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L281 "system->GetPlaceCell()").
 
 ### `SetSequenceInfo`
 

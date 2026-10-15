@@ -118,7 +118,7 @@ void LoopClosing::run()
 - one queued keyframe per iteration, as a short-circuit chain ([`LoopClosing.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L84 "if(has_new_keyframes() && detect_loop()")): [`has_new_keyframes`](#has_new_keyframes) → [`detect_loop`](#detect_loop) pops the keyframe, votes its candidates and adds it to the VPR database → [`compute_sim3`](#compute_sim3) verifies them with RANSAC + Sim3 optimization → [`search_loop_map_points`](#search_loop_map_points) projects the loop side into the keyframe and accepts the loop. Each stage returning `false` ends the iteration for that keyframe, having already lifted the erase guards it set (`set_erase`), so a rejected keyframe is cullable again at once.
 - on acceptance: [`correct_loop`](#correct_loop) corrects the map around the loop and launches the global BA in `gba_thread_`, the closed loop is handed to the viewer ([`LoopClosing.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L88 "AddLoopClosureKeyframe")) and one `AF_INFO` line reports both keyframe ids and the duration ([`LoopClosing.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L90 "loop closed: keyframes")). The duration covers correction + essential-graph optimization only; the BA runs concurrently in its own thread and reports through its own lines.
 - iteration tail, keyframe or not: [`reset_if_requested`](#reset_if_requested) then [`is_finish_requested`](#is_finish_requested); `true` breaks the loop, so a loop closure in flight always completes before the thread exits. Otherwise the thread sleeps 5 ms ([`LoopClosing.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L100 "sleep_for(std::chrono::milliseconds(5))")) — unconditionally, unlike `LocalMapping::run`, which only yields when its queue is empty.
-- last statement: [`set_finished`](#set_finished) publishes the exit that `System::Shutdown` waits for ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L468 "loopCloser->is_gba_running()")) alongside [`is_gba_running`](#is_gba_running): the thread returning does not stop a running global BA, so `Shutdown` waits for that separately, and the destructor ([`~LoopClosing`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L64)) joins the finished BA thread.
+- last statement: [`set_finished`](#set_finished) publishes the exit that `System::Shutdown` waits for ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L481 "loopCloser->is_gba_running()")) alongside [`is_gba_running`](#is_gba_running): the thread returning does not stop a running global BA, so `Shutdown` waits for that separately, and the destructor ([`~LoopClosing`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L64)) joins the finished BA thread.
 
 ## `# Loop detection`
 
@@ -323,7 +323,7 @@ bool LoopClosing::has_new_keyframes() const
 bool LoopClosing::is_gba_running() const
 ```
 - `gba_running_` under `gba_mutex_`: `true` from the launch in [`correct_loop`](#correct_loop) until [`run_global_bundle_adjustment`](#run_global_bundle_adjustment) clears it (a superseded BA leaves it to the newer one).
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L468 "loopCloser->is_gba_running()"), in the wait before joining the threads: `request_finish` does not stop a running BA, so the BA has to finish on its own before shutdown proceeds.
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L481 "loopCloser->is_gba_running()"), in the wait before joining the threads: `request_finish` does not stop a running BA, so the BA has to finish on its own before shutdown proceeds.
 
 ## `# Reset protocol`
 
@@ -360,9 +360,9 @@ flowchart LR
 ```cpp
 void LoopClosing::request_reset()
 ```
-- caller side of the round trip: raises `reset_requested_` under `reset_mutex_`, then blocks (5 ms polls of `is_reset_requested`) until the loop-closing thread has performed the reset. Blocking matters: `Tracking::reset` wipes the VPR database and the map right after this call ([`Tracking.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1222 "place_recognition_->clear();")), so the loop-closing thread must have dropped every reference to the old map first.
+- caller side of the round trip: raises `reset_requested_` under `reset_mutex_`, then blocks (5 ms polls of `is_reset_requested`) until the loop-closing thread has performed the reset. Blocking matters: `Tracking::reset` wipes the VPR database and the map right after this call ([`Tracking.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1228 "place_recognition_->clear();")), so the loop-closing thread must have dropped every reference to the old map first.
 - early-returns when the VPR backend is inactive (`vpr: none`): the thread was never started, so nobody would ever clear the request and the caller would spin forever. There is nothing to reset in that case either.
-- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1218 "loop_closing_->request_reset();"), after LocalMapping's `request_reset` has returned.
+- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1224 "loop_closing_->request_reset();"), after LocalMapping's `request_reset` has returned.
 
 ### `is_reset_requested`
 
@@ -417,7 +417,7 @@ flowchart LR
 void LoopClosing::request_finish()
 ```
 - raises `finish_requested_` under `finish_mutex_`. It only asks: [`run`](#run) notices at the end of its current iteration, so a loop closure in flight completes first. A running global BA is not stopped by this, which is why `Shutdown` also waits on [`is_gba_running`](#is_gba_running).
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L459 "loopCloser->request_finish();"), right after LocalMapping's `request_finish`.
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L472 "loopCloser->request_finish();"), right after LocalMapping's `request_finish`.
 
 ### `is_finish_requested`
 
@@ -438,8 +438,8 @@ void LoopClosing::set_finished()
 ```cpp
 bool LoopClosing::is_finished() const
 ```
-- what `Shutdown` spins on ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L468 "loopCloser->is_finished()")), together with LocalMapping's `is_finished` and [`is_gba_running`](#is_gba_running). Starts `true` (`finished_{true}`): with `vpr: none` the thread is never started and the wait passes immediately.
-- after the wait, `Shutdown` joins the three worker threads ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L475 "for(const auto& thread : {mptLocalMapping, mptLoopClosing, mptViewer})")), so no `std::thread` is destroyed joinable.
+- what `Shutdown` spins on ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L481 "loopCloser->is_finished()")), together with LocalMapping's `is_finished` and [`is_gba_running`](#is_gba_running). Starts `true` (`finished_{true}`): with `vpr: none` the thread is never started and the wait passes immediately.
+- after the wait, `Shutdown` joins the three worker threads ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L488 "for(const auto& thread : {mptLocalMapping, mptLoopClosing, mptViewer})")), so no `std::thread` is destroyed joinable.
 
 ## Settings read by this file
 

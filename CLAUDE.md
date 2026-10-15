@@ -55,7 +55,7 @@ pixi run execute-mono-stream    # ./bin/vslamlab_allfeature_mono_arstream (ARStr
 pixi run execute-rgbd-stream    # ./bin/vslamlab_allfeature_rgbd_arstream (... --mode rgbd, LiDAR depth)
 ```
 
-The `*_arstream` entry points are built only when the `libarstream` conda package (prefix.dev/vslamlab/vslamlab, header-only ZeroMQ subscriber from github.com/VSLAM-LAB/arstream) is in the environment; they take `stream_url:` instead of `sequence_path:`/`rgb_csv:` and stop at the relay's end-of-stream message or Ctrl-C.
+The `*_arstream` entry points are built only when the `libarstream` conda package (prefix.dev/vslamlab/vslamlab, header-only ZeroMQ subscriber from github.com/VSLAM-LAB/arstream) is in the environment; they take `stream_url:` instead of `sequence_path:`/`rgb_csv:` and stop at the relay's end-of-stream message or Ctrl-C. The Viewer's `Pause` toggle (`System::set_paused`) blocks `System::Track` before the frame; the tracker relocalizes on resume (`Tracking::request_relocalization`).
 
 The executables take `key:value` positional arguments, parsed by prefix in `src/vslamlab_allfeature_mono.cpp` / `_rgbd.cpp`:
 

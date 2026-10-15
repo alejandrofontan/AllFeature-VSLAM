@@ -32,7 +32,7 @@ commit that was read. Tags: `→ #<issue>`, `→ reference`, `→ paper:<file>.t
 | `Tracking::wait_for_idle_local_mapper` | [Tracking.cc#L1050](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1050 "Tracking::wait_for_idle_local_mapper(") | unread |  |
 | `Tracking::relocalize` | [Tracking.cc#L1056](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1056 "Tracking::relocalize(") | unread |  |
 | `Tracking::accept_relocalization_hypothesis` | [Tracking.cc#L1133](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1133 "Tracking::accept_relocalization_hypothesis(") | unread |  |
-| `Tracking::reset` | [Tracking.cc#L1199](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1199 "Tracking::reset(") | unread |  |
+| `Tracking::reset` | [Tracking.cc#L1205](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1205 "Tracking::reset(") | unread |  |
 | `Tracking::load_camera_parameters` | [Tracking_aux.cc#L20](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L20 "Tracking::load_camera_parameters(") | unread |  |
 | `Tracking::get_feature_extractor` | [Tracking_aux.cc#L97](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L97 "Tracking::get_feature_extractor(") | unread |  |
 | `Tracking::run_tracking_stage` | [Tracking_aux.cc#L106](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L106 "Tracking::run_tracking_stage(") | unread |  |
