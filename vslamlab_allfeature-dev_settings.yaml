@@ -4,7 +4,7 @@
 # Camera names
 #--------------------------------------------------------------------------------------------
 cam_mono: rgb_0
-features: ["orb32", "aliked128"]
+features: ["orb32", "akaze61"]
 vpr: "megaloc"       # visual place recognition backend: "megaloc" (default) | "none"
 feature_vpr: "orb32" # local feature that verifies retrieved candidates (reloc PnP, loop Sim3);
                      # must be in features; defaults to the first feature.

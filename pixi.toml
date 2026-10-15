@@ -34,11 +34,18 @@ download-lightglue-models = { cmd = "hf download vslamlab/allfeature-vslamlab --
 
 execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
 execute-rgbd = { cmd = "./bin/vslamlab_allfeature_rgbd" }
-stream = { cmd = "./bin/vslamlab_allfeature_mono_stream" }
+stream = { cmd = "./bin/vslamlab_allfeature_mono_stream" }   # RTMP video (e.g. Larix on the phone), see issue #48
+# Online on an ARStream relay (VSLAM-LAB: `pixi run stream-iphone --run allfeature-dev [--mode rgbd]`), see
+# src/vslamlab_allfeature_{mono,rgbd}_arstream.cpp
+execute-mono-stream = { cmd = "./bin/vslamlab_allfeature_mono_arstream" }
+execute-rgbd-stream = { cmd = "./bin/vslamlab_allfeature_rgbd_arstream" }
 
 [dependencies]
 python = "3.11.*"
 huggingface_hub = "*"   # `hf` CLI for the download tasks
+# ARStream C++ subscriber (header-only, github.com/VSLAM-LAB/arstream) for the *_arstream entry points; 0.2.2 carries
+# the LiDAR depth of the rgbd one without pinning OpenCV (this repo pins 4.12)
+libarstream = { version = ">=0.2.2", channel = "https://prefix.dev/vslamlab/vslamlab" }
 
 # SLAM runtime libraries (every platform)
 opencv = "4.12.*"
@@ -146,6 +153,7 @@ setup = { depends-on = ["build"] }
 # `pixi run -e cpu ./bin/vslamlab_allfeature_mono ...`. Model downloads are not needed for it.
 [feature.cpu.dependencies]
 python = "3.11.*"
+libarstream = { version = ">=0.2.2", channel = "https://prefix.dev/vslamlab/vslamlab" }   # the *_arstream entry points
 cxx-compiler = "*"
 compilers = "*"
 cmake = "*"

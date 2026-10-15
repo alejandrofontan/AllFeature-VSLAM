@@ -40,7 +40,7 @@ One CMake project (`cmake -G Ninja` + `cmake --build --parallel 4`, `-DCMAKE_INS
 This project only builds correctly inside the `allfeature-dev` pixi environment (from the parent `VSLAM-LAB` repo) or this repo's own `build` environment (`pixi run build` here; `pixi run setup` also downloads the models); the GPU-free configuration also builds in the `cpu` environment (`pixi run -e cpu ./build.sh -c`), on linux-64 and osx-arm64. Both provide CUDA 12.9/TensorRT 10.3, libtorch 2.7, OpenCV 4.12, Eigen 3.4, Pangolin (`pangolin-opengl`), yaml-cpp and the brisk/akaze/siftgpu feature backends (prefix.dev/vslamlab/vslamlab, built from `VSLAM-LAB/conda-recipes`) — see `pixi.toml`.
 
 - **Standard:** C++17, `-Wall -Wextra -Wpedantic -O3 -march=native` with `ALLFEATURE_NATIVE=ON` (off: `-march=x86-64-v3` on x86-64, the compiler default on arm64); vendored code is compiled with `-w`
-- **Output:** `lib/libAllFeature-VSLAM.so`, `bin/vslamlab_allfeature_mono`, `bin/vslamlab_allfeature_rgbd`, `bin/vslamlab_allfeature_mono_stream`, plus test/benchmark binaries (`bin/test_bfmatcher_parity`, `bin/test_segmentation`, …)
+- **Output:** `lib/libAllFeature-VSLAM.so`, `bin/vslamlab_allfeature_mono`, `bin/vslamlab_allfeature_rgbd`, `bin/vslamlab_allfeature_mono_stream`, `bin/vslamlab_allfeature_{mono,rgbd}_arstream` (with `libarstream`), plus test/benchmark binaries (`bin/test_bfmatcher_parity`, `bin/test_segmentation`, …)
 - **Build dir:** `build/` (CMake 3.16+, Ninja) — `build/`, `bin/`, `lib/` and the `*_models/` folders are gitignored
 
 There is no automated test suite or linter. Parity harnesses exist for the brute-force matcher and the segmentation engine (`src/test_bfmatcher_parity.cpp`, `bin/test_segmentation`). Building fills swap; the parent framework's swap watchdog then kills runs (VSLAM-LAB#119) — `pixi run kill-all` there resets it.
@@ -48,10 +48,14 @@ There is no automated test suite or linter. Parity harnesses exist for the brute
 ## Running
 
 ```bash
-pixi run execute-mono    # ./bin/vslamlab_allfeature_mono (no args: prints usage)
-pixi run execute-rgbd    # ./bin/vslamlab_allfeature_rgbd
-pixi run stream          # ./bin/vslamlab_allfeature_mono_stream
+pixi run execute-mono           # ./bin/vslamlab_allfeature_mono (no args: prints usage)
+pixi run execute-rgbd           # ./bin/vslamlab_allfeature_rgbd
+pixi run stream                 # ./bin/vslamlab_allfeature_mono_stream (RTMP video input, e.g. Larix)
+pixi run execute-mono-stream    # ./bin/vslamlab_allfeature_mono_arstream (ARStream relay, VSLAM-LAB `stream-iphone --run allfeature-dev`)
+pixi run execute-rgbd-stream    # ./bin/vslamlab_allfeature_rgbd_arstream (... --mode rgbd, LiDAR depth)
 ```
+
+The `*_arstream` entry points are built only when the `libarstream` conda package (prefix.dev/vslamlab/vslamlab, header-only ZeroMQ subscriber from github.com/VSLAM-LAB/arstream) is in the environment; they take `stream_url:` instead of `sequence_path:`/`rgb_csv:` and stop at the relay's end-of-stream message or Ctrl-C. The Viewer's `Pause` toggle (`System::set_paused`) blocks `System::Track` before the frame; the tracker relocalizes on resume (`Tracking::request_relocalization`).
 
 The executables take `key:value` positional arguments, parsed by prefix in `src/vslamlab_allfeature_mono.cpp` / `_rgbd.cpp`:
 
@@ -104,7 +108,7 @@ Cross-cutting components: `Feature`/`FeatureExtractor`/`FeatureMatcher` (multi-f
 | `src/Optimizer.cc` | g2o-based BA, pose optimization, Sim3, essential graph; `OptimizerParameters` |
 | `include/PlaceRecognition.h`, `src/PlaceRecognitionMegaLoc.cpp` | VPR backend interface and the MegaLoc backend (placecell) |
 | `include/PlaceCellSettings.h`, `include/SegmentationSettings.h` | settings blocks for placecell diagnostics and online segmentation |
-| `src/vslamlab_allfeature_mono.cpp`, `_rgbd.cpp`, `_mono_stream.cpp` | CLI entry points |
+| `src/vslamlab_allfeature_mono.cpp`, `_rgbd.cpp`, `_mono_stream.cpp`, `_mono_arstream.cpp`, `_rgbd_arstream.cpp` | CLI entry points (offline, RTMP video, ARStream relay) |
 | `include/afvslam_log.hpp` | `AF_INFO`/`AF_WARN`/`AF_ERROR` logging (`AF_WARN` goes to stderr and is unbuffered; `AF_INFO` to stdout, fully buffered under the runner's redirect — flush after one-off lines) |
 | `CMakeLists.txt`, `build.sh`, `pixi.toml` | build configuration |
 | `Baselines/baseline_files/baseline_allfeature.py` (parent repo) | VSLAM-LAB integration |

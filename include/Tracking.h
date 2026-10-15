@@ -176,6 +176,10 @@ public:
 
     void reset();
 
+    // Drop the current pose and relocalize on the next frame (System::Track after a pause): an OK tracker
+    // becomes LOST; an uninitialized or already lost one is left as it is. Tracking thread only.
+    void request_relocalization();
+
     size_t num_tracked_frames_{2};
 
     std::vector<FeatureType> feature_types_{};
