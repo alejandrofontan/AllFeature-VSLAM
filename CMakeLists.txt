@@ -300,6 +300,19 @@ target_link_libraries(vslamlab_allfeature_mono_stream mimalloc ${PROJECT_NAME} $
 add_executable(vslamlab_allfeature_rgbd src/vslamlab_allfeature_rgbd.cpp)
 target_link_libraries(vslamlab_allfeature_rgbd mimalloc ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB})
 
+# Online entry points on an ARStream relay (github.com/VSLAM-LAB/arstream, conda package libarstream: header-only
+# ZeroMQ subscriber; VSLAM-LAB's `pixi run stream-iphone --run allfeature-dev [--mode rgbd]`). Built only when the
+# subscriber is available, so the package build is unaffected until libarstream joins its dependencies.
+find_package(arstream QUIET)
+if(arstream_FOUND)
+  message(STATUS "arstream found: building vslamlab_allfeature_mono_arstream and vslamlab_allfeature_rgbd_arstream")
+  add_executable(vslamlab_allfeature_mono_arstream src/vslamlab_allfeature_mono_arstream.cpp)
+  target_link_libraries(vslamlab_allfeature_mono_arstream mimalloc ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB} arstream::arstream)
+  add_executable(vslamlab_allfeature_rgbd_arstream src/vslamlab_allfeature_rgbd_arstream.cpp)
+  target_link_libraries(vslamlab_allfeature_rgbd_arstream mimalloc ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB} arstream::arstream)
+  install(TARGETS vslamlab_allfeature_mono_arstream vslamlab_allfeature_rgbd_arstream RUNTIME DESTINATION bin)
+endif()
+
 # Parity/benchmark harness for the brute-force matcher (issue #13 P2) — not installed.
 add_executable(test_bfmatcher_parity src/test_bfmatcher_parity.cpp)
 target_link_libraries(test_bfmatcher_parity mimalloc ${PROJECT_NAME})
