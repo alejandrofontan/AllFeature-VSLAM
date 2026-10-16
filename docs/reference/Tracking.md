@@ -80,7 +80,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
 - profiling: `GrabProfiler` ([`Tracking_aux.h`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/Tracking_aux.h#L92 "struct GrabProfiler")) fills the resize / frame-creation / tracking / total histograms; the total is only counted for frames that ended in state `OK`, and the running median is pushed to the viewer when one exists.
 - called from: [`System::Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L450 "tracker->grab_image"), once per image.
 - differs from ORB-SLAM2: one entry point for mono and RGB-D (`GrabImageMonocular`/`GrabImageRGBD` are gone; depth travels inside `Image` and becomes per-keypoint inverse depth in the `Frame`); the mask and the multi-feature extractor map are new.
-- settings: `Tracking.InitExtractorFeaturesScale` (4).
+- settings: `Tracking.InitExtractorFeaturesScale` (4), `Tracking.NominalImageArea` (307200 px: the resize target of `fix_image_size`, aspect ratio kept, then cropped to a multiple of 32), `Tracking.ImageWidth` / `Tracking.ImageHeight` (0: both set resize to exactly that size, intrinsics scaled per axis).
 
 ### `track`
 

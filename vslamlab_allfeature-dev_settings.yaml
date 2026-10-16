@@ -4,7 +4,7 @@
 # Camera names
 #--------------------------------------------------------------------------------------------
 cam_mono: rgb_0
-features: ["orb32", "sift128"]
+features: ["orb32", "superpoint256"]
 vpr: "megaloc"       # visual place recognition backend: "megaloc" (default) | "none"
 feature_vpr: "orb32" # local feature that verifies retrieved candidates (reloc PnP, loop Sim3);
                      # must be in features; defaults to the first feature.
@@ -108,6 +108,10 @@ Tracking.InitGbaIterations: 20          # global-BA iterations on the initial ma
 Tracking.InitMinTrackedPoints: 100      # min tracked points to accept the initial map
 Tracking.InitMinDepthSamples: 10        # min sensor-depth samples to prefer metric scale
 Tracking.InitExtractorFeaturesScale: 4  # init extractor keeps this x more keypoints
+Tracking.NominalImageArea: 307200       # px (640x480): frames are resized to this area (aspect ratio kept) and cropped to a multiple of 32,
+                                        # e.g. 739x458 -> 672x416; the size the log reports is the one a static export (features_static_shapes) needs
+Tracking.ImageWidth: 0                  # both > 0: resize every frame to exactly this size instead (the aspect ratio may change; the intrinsics
+Tracking.ImageHeight: 0                 # are scaled per axis). Use multiples of 32 (640x480 is), or the crop trims the remainder
 
 # Frame-to-frame tracking
 Tracking.TrackRefMinMatches: 15                 # raw matches to the reference keyframe below this -> lost

@@ -86,6 +86,10 @@ struct TrackingParameters
 
     // grab_image()
     int init_extractor_features_scale{4}; // the init extractor keeps this x more keypoints
+    float nominal_image_area{307200.0f};  // px (640x480): frames are resized to this area (aspect kept) and cropped
+                                          // to a multiple of 32; every per-frame cost scales with it
+    int image_width{0};                   // both > 0: resize to exactly this size instead (intrinsics scaled per
+    int image_height{0};                  // axis); multiples of 32, or the crop trims the remainder
 
     // track_reference_keyframe()
     int track_ref_min_matches{15}; // raw matches to the reference keyframe below this -> lost
@@ -365,7 +369,6 @@ protected:
 
     // load_camera_parameters()
     static constexpr float DEFAULT_FPS{30.0f};
-    static constexpr float NOMINAL_IMAGE_AREA{307200.0f}; // ~640x480, fix_image_size_ target
 };
 
 } // namespace AF_VSLAM

@@ -44,11 +44,22 @@ void Tracking::load_camera_parameters(const std::string& calibration_yaml, const
     image_height_ = cam["image_dimension"][1].as<int>();
 
     if(fix_image_size_){
-        const float ratio = float(image_width_) / float(image_height_);
-        const int new_height = static_cast<int>(std::sqrt(NOMINAL_IMAGE_AREA / ratio));
-        const int new_width = static_cast<int>(float(new_height) * ratio);
+        // Tracking.ImageWidth/Height set: exactly that size (per-axis scaling of K is valid for the pinhole model:
+        // the distortion acts in normalised coordinates). Else: Tracking.NominalImageArea with the aspect ratio kept.
+        int new_width = params.image_width, new_height = params.image_height;
+        if(new_width <= 0 || new_height <= 0){
+            const float ratio = float(image_width_) / float(image_height_);
+            new_height = static_cast<int>(std::sqrt(params.nominal_image_area / ratio));
+            new_width = static_cast<int>(float(new_height) * ratio);
+        }
         const float scale_height = float(new_height) / float(image_height_);
         const float scale_width = float(new_width) / float(image_width_);
+        if(new_width % 32 != 0 || new_height % 32 != 0)
+            AF_WARN("[Tracking] frames resized to " << new_width << "x" << new_height << " are cropped to "
+                    << (new_width / 32) * 32 << "x" << (new_height / 32) * 32 << " (multiples of 32)");
+        AF_INFO("[Tracking] frames " << image_width_ << "x" << image_height_ << " -> " << new_width << "x" << new_height
+                << (params.image_width > 0 && params.image_height > 0 ? " (Tracking.ImageWidth/Height)"
+                                                                       : " (Tracking.NominalImageArea, aspect ratio kept)"));
 
         image_width_ = new_width;
         image_height_ = new_height;

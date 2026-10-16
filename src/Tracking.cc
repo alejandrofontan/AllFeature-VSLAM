@@ -55,6 +55,9 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.InitMinTrackedPoints", params.init_min_tracked_points);
     read_if_present("Tracking.InitMinDepthSamples", params.init_min_depth_samples);
     read_if_present("Tracking.InitExtractorFeaturesScale", params.init_extractor_features_scale);
+    read_if_present("Tracking.NominalImageArea", params.nominal_image_area);
+    read_if_present("Tracking.ImageWidth", params.image_width);
+    read_if_present("Tracking.ImageHeight", params.image_height);
     read_if_present("Tracking.TrackRefMinMatches", params.track_ref_min_matches);
     read_if_present("Tracking.TrackRefMinInliers", params.track_ref_min_inliers);
     read_if_present("Tracking.TrackLocalMapMinInliers", params.track_local_map_min_inliers);

@@ -127,7 +127,10 @@ and `shared_lightglue(variant, n_max)` pick the smallest `lightglue_<f>_L<L>.onn
 beyond, one warning); a missing static file is a hard error naming the export command. That error fired on the first
 Linux smoke run: the tracker resizes every frame to a nominal area (`NOMINAL_IMAGE_AREA`, `Tracking_aux.cc`) and crops it to a multiple of 32 (`Image::fix_image_size`), so
 `table_3` runs at **672×416**, not the 739×458 of the parity frames — the static detector files the host needs are
-`--static 672x416`; the 739×458 ones serve `test_feature_parity` and `time_onnx.py` only. With those files the two
+`--static 672x416`; the 739×458 ones serve `test_feature_parity` and `time_onnx.py` only. The frame size is a
+setting since this evening: `Tracking.NominalImageArea` (the area rule, 307200 px) or `Tracking.ImageWidth` /
+`Tracking.ImageHeight` for an exact size (640×480: median 37 ms on Linux, 561 points; a 480×360-equivalent area:
+25 ms, 437 points; the default 672×416: 34 ms, 647 points — same 70 keyframes each). With those files the two
 150-frame smoke runs (`features_static_shapes: true`, CUDA) go through: superpoint256 on `superpoint_v1_672x416.onnx`
 + `lightglue_superpoint_L1024.onnx` (439 points, median tracking 0.141 s), aliked128 on `aliked_n16_672x416.onnx` +
 `lightglue_aliked_L1024.onnx` (271 points, 0.131 s); no pair outgrew L=1024, so the dynamic fallback never fired.
