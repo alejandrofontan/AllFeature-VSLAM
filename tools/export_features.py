@@ -367,21 +367,32 @@ def get_patches(x: torch.Tensor, centers_wh: torch.Tensor, ps: int) -> torch.Ten
     return sampled.permute(1, 0, 2, 3)                             # [N, c, ps, ps]
 
 
-def dkd_threshold(dkd: nn.Module, scores_map: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Upstream DKD.forward in threshold mode with sub-pixel refinement, for one image, without the two
-    data-dependent branches: the "nothing above threshold -> use the mean" fallback (a Python `if` on a tensor sum)
-    and the n_limit cap (an `if` on the keypoint count; 20000 is never reached after NMS at SLAM resolutions, and the
-    C++ side has its own budget). Returns keypoints in [-1,1] (x,y) [N,2] and their bilinear scores [N]."""
+def dkd_threshold(dkd: nn.Module, scores_map: torch.Tensor, top_k: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
+    """Upstream DKD.forward with sub-pixel refinement, for one image. top_k == 0: threshold mode (every NMS maximum
+    above scores_th, N data-dependent) without the two data-dependent branches - the "nothing above threshold -> use
+    the mean" fallback (a Python `if` on a tensor sum) and the n_limit cap (an `if` on the keypoint count; 20000 is
+    never reached after NMS at SLAM resolutions, and the C++ side has its own budget). top_k > 0: upstream's top-k
+    mode - the K best NMS maxima, K static, so every shape downstream is bounded (Core ML); upstream's selection
+    rule (NMS score at the pixel > scores_th) is applied inside as a sentinel: entries that fail it get score -1
+    (the refined scores are sigmoid outputs, never negative) and the host drops them. The same set as threshold
+    mode whenever fewer than K pass (the suppressed pixels score 0).
+    Returns keypoints in [-1,1] (x,y) [N,2] and their bilinear scores [N]."""
     from lightglue.aliked import simple_nms
 
     _, _, h, w = scores_map.shape
     r = dkd.radius
     nms = simple_nms(scores_map, r)
     nms = torch.where(border_mask(nms, r), nms, torch.zeros_like(nms))
-    # (row, col) of every maximum above the threshold, row-major like upstream's flat nonzero. 2-D so that no
-    # `index % w` / `index // w` on the symbolic width is needed (the ONNX translation of remainder-by-a-symbol fails).
-    rc = (nms[0, 0] > dkd.scores_th).nonzero()                     # [N, 2]
-    rows, cols = rc[:, 0], rc[:, 1]
+    valid = None
+    if top_k > 0:
+        top = torch.topk(nms.reshape(-1), top_k)                     # [K], score order (static w: plain integer ops)
+        flat, valid = top.indices, top.values > dkd.scores_th
+        rows, cols = torch.div(flat, w, rounding_mode="trunc"), flat % w
+    else:
+        # (row, col) of every maximum above the threshold, row-major like upstream's flat nonzero. 2-D so that no
+        # `index % w` / `index // w` on the symbolic width is needed (remainder-by-a-symbol does not translate).
+        rc = (nms[0, 0] > dkd.scores_th).nonzero()                 # [N, 2]
+        rows, cols = rc[:, 0], rc[:, 1]
     patch = dkd.unfold(scores_map)[0].reshape(-1, h, w)            # [k*k, H, W]
     patch_scores = patch[:, rows, cols].t()                        # [N, k*k]
     kp_nms = torch.stack([cols, rows], 1)                          # (x, y)
@@ -391,6 +402,8 @@ def dkd_threshold(dkd: nn.Module, scores_map: torch.Tensor) -> tuple[torch.Tenso
     xy_residual = x_exp @ hw_grid / x_exp.sum(dim=1)[:, None]      # soft-argmax within the k x k patch
     kp = div_xy(kp_nms + xy_residual, w - 1, h - 1) * 2 - 1       # pixels -> [-1, 1], upstream's operation order
     kp_scores = F.grid_sample(scores_map, kp.view(1, 1, -1, 2), mode="bilinear", align_corners=True)[0, 0, 0, :]
+    if valid is not None:
+        kp_scores = torch.where(valid, kp_scores, torch.full_like(kp_scores, -1.0))
     return kp, kp_scores
 
 
@@ -421,11 +434,13 @@ class AlikedExport(nn.Module):
     """ALIKED end to end for one RGB image in [0,1] of any size: replicate-pad to a multiple of 32 (upstream's
     InputPadder, split between both sides, computed from the input shape so it exports as shape arithmetic), the
     dense trunk with its two deformable-convolution blocks, crop the maps back, DKD detection, SDDH description.
-    Outputs: keypoints [N,2] in pixels of the input frame, descriptors [N,128], scores [N]; N is data-dependent."""
+    Outputs: keypoints [N,2] in pixels of the input frame, descriptors [N,128], scores [N]; N is data-dependent in
+    threshold mode (top_k 0) and exactly K in top-k mode (the static exports for Core ML; the host thresholds)."""
 
-    def __init__(self, m: nn.Module):
+    def __init__(self, m: nn.Module, top_k: int = 0):
         super().__init__()
         self.m = m
+        self.top_k = top_k
 
     def forward(self, image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         m = self.m
@@ -451,7 +466,7 @@ class AlikedExport(nn.Module):
         score_map = crop(torch.sigmoid(m.score_head(x1234)), pt, H, pl, W)
         feature_map = crop(F.normalize(x1234, p=2, dim=1), pt, H, pl, W)
 
-        kp, kp_scores = dkd_threshold(m.dkd, score_map)
+        kp, kp_scores = dkd_threshold(m.dkd, score_map, self.top_k)
         desc = sddh(m.desc_head, feature_map[0], kp)
         return scale_xy(kp + 1, W - 1, H - 1) / 2.0, desc, kp_scores
 
@@ -477,8 +492,9 @@ def compare_detections(label: str, a: dict, b: dict) -> None:
     rows in order. Different counts (fp16, later CoreML): nearest-neighbour matching of b's keypoints to a's - the
     fraction within 0.5 px and the descriptor cosine over those pairs (the T2 criterion of the plan)."""
     ka, kb = a["keypoints"], b["keypoints"]
-    if ka.shape != kb.shape:
-        d = torch.cdist(kb, ka)                                    # [Nb, Na]
+    if ka.shape != kb.shape or not torch.equal(ka, kb) and (ka - kb).abs().max() > 1e-3:
+        # exact pairwise distances: cdist's matmul formula loses ~0.25 px at coordinates in the hundreds
+        d = torch.cdist(kb, ka, compute_mode="donot_use_mm_for_euclid_dist")   # [Nb, Na]
         dmin, idx = d.min(dim=1)
         hit = dmin < 0.5
         cos = F.cosine_similarity(b["descriptors"][hit], a["descriptors"][idx[hit]], dim=1).min().item() if hit.any() else 0.0
@@ -799,12 +815,13 @@ ALL_EXPORTS = ("superpoint", "aliked", "lightglue_superpoint", "lightglue_aliked
 
 
 def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None = None,
-               static_size: tuple[int, int] | None = None) -> dict[str, Path]:
+               static_size: tuple[int, int] | None = None, top_k: int = 2048) -> dict[str, Path]:
     """The fp32 exports + fp16 twins + sidecars into feature_models/ (`only`: a subset of ALL_EXPORTS, e.g. the
     `export-superpoint` pixi task - SuperPoint is the one model every machine exports itself, plan Q6).
     `static_size` (W, H): export the two detectors with that fixed input size as '<stem>_<W>x<H>.onnx' instead of
     the dynamic-axis files - Core ML compiles only bounded shapes (step 7: with dynamic H, W every partition fell
-    back to the CPU). Returns {key: fp32 path}."""
+    back to the CPU); ALIKED then also runs its detector in top-k mode (`top_k` keypoints, every shape static).
+    Returns {key: fp32 path}."""
     from torch.export import Dim
 
     wanted = set(ALL_EXPORTS) if not only else only
@@ -828,12 +845,15 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
                       superpoint_contract(models["superpoint"]) + size_lines)
         paths["superpoint"] = path
 
-    # ALIKED: dynamic H, W unless static_size; opset 19 for DeformConv, reached through the custom translation table
+    # ALIKED: dynamic H, W unless static_size (then top-k mode too); opset 19 for DeformConv (custom translation)
+    aliked_k = top_k if static_size else 0
+    aliked_lines = size_lines + ([f"topk: {aliked_k}   # the graph returns exactly topk entries by NMS score; those failing "
+                                  "the detection_threshold carry score -1 - the host drops them"] if aliked_k else [])
     if "aliked" in wanted:
         path = MODELS_DIR / f"aliked_n16{suffix}.onnx"
-        export_onnx(AlikedExport(models["aliked"]), path, (torch.rand(1, 3, H, W),), ["image"],
+        export_onnx(AlikedExport(models["aliked"], aliked_k), path, (torch.rand(1, 3, H, W),), ["image"],
                     ["keypoints", "descriptors", "scores"], dyn, opset=19, translation=DEFORM_CONV_TRANSLATION)
-        write_sidecar(path, "aliked", "aliked-n16", commit, 19, "fp32", aliked_contract(models["aliked"]) + size_lines)
+        write_sidecar(path, "aliked", "aliked-n16", commit, 19, "fp32", aliked_contract(models["aliked"]) + aliked_lines)
         paths["aliked"] = path
 
     # LightGlue x3: dynamic N0, N1 (>= 2: the graph has no empty/single-keypoint branch and 0/1 sizes specialise)
@@ -865,7 +885,7 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
         convert_fp16(path, fp16)
         opset = 19 if key == "aliked" else 18
         contract = {"superpoint": lambda: superpoint_contract(models["superpoint"]) + size_lines,
-                    "aliked": lambda: aliked_contract(models["aliked"]) + size_lines}.get(
+                    "aliked": lambda: aliked_contract(models["aliked"]) + aliked_lines}.get(
             key, lambda: lightglue_contract(models[key], key.split("_", 1)[1]))()
         weights_key = {"superpoint": "superpoint", "aliked": "aliked-n16"}.get(key, key)
         write_sidecar(fp16, key.split("_")[0], weights_key, commit, opset, "fp16", contract)
@@ -903,7 +923,8 @@ def ort_detect(key: str, sess: OrtModel, grey: torch.Tensor, rgb: torch.Tensor, 
         kp, s, d = superpoint_tail(scores, desc, sp.conf.detection_threshold, max_keypoints)
         return {"keypoints": kp, "scores": s, "descriptors": d}
     kp, d, s = sess.run(image=rgb)
-    return {"keypoints": kp, "scores": s, "descriptors": d}
+    keep = s >= 0                                                  # top-k exports mark the failed entries with -1 (no-op otherwise)
+    return {"keypoints": kp[keep], "scores": s[keep], "descriptors": d[keep]}
 
 
 def ort_match(lg: nn.Module, sess: OrtModel, f0: dict, f1: dict, size_wh: tuple[int, int]):
@@ -929,10 +950,13 @@ def compare_matches(label: str, a: tuple, b: tuple, ms: float) -> None:
           f"{m_a.numel()}  max|dscore|={(s_a - s_b).abs().max().item():.2e}  {ms:7.1f} ms")
 
 
-def check_ort(models: dict[str, nn.Module], paths: dict[str, Path], images: list[Path], max_keypoints: int) -> None:
-    """(c) fp32 and (d) fp16 exports on ORT CPU against upstream (a); plus the fp32 detectors on a 640x480 resize of
-    the first frame against upstream on the same resize (the dynamic axes at work)."""
-    print(f"\n(a) upstream vs (c) ONNX fp32 / (d) ONNX fp16 on ONNX Runtime CPU, {len(images)} frames:")
+def check_ort(models: dict[str, nn.Module], paths: dict[str, Path], images: list[Path], max_keypoints: int,
+              static: bool = False) -> None:
+    """(c) fp32 and (d) fp16 exports on ORT CPU against upstream (a); plus, for the dynamic exports, the fp32
+    detectors on a 640x480 resize of the first frame against upstream on the same resize (the dynamic axes at
+    work). Static exports: only the detectors, ALIKED through the host threshold of its top-k output."""
+    print(f"\n(a) upstream vs (c) ONNX fp32 / (d) ONNX fp16 on ONNX Runtime CPU, {len(images)} frames"
+          f"{' (static exports)' if static else ''}:")
     sess = {col: {k: OrtModel(p if col == "c" else p.with_name(p.stem + "_fp16.onnx")) for k, p in paths.items()}
             for col in ("c", "d")}
     sp = models["superpoint"]
@@ -942,12 +966,14 @@ def check_ort(models: dict[str, nn.Module], paths: dict[str, Path], images: list
         H, W = grey.shape[-2:]
         print(f" {path.name} ({W}x{H})")
         fa = {name: upstream_detect(models, name, grey, rgb) for name in ("superpoint", "aliked", "sift")}
-        for key in ("superpoint", "aliked"):
+        for key in [k for k in ("superpoint", "aliked") if k in paths]:
             for col in ("c", "d"):
                 fb = ort_detect(key, sess[col][key], grey, rgb, sp, max_keypoints)
                 compare_detections(f"({col}) {key}", fa[key], fb)
                 print(f"  {'':34s} {sess[col][key].ms:7.1f} ms")
         feats.append(fa)
+    if static:
+        return
     for i in range(0, len(images) - 1, 2):
         grey, _ = load_image(images[i])
         H, W = grey.shape[-2:]
@@ -1012,6 +1038,8 @@ def main() -> None:
                         help="export only these models (default: all five)")
     parser.add_argument("--static", metavar="WxH", default=None,
                         help="export the detectors with this fixed input size as <stem>_<W>x<H>.onnx (Core ML)")
+    parser.add_argument("--topk", type=int, default=2048,
+                        help="static ALIKED: keypoints returned by the graph (top-k mode; the host thresholds)")
     args = parser.parse_args()
     static_size = None
     if args.static:
@@ -1027,8 +1055,10 @@ def main() -> None:
         if args.images:
             check_wrappers(models, args.images, args.max_keypoints)
         print()
-        paths = export_all(models, commit, set(args.only) if args.only else None, static_size)
-        if args.images and not args.only and not static_size:
+        paths = export_all(models, commit, set(args.only) if args.only else None, static_size, args.topk)
+        if args.images and static_size:
+            check_ort(models, paths, args.images, args.max_keypoints, static=True)
+        elif args.images and not args.only:
             check_ort(models, paths, args.images, args.max_keypoints)
             write_references(models, args.images, commit)
 

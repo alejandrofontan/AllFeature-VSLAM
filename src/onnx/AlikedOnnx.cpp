@@ -43,7 +43,8 @@ AlikedOnnx::AlikedOnnx(const std::string& onnx_path, const OrtSettings& settings
         throw std::runtime_error("AlikedOnnx: the sidecar's tensor names disagree with " + onnx_path + ":\n" +
                                  session_.describe_io());
     AF_INFO("AlikedOnnx: " << onnx_path << " (" << precision_ << " weights) on onnxruntime/" << session_.provider()
-                           << ", threshold " << detection_threshold_);
+                           << ", threshold " << detection_threshold_
+                           << (top_k_ > 0 ? " on the graph's top-" + std::to_string(top_k_) : std::string(" in the graph")));
 }
 
 void AlikedOnnx::read_sidecar(const std::string& path)
@@ -69,6 +70,8 @@ void AlikedOnnx::read_sidecar(const std::string& path)
         descriptor_dim_ = root["descriptor_dim"].as<int>();
         if (root["precision"])
             precision_ = root["precision"].as<std::string>();
+        if (root["topk"])
+            top_k_ = root["topk"].as<int>();
     }
     catch (const std::exception& e)
     {
@@ -114,10 +117,21 @@ void AlikedOnnx::detect(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoin
     if (dim != descriptor_dim_)
         throw std::runtime_error("AlikedOnnx: descriptors are " + std::to_string(dim) + "-d, sidecar says " +
                                  std::to_string(descriptor_dim_));
+    // Threshold mode: the graph already returned only the maxima above the threshold. Top-k mode (the static
+    // exports): the graph returns exactly K entries in NMS-score order and marks those failing upstream's rule
+    // (NMS score at the pixel > threshold) with score -1; drop them - the same set whenever fewer than K pass.
+    int n_keep = n;
+    if (top_k_ > 0)
+    {
+        n_keep = 0;
+        for (int i = 0; i < n; ++i)
+            if (sc.data[i] >= 0.0f)
+                n_keep = i + 1;                                    // the valid entries form a prefix
+    }
     keypoints.clear();
-    keypoints.reserve(n);
-    descriptors.create(n, dim, CV_32F);
-    for (int i = 0; i < n; ++i)
+    keypoints.reserve(n_keep);
+    descriptors.create(n_keep, dim, CV_32F);
+    for (int i = 0; i < n_keep; ++i)
     {
         cv::KeyPoint k;
         k.pt = cv::Point2f(kp.data[2 * i], kp.data[2 * i + 1]);
