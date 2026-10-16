@@ -86,6 +86,15 @@ side (step 4, T4).
    (`end == rank`) throws (`coreml/builders/impl/shape_op_builder.cc`, an ORT bug). `rewrite_shape_slices` turns
    every sliced Shape into Shape + Slice on the 1-D shape tensor (2 nodes in SuperPoint, 3 in ALIKED; the
    matchers have none); same values, exports still exact.
+9. **Core ML compiles only bounded shapes, and only its operator subset** (step 7, Mac): with dynamic H, W every
+   partition of the detector graphs fell back to the CPU ("unbounded dimension is not supported"), and the matcher
+   with dynamic N0/N1 fails session creation outright (now caught: OrtSession falls back to the CPU provider).
+   `--static WxH` exports fixed-size detector variants (`<stem>_<W>x<H>.onnx`). Even static, SuperPoint ran in
+   8 Core ML partitions at ~118 ms whatever the precision or compute units: upstream's `simple_nms` is max-pools
+   interleaved with Equal / Greater / Not / And / Or / Where, none of which the provider runs, so the NMS moved
+   to the host tail (cv::dilate is the max-pool; `superpoint_tail` is the specification; still bit-exact, 2.5 ms
+   on the CPU, and the CUDA graph got faster: 7.9 instead of 9.3 ms). The static SuperPoint graph is now 33 nodes
+   of 11 Core ML-friendly op types.
 7. **`torch.export` specialises 0/1 sizes**: the matcher axes are declared `Dim(min=2)`; the C++ side returns no
    matches below two keypoints per side (sidecar `min_keypoints: 2`).
 

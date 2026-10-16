@@ -204,19 +204,20 @@ def border_mask(scores: torch.Tensor, pad: int) -> torch.Tensor:
 
 
 class SuperPointDense(nn.Module):
-    """SuperPoint up to the dense maps (plan Q4): the exported graph ends at the NMS-ed, border-masked score map and
-    the L2-normalised descriptor map; threshold, top-k and descriptor sampling are `superpoint_tail` below in Python
-    and the C++ tail in AllFeature. Every learned layer is upstream's; the three max-pools floor the size, so a
+    """SuperPoint up to the dense maps (plan Q4): the exported graph ends at the raw score map (softmax + pixel
+    shuffle) and the L2-normalised descriptor map; NMS, border masking, threshold, top-k and descriptor sampling are
+    `superpoint_tail` below in Python and the C++ tail in AllFeature. The NMS left the graph in step 7: upstream's
+    `simple_nms` is max-pools interleaved with Equal / Greater / Not / And / Or / Where, which the Core ML provider
+    does not run, so it cut the graph into 8 partitions (120 ms on the M1 Pro GPU regardless of precision); the
+    trunk alone is one partition. Every learned layer is upstream's; the three max-pools floor the size, so a
     739x458 image gives 736x456 maps with no explicit crop (the TensorRT path behaves the same today).
-    Input: [1,1,H,W] grey in [0,1]. Outputs: scores [1,H8,W8] (border pixels -1), descriptors [1,256,H8/8,W8/8]."""
+    Input: [1,1,H,W] grey in [0,1]. Outputs: scores [1,H8,W8], descriptors [1,256,H8/8,W8/8]."""
 
     def __init__(self, sp: nn.Module):
         super().__init__()
         self.sp = sp
 
     def forward(self, image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        from lightglue.superpoint import simple_nms
-
         sp = self.sp
         x = sp.relu(sp.conv1a(image))
         x = sp.relu(sp.conv1b(x))
@@ -237,22 +238,23 @@ class SuperPointDense(nn.Module):
         # rank-infer (it rejected the permutation of axis 4 at session creation). pixel_shuffle is the same mapping
         # (channel k -> row k // 8, col k % 8, one output channel) and exports as one 4-D DepthToSpace node.
         scores = F.pixel_shuffle(scores, 8)[:, 0]                   # [b, 1, 8h, 8w] -> [b, 8h, 8w]
-        scores = simple_nms(scores, sp.conf.nms_radius)
-        scores = torch.where(border_mask(scores, sp.conf.remove_borders), scores, torch.full_like(scores, -1.0))
 
         descriptors = sp.convDb(sp.relu(sp.convDa(x)))
         descriptors = F.normalize(descriptors, p=2, dim=1)
         return scores, descriptors
 
 
-def superpoint_tail(scores: torch.Tensor, descriptors: torch.Tensor, threshold: float,
-                    max_keypoints: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """What runs after the SuperPoint graph, in the order upstream does it: threshold, best `max_keypoints` by score,
-    bilinear descriptor sampling (upstream `sample_descriptors`, s=8, align_corners=True) and L2. This is the
-    specification the C++ tail (step 4) is written against. Returns keypoints [N,2] (x,y), scores [N], descriptors
-    [N,256]."""
-    from lightglue.superpoint import sample_descriptors, top_k_keypoints
+def superpoint_tail(scores: torch.Tensor, descriptors: torch.Tensor, threshold: float, max_keypoints: int,
+                    nms_radius: int = 4, remove_borders: int = 4) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """What runs after the SuperPoint graph, in the order upstream does it: NMS (`simple_nms`, radius 4: a pixel
+    survives if nothing within the radius beats it, two suppression passes), border masking (-1 within
+    `remove_borders` px), threshold, best `max_keypoints` by score, bilinear descriptor sampling (upstream
+    `sample_descriptors`, s=8, align_corners=True) and L2. This is the specification the C++ tail (step 4) is written
+    against (cv::dilate is the max-pool). Returns keypoints [N,2] (x,y), scores [N], descriptors [N,256]."""
+    from lightglue.superpoint import sample_descriptors, simple_nms, top_k_keypoints
 
+    scores = simple_nms(scores, nms_radius)
+    scores = torch.where(border_mask(scores, remove_borders), scores, torch.full_like(scores, -1.0))
     best = torch.where(scores[0] > threshold)
     kp_scores = scores[0][best]
     keypoints = torch.stack(best, dim=-1)                          # (row, col)
@@ -734,14 +736,16 @@ def superpoint_contract(sp: nn.Module) -> list[str]:
         "# max-pools floor the size, so the maps cover the top-left (W//8*8) x (H//8*8) pixels of the image.",
         "input_tensor: image",
         "color: gray",
-        "# Outputs: the dense maps. scores [1,H8,W8] after softmax, pixel shuffle, NMS and border masking (border",
-        "# pixels = -1); descriptors [1,256,H8/8,W8/8] L2-normalised. The graph ends here (plan Q4).",
+        "# Outputs: the dense maps. scores [1,H8,W8] after softmax and pixel shuffle (raw, no NMS: its boolean ops would",
+        "# split the Core ML graph into 8 partitions); descriptors [1,256,H8/8,W8/8] L2-normalised. The graph ends here.",
         "output_tensors: [scores, descriptors]",
-        f"nms_radius: {c.nms_radius}   # inside the graph",
-        f"remove_borders: {c.remove_borders}   # inside the graph",
-        "# Tail (C++, tools/export_features.py superpoint_tail is the specification): keep scores > detection_threshold,",
-        "# best max_keypoints (FeatureExtractor.maxNumFeatures) by score, sample the descriptor map bilinearly at",
-        "# ((x,y) - 4 + 0.5) / (W8 - 4 - 0.5, H8 - 4 - 0.5) * 2 - 1 with align_corners=true, then L2-normalise.",
+        "# Tail (C++, tools/export_features.py superpoint_tail is the specification): NMS with nms_radius (upstream",
+        "# simple_nms: 9x9 max-pool == scores, two suppression passes), border pixels within remove_borders set to -1,",
+        "# keep scores > detection_threshold, best max_keypoints (FeatureExtractor.maxNumFeatures) by score, sample the",
+        "# descriptor map bilinearly at ((x,y) - 4 + 0.5) / (W8 - 4 - 0.5, H8 - 4 - 0.5) * 2 - 1 with align_corners=true,",
+        "# then L2-normalise.",
+        f"nms_radius: {c.nms_radius}   # host tail",
+        f"remove_borders: {c.remove_borders}   # host tail",
         f"detection_threshold: {c.detection_threshold}",
         "descriptor_dim: 256",
         "descriptor_sampling: bilinear_align_corners_s8",

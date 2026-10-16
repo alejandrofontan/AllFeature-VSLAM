@@ -70,6 +70,30 @@ void sample_descriptor(const float* desc_map, int dim, int map_h, int map_w, flo
         out[c] *= inv;
 }
 
+/// Upstream `simple_nms(scores, radius)` on a [H,W] float map: a pixel survives if it equals the max of its
+/// (2r+1)^2 neighbourhood (cv::dilate with a rectangular kernel == max_pool2d with padding r), then two suppression
+/// passes: pixels within r of a survivor are suppressed, and a non-suppressed pixel that is the max of the suppressed
+/// map joins the survivors. Non-survivors become 0. Exact mirror of the Python specification (superpoint_tail).
+void simple_nms(cv::Mat& scores, int radius)
+{
+    const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(2 * radius + 1, 2 * radius + 1));
+    cv::Mat pooled, max_mask, supp_mask, supp_scores, pooled_supp, new_max_mask, keep;
+    cv::dilate(scores, pooled, kernel);
+    cv::compare(scores, pooled, max_mask, cv::CMP_EQ);                 // 255 where scores == max_pool(scores)
+    for (int it = 0; it < 2; ++it)
+    {
+        cv::dilate(max_mask, supp_mask, kernel);                       // supp_mask = max_pool(max_mask) > 0
+        scores.copyTo(supp_scores);
+        supp_scores.setTo(0.0f, supp_mask);                            // where(supp_mask, 0, scores)
+        cv::dilate(supp_scores, pooled_supp, kernel);
+        cv::compare(supp_scores, pooled_supp, new_max_mask, cv::CMP_EQ);
+        cv::bitwise_and(new_max_mask, ~supp_mask, keep);               // new_max_mask & ~supp_mask
+        cv::bitwise_or(max_mask, keep, max_mask);
+    }
+    cv::Mat zeros = cv::Mat::zeros(scores.size(), scores.type());
+    zeros.copyTo(scores, ~max_mask);                                   // where(max_mask, scores, 0)
+}
+
 } // namespace
 
 SuperPointOnnx::SuperPointOnnx(const std::string& onnx_path, const OrtSettings& settings,
@@ -107,6 +131,8 @@ void SuperPointOnnx::read_sidecar(const std::string& path)
         descriptors_name_ = root["output_tensors"][1].as<std::string>();
         detection_threshold_ = root["detection_threshold"].as<float>();
         descriptor_dim_ = root["descriptor_dim"].as<int>();
+        nms_radius_ = root["nms_radius"].as<int>();
+        remove_borders_ = root["remove_borders"].as<int>();
         if (root["precision"])
             precision_ = root["precision"].as<std::string>();
     }
@@ -151,17 +177,20 @@ void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector
         throw std::runtime_error("SuperPointOnnx: descriptor map has " + std::to_string(dim) + " channels, sidecar says " +
                                  std::to_string(descriptor_dim_));
 
-    // Tail, upstream order: threshold -> best K by score -> (x, y) -> sample -> L2
+    // Tail, upstream order: NMS -> border mask -> threshold -> best K by score -> (x, y) -> sample -> L2
+    cv::Mat score_map(h8, w8, CV_32F, const_cast<float*>(scores.data.data()));
+    simple_nms(score_map, nms_radius_);
     struct Candidate
     {
         float score;
         int x, y;
     };
     std::vector<Candidate> candidates;
-    for (int y = 0; y < h8; ++y)
+    const int b = remove_borders_;
+    for (int y = b; y < h8 - b; ++y)                                   // border pixels are -1 upstream: never above threshold
     {
-        const float* row = scores.data.data() + static_cast<size_t>(y) * w8;
-        for (int x = 0; x < w8; ++x)
+        const float* row = score_map.ptr<float>(y);
+        for (int x = b; x < w8 - b; ++x)
             if (row[x] > detection_threshold_)
                 candidates.push_back({row[x], x, y});
     }
