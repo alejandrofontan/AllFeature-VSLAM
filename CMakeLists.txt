@@ -137,6 +137,9 @@ endif()
 if(ALLFEATURE_WITH_MEGALOC)
   list(APPEND SRCS_ALLFEATURE src/PlaceRecognitionMegaLoc.cc)
 endif()
+# Learned feature models on ONNX Runtime (docs/plans/learned_features_onnxruntime.md): one session class and
+# one thin wrapper per model, on every platform (ONNX Runtime is in every environment since phase 2).
+list(APPEND SRCS_ALLFEATURE src/onnx/OrtSession.cpp src/onnx/SuperPointOnnx.cpp)
 
 # ---- CUDA (help Torch/Caffe2 legacy FindCUDA) ----
 # Prefer the pixi/conda CUDA layout when present
@@ -220,6 +223,20 @@ find_package(OpenCV REQUIRED )
 find_package(Eigen3  REQUIRED NO_MODULE)
 find_package(Pangolin REQUIRED)
 find_package(yaml-cpp REQUIRED)
+
+# ---- ONNX Runtime (the learned feature models, include/onnx/) ----
+# conda-forge's onnxruntime-cpp ships a CMake config (target onnxruntime::onnxruntime) and keeps the source layout
+# (include/onnxruntime/core/session/onnxruntime_cxx_api.h) while the release tarballs are flat; add the
+# subdirectory so <onnxruntime_cxx_api.h> works on both (the same fix Thirdparty/placecell applies).
+find_package(onnxruntime CONFIG REQUIRED)
+message(STATUS "ONNX Runtime (features): ${onnxruntime_DIR}")
+get_target_property(_ort_includes onnxruntime::onnxruntime INTERFACE_INCLUDE_DIRECTORIES)
+set(ALLFEATURE_ORT_INCLUDE_DIRS)
+foreach(_dir ${_ort_includes})
+  if(EXISTS ${_dir}/core/session/onnxruntime_cxx_api.h)
+    list(APPEND ALLFEATURE_ORT_INCLUDE_DIRS ${_dir}/core/session)
+  endif()
+endforeach()
 find_package(Python REQUIRED COMPONENTS Interpreter)
 if(ALLFEATURE_WITH_SIFTGPU)
   find_package(SiftGPU CONFIG REQUIRED)
@@ -248,6 +265,7 @@ add_library(${PROJECT_NAME} SHARED ${SRCS_ALLFEATURE})
 target_include_directories(${PROJECT_NAME} PUBLIC
         ${PROJECT_SOURCE_DIR}
         ${PROJECT_SOURCE_DIR}/include
+        ${ALLFEATURE_ORT_INCLUDE_DIRS}
 )
 
 # Link libraries
@@ -261,6 +279,7 @@ target_link_libraries(${PROJECT_NAME}
         PoseLib::PoseLib
         placecell::placecell
         placecell::viz
+        onnxruntime::onnxruntime
 )
 if(ALLFEATURE_WITH_TORCH)
   target_link_libraries(${PROJECT_NAME} LightGlue::lib)
@@ -316,6 +335,11 @@ endif()
 # Parity/benchmark harness for the brute-force matcher (issue #13 P2) — not installed.
 add_executable(test_bfmatcher_parity src/test_bfmatcher_parity.cpp)
 target_link_libraries(test_bfmatcher_parity mimalloc ${PROJECT_NAME})
+
+# Parity/timing harness for the learned feature models on ONNX Runtime against the Python references
+# (docs/plans/learned_features_onnxruntime.md, T2) — not installed.
+add_executable(test_feature_parity src/test_feature_parity.cpp)
+target_link_libraries(test_feature_parity mimalloc ${PROJECT_NAME} ${YAML_CPP_LIBRARIES})
 
 # Install targets and headers
 install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mono_stream vslamlab_allfeature_rgbd
