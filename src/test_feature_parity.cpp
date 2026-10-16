@@ -17,8 +17,8 @@
  *   matcher:   ./bin/test_feature_parity --model feature_models/lightglue_superpoint.onnx \
  *                  --reference0 <frame0>.superpoint.txt --reference1 <frame1>.superpoint.txt \
  *                  --matches <frame0>__<frame1>.lightglue_superpoint.txt
- *   common:    [--provider auto|cuda|coreml|cpu] [--threads 4] [--iters 10] [--max-keypoints 1000]
- *              [--min-fraction 0.99] [--min-cos 0.999]
+ *   common:    [--provider auto|cuda|coreml|cpu] [--threads 4] [--coreml-units ALL|CPUAndGPU|CPUAndNeuralEngine|CPUOnly]
+ *              [--iters 10] [--max-keypoints 1000] [--min-fraction 0.99] [--min-cos 0.999]
  *
  * The matcher mode feeds the matcher with the reference detector outputs (the extractor's parity is measured
  * separately), so a matcher failure is the matcher's alone.
@@ -226,6 +226,7 @@ int main(int argc, char** argv)
     AF_VSLAM::onnx::OrtSettings settings;
     settings.provider = arg(args, "--provider", "auto");
     settings.threads = std::stoi(arg(args, "--threads", "4"));
+    settings.coreml_compute_units = arg(args, "--coreml-units", "ALL");   // ALL | CPUAndGPU | CPUAndNeuralEngine | CPUOnly
     const int iters = std::stoi(arg(args, "--iters", "10"));
     const int max_keypoints = std::stoi(arg(args, "--max-keypoints", "1000"));
     const double min_fraction = std::stod(arg(args, "--min-fraction", "0.99"));
