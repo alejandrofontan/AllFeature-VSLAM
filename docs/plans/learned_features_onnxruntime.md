@@ -6,7 +6,8 @@
   "the ONNX file is the contract" rule, same sidecar / reference / parity discipline.
 - **Branches:** AllFeature `features-onnx` (off `main`). No placecell work. The two feature submodules
   (`Thirdparty/Light_Glue_CPP`, `Thirdparty/SuperPoint-LightGlue-TensorRT`) are removed at step 9, not forked.
-- **Status:** draft 2026-10-16, nothing implemented. Questions for the user at the end.
+- **Status:** draft 2026-10-16; **decisions Q1–Q8 taken 2026-10-16** (all the recommended options, see Decisions);
+  nothing implemented. Next: the three bug issues, then steps 1–3 (export tool, user runs the exports).
 - **Written as a walkthrough on purpose**, like phase 2: every step says what it does and why, so the path
   *git repo → ONNX → C++ → ONNX Runtime on two platforms* can be followed end to end for three models at once. What is
   new versus MegaLoc, and therefore where the learning is: (i) **variable-size outputs and inputs** — a detector
@@ -214,7 +215,13 @@ dynamic-shape declarations, the SIFT scale/ori inputs, fp16 numbers), `docs/note
 7. Mac: build, T2/T4/T6 (user runs; `ProfileComputePlan` once).
 8. Step 9 removals; step 10 write-up; `mac_port.md` status; PR into `main`, `dev` follows.
 
-## Decisions (open — answers go here, like phase 2's)
+## Decisions (2026-10-16, all answered)
+
+Every question below was answered with its recommended option (a). Conditions attached while deciding: Q7 is
+confirmed by T4 — if `cv::SIFT` measures above ~30 ms per frame on Linux and SIFT speed there matters, option (b)
+(SiftGPU behind a Linux-only CMake option) is the fallback; Q5's decomposition (b) stays the phase-6 lever for the
+Mac; Q6 also means the public `superpoint_models/` files on HF come down at step 9. The questions are kept for the
+record:
 
 - **Q1 — settings keys.** (a) one shared block for every ORT-hosted feature model, `features_provider`,
   `features_threads`, `features_coreml_units` next to the existing `megaloc_*` keys (recommended: the models share
