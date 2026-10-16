@@ -139,7 +139,10 @@ if(ALLFEATURE_WITH_MEGALOC)
 endif()
 # Learned feature models on ONNX Runtime (docs/plans/learned_features_onnxruntime.md): one session class and
 # one thin wrapper per model, on every platform (ONNX Runtime is in every environment since phase 2).
-list(APPEND SRCS_ALLFEATURE src/onnx/OrtSession.cpp src/onnx/SuperPointOnnx.cpp)
+list(APPEND SRCS_ALLFEATURE src/onnx/OrtSession.cpp src/onnx/SuperPointOnnx.cpp src/onnx/LightGlueOnnx.cpp
+                            src/onnx/AlikedOnnx.cpp)
+# SIFT on OpenCV's CPU implementation (plan Q7), the extractor the LightGlue-SIFT matcher was trained with
+list(APPEND SRCS_ALLFEATURE src/SiftCpu.cpp)
 
 # ---- CUDA (help Torch/Caffe2 legacy FindCUDA) ----
 # Prefer the pixi/conda CUDA layout when present

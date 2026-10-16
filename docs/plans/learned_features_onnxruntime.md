@@ -10,7 +10,10 @@
   **Steps 1–3 done 2026-10-16** (branch `features-onnx`): `tools/export_features.py` + `export-features` env; the five
   fp32 exports reproduce upstream to float32 precision on ONNX Runtime CPU (DeformConv and the data-dependent keypoint
   count included), fp16 twins usable but not exact, sidecars and references in `feature_models/` —
-  `docs/notes/2026-10-16_learned_features_onnx_export.md`. Next: step 4 (`OrtSession` + `SuperPointOnnx` first).
+  `docs/notes/2026-10-16_learned_features_onnx_export.md`. **Step 4 done 2026-10-16**: `OrtSession`, `SuperPointOnnx`,
+  `LightGlueOnnx`, `AlikedOnnx`, `SiftCpu` + `test_feature_parity`; every fp32 path exact vs the references on CPU
+  and CUDA (TF32 off), SuperPoint 9 ms / ALIKED 16 ms / LightGlue 9–19 ms per call on CUDA, SIFT 22 ms on the CPU —
+  `docs/notes/2026-10-16_features_onnxruntime_host.md`. Next: steps 5–6 (host wiring).
 - **Written as a walkthrough on purpose**, like phase 2: every step says what it does and why, so the path
   *git repo → ONNX → C++ → ONNX Runtime on two platforms* can be followed end to end for three models at once. What is
   new versus MegaLoc, and therefore where the learning is: (i) **variable-size outputs and inputs** — a detector
