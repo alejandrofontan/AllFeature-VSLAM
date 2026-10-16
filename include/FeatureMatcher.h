@@ -10,22 +10,9 @@
 #include "KeyFrame.h"
 #include "MapPoint.h"
 
-// Learned / GPU matching backends follow the CMake backend options (CMakeLists.txt): SiftMatchGPU with
-// ALLFEATURE_WITH_SIFTGPU, LightGlue (libtorch) with ALLFEATURE_WITH_TORCH, SuperPoint-LightGlue (TensorRT)
-// with ALLFEATURE_WITH_TENSORRT. Features that need a compiled-out backend never reach this class
-// (FeatureFactory.h refuses them at startup), so the dispatch below only has to compile without them.
-#ifdef ALLFEATURE_WITH_SIFTGPU
-#include "Feature_sift128.h"
-#endif
-#ifdef ALLFEATURE_WITH_TORCH
-#include "matcher/lightglue/matcher.hpp"
-#endif
-#ifdef ALLFEATURE_WITH_TENSORRT
-#ifdef CHECK
-#undef CHECK
-#endif
-#include "light_glue.h"
-#endif
+// Learned matching: the three LightGlue variants (superpoint / aliked / sift) run on ONNX Runtime through the
+// process-wide sessions of onnx/FeatureModels.h (docs/plans/learned_features_onnxruntime.md); classical descriptors
+// go through the brute-force matcher (BruteForceMatcher.h). No CMake backend option gates the dispatch any more.
 
 namespace AF_VSLAM
 {
@@ -34,7 +21,7 @@ class FeatureMatcher
 {
 public:
 
-    // Initializes all feature matching backends: SiftMatchGPU, LightGlue, and SuperPoint-LightGlue (TensorRT).
+    // Loads (once per process) and warms up the LightGlue variant of every learned feature in `feature_types`.
     const int max_supported = 4000;
     FeatureMatcher(const int& image_width, const int& image_height,
         const std::vector<FeatureType>& feature_types,
@@ -48,16 +35,6 @@ public:
     std::vector<cv::DMatch> match_descriptors(const cv::Mat& desc1, const cv::Mat& desc2,
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type);
     std::vector<cv::DMatch> match_descriptors_only(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& feat_type);
-
-    std::vector<cv::DMatch> lightglueMatching(
-            const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
-            const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
-            float min_score = 0.0f);
-
-    std::vector<cv::DMatch> matcherLightglueSuperpoint(
-            const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
-            const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
-            float min_score = 0.0f);
 
     // Robust geometric match filtering via PoseLib LO-RANSAC (replaced OpenCV's
     // findFundamentalMat/USAC, which both threw on degenerate inputs and ground for
@@ -181,16 +158,6 @@ protected:
 
     // Brute-force matching now goes through BruteForceMatcher.h (issue #13 P2), which
     // replicates the cv::BFMatcher(<norm>, crossCheck=true) semantics these members had.
-#ifdef ALLFEATURE_WITH_SIFTGPU
-    SiftMatchGPU sift_match_gpu_{};
-#endif
-#ifdef ALLFEATURE_WITH_TORCH
-    std::shared_ptr<matcher::LightGlue> matcher_lightglue;
-    std::shared_ptr<torch::Device> torch_device;
-#endif
-#ifdef ALLFEATURE_WITH_TENSORRT
-    std::shared_ptr<SuperPointLightGlue> matcher_lightglue_superpoint;
-#endif
     int image_width;
     int image_height;
 
@@ -209,8 +176,6 @@ protected:
     // SearchForInitialization Frame-Frame
     // Tracking::monocular_initialization
     static constexpr int sFI_ff_outlierMethod = cv::FM_RANSAC;
-
-    std::mutex lightglue_superpoint_mutex_;
 };
 
 }

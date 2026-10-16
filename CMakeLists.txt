@@ -21,7 +21,7 @@ if(ALLFEATURE_OUTPUT_IN_SOURCE)
 endif()
 
 # Compiler flags. The architecture flag applies to every C/C++ target, vendored subprojects included (g2o,
-# Light_Glue_CPP and PoseLib follow it): Eigen code compiled for different targets in one process breaks alignment.
+# PoseLib follows it): Eigen code compiled for different targets in one process breaks alignment.
 # ALLFEATURE_NATIVE=ON tunes for this machine (build.sh; -march=native also works with clang on Apple Silicon); OFF
 # targets x86-64-v3 (AVX2) on x86-64, as the conda package does, and the compiler's default on every other
 # architecture (arm64: the armv8-a baseline with NEON; Apple clang rejects x86 -march values).
@@ -33,41 +33,30 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
   set(ALLFEATURE_MARCH_FLAG -march=x86-64-v3)
 endif()
 message(STATUS "AllFeature architecture flag: '${ALLFEATURE_MARCH_FLAG}' (${CMAKE_SYSTEM_PROCESSOR})")
-# C/C++ only: these flags must not reach nvcc (Light_Glue_CPP's CUDA kernels)
+# C/C++ only: these flags must not reach nvcc (the CUDA language stays enabled for Segmentation-TensorRT)
 add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra;-Wpedantic;-O3;${ALLFEATURE_MARCH_FLAG}>")
-# GPU architectures of Light_Glue_CPP's CUDA kernels: this machine's GPU with ALLFEATURE_NATIVE, otherwise Turing to
-# Hopper plus consumer Blackwell ("90" also embeds PTX that newer GPUs JIT-compile)
-if(ALLFEATURE_NATIVE)
-  set(ALLFEATURE_CUDA_ARCHITECTURES_DEFAULT native)
-else()
-  set(ALLFEATURE_CUDA_ARCHITECTURES_DEFAULT "75-real;80-real;86-real;89-real;90;120-real")
-endif()
-set(ALLFEATURE_CUDA_ARCHITECTURES "${ALLFEATURE_CUDA_ARCHITECTURES_DEFAULT}" CACHE STRING
-    "CUDA architectures of the Light_Glue_CPP kernels")
 
-# GPU backends (docs/plans/mac_port.md, phase 1). Each option gates a third-party project, its find_package
-# calls, the source files that use it and a compile definition of the same name; a feature or backend
-# requested in the settings YAML but compiled out is a clear error at startup (FeatureFactory.h, System.cc,
-# SegmentationSettings.h). All three default to ON on Linux (today's build) and OFF on macOS, where none
-# of the libraries exists. With every option OFF the project needs OpenCV, Eigen, Pangolin, yaml-cpp,
-# OpenMP, brisk and akaze only.
+# GPU backend (docs/plans/mac_port.md phase 1, docs/plans/learned_features_onnxruntime.md phase 4). The learned
+# features (superpoint256, aliked128, the LightGlue matchers) and MegaLoc run on ONNX Runtime on every platform -
+# the CUDA / CoreML / CPU execution provider is a runtime setting - and sift128 on OpenCV's CPU SIFT, so no option
+# gates them. TensorRT remains for online segmentation only (Thirdparty/Segmentation-TensorRT, phase 5 ports it):
+# ON on Linux, OFF on macOS; a `segmentation:` request without it is a clear error at startup
+# (SegmentationSettings.h).
 if(APPLE)
   set(ALLFEATURE_GPU_DEFAULT OFF)
 else()
   set(ALLFEATURE_GPU_DEFAULT ON)
 endif()
-option(ALLFEATURE_WITH_SIFTGPU  "SiftGPU (CUDA): the sift128 feature and its SiftMatchGPU matcher" ${ALLFEATURE_GPU_DEFAULT})
-option(ALLFEATURE_WITH_TORCH    "libtorch + Light_Glue_CPP (CUDA kernels): the aliked128 feature and the LightGlue matcher" ${ALLFEATURE_GPU_DEFAULT})
-option(ALLFEATURE_WITH_TENSORRT "TensorRT: the superpoint256 feature + SuperPoint-LightGlue matcher and online segmentation" ${ALLFEATURE_GPU_DEFAULT})
+option(ALLFEATURE_WITH_TENSORRT "TensorRT: online segmentation (Segmentation-TensorRT)" ${ALLFEATURE_GPU_DEFAULT})
 # The MegaLoc VPR backend (placecell::megaloc) runs on ONNX Runtime on every platform (CUDA / CoreML / CPU
 # execution providers chosen at runtime by the `megaloc_provider` setting), so it is ON everywhere.
 option(ALLFEATURE_WITH_MEGALOC "MegaLoc VPR backend (vpr: megaloc) through Thirdparty/placecell, on ONNX Runtime" ON)
-foreach(_opt ALLFEATURE_WITH_SIFTGPU ALLFEATURE_WITH_TORCH ALLFEATURE_WITH_TENSORRT ALLFEATURE_WITH_MEGALOC)
+foreach(_opt ALLFEATURE_WITH_TENSORRT ALLFEATURE_WITH_MEGALOC)
   if(${_opt})
     add_compile_definitions(${_opt})
   endif()
 endforeach()
-message(STATUS "AllFeature backends: SiftGPU=${ALLFEATURE_WITH_SIFTGPU} torch/LightGlue=${ALLFEATURE_WITH_TORCH} TensorRT=${ALLFEATURE_WITH_TENSORRT} MegaLoc=${ALLFEATURE_WITH_MEGALOC} (ONNX Runtime)")
+message(STATUS "AllFeature backends: learned features + MegaLoc on ONNX Runtime (MegaLoc=${ALLFEATURE_WITH_MEGALOC}), TensorRT segmentation=${ALLFEATURE_WITH_TENSORRT}")
 
 # brisk / akaze (standalone feature libraries from prefix.dev/vslamlab, VSLAM-LAB/conda-recipes): optional, so a
 # platform without the packages yet (osx-arm64 until their recipes are built there, docs/plans/mac_port.md
@@ -119,34 +108,26 @@ set(SRCS_ALLFEATURE
         src/Feature_surf64.cpp
         src/Feature_kaze64.cpp
 )
-if(ALLFEATURE_WITH_SIFTGPU)
-  list(APPEND SRCS_ALLFEATURE src/Feature_sift128.cpp)
-endif()
 if(brisk_FOUND)
   list(APPEND SRCS_ALLFEATURE src/Feature_brisk48.cpp)
 endif()
 if(akaze_FOUND)
   list(APPEND SRCS_ALLFEATURE src/Feature_akaze61.cpp)
 endif()
-if(ALLFEATURE_WITH_TORCH)
-  list(APPEND SRCS_ALLFEATURE src/Feature_aliked128.cpp src/FeatureMatcher_lightglue.cpp)
-endif()
-if(ALLFEATURE_WITH_TENSORRT)
-  list(APPEND SRCS_ALLFEATURE src/Feature_superpoint256.cpp src/FeatureMatcher_superglue.cpp)
-endif()
 if(ALLFEATURE_WITH_MEGALOC)
   list(APPEND SRCS_ALLFEATURE src/PlaceRecognitionMegaLoc.cc)
 endif()
-# Learned feature models on ONNX Runtime (docs/plans/learned_features_onnxruntime.md): one session class and
-# one thin wrapper per model, on every platform (ONNX Runtime is in every environment since phase 2).
+# Learned feature models on ONNX Runtime (docs/plans/learned_features_onnxruntime.md): one session class, one thin
+# wrapper per model, the process-wide configuration + shared matchers, and the three features built on them; SIFT on
+# OpenCV's CPU implementation (plan Q7), the extractor the LightGlue-SIFT matcher was trained with. Every platform.
 list(APPEND SRCS_ALLFEATURE src/onnx/OrtSession.cpp src/onnx/SuperPointOnnx.cpp src/onnx/LightGlueOnnx.cpp
-                            src/onnx/AlikedOnnx.cpp)
-# SIFT on OpenCV's CPU implementation (plan Q7), the extractor the LightGlue-SIFT matcher was trained with
-list(APPEND SRCS_ALLFEATURE src/SiftCpu.cpp)
+                            src/onnx/AlikedOnnx.cpp src/onnx/FeatureModels.cpp
+                            src/Feature_superpoint256.cpp src/Feature_aliked128.cpp
+                            src/SiftCpu.cpp src/Feature_sift128.cpp)
 
 # ---- CUDA (help Torch/Caffe2 legacy FindCUDA) ----
 # Prefer the pixi/conda CUDA layout when present
-if((ALLFEATURE_WITH_TORCH OR ALLFEATURE_WITH_TENSORRT OR ALLFEATURE_WITH_SIFTGPU) AND DEFINED ENV{CONDA_PREFIX})
+if(ALLFEATURE_WITH_TENSORRT AND DEFINED ENV{CONDA_PREFIX})
   set(_CUDA_PREFIX "$ENV{CONDA_PREFIX}/targets/x86_64-linux")
   if(EXISTS "${_CUDA_PREFIX}/include/cuda.h")
     set(CUDA_TOOLKIT_ROOT_DIR "${_CUDA_PREFIX}" CACHE PATH "CUDA root" FORCE)
@@ -165,14 +146,6 @@ endif()
 # Optional but often helps some configs that look at CMAKE_PREFIX_PATH
 if(DEFINED CUDA_TOOLKIT_ROOT_DIR)
   list(APPEND CMAKE_PREFIX_PATH "${CUDA_TOOLKIT_ROOT_DIR}")
-endif()
-
-# ---- SuperPoint-LightGlue (TensorRT) ----
-if(ALLFEATURE_WITH_TENSORRT)
-  set(SUPERPOINT_LIGHTGLUE_DIR "${PROJECT_SOURCE_DIR}/Thirdparty/SuperPoint-LightGlue-TensorRT"
-      CACHE PATH "Path to SuperPoint-LightGlue source")
-  set(SUPERPOINT_LIGHTGLUE_BUILD_EXECUTABLES OFF CACHE BOOL "" FORCE)
-  add_subdirectory(${SUPERPOINT_LIGHTGLUE_DIR} ${CMAKE_BINARY_DIR}/superpoint_lightglue)
 endif()
 
 # ---- g2o ----
@@ -241,18 +214,6 @@ foreach(_dir ${_ort_includes})
   endif()
 endforeach()
 find_package(Python REQUIRED COMPONENTS Interpreter)
-if(ALLFEATURE_WITH_SIFTGPU)
-  find_package(SiftGPU CONFIG REQUIRED)
-endif()
-# ---- Light_Glue_CPP (ALIKED extractor + LightGlue matcher, libtorch + CUDA kernels) ----
-# Built in the same tree (static LightGlue::lib); it compiles LIGHTGLUE_MODELS_DIR (default: the bare
-# `lightglue_models`, resolved against the cwd at runtime) into the library and finds Torch itself, with libtorch's
-# Caffe2Config dev warning already scoped there.
-if(ALLFEATURE_WITH_TORCH)
-  set(LIGHTGLUE_CUDA_ARCHITECTURES "${ALLFEATURE_CUDA_ARCHITECTURES}")
-  add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/Light_Glue_CPP ${CMAKE_BINARY_DIR}/light_glue_cpp)
-  target_compile_options(LightGlue_lib PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-w>)
-endif()
 
 find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
@@ -284,17 +245,8 @@ target_link_libraries(${PROJECT_NAME}
         placecell::viz
         onnxruntime::onnxruntime
 )
-if(ALLFEATURE_WITH_TORCH)
-  target_link_libraries(${PROJECT_NAME} LightGlue::lib)
-endif()
-if(ALLFEATURE_WITH_TENSORRT)
-  target_link_libraries(${PROJECT_NAME} superpoint_lightglue_lib)
-endif()
 if(ALLFEATURE_WITH_MEGALOC)
   target_link_libraries(${PROJECT_NAME} placecell::megaloc)
-endif()
-if(ALLFEATURE_WITH_SIFTGPU)
-  target_link_libraries(${PROJECT_NAME} SiftGPU::sift_gpu)
 endif()
 if(brisk_FOUND)
   target_link_libraries(${PROJECT_NAME} ${brisk_LIBRARIES})
@@ -352,11 +304,6 @@ install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mon
 
 # Headers under include/AllFeature-VSLAM/: they have generic names (Frame.h, System.h, Types.h, ...)
 install(DIRECTORY include/ DESTINATION include/AllFeature-VSLAM)
-
-# SuperPoint-LightGlue-TensorRT has no install rules of its own; libAllFeature-VSLAM.so links it
-if(ALLFEATURE_WITH_TENSORRT)
-  install(TARGETS superpoint_lightglue_lib LIBRARY DESTINATION lib)
-endif()
 
 # Reference copies of the settings (VSLAM-LAB's allfeature environment copies them next to the models)
 install(DIRECTORY settings/ DESTINATION share/allfeature-vslamlab/settings FILES_MATCHING PATTERN "*.yaml")

@@ -12,17 +12,21 @@ keeps the compiled-in default (each `LoadParameters` reads only the keys present
 |---|---|---|---|---|
 | `cam_mono` | `rgb_0` | [Tracking_aux.cc#L26](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L26 "cam_mono"), [Viewer.cc#L62](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Viewer.cc#L62 "cam_mono"), [vslamlab_allfeature_rgbd.cpp#L129](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_rgbd.cpp#L129 "cam_mono"), [vslamlab_allfeature_rgbd_arstream.cpp#L129](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_rgbd_arstream.cpp#L129 "cam_mono") | [Tracking](Tracking.md), [Viewer](Viewer.md), — |  |
 | `debug` | `false` | [vslamlab_allfeature_mono.cpp#L112](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_mono.cpp#L112 "debug"), [vslamlab_allfeature_mono_arstream.cpp#L118](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_mono_arstream.cpp#L118 "debug"), [vslamlab_allfeature_mono_stream.cpp#L45](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_mono_stream.cpp#L45 "debug"), [vslamlab_allfeature_rgbd.cpp#L112](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_rgbd.cpp#L112 "debug"), [vslamlab_allfeature_rgbd_arstream.cpp#L121](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_rgbd_arstream.cpp#L121 "debug") | — |  |
-| `feature_vpr` | `"orb32"` | [System.cc#L96](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L96 "feature_vpr"), [System.cc#L96](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L96 "feature_vpr") | [System](System.md) | local feature that verifies retrieved candidates (reloc PnP, loop Sim3); |
+| `feature_vpr` | `"orb32"` | [System.cc#L103](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L103 "feature_vpr"), [System.cc#L103](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L103 "feature_vpr") | [System](System.md) | local feature that verifies retrieved candidates (reloc PnP, loop Sim3); |
 | `features` | `["orb32", "akaze61"]` | [vslamlab_allfeature_mono.cpp#L111](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_mono.cpp#L111 "features"), [vslamlab_allfeature_mono_arstream.cpp#L117](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_mono_arstream.cpp#L117 "features"), [vslamlab_allfeature_mono_stream.cpp#L44](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_mono_stream.cpp#L44 "features"), [vslamlab_allfeature_rgbd.cpp#L111](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_rgbd.cpp#L111 "features"), [vslamlab_allfeature_rgbd_arstream.cpp#L120](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/vslamlab_allfeature_rgbd_arstream.cpp#L120 "features") | — |  |
+| `features_coreml_units` | `"ALL"` | *(read nowhere)* | — | CoreML compute units for those models: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly" |
+| `features_models_dir` | `"feature_models"` | *(read nowhere)* | — | learned feature models on ONNX Runtime (superpoint256, aliked128 and the LightGlue matchers of |
+| `features_provider` | `"auto"` | *(read nowhere)* | — | their ONNX Runtime execution provider: "auto" | "cuda" | "coreml" | "cpu" (megaloc_provider semantics). |
+| `features_threads` | `4` | *(read nowhere)* | — | CPU-provider threads per model session (also the CPU-fallback nodes under CUDA / CoreML) |
 | `max_frame_wait` | `0.2` | [FramePacer.h#L35](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/FramePacer.h#L35 "max_frame_wait") | — | s; the mono/rgbd executables replay the sequence at its own rate (sleep for the rest of the |
 | `megaloc_coreml_units` | `"ALL"` | *(read nowhere)* | — | CoreML compute units: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly". The Neural Engine |
-| `megaloc_onnx` | `"megaloc_models/megaloc_322x322.onnx"` | [System.cc#L97](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L97 "megaloc_onnx"), [System.cc#L97](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L97 "megaloc_onnx") | [System](System.md) | vpr: megaloc — the model file to load, exported by Thirdparty/placecell/tools/export_megaloc.py: |
-| `megaloc_precision` | `*(not in the YAML)*` | [System.cc#L98](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L98 "megaloc_precision") | [System](System.md) |  |
+| `megaloc_onnx` | `"megaloc_models/megaloc_322x322.onnx"` | [System.cc#L104](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L104 "megaloc_onnx"), [System.cc#L104](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L104 "megaloc_onnx") | [System](System.md) | vpr: megaloc — the model file to load, exported by Thirdparty/placecell/tools/export_megaloc.py: |
+| `megaloc_precision` | `*(not in the YAML)*` | [System.cc#L105](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L105 "megaloc_precision") | [System](System.md) |  |
 | `megaloc_provider` | `"auto"` | *(read nowhere)* | — | ONNX Runtime execution provider: "auto" (CUDA where built in, else CoreML on macOS, else CPU) | |
 | `megaloc_threads` | `4` | *(read nowhere)* | — | ONNX Runtime CPU-provider threads (never the core count: tracking and mapping need the rest; |
 | `segmentation` | `"none"` | [SegmentationSettings.h#L63](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/SegmentationSettings.h#L63 "segmentation"), [SegmentationSettings.h#L64](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/SegmentationSettings.h#L64 "segmentation") | [System](System.md) | online semantic segmentation: "efficientvit" | "none" |
 | `segmentation_onnx` | `*(not in the YAML)*` | [SegmentationSettings.h#L67](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/SegmentationSettings.h#L67 "segmentation_onnx"), [SegmentationSettings.h#L68](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/SegmentationSettings.h#L68 "segmentation_onnx") | [System](System.md) |  |
-| `vpr` | `"megaloc"` | [System.cc#L95](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L95 "vpr"), [System.cc#L95](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L95 "vpr") | [System](System.md) | visual place recognition backend: "megaloc" (default) | "none" |
+| `vpr` | `"megaloc"` | [System.cc#L102](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L102 "vpr"), [System.cc#L102](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L102 "vpr") | [System](System.md) | visual place recognition backend: "megaloc" (default) | "none" |
 
 ## FeatureExtractor
 
@@ -37,9 +41,9 @@ keeps the compiled-in default (each `LoadParameters` reads only the keys present
 
 | Key | Dev YAML value | Read in | Page | Description (YAML comment) |
 |---|---|---|---|---|
-| `FeatureMatcher.TH_LOW` | `*(not in the YAML)*` | [FeatureMatcher.cpp#L969](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L969 "FeatureMatcher.TH_LOW") | — |  |
-| `FeatureMatcher.descDistTh_high_reloc` | `*(not in the YAML)*` | [FeatureMatcher.cpp#L970](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L970 "FeatureMatcher.descDistTh_high_reloc") | — |  |
-| `FeatureMatcher.descDistTh_low_reloc` | `*(not in the YAML)*` | [FeatureMatcher.cpp#L971](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L971 "FeatureMatcher.descDistTh_low_reloc") | — |  |
+| `FeatureMatcher.TH_LOW` | `*(not in the YAML)*` | [FeatureMatcher.cpp#L932](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L932 "FeatureMatcher.TH_LOW") | — |  |
+| `FeatureMatcher.descDistTh_high_reloc` | `*(not in the YAML)*` | [FeatureMatcher.cpp#L933](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L933 "FeatureMatcher.descDistTh_high_reloc") | — |  |
+| `FeatureMatcher.descDistTh_low_reloc` | `*(not in the YAML)*` | [FeatureMatcher.cpp#L934](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L934 "FeatureMatcher.descDistTh_low_reloc") | — |  |
 
 ## LocalMapping
 
@@ -114,8 +118,8 @@ keeps the compiled-in default (each `LoadParameters` reads only the keys present
 
 | Key | Dev YAML value | Read in | Page | Description (YAML comment) |
 |---|---|---|---|---|
-| `PlaceRecognition.MaxCandidates` | `10` | [System.cc#L105](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L105 "PlaceRecognition.MaxCandidates"), [System.cc#L106](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L106 "PlaceRecognition.MaxCandidates") | [System](System.md) | cap on candidates per query (each costs a feature match + PnP/Sim3); 0 = unlimited |
-| `PlaceRecognition.MegaLocMinSimilarity` | `0.55` | [System.cc#L103](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L103 "PlaceRecognition.MegaLocMinSimilarity"), [System.cc#L104](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L104 "PlaceRecognition.MegaLocMinSimilarity") | [System](System.md) | cosine floor for a keyframe to be a reloc/loop candidate (unrelated places ~0.35-0.4, keyframe neighbours ~0.75) |
+| `PlaceRecognition.MaxCandidates` | `10` | [System.cc#L117](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L117 "PlaceRecognition.MaxCandidates"), [System.cc#L118](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L118 "PlaceRecognition.MaxCandidates") | [System](System.md) | cap on candidates per query (each costs a feature match + PnP/Sim3); 0 = unlimited |
+| `PlaceRecognition.MegaLocMinSimilarity` | `0.55` | [System.cc#L115](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L115 "PlaceRecognition.MegaLocMinSimilarity"), [System.cc#L116](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L116 "PlaceRecognition.MegaLocMinSimilarity") | [System](System.md) | cosine floor for a keyframe to be a reloc/loop candidate (unrelated places ~0.35-0.4, keyframe neighbours ~0.75) |
 
 ## Tracking
 
@@ -184,5 +188,5 @@ keeps the compiled-in default (each `LoadParameters` reads only the keys present
 
 ## Consistency
 
-- In the YAML but read nowhere: `megaloc_provider`, `megaloc_threads`, `megaloc_coreml_units`.
+- In the YAML but read nowhere: `megaloc_provider`, `megaloc_threads`, `megaloc_coreml_units`, `features_models_dir`, `features_provider`, `features_threads`, `features_coreml_units`.
 - Read by the code but absent from the YAML: `segmentation_onnx`, `FeatureExtractor.nOctaves`, `FeatureExtractor.scaleFactor`, `FeatureExtractor.detectTh`, `FeatureExtractor.maxNumFeatures`, `FeatureMatcher.TH_LOW`, `FeatureMatcher.descDistTh_high_reloc`, `FeatureMatcher.descDistTh_low_reloc`, `megaloc_precision`.

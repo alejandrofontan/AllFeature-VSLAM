@@ -20,6 +20,15 @@ megaloc_threads: 4                                   # ONNX Runtime CPU-provider
 megaloc_coreml_units: "ALL"                          # CoreML compute units: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly". The Neural Engine
                                                      # loses accuracy (cos 0.982 vs the 0.9955 floor with the fp16 file on "ALL" / "CPUAndNeuralEngine");
                                                      # the GPU is exact: fp32 file + "ALL" (48 ms) or the fp16 file + "CPUAndGPU" (46 ms, half the download)
+features_models_dir: "feature_models"               # learned feature models on ONNX Runtime (superpoint256, aliked128 and the LightGlue matchers of
+                                                     # superpoint256 / aliked128 / sift128): superpoint_v1.onnx, aliked_n16.onnx, lightglue_{superpoint,aliked,sift}.onnx
+                                                     # + sidecars; `pixi run download-feature-models` + `pixi run -e export-features export-superpoint` (plan Q6).
+                                                     # The fp32 exports by name; the _fp16 twins are approximate (docs/notes/2026-10-16_features_onnxruntime_host.md)
+features_provider: "auto"                            # their ONNX Runtime execution provider: "auto" | "cuda" | "coreml" | "cpu" (megaloc_provider semantics).
+                                                     # Measured 2026-10-16, 739x458: SuperPoint 9 ms / ALIKED 16 ms / LightGlue 9-19 ms per call on CUDA (RTX 4000 Ada),
+                                                     # 97 / 217 / 83-178 ms on 4 CPU threads; cv::SIFT 22 ms on the CPU either way
+features_threads: 4                                  # CPU-provider threads per model session (also the CPU-fallback nodes under CUDA / CoreML)
+features_coreml_units: "ALL"                         # CoreML compute units for those models: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
 segmentation: "none" # online semantic segmentation: "efficientvit" | "none"
 debug: false
 max_frame_wait: 0.2  # s; the mono/rgbd executables replay the sequence at its own rate (sleep for the rest of the

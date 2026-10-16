@@ -749,31 +749,41 @@ def lightglue_contract(lg: nn.Module, feat: str) -> list[str]:
     ]
 
 
-def export_all(models: dict[str, nn.Module], commit: str) -> dict[str, Path]:
-    """The five fp32 exports + fp16 twins + sidecars into feature_models/. Returns {key: fp32 path}."""
+ALL_EXPORTS = ("superpoint", "aliked", "lightglue_superpoint", "lightglue_aliked", "lightglue_sift")
+
+
+def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None = None) -> dict[str, Path]:
+    """The fp32 exports + fp16 twins + sidecars into feature_models/ (`only`: a subset of ALL_EXPORTS, e.g. the
+    `export-superpoint` pixi task - SuperPoint is the one model every machine exports itself, plan Q6).
+    Returns {key: fp32 path}."""
     from torch.export import Dim
 
+    wanted = set(ALL_EXPORTS) if not only else only
     paths: dict[str, Path] = {}
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     # SuperPoint: dynamic H, W (the sample is a table_3-sized frame; its values shape the trace, not the graph)
-    path = MODELS_DIR / "superpoint_v1.onnx"
-    export_onnx(SuperPointDense(models["superpoint"]), path, (torch.rand(1, 1, 458, 739),), ["image"],
-                ["scores", "descriptors"], ({2: Dim("height", min=64), 3: Dim("width", min=64)},), opset=18)
-    write_sidecar(path, "superpoint", "superpoint", commit, 18, "fp32", superpoint_contract(models["superpoint"]))
-    paths["superpoint"] = path
+    if "superpoint" in wanted:
+        path = MODELS_DIR / "superpoint_v1.onnx"
+        export_onnx(SuperPointDense(models["superpoint"]), path, (torch.rand(1, 1, 458, 739),), ["image"],
+                    ["scores", "descriptors"], ({2: Dim("height", min=64), 3: Dim("width", min=64)},), opset=18)
+        write_sidecar(path, "superpoint", "superpoint", commit, 18, "fp32", superpoint_contract(models["superpoint"]))
+        paths["superpoint"] = path
 
     # ALIKED: dynamic H, W; opset 19 for DeformConv, reached through the custom translation table
-    path = MODELS_DIR / "aliked_n16.onnx"
-    export_onnx(AlikedExport(models["aliked"]), path, (torch.rand(1, 3, 458, 739),), ["image"],
-                ["keypoints", "descriptors", "scores"], ({2: Dim("height", min=64), 3: Dim("width", min=64)},),
-                opset=19, translation=DEFORM_CONV_TRANSLATION)
-    write_sidecar(path, "aliked", "aliked-n16", commit, 19, "fp32", aliked_contract(models["aliked"]))
-    paths["aliked"] = path
+    if "aliked" in wanted:
+        path = MODELS_DIR / "aliked_n16.onnx"
+        export_onnx(AlikedExport(models["aliked"]), path, (torch.rand(1, 3, 458, 739),), ["image"],
+                    ["keypoints", "descriptors", "scores"], ({2: Dim("height", min=64), 3: Dim("width", min=64)},),
+                    opset=19, translation=DEFORM_CONV_TRANSLATION)
+        write_sidecar(path, "aliked", "aliked-n16", commit, 19, "fp32", aliked_contract(models["aliked"]))
+        paths["aliked"] = path
 
     # LightGlue x3: dynamic N0, N1 (>= 2: the graph has no empty/single-keypoint branch and 0/1 sizes specialise)
     n0, n1 = Dim("n0", min=2), Dim("n1", min=2)
     for feat, cfg in LIGHTGLUE_FEATURES.items():
+        if f"lightglue_{feat}" not in wanted:
+            continue
         lg = models[f"lightglue_{feat}"]
         path = MODELS_DIR / f"lightglue_{feat}.onnx"
         d = cfg["input_dim"]
@@ -941,6 +951,8 @@ def main() -> None:
                         help="frames for the (a) vs (b) check (an even number; consecutive ones form the match pairs)")
     parser.add_argument("--max-keypoints", type=int, default=1000,
                         help="keypoint budget of the SuperPoint / SIFT references (FeatureExtractor.maxNumFeatures)")
+    parser.add_argument("--only", nargs="+", choices=ALL_EXPORTS, default=None,
+                        help="export only these models (default: all five)")
     args = parser.parse_args()
 
     print(f"torch {torch.__version__} (CPU), TORCH_HOME={os.environ['TORCH_HOME']}")
@@ -952,8 +964,8 @@ def main() -> None:
         if args.images:
             check_wrappers(models, args.images, args.max_keypoints)
         print()
-        paths = export_all(models, commit)
-        if args.images:
+        paths = export_all(models, commit, set(args.only) if args.only else None)
+        if args.images and not args.only:
             check_ort(models, paths, args.images, args.max_keypoints)
             write_references(models, args.images, commit)
 

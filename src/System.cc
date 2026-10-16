@@ -4,6 +4,7 @@
 #include "KeyframeInformation.h"
 #include "Optimizer.h"
 #include "PlaceRecognitionMegaLoc.h"   // header is backend-free (placecell pimpl); the backend itself needs ALLFEATURE_WITH_MEGALOC
+#include "onnx/FeatureModels.h"
 
 #include <placecell/viz.h>
 
@@ -77,6 +78,12 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //   megaloc_threads:   4 (default) — ONNX Runtime CPU-provider threads (never the core
     //                      count: tracking and mapping need the rest)
     //   megaloc_coreml_units: "ALL" (default) | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
+    //   features_models_dir: "feature_models" (default) — the learned feature models on ONNX
+    //                      Runtime (superpoint256, aliked128, the LightGlue matchers of
+    //                      superpoint256 / aliked128 / sift128; onnx/FeatureModels.h)
+    //   features_provider, features_threads, features_coreml_units: their ONNX Runtime
+    //                      execution provider / CPU threads / Core ML units (same semantics
+    //                      as the megaloc_* keys; "auto", 4, "ALL" by default)
     //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:
     //                      see PlaceRecognitionMegaLocParameters
     //   PlaceCell.*:       placecell's print manager / profiler / recorder / visualizer
@@ -100,6 +107,11 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         if(settingsNode["megaloc_provider"]) megaloc_settings.provider = settingsNode["megaloc_provider"].as<std::string>();
         if(settingsNode["megaloc_threads"]) megaloc_settings.threads = settingsNode["megaloc_threads"].as<int>();
         if(settingsNode["megaloc_coreml_units"]) megaloc_settings.coreml_compute_units = settingsNode["megaloc_coreml_units"].as<std::string>();
+        onnx::FeatureModelsConfig& feature_models = onnx::feature_models_config();
+        if(settingsNode["features_models_dir"]) feature_models.models_dir = settingsNode["features_models_dir"].as<std::string>();
+        if(settingsNode["features_provider"]) feature_models.ort.provider = settingsNode["features_provider"].as<std::string>();
+        if(settingsNode["features_threads"]) feature_models.ort.threads = settingsNode["features_threads"].as<int>();
+        if(settingsNode["features_coreml_units"]) feature_models.ort.coreml_compute_units = settingsNode["features_coreml_units"].as<std::string>();
         if(settingsNode["PlaceRecognition.MegaLocMinSimilarity"])
             megaloc_params.min_similarity = settingsNode["PlaceRecognition.MegaLocMinSimilarity"].as<float>();
         if(settingsNode["PlaceRecognition.MaxCandidates"])

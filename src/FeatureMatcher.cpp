@@ -14,9 +14,7 @@
 #include "afvslam_log.hpp"
 #include "BruteForceMatcher.h"
 #include "FeatureMatcher.h"
-#ifdef ALLFEATURE_WITH_TENSORRT
-#include "Feature_superpoint256.h"
-#endif
+#include "onnx/FeatureModels.h"
 
 #include <opencv2/core/utility.hpp>
 
@@ -35,7 +33,22 @@ VerbosityLevel FeatureMatcher::verbosity{MEDIUM};
 
 float FeatureMatcher::radiusScale{1.15f};
 
-// Initializes all feature matching backends: SiftMatchGPU, LightGlue, and SuperPoint-LightGlue (TensorRT).
+namespace
+{
+/// The LightGlue variant of a learned matcher type (nullptr for the brute-force ones).
+const char* lightglue_variant(const MatcherType matcher_type)
+{
+    switch (matcher_type)
+    {
+        case LIGHTGLUE_SUPERPOINT: return "superpoint";
+        case LIGHTGLUE_ALIKED: return "aliked";
+        case LIGHTGLUE_SIFT: return "sift";
+        default: return nullptr;
+    }
+}
+} // namespace
+
+// Loads (once per process, onnx::shared_lightglue) and warms up the LightGlue variant of every learned feature.
 FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
     const std::vector<FeatureType>& feature_types,
     std::string name, float nnratio, bool checkOri):
@@ -53,61 +66,11 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
                                            : info.substr(p, info.find('\n', p) - p)));
     }
     for(const auto& feat_type : feature_types) {
-        (void)feat_type;   // unused when every learned / GPU backend is compiled out
-#ifdef ALLFEATURE_WITH_SIFTGPU
-        if (feat_type == FEAT_SIFT128) {
-            AF_INFO("Initializing SiftMatchGPU...");
-            sift_match_gpu_ = SiftMatchGPU();
-            sift_match_gpu_.SetLanguage(SiftMatchGPU::SIFTMATCH_CUDA);
-            if (sift_match_gpu_.VerifyContextGL() == 0) {
-                AF_ERROR("SiftMatchGPU initialization failed!");
-            }
-            sift_match_gpu_.Allocate(FeatureMatcher::max_supported, 1);
-            AF_INFO("SiftMatchGPU initialized.");
+        if (const char* variant = lightglue_variant(get_feature(feat_type).getMatcherType())) {
+            const auto& lg = onnx::shared_lightglue(variant);
+            AF_INFO("LightGlue (" << variant << ") ready for " << name << ": " << lg.model_path() << " (" << lg.precision()
+                    << " weights) on onnxruntime/" << lg.provider());
         }
-#endif
-
-#ifdef ALLFEATURE_WITH_TENSORRT
-        if (feat_type == FEAT_SUPERPOINT256) {
-            AF_INFO("Initializing SuperPoint-LightGlue...");
-            const std::string& config_path = Superpoint256::getConfigYaml();
-            const std::string& model_dir = Superpoint256::getModelsDir();
-            Configs configs(config_path, model_dir);
-            matcher_lightglue_superpoint = std::make_shared<SuperPointLightGlue>(configs.superpoint_lightglue_config);
-
-            AF_CONFIG_BEGIN("SuperPoint-LightGlue config");
-            AF_CONFIG_FIELD("onnx_file:           ", configs.superpoint_lightglue_config.onnx_file);
-            AF_CONFIG_FIELD("engine_file:         ", configs.superpoint_lightglue_config.engine_file);
-            AF_CONFIG_FIELD("input_tensor_names:  ", configs.superpoint_lightglue_config.input_tensor_names.size());
-            AF_CONFIG_FIELD("output_tensor_names: ", configs.superpoint_lightglue_config.output_tensor_names.size());
-            AF_CONFIG_END();
-
-            // Build reuses a cached .engine file if present, or compiles from ONNX on first run
-            if (!matcher_lightglue_superpoint->build()) {
-                throw std::runtime_error(
-                        "SuperPoint-LightGlue: failed to build/load TensorRT engine.\n"
-                        "  config: " + config_path + "\n"
-                        "  weights: " + model_dir);
-            }
-
-            // Warm up the model by running a dummy inference to avoid first-run overhead during actual matching
-            Eigen::Matrix<double, 258, Eigen::Dynamic> dummy = Eigen::Matrix<double, 258, Eigen::Dynamic>::Zero(258, 1);
-            std::vector<cv::DMatch> dummy_matches;
-            matcher_lightglue_superpoint->matching_points(dummy, dummy, dummy_matches);
-
-            AF_INFO("SuperPoint-LightGlue initialized and warmed up from: " + model_dir);
-        }
-#endif
-#ifdef ALLFEATURE_WITH_TORCH
-        if (feat_type == FEAT_ALIKED128 || feat_type == FEAT_SIFT128) {
-            AF_INFO("Initializing LightGlue...");
-            // Select CUDA if available, fall back to CPU
-            torch_device = std::make_shared<torch::Device>(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
-            matcher_lightglue = std::make_shared<matcher::LightGlue>();
-            matcher_lightglue->to(*torch_device);
-            AF_INFO("LightGlue initialized.");
-        }
-#endif
     }
 }
 
@@ -1079,31 +1042,13 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
 
         std::vector<cv::DMatch> matches;
         switch(matcherType) {
+            // descriptor-only matching of every float descriptor, learned or not: the cross-checked brute force
+            // (SIFT came through SiftMatchGPU's ratio test until 2026-10-16; plan Q7)
             case LIGHTGLUE_SUPERPOINT:
             case LIGHTGLUE_ALIKED:
+            case LIGHTGLUE_SIFT:
             case BF_L2:{
                 matches = bruteforce_match_l2(desc1, desc2);
-                break;
-            }
-            case LIGHTGLUE_SIFT:
-            {
-#ifdef ALLFEATURE_WITH_SIFTGPU
-                sift_match_gpu_.SetDescriptors(0, desc1.rows, desc1.ptr<float>());
-                sift_match_gpu_.SetDescriptors(1, desc2.rows, desc2.ptr<float>());
-                constexpr int max_out = 4000;
-                std::vector<std::array<uint32_t, 2>> match_buffer(max_out);
-                int num_matches = sift_match_gpu_.GetSiftMatch(max_out, reinterpret_cast<uint32_t(*)[2]>(match_buffer.data()), 0.7f, 0.8f, 1);
-                matches.clear();
-                matches.reserve(num_matches);
-                for (int i = 0; i < num_matches; ++i) {
-                    matches.emplace_back(
-                        static_cast<int>(match_buffer[i][0]),
-                        static_cast<int>(match_buffer[i][1]),
-                        0.0f);
-                }
-#else
-                matches = bruteforce_match_l2(desc1, desc2);   // unreachable: sift128 needs ALLFEATURE_WITH_SIFTGPU
-#endif
                 break;
             }
             case BF_HAMMING:
@@ -1123,27 +1068,17 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
 
         const AF_VSLAM::Feature& ft = get_feature(featType_);
         const MatcherType matcherType = ft.getMatcherType();
-        (void)kps1; (void)kps2;   // only the learned matchers use the keypoints (compiled out without their backend)
 
         std::vector<cv::DMatch> matches;
         switch(matcherType) {
+            // LightGlue on ONNX Runtime: the keypoints are normalised with the real image size inside
+            // (the TensorRT path normalised with a 320x240 config until 2026-10-16)
             case LIGHTGLUE_SIFT:
             case LIGHTGLUE_ALIKED:
-            {
-#ifdef ALLFEATURE_WITH_TORCH
-                matches = lightglueMatching(kps1, desc1, kps2, desc2, 0.0f);
-#else
-                matches = bruteforce_match_l2(desc1, desc2);   // unreachable: these features need ALLFEATURE_WITH_TORCH
-#endif
-                break;
-            }
             case LIGHTGLUE_SUPERPOINT:
             {
-#ifdef ALLFEATURE_WITH_TENSORRT
-                matches = matcherLightglueSuperpoint(kps1, desc1, kps2, desc2, 0.0f);
-#else
-                matches = bruteforce_match_l2(desc1, desc2);   // unreachable: superpoint256 needs ALLFEATURE_WITH_TENSORRT
-#endif
+                matches = onnx::shared_lightglue(lightglue_variant(matcherType))
+                              .match(kps1, desc1, kps2, desc2, image_width, image_height);
                 break;
             }
             case BF_L2:

@@ -47,6 +47,29 @@ on CUDA, ~300 ms on the CPU; SIFT + LightGlue-SIFT ~22 + 18 ms (the extractor on
 6. **SIFT on the CPU is 21–23 ms** at 739×458 with OpenCV 4.12's parallel implementation — the same class as AKAZE,
    not the 40–80 ms feared (Q7's SiftGPU fallback is not needed).
 
+## Steps 5–6 — the host on the new path (2026-10-16)
+
+Wiring: `Feature_superpoint256` → `SuperPointOnnx`, `Feature_aliked128` → `AlikedOnnx` (+ the octree budget as
+before), `Feature_sift128` → `SiftCpu` (scale and orientation kept on the keypoints); `FeatureMatcher` dispatches
+the three `LIGHTGLUE_*` types to `onnx::shared_lightglue(variant).match(...)` with the real image size, and its
+descriptor-only path sends SIFT through the cross-checked brute force (Q7); one LightGlue session per variant per
+process (`onnx/FeatureModels.h`), warmed up once; settings `features_models_dir / features_provider /
+features_threads / features_coreml_units`; CMake options `ALLFEATURE_WITH_TORCH` and `ALLFEATURE_WITH_SIFTGPU` gone,
+`ALLFEATURE_WITH_TENSORRT` = segmentation only; pixi `download-feature-models` + `export-superpoint`
+(`export-features` env now also osx-arm64), `pytorch-gpu` / `siftgpu` / `glew` out of the dependencies.
+
+Smoke (150 `table_3` frames, `vpr: none`, `Tracking.Sequential: 1`, information culling, CUDA, each feature alone):
+
+| features | startup | keyframes inserted / points | median tracking s |
+|---|---|---|---|
+| `[superpoint256]` | 2 extractors (budgets 1000 / 4000 for the init frames) + 1 shared matcher, warm-up 21 ms | 138 / 455 | 0.137 |
+| `[aliked128]` | same shape, warm-up 9 ms | 112 / 327 | 0.086 |
+| `[sift128]` | cv::SIFT ×2 + 1 shared matcher, warm-up 57 ms | 131 / 2191 | 0.245 |
+
+All three run to the end and save their trajectories; the tracking times include the sequential wait for local
+mapping at ~1 keyframe per frame (the shipped YAML's covisibility-kernel keyframe runaway, phase 6 material), so
+they are not per-frame front-end costs. Three `FeatureMatcher`s log the same shared session: by design.
+
 ## Open
 
 - Step 5–6: host wiring (`Feature_*` classes, `FeatureMatcher`, settings keys, model folder tasks), then T3–T5.

@@ -26,11 +26,11 @@ git-clone = "git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git -
 # cached next to them)
 download-megaloc-models = { cmd = "hf download vslamlab/megaloc-models --local-dir megaloc_models", outputs = ["megaloc_models/*.onnx"] }
 download-segmentation-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'efficientvit-seg*' --local-dir segmentation_models", outputs = ["segmentation_models/*.onnx"] }
-# SuperPoint + SuperPoint-LightGlue ONNX (and their config.yaml) and the ALIKED + LightGlue torch
-# weights: no longer tracked in the Thirdparty submodules, served from the same HF repo as
-# subfolders, downloaded to superpoint_models/ and lightglue_models/ next to the other model folders
-download-superpoint-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'superpoint_models/*' --local-dir .", outputs = ["superpoint_models/*.onnx"] }
-download-lightglue-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'lightglue_models/*' --local-dir .", outputs = ["lightglue_models/*.pt"] }
+# Learned feature models on ONNX Runtime (docs/plans/learned_features_onnxruntime.md): the four redistributable
+# exports (ALIKED, BSD-3; the three LightGlue matchers, Apache-2.0) with their sidecars come from the HF repo's
+# feature_models/ folder. SuperPoint's weights are Magic Leap's (non-commercial research, no redistribution: plan
+# Q6), so superpoint_v1.onnx is exported locally from the official file by `export-superpoint` (export-features env).
+download-feature-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'feature_models/*' --local-dir .", outputs = ["feature_models/lightglue_superpoint.onnx"] }
 
 execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
 execute-rgbd = { cmd = "./bin/vslamlab_allfeature_rgbd" }
@@ -64,14 +64,14 @@ onnxruntime-cpp = "1.31.*"
 [target.osx-arm64.dependencies]
 llvm-openmp = "*"   # Apple clang ships no OpenMP runtime; the brute-force matcher and local mapping use it
 
-# linux-64 only: the GPU backends (CUDA / TensorRT / libtorch / SiftGPU) and the X11 display stack
+# linux-64 only: CUDA (ONNX Runtime's CUDA provider, TensorRT segmentation) and the X11 display stack
 [target.linux-64.dependencies]
 # CUDA runtime libraries (the -dev variants also carry the headers the build needs;
 # splitting lib/header per package is a finer pass than is worth it here)
 cuda-version = "12.9.*"
 cuda-cudart-dev = "*"
 onnxruntime-cpp = { version = "1.31.*", build = "*cuda129*" }   # CUDA execution provider (dlopens libcudart / cudnn at runtime)
-cuda-nvrtc-dev = "*"    # torch JIT loads libnvrtc at runtime
+cuda-nvrtc-dev = "*"    # TensorRT loads libnvrtc at runtime
 cuda-nvtx = "*"
 cudnn = "*"
 libcublas-dev = "*"
@@ -84,9 +84,6 @@ libcusparse-dev = "*"
 cusparselt = "*"
 libnvjitlink = "*"
 
-# libtorch (linked by Light_Glue_CPP)
-pytorch-gpu = "2.7.*"   # libtorch 2.7 (Light_Glue_CPP); its cuda129 build shares libprotobuf 6.31 with OpenCV 4.12
-
 # TensorRT: -full carries libnvinfer/nvonnxparser (needed to LOAD engines), -builder the
 # tactics resource needed to BUILD them -- which happens at runtime, on the first run on
 # each GPU (engines are machine-specific, then cached next to the ONNX). Neither is a
@@ -94,9 +91,6 @@ pytorch-gpu = "2.7.*"   # libtorch 2.7 (Light_Glue_CPP); its cuda129 build share
 tensorrt-cxx = "*"
 tensorrt-cxx-full = "*"
 tensorrt-cxx-builder = "*"
-# SiftGPU (CUDA), packaged in github.com/VSLAM-LAB/conda-recipes (prefix.dev/vslamlab/vslamlab)
-siftgpu = "*"
-glew = "*"
 
 # Display stack (Pangolin viewer)
 xorg-libxext = "*"
@@ -139,7 +133,7 @@ tensorrt-cxx-headers = "*"   # NvInfer.h etc. for compilation (the runtime libs 
 build = { cmd = "./build.sh" }
 build-cpu = { cmd = "./build.sh -c" }   # GPU-free build (build-cpu/, same bin/ and lib/): the Mac build, also testable on Linux
 # setup = everything a fresh clone needs to run: fetch the models, then compile
-setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "download-superpoint-models", "download-lightglue-models", "build"] }
+setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "download-feature-models", { task = "export-superpoint", environment = "export-features" }, "build"] }
 
 # macOS: no GPU backend yet (mac_port.md phases 2-5), so setup skips the model downloads; CMake defaults every
 # ALLFEATURE_WITH_* option to OFF on Apple, hence plain `build` is already the GPU-free build there
@@ -209,12 +203,16 @@ docs-check = { cmd = "python docs/tools/resolve_links.py --check && python docs/
 # environment without the default feature: the default feature carries the runtime pytorch-gpu 2.7 on linux-64,
 # which cannot share an environment with pytorch-cpu.
 [feature.export-features]
-platforms = ["linux-64-cuda"]
+platforms = ["linux-64-cuda", "osx-arm64"]   # osx-arm64 too: every machine exports SuperPoint itself (plan Q6)
 
 [feature.export-features.tasks]
 # PYTHONNOUSERSITE: keep ~/.local/lib/pythonX.Y/site-packages out of the env (a stale user-site package there, e.g.
 # an empty `triton` folder, shadows the real module and breaks torch's import) - the placecell export task's lesson
 export-features = { cmd = "python tools/export_features.py", env = { PYTHONNOUSERSITE = "1" } }
+# SuperPoint only (feature_models/superpoint_v1.onnx + fp16 twin + sidecars) - the one model that is not downloaded
+export-superpoint = { cmd = "python tools/export_features.py --only superpoint", env = { PYTHONNOUSERSITE = "1" }, outputs = ["feature_models/superpoint_v1.onnx"] }
+# publish the four redistributable exports + sidecars (never SuperPoint, never the references / cache); needs `hf auth login`
+upload-feature-models = { cmd = "hf upload vslamlab/allfeature-vslamlab feature_models feature_models --include='aliked_*.onnx*' --include='lightglue_*.onnx*'" }
 
 [feature.export-features.dependencies]
 python = "3.11.*"
@@ -262,9 +260,8 @@ backend = { name = "pixi-build-cmake", version = "0.*" }
 
 [package.build.config]
 compilers = ["c", "cxx", "cuda"]
-# x86-64-v3 and the portable GPU list (CMakeLists.txt); outputs stay in the build directory, not in bin/ and lib/
+# x86-64-v3 (CMakeLists.txt); outputs stay in the build directory, not in bin/ and lib/
 extra-args = ["-DALLFEATURE_NATIVE=OFF", "-DALLFEATURE_OUTPUT_IN_SOURCE=OFF"]
-# libtorch-heavy translation units (Light_Glue_CPP) take several GB each at -O3
 env = { CMAKE_BUILD_PARALLEL_LEVEL = "3" }
 
 [package.build-dependencies]
@@ -290,9 +287,8 @@ libcusolver-dev = "*"
 libcusparse-dev = "*"
 cusparselt = "*"
 libnvjitlink = "*"
-onnxruntime-cpp = { version = "1.31.*", build = "*cuda129*" }   # MegaLoc VPR backend (placecell::megaloc)
-libtorch = { version = "2.7.*", build = "cuda*" }   # cuda129 build: libprotobuf 6.31, like OpenCV 4.12
-tensorrt-cxx-headers = "10.3.*"   # validated TensorRT (spqr-tests channel)
+onnxruntime-cpp = { version = "1.31.*", build = "*cuda129*" }   # learned features + MegaLoc VPR backend
+tensorrt-cxx-headers = "10.3.*"   # validated TensorRT (spqr-tests channel); online segmentation
 tensorrt-cxx-full = "10.3.*"
 tensorrt-cxx-onnx = "10.3.*"
 libopencv = "4.12.*"
@@ -301,8 +297,6 @@ yaml-cpp = "*"
 pangolin-opengl = "*"
 brisk = "*"
 akaze = "*"
-siftgpu = "*"
-glew = "*"
 zlib = "*"
 libgl-devel = "*"
 libegl-devel = "*"
@@ -313,9 +307,8 @@ xorg-libxext = "*"
 libxkbcommon = "*"
 
 [package.run-dependencies]
-libtorch = { version = "2.7.*", build = "cuda*" }
-cuda-nvrtc = "*"        # torch JIT loads libnvrtc at runtime
-onnxruntime-cpp = { version = "1.31.*", build = "*cuda129*" }   # MegaLoc VPR backend
+cuda-nvrtc = "*"        # TensorRT loads libnvrtc at runtime
+onnxruntime-cpp = { version = "1.31.*", build = "*cuda129*" }   # learned features + MegaLoc VPR backend
 cuda-cudart = "*"       # dlopened by ONNX Runtime's CUDA provider, not a declared dependency of its package
 tensorrt-cxx-full = "10.3.*"
 tensorrt-cxx-onnx = "10.3.*"
@@ -323,4 +316,3 @@ tensorrt-cxx-builder = "10.3.*"   # engines are built from the ONNX on the first
 pangolin-opengl = "*"
 brisk = "*"
 akaze = "*"
-siftgpu = "*"

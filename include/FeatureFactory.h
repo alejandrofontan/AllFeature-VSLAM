@@ -15,18 +15,13 @@
 #ifdef ALLFEATURE_WITH_BRISK
 #include "Feature_brisk48.h"
 #endif
-// GPU-backed features follow the CMake backend options (ALLFEATURE_WITH_*, CMakeLists.txt): a feature
-// compiled out keeps its FeatureType value (Types.h) but has no Feature instance, so requesting it in the
+// The learned features run on ONNX Runtime on every platform (docs/plans/learned_features_onnxruntime.md), SIFT on
+// OpenCV's CPU implementation: no CMake option gates them any more. A feature compiled out (brisk / akaze without
+// their conda package) keeps its FeatureType value (Types.h) but has no Feature instance, so requesting it in the
 // settings is an error at startup (feature_compiled_out below) instead of a link error.
-#ifdef ALLFEATURE_WITH_SIFTGPU
 #include "Feature_sift128.h"
-#endif
-#ifdef ALLFEATURE_WITH_TORCH
 #include "Feature_aliked128.h"
-#endif
-#ifdef ALLFEATURE_WITH_TENSORRT
 #include "Feature_superpoint256.h"
-#endif
 
 // Returns a stateless singleton per feature type (every Feature virtual is const).
 // Previously returned a fresh unique_ptr per call — a heap allocation inside every
@@ -48,15 +43,9 @@ inline const AF_VSLAM::Feature& get_feature(const FeatureType& featureType) {
 #endif
     static const AF_VSLAM::Surf64 surf64;
     static const AF_VSLAM::Kaze64 kaze64;
-#ifdef ALLFEATURE_WITH_SIFTGPU
     static const AF_VSLAM::Sift128 sift128;
-#endif
-#ifdef ALLFEATURE_WITH_TORCH
     static const AF_VSLAM::Aliked128 aliked128;
-#endif
-#ifdef ALLFEATURE_WITH_TENSORRT
     static const AF_VSLAM::Superpoint256 superpoint256;
-#endif
 
     switch (featureType) {
         case FEAT_ORB32:
@@ -78,23 +67,11 @@ inline const AF_VSLAM::Feature& get_feature(const FeatureType& featureType) {
         case FEAT_KAZE64:
             return kaze64;
         case FEAT_SIFT128:
-#ifdef ALLFEATURE_WITH_SIFTGPU
             return sift128;
-#else
-            feature_compiled_out("sift128", "the CMake option ALLFEATURE_WITH_SIFTGPU=ON");
-#endif
         case FEAT_ALIKED128:
-#ifdef ALLFEATURE_WITH_TORCH
             return aliked128;
-#else
-            feature_compiled_out("aliked128", "the CMake option ALLFEATURE_WITH_TORCH=ON");
-#endif
         case FEAT_SUPERPOINT256:
-#ifdef ALLFEATURE_WITH_TENSORRT
             return superpoint256;
-#else
-            feature_compiled_out("superpoint256", "the CMake option ALLFEATURE_WITH_TENSORRT=ON");
-#endif
         default:{
             std::cout <<"get_feature"<< std::endl;
             std::terminate();

@@ -47,7 +47,7 @@ build_library() {
   # -c: GPU-free build (docs/plans/mac_port.md phase 1) in its own build directory, same bin/ and lib/ outputs
   if [ "$cpu_only" = true ]; then
     build_folder="$source_folder/build-cpu"
-    extra_flags+=(-DALLFEATURE_WITH_SIFTGPU=OFF -DALLFEATURE_WITH_TORCH=OFF -DALLFEATURE_WITH_TENSORRT=OFF)
+    extra_flags+=(-DALLFEATURE_WITH_TENSORRT=OFF)
   fi
 
   if [ "$verbose" = true ]; then
