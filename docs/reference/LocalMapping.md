@@ -103,9 +103,9 @@ void LocalMapping::run()
   finish request. Then [`reset_if_requested`](#reset_if_requested), publish "idle", break on a finish
   request, and sleep 3 ms only when the queue is empty, so a queued keyframe is processed at once.
 - Tracking reads the busy flag to choose between a normal and an emergency insertion
-  ([`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1008 "if(local_mapper_->accepts_keyframes())"))
+  ([`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1152 "if(local_mapper_->accepts_keyframes())"))
   and to wait after an emergency insertion
-  ([`Tracking::track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L242 "while(!local_mapper_->accepts_keyframes())")).
+  ([`Tracking::track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L269 "while(!local_mapper_->accepts_keyframes())")).
 - differs from ORB-SLAM2: the busy flag is toggled once per iteration around the whole
   iteration, not around `ProcessNewKeyFrame` only; the stop branch is taken only when the queue
   is empty, so a queued keyframe is always processed before the thread pauses for a loop closure.
@@ -184,7 +184,7 @@ void LocalMapping::create_new_map_points()
   against them ([`cache_neighbor_matches`](#cache_neighbor_matches)), then for each neighbour whose
   baseline over its median scene depth ([`KeyFrame::compute_scene_median_depth`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyFrame.cc#L685)) is at least
   `CreateNewMapPointsMinBaselineDepthRatio`, fetches the matched keypoint pairs per feature type
-  ([`FeatureMatcher::match_keyframes_for_triangulation`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L387)) and places each pair in 3D.
+  ([`FeatureMatcher::match_keyframes_for_triangulation`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L388)) and places each pair in 3D.
 - 3D position, in priority order: both views have sensor depth (`inv_depth > 0`) → back-project from
   each and average; one view has depth → back-project from that view; neither → linear two-view
   triangulation (SVD of the 4×4 system) only if `0 < cos(parallax) < CreateNewMapPointsMaxParallaxCos`;
@@ -214,7 +214,7 @@ void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors
   `collapse(2)` parallel loop, then stores the results serially: per feature type in both keyframes'
   `cache_matched_pairs_feat_type` (reversed for the neighbour) and stacked over feature types with
   keypoint-index offsets in `cache_matched_pairs` (reversed via
-  [`FeatureMatcher::swap_match_direction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L83)).
+  [`FeatureMatcher::swap_match_direction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L84)).
 - the cache is what `match_keyframes_for_triangulation` reads; a neighbour already cached (for
   example by the matcher itself in an earlier call) is skipped.
 - differs from ORB-SLAM2: no counterpart (stock uses the BoW feature vector to restrict matching).
@@ -249,7 +249,7 @@ void LocalMapping::search_in_neighbors()
   covisible keyframes plus, for each, its `SearchInNeighborsSecondKeyframes` best covisible
   keyframes, deduplicated with the `fuse_target_for_keyframe` mark (the current keyframe excluded).
 - per feature type: projects the current keyframe's map points into every target and fuses
-  duplicates ([`FeatureMatcher::fuse_map_points_to_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L426), radius
+  duplicates ([`FeatureMatcher::fuse_map_points_to_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L427), radius
   `SearchInNeighborsRadius`); collects the targets' map points (deduplicated with
   `fuse_candidate_for_keyframe`) and fuses them into the current keyframe; then recomputes the
   descriptor and normal/depth of every surviving match. Finally refreshes the covisibility graph.
@@ -341,7 +341,7 @@ void LocalMapping::cull_keyframes_information()
   cull, alive count) and one summary per call with culls; when nothing is culled and the history
   holds keyframes above τ (threshold lowered after earlier culls), reports that once per change.
 - the same τ and centring drive keyframe *insertion* in
-  [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L937 "const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load()"),
+  [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1081 "const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load()"),
   so insertion and culling maintain one invariant from both ends. Design background:
   [`docs/notes/2026-08-28_place_recognition_megaloc.md`](../notes/2026-08-28_place_recognition_megaloc.md),
   [`docs/notes/2026-09-03_keyframe_information_policy.md`](../notes/2026-09-03_keyframe_information_policy.md).
@@ -362,9 +362,9 @@ void LocalMapping::insert_keyframe(const Keyframe& keyframe)
 ```
 - appends to `new_keyframes_` under `new_keyframes_mutex_`. Nothing else: the keyframe is processed
   by [`run`](#run) on the local-mapping thread.
-- called from: [`Tracking::create_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1043 "local_mapper_->insert_keyframe(keyframe)") (wrapped in
+- called from: [`Tracking::create_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1187 "local_mapper_->insert_keyframe(keyframe)") (wrapped in
   [`set_insertion_lock`](#set_insertion_lock)), and
-  [`Tracking::create_initial_map`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L551 "local_mapper_->insert_keyframe(keyframe_ini)") for the two initial keyframes.
+  [`Tracking::create_initial_map`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L578 "local_mapper_->insert_keyframe(keyframe_ini)") for the two initial keyframes.
 - differs from ORB-SLAM2: the `mbAbortBA = true` side effect is gone (no BA interruption).
 
 ### `has_new_keyframes`
@@ -374,7 +374,7 @@ bool LocalMapping::has_new_keyframes() const
 ```
 - `!new_keyframes_.empty()` under the queue mutex (`mutable`, so the query is `const`).
 - called from: [`run`](#run) (twice per iteration: to process, and to decide whether to sleep) and
-  [`Tracking::wait_for_idle_local_mapper`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1050), which spins until the
+  [`Tracking::wait_for_idle_local_mapper`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1194), which spins until the
   queue is empty *and* the thread is idle (sequential mode).
 
 ### `accepts_keyframes`
@@ -384,9 +384,9 @@ bool LocalMapping::accepts_keyframes() const
 ```
 - the busy flag under `accept_mutex_`: `false` from the start of a [`run`](#run) iteration until
   its work is done.
-- called from: [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1008 "if(local_mapper_->accepts_keyframes())") (busy → only an
-  emergency keyframe may be inserted), [`Tracking::track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L242 "while(!local_mapper_->accepts_keyframes())") (wait after an
-  emergency insertion), [`Tracking::wait_for_idle_local_mapper`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1050).
+- called from: [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1152 "if(local_mapper_->accepts_keyframes())") (busy → only an
+  emergency keyframe may be inserted), [`Tracking::track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L269 "while(!local_mapper_->accepts_keyframes())") (wait after an
+  emergency insertion), [`Tracking::wait_for_idle_local_mapper`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1194).
 
 ### `set_accept_keyframes`
 
@@ -404,7 +404,7 @@ bool LocalMapping::set_insertion_lock(const bool locked)
 - under `stop_mutex_`: refuses (`false`) to lock when the thread is already stopped; otherwise sets
   `insertion_locked_`, which [`stop_if_requested`](#stop_if_requested) honours by deferring a pending
   stop until the lock is released.
-- called from: [`Tracking::create_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1035 "if(!local_mapper_->set_insertion_lock(true))") around
+- called from: [`Tracking::create_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1179 "if(!local_mapper_->set_insertion_lock(true))") around
   `insert_keyframe`; a `false` return skips the insertion (a loop closure holds the mapper).
 - differs from ORB-SLAM2: replaces `SetNotStop(bool)`; same contract, returns the refusal instead of
   relying on the caller to check `isStopped()` first.
@@ -439,7 +439,7 @@ bool LocalMapping::stop_if_requested()
 bool LocalMapping::is_stopped() const
 ```
 - `stopped_` under `stop_mutex_`.
-- called from: [`run`](#run) (idle loop), [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L869 "local_mapper_->is_stopped()") (no keyframes while
+- called from: [`run`](#run) (idle loop), [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1013 "local_mapper_->is_stopped()") (no keyframes while
   frozen), [`LoopClosing::correct_loop`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L402 "while(!local_mapper_->is_stopped())") and
   [`LoopClosing::apply_gba_correction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L599 "while(!local_mapper_->is_stopped()") (wait for the pause;
   the latter also accepts `is_finished` so shutdown cannot deadlock it).
@@ -450,7 +450,7 @@ bool LocalMapping::is_stopped() const
 bool LocalMapping::is_stop_requested() const
 ```
 - `stop_requested_` under `stop_mutex_`.
-- called from: [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L869 "local_mapper_->is_stop_requested()"): a pending stop
+- called from: [`Tracking::need_new_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1013 "local_mapper_->is_stop_requested()"): a pending stop
   already blocks keyframe insertion, before the thread has actually paused.
 
 ### `release`
@@ -477,7 +477,7 @@ void LocalMapping::request_reset()
 - raises `reset_requested_` under `reset_mutex_`, then blocks (3 ms polls of
   [`is_reset_requested`](#is_reset_requested)) until the local-mapping thread has performed the reset.
   Blocking matters: `Tracking::reset` clears the map right after this returns.
-- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1220 "local_mapper_->request_reset()").
+- called from: [`Tracking::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1364 "local_mapper_->request_reset()").
 
 ### `is_reset_requested`
 

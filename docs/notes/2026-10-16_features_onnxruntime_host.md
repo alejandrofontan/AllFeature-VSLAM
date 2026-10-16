@@ -141,9 +141,23 @@ setting since this evening: `Tracking.NominalImageArea` (the area rule, 307200 p
   73–84 ms with superpoint256, 39 ms with orb32; the per-frame LightGlue call of `track_reference_keyframe` (a padded
   L768 call, 41 ms isolated, 53–96 ms with the mapper's five calls in flight) is the gap, SuperPoint itself stays at
   16 ms. Fixed here: every padded session is created at startup (`preload_lightglue`; the lazy L1024 creation cost a
-  9 s stall on the tracking thread) and the mapper's calls are serialised per session (finding 7). Remaining levers,
-  phase 6: motion-model projection tracking instead of a LightGlue match per frame; L512 / fp16 for the tracker's
-  call if it stays.
+  9 s stall on the tracking thread) and the mapper's calls are serialised per session (finding 7). **The per-frame
+  LightGlue call has an alternative since 2026-10-17: `Tracking.FrameTracking: "optical_flow"`** (`track_with_optical_flow`:
+  KLT of the last frame's tracked points, forward-backward checked, snapped to the nearest detected keypoint within 2 px,
+  the shared pose optimization; the reference-keyframe match stays as the fallback and nothing else changes). Linux,
+  150 `table_3` frames, `vpr: none`, Sequential 0:
+
+  | feature | stage | median / mean tracking | keyframes | points | lost | fallbacks |
+  |---|---|---|---|---|---|---|
+  | superpoint256 | reference_keyframe | 36 / 46 ms | 70 | 647 | 0 | – |
+  | superpoint256 | optical_flow | **14.5 / 17 ms** | 53 | 579 | 0 | 0 |
+  | aliked128 | reference_keyframe | 30 / 34 ms | 64 | 380 | 0 | – |
+  | aliked128 | optical_flow | **24 / 24 ms** | 69 | 377 | 0 | 0 |
+
+  The flow never fell back on this sequence. On the Mac the saved call is the 41 ms L768 match. Default stays
+  `reference_keyframe` until the gym (3 runs, trajectory accuracy) says otherwise; fewer keyframes with
+  superpoint256 means more map points tracked per frame (fewer weak-tracking triggers), to be read with the
+  accuracy numbers.
 - ALIKED on the Mac: the head split (plan §7b), 136 → ≈ 60 ms.
 - ALIKED CPU 217 ms: profile per op; the Memcpy partition on CUDA (10 nodes, 16 ms all included).
 - The two ORT "nodes not assigned to the preferred provider" warnings print per session; keep (informative) or

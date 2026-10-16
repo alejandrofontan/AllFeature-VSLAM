@@ -36,6 +36,7 @@
 #include "Initializer.h"
 #include "KeyframeInformation.h"
 #include "PlaceRecognition.h"
+#include "Profiling_aux.h"
 #include "LocalMapping.h"
 #include "LoopClosing.h"
 #include "Map.h"
@@ -90,6 +91,15 @@ struct TrackingParameters
                                           // to a multiple of 32; every per-frame cost scales with it
     int image_width{0};                   // both > 0: resize to exactly this size instead (intrinsics scaled per
     int image_height{0};                  // axis); multiples of 32, or the crop trims the remainder
+
+    // Frame-to-frame stage: "reference_keyframe" = a LightGlue (or brute-force) match against the reference
+    // keyframe on every frame (track_reference_keyframe); "optical_flow" = KLT on the last frame's tracked
+    // points, snapped to the current frame's detected keypoints (track_with_optical_flow), with the
+    // reference-keyframe match as the fallback when the flow finds too few matches or inliers
+    std::string frame_tracking{"reference_keyframe"};
+    float flow_association_radius{2.0f};  // px: a flowed point takes the nearest detected keypoint within this
+    float flow_max_backward_error{1.0f};  // px: forward-backward KLT disagreement above this drops the track
+    int flow_min_matches{30};             // map points matched by flow below this -> fall back to the reference match
 
     // track_reference_keyframe()
     int track_ref_min_matches{15}; // raw matches to the reference keyframe below this -> lost
@@ -168,6 +178,8 @@ public:
     // Current Frame
     Frame current_frame_;
     cv::Mat color_image_; // current image as loaded (BGR/BGRA, or gray), after resize/crop; drawn by the viewer
+    cv::Mat grey_image_;      // current grey frame after resize/crop (optical-flow tracking)
+    cv::Mat last_grey_image_; // the previous frame's, whatever its tracking state
     cv::Mat mask_image_; // segmentation mask of the current image (1 = static, 0 = dynamic); empty when segmentation is off
     std::string image_name_;
 
@@ -238,6 +250,14 @@ protected:
 
     void check_replaced_in_last_frame();
     bool track_reference_keyframe();
+    // Frame-to-frame tracking by KLT optical flow of the last frame's tracked points into the current grey frame
+    // (forward-backward checked), each snapped to the nearest detected keypoint of its feature type within
+    // params.flow_association_radius, then the shared pose optimization. false = fall back to
+    // track_reference_keyframe (never "lost" by itself; the frame's matches are cleared first).
+    bool track_with_optical_flow();
+    // The tail both stages share: seed the pose from the last frame's relative pose, optimize, the depth-free
+    // rescue, discard the outlier matches. Returns the inlier count; the caller decides what too few means.
+    int optimize_pose_from_last_frame(int num_matches, const char* stage, StageTimer& timer);
 
     bool relocalize();
     // One RANSAC pose hypothesis for a relocalization candidate: seed the frame

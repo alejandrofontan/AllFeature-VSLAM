@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <limits>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -17,7 +18,9 @@
 #include <string>
 #include <utility>
 
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core/core.hpp>
+#include <opencv2/video/tracking.hpp>
 
 #include "Converter.h"
 #include "Initializer.h"
@@ -58,6 +61,16 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.NominalImageArea", params.nominal_image_area);
     read_if_present("Tracking.ImageWidth", params.image_width);
     read_if_present("Tracking.ImageHeight", params.image_height);
+    read_if_present("Tracking.FrameTracking", params.frame_tracking);
+    read_if_present("Tracking.FlowAssociationRadius", params.flow_association_radius);
+    read_if_present("Tracking.FlowMaxBackwardError", params.flow_max_backward_error);
+    read_if_present("Tracking.FlowMinMatches", params.flow_min_matches);
+    if(params.frame_tracking != "reference_keyframe" && params.frame_tracking != "optical_flow")
+    {
+        AF_ERROR("[Tracking] Tracking.FrameTracking must be \"reference_keyframe\" or \"optical_flow\", got \""
+                 << params.frame_tracking << "\"");
+        exit(-1);
+    }
     read_if_present("Tracking.TrackRefMinMatches", params.track_ref_min_matches);
     read_if_present("Tracking.TrackRefMinInliers", params.track_ref_min_inliers);
     read_if_present("Tracking.TrackLocalMapMinInliers", params.track_local_map_min_inliers);
@@ -112,6 +125,12 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
     }
 
     matcher_ = std::make_shared<FeatureMatcher>(image_width_, image_height_, feature_types, "Tracking");
+    if(params.frame_tracking == "optical_flow")
+        AF_INFO("[Tracking] frame-to-frame stage: optical_flow (KLT on the last frame's tracked points, association radius "
+                << params.flow_association_radius << " px, min " << params.flow_min_matches
+                << " matches; fallback: the reference-keyframe match)");
+    else
+        AF_INFO("[Tracking] frame-to-frame stage: reference_keyframe (a descriptor match per frame)");
 }
 
 mat4f Tracking::grab_image(Image &im, const double timestamp)
@@ -123,6 +142,8 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     if(fix_image_size_)
         im.fix_image_size(image_width_, image_height_);
 
+    last_grey_image_ = grey_image_;                   // the previous frame's grey, for optical-flow tracking
+    grey_image_ = im.grayImg.clone();                 // the caller may reuse its Image
     color_image_ = im.img;
     mask_image_ = im.mask;
     image_name_ = im.imageName;
@@ -182,7 +203,10 @@ void Tracking::track()
     {
         // Local Mapping might have changed some MapPoints tracked in last frame
         check_replaced_in_last_frame();
-        ok = run_tracking_stage([this] { return track_reference_keyframe(); });
+        if(params.frame_tracking == "optical_flow")
+            ok = track_with_optical_flow();                  // false: not lost, fall back to the descriptor match
+        if(!ok)
+            ok = run_tracking_stage([this] { return track_reference_keyframe(); });
     }
     else
         ok = relocalize();
@@ -610,6 +634,21 @@ bool Tracking::track_reference_keyframe()
     }
     timer.record(track_ref_times_);
 
+    const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_reference_keyframe", timer);
+    if(num_map_inliers < params.track_ref_min_inliers)
+    {
+        std::ostringstream reason;
+        reason << "track_reference_keyframe: insufficient inlier matches after pose optimization (num_map_inliers="
+               << num_map_inliers << " < " << params.track_ref_min_inliers << ")"
+               << " | frame=" << current_frame_.frame_id << " raw_matches=" << num_matches;
+        throw TrackingLostException(reason.str());
+    }
+
+    return true;
+}
+
+int Tracking::optimize_pose_from_last_frame(const int num_matches, const char* stage, StageTimer& timer)
+{
     // Optimize pose — seeded from the last frame's pose, recomputed on the fly from its
     // stored RELATIVE pose and the reference keyframe's CURRENT pose, so BA/loop-closure
     // corrections since last frame are absorbed into the seed by construction (no stale
@@ -632,7 +671,7 @@ bool Tracking::track_reference_keyframe()
     if(num_map_inliers < params.track_ref_min_inliers
        && num_matches >= 3 * params.track_ref_min_matches)
     {
-        AF_WARN("track_reference_keyframe: pose optimization collapsed (" << num_map_inliers
+        AF_WARN(stage << ": pose optimization collapsed (" << num_map_inliers
                 << " inliers of " << num_matches << " raw matches) — retrying without depth channel"
                 << " | frame=" << current_frame_.frame_id);
 
@@ -660,16 +699,118 @@ bool Tracking::track_reference_keyframe()
         }
     }
     timer.record(pose_opt_times_);
+    return num_map_inliers;
+}
 
-    if(num_map_inliers < params.track_ref_min_inliers)
+bool Tracking::track_with_optical_flow()
+{
+    StageTimer timer{};
+    const auto fall_back = [this](const char* why, const int count)
     {
-        std::ostringstream reason;
-        reason << "track_reference_keyframe: insufficient inlier matches after pose optimization (num_map_inliers="
-               << num_map_inliers << " < " << params.track_ref_min_inliers << ")"
-               << " | frame=" << current_frame_.frame_id << " raw_matches=" << num_matches;
-        throw TrackingLostException(reason.str());
-    }
+        for (auto& [ft, pts] : current_frame_.pts)
+        {
+            std::fill(pts.begin(), pts.end(), nullptr);
+            std::fill(current_frame_.outliers.at(ft).begin(), current_frame_.outliers.at(ft).end(), false);
+        }
+        AF_INFO("track_with_optical_flow: " << why << " (" << count << ") - falling back to the reference-keyframe match"
+                << " | frame=" << current_frame_.frame_id);
+        return false;
+    };
+    if(last_grey_image_.empty() || last_grey_image_.size() != grey_image_.size())
+        return fall_back("no previous frame of the same size", 0);
 
+    // 1. The last frame's tracked points: raw (distorted) positions, the flow runs on the image as it is
+    struct Track { FeatureType ft; int index; Pt map_point; };
+    std::vector<Track> tracks;
+    std::vector<cv::Point2f> prev_pts;
+    for (const auto& [ft, pts] : last_frame_.pts)
+    {
+        const auto& raw = last_frame_.raw_keypoints.at(ft);
+        const auto& outliers = last_frame_.outliers.at(ft);
+        for (size_t i = 0; i < pts.size(); i++)
+        {
+            if(!pts[i] || pts[i]->is_bad() || outliers[i])
+                continue;
+            tracks.push_back({ft, static_cast<int>(i), pts[i]});
+            prev_pts.push_back(raw[i].pt);
+        }
+    }
+    if(static_cast<int>(prev_pts.size()) < params.flow_min_matches)
+        return fall_back("too few tracked points in the last frame", static_cast<int>(prev_pts.size()));
+
+    // 2. KLT forward and backward; a track survives when both succeed and it returns to where it started
+    std::vector<cv::Point2f> next_pts, back_pts;
+    std::vector<uchar> status_fwd, status_bwd;
+    std::vector<float> err;
+    const cv::Size window(21, 21);
+    const int levels = 3;
+    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 30, 0.01);
+    cv::calcOpticalFlowPyrLK(last_grey_image_, grey_image_, prev_pts, next_pts, status_fwd, err, window, levels, criteria);
+    cv::calcOpticalFlowPyrLK(grey_image_, last_grey_image_, next_pts, back_pts, status_bwd, err, window, levels, criteria);
+    std::vector<int> kept;
+    std::vector<cv::Point2f> kept_pts;
+    const float max_err2 = params.flow_max_backward_error * params.flow_max_backward_error;
+    for (size_t t = 0; t < tracks.size(); t++)
+    {
+        if(!status_fwd[t] || !status_bwd[t])
+            continue;
+        const cv::Point2f d = back_pts[t] - prev_pts[t];
+        if(d.dot(d) > max_err2)
+            continue;
+        const cv::Point2f& p = next_pts[t];
+        if(p.x < 0.0f || p.y < 0.0f || p.x >= static_cast<float>(grey_image_.cols) || p.y >= static_cast<float>(grey_image_.rows))
+            continue;
+        kept.push_back(static_cast<int>(t));
+        kept_pts.push_back(p);
+    }
+    if(static_cast<int>(kept.size()) < params.flow_min_matches)
+        return fall_back("too few flow tracks survived the forward-backward check", static_cast<int>(kept.size()));
+
+    // 3. The frame's keypoints live in undistorted coordinates: undistort the flowed positions to look them up
+    std::vector<cv::Point2f> lookup_pts = kept_pts;
+    if(mDistCoef.at<float>(0) != 0.0f)
+        cv::undistortPoints(kept_pts, lookup_pts, mK, mDistCoef, cv::noArray(), mK);
+
+    // 4. Snap each track to the nearest detected keypoint of its feature type; a keypoint claimed twice keeps
+    //    the closer track
+    std::map<FeatureType, std::vector<float>> best_dist2;
+    for (const auto& [ft, n] : current_frame_.N)
+        best_dist2[ft].assign(n, std::numeric_limits<float>::max());
+    const float radius = params.flow_association_radius;
+    int num_matches = 0;
+    for (size_t k = 0; k < kept.size(); k++)
+    {
+        const Track& track = tracks[kept[k]];
+        const cv::Point2f& u = lookup_pts[k];
+        const std::vector<size_t> candidates = current_frame_.get_features_in_area(u.x, u.y, radius, track.ft);
+        int best = -1;
+        float best_d2 = radius * radius;
+        for (const size_t idx : candidates)
+        {
+            const cv::Point2f d = current_frame_.keypoints.at(track.ft)[idx].pt - u;
+            const float d2 = d.dot(d);
+            if(d2 < best_d2)
+            {
+                best_d2 = d2;
+                best = static_cast<int>(idx);
+            }
+        }
+        if(best < 0 || best_d2 >= best_dist2[track.ft][best])
+            continue;
+        auto& pts = current_frame_.pts.at(track.ft);
+        if(!pts[best])
+            ++num_matches;                                  // a re-claim replaces, the count stays
+        pts[best] = track.map_point;
+        best_dist2[track.ft][best] = best_d2;
+    }
+    if(num_matches < params.flow_min_matches)
+        return fall_back("too few flow tracks landed on a detected keypoint", num_matches);
+    timer.record(track_ref_times_);
+
+    // 5. The shared pose optimization; too few inliers is a fallback here, not a loss
+    const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_with_optical_flow", timer);
+    if(num_map_inliers < params.track_ref_min_inliers)
+        return fall_back("too few inliers after pose optimization", num_map_inliers);
     return true;
 }
 

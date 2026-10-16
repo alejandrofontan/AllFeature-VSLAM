@@ -211,7 +211,9 @@ Fused extractor+matcher pipeline per pair (LightGlue-ONNX style: one session, no
 attention fusion (`com.microsoft.MultiHeadAttention` on CUDA/CPU — not CoreML); int8 weights for the CNNs; a lower
 `n_limit`/top-k for ALIKED; image downscale per device (`Image::fix_image_size` exists); cache the per-frame
 SuperPoint/ALIKED outputs the matcher re-uses across the several `match_descriptors` calls Tracking makes on the same
-frame. **ALIKED head split for the Mac** (measured 2026-10-16, static 739×458 on Core ML GPU): the full graph runs in
+frame — *pulled 2026-10-17 as `Tracking.FrameTracking: "optical_flow"` (KLT frame-to-frame, LightGlue only as the
+fallback; superpoint256 on Linux 36 → 14.5 ms median tracking, no fallbacks on `table_3`; default off until the gym
+confirms accuracy)*. **ALIKED head split for the Mac** (measured 2026-10-16, static 739×458 on Core ML GPU): the full graph runs in
 136 ms over 16 partitions, its trunk alone in 54 ms over 2 — the DKD detector head (NMS, top-k, 5×5 soft-argmax) and
 the SDDH descriptor head cost ~80 ms in partition round trips. The lever: the trunk graph (`aliked_n16_<W>x<H>_trunk.onnx`
 exists) + the detector head in C++ as SuperPoint's NMS is + the descriptor head as a small static graph on the

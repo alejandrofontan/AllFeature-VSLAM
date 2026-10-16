@@ -12,32 +12,32 @@ commit that was read. Tags: `→ #<issue>`, `→ reference`, `→ paper:<file>.t
 
 | Function | Source | State | Notes |
 |---|---|---|---|
-| `Tracking::LoadParameters` | [Tracking.cc#L36](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L36 "Tracking::LoadParameters(") | unread |  |
-| `Tracking::Tracking` | [Tracking.cc#L90](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L90 "Tracking::Tracking(") | unread |  |
-| `Tracking::grab_image` | [Tracking.cc#L114](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L114 "Tracking::grab_image(") | unread |  |
-| `Tracking::track` | [Tracking.cc#L149](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L149 "Tracking::track(") | unread |  |
-| `Tracking::store_relative_pose` | [Tracking.cc#L251](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L251 "Tracking::store_relative_pose(") | unread |  |
-| `Tracking::monocular_initialization` | [Tracking.cc#L257](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L257 "Tracking::monocular_initialization(") | unread |  |
-| `Tracking::attempt_monocular_initialization` | [Tracking.cc#L265](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L265 "Tracking::attempt_monocular_initialization(") | unread |  |
-| `Tracking::create_initial_map` | [Tracking.cc#L363](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L363 "Tracking::create_initial_map(") | unread |  |
-| `Tracking::check_replaced_in_last_frame` | [Tracking.cc#L573](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L573 "Tracking::check_replaced_in_last_frame(") | unread |  |
-| `Tracking::track_reference_keyframe` | [Tracking.cc#L583](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L583 "Tracking::track_reference_keyframe(") | unread |  |
-| `Tracking::track_local_map` | [Tracking.cc#L673](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L673 "Tracking::track_local_map(") | unread |  |
-| `Tracking::update_local_map` | [Tracking.cc#L716](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L716 "Tracking::update_local_map(") | unread |  |
-| `Tracking::update_local_keyframes` | [Tracking.cc#L725](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L725 "Tracking::update_local_keyframes(") | unread |  |
-| `Tracking::update_local_points` | [Tracking.cc#L808](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L808 "Tracking::update_local_points(") | unread |  |
-| `Tracking::search_local_points` | [Tracking.cc#L831](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L831 "Tracking::search_local_points(") | unread |  |
-| `Tracking::need_new_keyframe` | [Tracking.cc#L866](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L866 "Tracking::need_new_keyframe(") | unread |  |
-| `Tracking::create_new_keyframe` | [Tracking.cc#L1031](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1031 "Tracking::create_new_keyframe(") | unread |  |
-| `Tracking::wait_for_idle_local_mapper` | [Tracking.cc#L1050](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1050 "Tracking::wait_for_idle_local_mapper(") | unread |  |
-| `Tracking::relocalize` | [Tracking.cc#L1056](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1056 "Tracking::relocalize(") | unread |  |
-| `Tracking::accept_relocalization_hypothesis` | [Tracking.cc#L1133](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1133 "Tracking::accept_relocalization_hypothesis(") | unread |  |
-| `Tracking::reset` | [Tracking.cc#L1205](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1205 "Tracking::reset(") | unread |  |
+| `Tracking::LoadParameters` | [Tracking.cc#L39](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L39 "Tracking::LoadParameters(") | unread |  |
+| `Tracking::Tracking` | [Tracking.cc#L106](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L106 "Tracking::Tracking(") | unread |  |
+| `Tracking::grab_image` | [Tracking.cc#L136](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L136 "Tracking::grab_image(") | unread |  |
+| `Tracking::track` | [Tracking.cc#L173](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L173 "Tracking::track(") | unread |  |
+| `Tracking::store_relative_pose` | [Tracking.cc#L278](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L278 "Tracking::store_relative_pose(") | unread |  |
+| `Tracking::monocular_initialization` | [Tracking.cc#L284](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L284 "Tracking::monocular_initialization(") | unread |  |
+| `Tracking::attempt_monocular_initialization` | [Tracking.cc#L292](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L292 "Tracking::attempt_monocular_initialization(") | unread |  |
+| `Tracking::create_initial_map` | [Tracking.cc#L390](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L390 "Tracking::create_initial_map(") | unread |  |
+| `Tracking::check_replaced_in_last_frame` | [Tracking.cc#L600](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L600 "Tracking::check_replaced_in_last_frame(") | unread |  |
+| `Tracking::track_reference_keyframe` | [Tracking.cc#L610](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L610 "Tracking::track_reference_keyframe(") | unread |  |
+| `Tracking::track_local_map` | [Tracking.cc#L817](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L817 "Tracking::track_local_map(") | unread |  |
+| `Tracking::update_local_map` | [Tracking.cc#L860](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L860 "Tracking::update_local_map(") | unread |  |
+| `Tracking::update_local_keyframes` | [Tracking.cc#L869](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L869 "Tracking::update_local_keyframes(") | unread |  |
+| `Tracking::update_local_points` | [Tracking.cc#L952](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L952 "Tracking::update_local_points(") | unread |  |
+| `Tracking::search_local_points` | [Tracking.cc#L975](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L975 "Tracking::search_local_points(") | unread |  |
+| `Tracking::need_new_keyframe` | [Tracking.cc#L1010](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1010 "Tracking::need_new_keyframe(") | unread |  |
+| `Tracking::create_new_keyframe` | [Tracking.cc#L1175](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1175 "Tracking::create_new_keyframe(") | unread |  |
+| `Tracking::wait_for_idle_local_mapper` | [Tracking.cc#L1194](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1194 "Tracking::wait_for_idle_local_mapper(") | unread |  |
+| `Tracking::relocalize` | [Tracking.cc#L1200](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1200 "Tracking::relocalize(") | unread |  |
+| `Tracking::accept_relocalization_hypothesis` | [Tracking.cc#L1277](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1277 "Tracking::accept_relocalization_hypothesis(") | unread |  |
+| `Tracking::reset` | [Tracking.cc#L1349](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking.cc#L1349 "Tracking::reset(") | unread |  |
 | `Tracking::load_camera_parameters` | [Tracking_aux.cc#L20](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L20 "Tracking::load_camera_parameters(") | unread |  |
-| `Tracking::get_feature_extractor` | [Tracking_aux.cc#L97](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L97 "Tracking::get_feature_extractor(") | unread |  |
-| `Tracking::run_tracking_stage` | [Tracking_aux.cc#L106](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L106 "Tracking::run_tracking_stage(") | unread |  |
-| `Tracking::log_heartbeat` | [Tracking_aux.cc#L119](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L119 "Tracking::log_heartbeat(") | unread |  |
-| `Tracking::log_profile` | [Tracking_aux.cc#L136](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L136 "Tracking::log_profile(") | unread |  |
+| `Tracking::get_feature_extractor` | [Tracking_aux.cc#L108](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L108 "Tracking::get_feature_extractor(") | unread |  |
+| `Tracking::run_tracking_stage` | [Tracking_aux.cc#L117](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L117 "Tracking::run_tracking_stage(") | unread |  |
+| `Tracking::log_heartbeat` | [Tracking_aux.cc#L130](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L130 "Tracking::log_heartbeat(") | unread |  |
+| `Tracking::log_profile` | [Tracking_aux.cc#L147](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/Tracking_aux.cc#L147 "Tracking::log_profile(") | unread |  |
 | `Tracking::median_flow_from_last_frame` | — | gone | removed in #40; placecell owns the KF decision, see 2026-09-22 |
 
 ## Notes

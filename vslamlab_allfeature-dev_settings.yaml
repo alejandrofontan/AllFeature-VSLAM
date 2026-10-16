@@ -114,6 +114,13 @@ Tracking.ImageWidth: 0                  # both > 0: resize every frame to exactl
 Tracking.ImageHeight: 0                 # are scaled per axis). Use multiples of 32 (640x480 is), or the crop trims the remainder
 
 # Frame-to-frame tracking
+Tracking.FrameTracking: "reference_keyframe"    # "reference_keyframe": a descriptor match (LightGlue for the learned features) against the reference
+                                                # keyframe on every frame | "optical_flow": KLT of the last frame's tracked points, snapped to the
+                                                # current frame's detected keypoints; the reference-keyframe match only as the fallback. Saves the
+                                                # per-frame matcher call (41 ms on the M1 Pro GPU, 13 ms on CUDA); measured on the gym before it is the default
+Tracking.FlowAssociationRadius: 2.0             # px: a flowed point takes the nearest detected keypoint of its feature type within this radius
+Tracking.FlowMaxBackwardError: 1.0              # px: forward-backward KLT disagreement above this drops the track
+Tracking.FlowMinMatches: 30                     # map points matched by flow below this -> fall back to the reference-keyframe match
 Tracking.TrackRefMinMatches: 15                 # raw matches to the reference keyframe below this -> lost
 Tracking.TrackRefMinInliers: 10                 # pose-optimization inliers below this -> lost
 Tracking.TrackLocalMapMinInliers: 30            # inliers against the local map below this -> lost
