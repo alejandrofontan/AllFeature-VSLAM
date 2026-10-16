@@ -10,7 +10,9 @@
  * aliked128: ALIKED-n16 sub-pixel keypoints + 128-d descriptors on ONNX Runtime (onnx/AlikedOnnx.h), matched by
  * LightGlue-ALIKED (LIGHTGLUE_ALIKED -> onnx::shared_lightglue("aliked") in FeatureMatcher). The model file is
  * `<features_models_dir>/aliked_n16.onnx` (`pixi run download-feature-models`). The graph detects in threshold
- * mode; the host keeps its octree distribution to the keypoint budget, as before.
+ * mode; the host keeps its octree distribution to the keypoint budget, as before. With `features_static_shapes` the
+ * fixed-size export `aliked_n16_<W>x<H>.onnx` for the frame size is loaded on the first frame instead (top-k mode,
+ * Core ML; `export-features --only aliked --static WxH`).
  */
 
 #ifndef AF_VSLAM_FEATURE_ALIKED128_H
@@ -57,7 +59,13 @@ namespace AF_VSLAM {
         [[nodiscard]] float GetKeypointSize(const cv::KeyPoint &keypoint) const override;
 
     private:
+        /// Create the session on `path` and warm it up on a blank width x height frame.
+        void load(const std::string& path, int width, int height);
+        /// The session for a width x height frame: the one loaded, or (static shapes) the export for that size.
+        onnx::AlikedOnnx& extractor_for(int width, int height);
+
         std::unique_ptr<onnx::AlikedOnnx> extractor_;
+        int loaded_width_{0}, loaded_height_{0};   // the static export's size (static shapes only)
     };
 
     inline std::shared_ptr<FeatureExtractor> Aliked128::createExtractor(

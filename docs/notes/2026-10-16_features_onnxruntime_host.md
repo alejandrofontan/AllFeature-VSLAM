@@ -1,4 +1,4 @@
-# Learned features on ONNX Runtime, the C++ side (2026-10-16, step 4; extended by steps 5–8)
+# Learned features on ONNX Runtime, the C++ side (2026-10-16, step 4; extended by steps 5–7)
 
 - **Plan:** `docs/plans/learned_features_onnxruntime.md`, step 4 (T2, T4) — later steps append their sections.
 - **Code:** `include/onnx/OrtSession.h` (one session class, provider auto|cuda|coreml|cpu, per-call shapes),
@@ -70,9 +70,48 @@ All three run to the end and save their trajectories; the tracking times include
 mapping at ~1 keyframe per frame (the shipped YAML's covisibility-kernel keyframe runaway, phase 6 material), so
 they are not per-frame front-end costs. Three `FeatureMatcher`s log the same shared session: by design.
 
+## Step 7 — the Mac (2026-10-16, M1 Pro 16 GB, macOS 26.6, `table_3` 739×458)
+
+What Core ML needs, learned in this order (`docs/notes/2026-10-16_learned_features_onnx_export.md` has the export
+side): (1) it compiles only **bounded shapes** — the dynamic exports fall back to the CPU provider whole, so
+`--static WxH` (detectors) and `--static-length L` (matchers, padded with float attention masks) exist; (2) every
+operator the EP has no mapping for is a **partition** (a separate Core ML model, a CPU round trip): SuperPoint's NMS
+booleans (8 partitions → moved to the C++ tail), ALIKED's DeformConv (→ GridSample taps), its DKD/SDDH heads (16
+partitions, see the plan's §7b lever), the matcher's Gather / Neg / Expand (→ Split, `* -1`, Concat); (3) the ORT
+Core ML model cache is keyed by graph I/O only, so a re-export with the same signature served the stale compiled
+model until the cache folder was keyed by file content hash (`OrtSession`); (4) a session that cannot be created on
+the provider falls back to the CPU inside `OrtSession` (the dynamic matcher's case).
+
+| Model, static file | Provider / units | Result vs reference | Time per call |
+|---|---|---|---|
+| SuperPoint fp32, dynamic | CPU, 4 threads | exact | 186 ms |
+| SuperPoint fp32, `_739x458` | Core ML CPUAndGPU | exact, 2 partitions | 16.4 ms graph (`time_onnx.py`: 16.0) |
+| SuperPoint fp16, `_739x458` | Core ML CPUAndGPU | approximate | 15.4 ms |
+| SuperPoint, `_739x458` | Core ML ALL / CPUAndNeuralEngine | ANE compile fails → CPU | — |
+| ALIKED fp32, `_739x458` top-2048, DeformConv node | Core ML CPUAndGPU | exact, 20 partitions | 153 ms |
+| ALIKED fp32, `_739x458` top-2048, decomposed deform convs | Core ML CPUAndGPU | exact, 16 partitions | 136 ms |
+| ALIKED trunk only, `_739x458` (measurement graph) | Core ML CPUAndGPU | 2 partitions (582/584 nodes) | 53.9 ms |
+| LightGlue fp32, dynamic | CPU fallback | exact | 242 ms |
+| LightGlue fp32, `_L1024` padded (Linux check) | CUDA / CPU 4 threads | exact match sets, Δscore ≤ 1.4e-4 | 21 ms / see below |
+| LightGlue fp32, `_L1024` padded | Core ML CPUAndGPU | **pending** | — |
+
+The padded matcher costs O(L²) whatever the pair's size: 21 ms on CUDA at L=1024 against 9–19 ms for the dynamic
+file, the price of a bounded graph (on the Mac the alternative is the 242 ms CPU path). The host setting
+`features_static_shapes: true` makes the extractors load `<stem>_<W>x<H>.onnx` for the frame size on the first frame
+and `shared_lightglue(variant, n_max)` pick the smallest `lightglue_<f>_L<L>.onnx` with L ≥ max(N0, N1) (dynamic file
+beyond, one warning); a missing static file is a hard error naming the export command. That error fired on the first
+Linux smoke run: the tracker resizes every frame to a nominal area (`NOMINAL_IMAGE_AREA`, `Tracking_aux.cc`) and crops it to a multiple of 32 (`Image::fix_image_size`), so
+`table_3` runs at **672×416**, not the 739×458 of the parity frames — the static detector files the host needs are
+`--static 672x416`; the 739×458 ones serve `test_feature_parity` and `time_onnx.py` only. With those files the two
+150-frame smoke runs (`features_static_shapes: true`, CUDA) go through: superpoint256 on `superpoint_v1_672x416.onnx`
++ `lightglue_superpoint_L1024.onnx` (439 points, median tracking 0.141 s), aliked128 on `aliked_n16_672x416.onnx` +
+`lightglue_aliked_L1024.onnx` (271 points, 0.131 s); no pair outgrew L=1024, so the dynamic fallback never fired.
+
 ## Open
 
-- Step 5–6: host wiring (`Feature_*` classes, `FeatureMatcher`, settings keys, model folder tasks), then T3–T5.
-- ALIKED CPU 217 ms: profile per op (step 7), the Memcpy partition on CUDA (same).
+- Mac: time the padded matchers on Core ML (`time_onnx.py`, then `test_feature_parity --model ..._L1024.onnx`), then a
+  `table_3` run with `features_static_shapes: true`; fp16 twins and `features_threads` 2 vs 4 (plan §7 items 3–4).
+- ALIKED on the Mac: the head split (plan §7b), 136 → ≈ 60 ms.
+- ALIKED CPU 217 ms: profile per op; the Memcpy partition on CUDA (10 nodes, 16 ms all included).
 - The two ORT "nodes not assigned to the preferred provider" warnings print per session; keep (informative) or
   demote to INFO once the host creates four sessions at startup.

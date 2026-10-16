@@ -4,7 +4,7 @@
 # Camera names
 #--------------------------------------------------------------------------------------------
 cam_mono: rgb_0
-features: ["orb32", "akaze61"]
+features: ["orb32", "sift128"]
 vpr: "megaloc"       # visual place recognition backend: "megaloc" (default) | "none"
 feature_vpr: "orb32" # local feature that verifies retrieved candidates (reloc PnP, loop Sim3);
                      # must be in features; defaults to the first feature.
@@ -29,6 +29,10 @@ features_provider: "auto"                            # their ONNX Runtime execut
                                                      # 97 / 217 / 83-178 ms on 4 CPU threads; cv::SIFT 22 ms on the CPU either way
 features_threads: 4                                  # CPU-provider threads per model session (also the CPU-fallback nodes under CUDA / CoreML)
 features_coreml_units: "ALL"                         # CoreML compute units for those models: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
+features_static_shapes: false                        # true: load the fixed-shape exports instead of the dynamic files - the detectors' <stem>_<W>x<H>.onnx for the
+                                                     # frame size (on the first frame) and the matchers' lightglue_<f>_L<L>.onnx padded to L keypoints per side
+                                                     # (the smallest L that fits each pair; the dynamic file beyond). Core ML compiles only bounded shapes, so this
+                                                     # is the Mac's GPU path (`export-features --static 672x416 --static-length 1024`; the size the tracker logs, not the raw frame size); a missing file is a hard error.
 segmentation: "none" # online semantic segmentation: "efficientvit" | "none"
 debug: false
 max_frame_wait: 0.2  # s; the mono/rgbd executables replay the sequence at its own rate (sleep for the rest of the

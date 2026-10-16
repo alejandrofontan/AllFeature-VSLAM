@@ -21,6 +21,13 @@
  * `filter_matches`: mutual row/column argmax over the [N0, N1] block and exp(score) > filter_threshold. Fewer than
  * two keypoints on a side (sidecar `min_keypoints`) gives no matches: the graph has no empty-set branch.
  *
+ * Padded files ('lightglue_<features>_L<L>.onnx', sidecar `padded_length` L; tools/export_features.py
+ * LightGluePaddedExport, the Core ML lever of step 7: Core ML compiles only bounded shapes): both sides are padded
+ * to exactly L rows (zeros) and two more inputs, mask_0 / mask_1 [1,L], carry 0 for a real row and the sidecar's
+ * `mask_padded_value` for a padded one - the additive attention bias that keeps real keypoints from attending to
+ * the padding. The output is [L+1, L+1]; match() reads the [N0, N1] block with row stride L+1. A pair with more
+ * than L keypoints on a side does not fit: the caller (onnx::shared_lightglue) routes it to the dynamic file.
+ *
  * Output: cv::DMatch with queryIdx in set 0, trainIdx in set 1 and distance = 1 - matching score (the host's
  * convention for learned matchers).
  *
@@ -58,6 +65,8 @@ class LightGlueOnnx
     [[nodiscard]] int input_dim() const { return input_dim_; }
     [[nodiscard]] bool add_scale_ori() const { return add_scale_ori_; }
     [[nodiscard]] float filter_threshold() const { return filter_threshold_; }
+    /// 0 for the dynamic file; L for a padded file, which takes at most L keypoints per side.
+    [[nodiscard]] int padded_length() const { return padded_length_; }
     [[nodiscard]] const std::string& provider() const { return session_.provider(); }
     [[nodiscard]] const std::string& model_path() const { return session_.model_path(); }
     [[nodiscard]] const std::string& precision() const { return precision_; }
@@ -74,6 +83,8 @@ class LightGlueOnnx
     bool add_scale_ori_{false};
     float filter_threshold_{0.1f};
     int min_keypoints_{2};
+    int padded_length_{0};
+    float mask_padded_value_{-1e9f};
     std::string precision_{"fp32"};
     std::string output_name_;
     double last_graph_ms_{0.0};

@@ -17,7 +17,13 @@
   `Feature_aliked128` / `Feature_sift128` on the new classes, `FeatureMatcher` on the shared LightGlue sessions
   (`onnx/FeatureModels.h`), `features_*` settings, `feature_models/` tasks (SuperPoint exported locally), CMake
   options TORCH / SIFTGPU gone, TENSORRT = segmentation only; 150-frame `table_3` smoke runs of the three features pass
-  on CUDA. Next: `pixi install` (lock), T5 gym runs (user), step 7 Mac, step 9 removals, step 10 write-up.
+  on CUDA. **Step 7 in progress 2026-10-16** (M1 Pro, 739×458): CPU provider SuperPoint 186 ms / LightGlue 242 ms per
+  call; Core ML compiles only bounded shapes, hence the static exports — `--static WxH` (SuperPoint 16 ms exact on
+  the GPU, 2 partitions; ALIKED in top-k mode with decomposed deformable convs 136 ms exact, 16 partitions, its trunk
+  alone 54 ms in 2) and `--static-length L` (the matchers padded to L with additive attention masks, written without
+  the ops the Core ML EP lacks; exact on Linux, Mac timing pending) — selected by the `features_static_shapes`
+  setting (detectors by frame size, matchers by the smallest L that fits). Next: Mac numbers for the padded matchers,
+  T5 gym runs (user), step 9 removals, step 10 write-up.
 - **Written as a walkthrough on purpose**, like phase 2: every step says what it does and why, so the path
   *git repo → ONNX → C++ → ONNX Runtime on two platforms* can be followed end to end for three models at once. What is
   new versus MegaLoc, and therefore where the learning is: (i) **variable-size outputs and inputs** — a detector
@@ -190,7 +196,10 @@ ANE loses accuracy on this kind of graph. Expectations to test, in this order, o
    `Gather` in ALIKED's DKD and in the matchers' index gymnastics, `DeformConv`) and how many partitions result.
    If the matcher's dynamic `N0`/`N1` makes CoreML recompile or crawl, the lever is a **static-padded export**
    (pad both sides to 1024 with the attention masks upstream's `compile` path uses) — written down, pulled only if
-   measured.
+   measured. *Measured 2026-10-16: the dynamic matcher does not compile at all (unbounded dims → CPU fallback,
+   242 ms); pulled as `--static-length L` (`LightGluePaddedExport`: float additive masks over the key axis of every
+   softmax, Split / `* -1` / Concat instead of the Gather / Neg / Expand nodes the Core ML EP has no mapping for), the
+   host chooses the smallest exported L ≥ max(N0, N1) per pair and falls back to the dynamic file beyond.*
 3. fp16 twins where the fp32 CoreML path is accuracy-neutral (the phase-2 criterion, cosine ≥ 0.999 on the self-check
    columns; for detectors: same keypoint set).
 4. Thread budget: 6 P-cores for tracking + local mapping + loop closing + viewer + ORT intra-op pools of up to four
@@ -200,9 +209,14 @@ ANE loses accuracy on this kind of graph. Expectations to test, in this order, o
 
 Fused extractor+matcher pipeline per pair (LightGlue-ONNX style: one session, no host round trip of descriptors);
 attention fusion (`com.microsoft.MultiHeadAttention` on CUDA/CPU — not CoreML); int8 weights for the CNNs; a lower
-`n_limit`/top-k for ALIKED; the static-padded LightGlue variant (§7.2); image downscale per device
-(`Image::fix_image_size` exists); cache the per-frame SuperPoint/ALIKED outputs the matcher re-uses across the several
-`match_descriptors` calls Tracking makes on the same frame.
+`n_limit`/top-k for ALIKED; image downscale per device (`Image::fix_image_size` exists); cache the per-frame
+SuperPoint/ALIKED outputs the matcher re-uses across the several `match_descriptors` calls Tracking makes on the same
+frame. **ALIKED head split for the Mac** (measured 2026-10-16, static 739×458 on Core ML GPU): the full graph runs in
+136 ms over 16 partitions, its trunk alone in 54 ms over 2 — the DKD detector head (NMS, top-k, 5×5 soft-argmax) and
+the SDDH descriptor head cost ~80 ms in partition round trips. The lever: the trunk graph (`aliked_n16_<W>x<H>_trunk.onnx`
+exists) + the detector head in C++ as SuperPoint's NMS is + the descriptor head as a small static graph on the
+sampled feature-map patches, ≈ 60 ms exact. A day of work; the padded matcher came first because it serves all three
+learned features.
 
 ## 8. Tests (what "done" means)
 

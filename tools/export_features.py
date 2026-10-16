@@ -31,6 +31,12 @@ detectors, dynamic keypoint counts for the matchers, the DeformConv translation 
 twin and a sidecar YAML per file, runs the exports on ONNX Runtime (CPU) as columns (c) fp32 and (d) fp16 of the
 self-check, and dumps the upstream outputs on the given frames as the references the C++ parity test (step 4) reads.
 
+Step 7 (this version) adds the static exports Core ML needs (it compiles only bounded shapes): `--static WxH` fixes
+the detectors' image size (ALIKED then in top-k mode with its deformable convolutions decomposed), `--static-length L`
+pads both sides of the matchers to L keypoints with additive attention masks (`LightGluePaddedExport`); the files
+carry the size in their name (`superpoint_v1_739x458.onnx`, `lightglue_aliked_L1024.onnx`) and the host's
+`features_static_shapes` setting selects them.
+
 Run from the repository root:  pixi run -e export-features export-features [--images f0 f1 f2 f3]
 """
 from __future__ import annotations
@@ -322,6 +328,156 @@ class LightGlueScaleOriExport(LightGlueExport):
         return self.match(pos0, descriptors0, pos1, descriptors1)
 
 
+# The additive attention bias of a padded row (0 for a real keypoint): exp(-1e9 - max) is exactly 0 in float32, so a
+# real keypoint never attends to padding, and unlike -inf no row can turn into NaN (every row keeps its real keys).
+PAD_MASK_VALUE = -1e9
+
+
+# ONNX Runtime's Core ML execution provider (ML Program) has no Neg, Gather, Expand, Cos, Sin, Log or LogSoftmax: every
+# such node is a partition boundary (a separate Core ML model, a device round trip). The static matcher graph is written
+# without the first three inside the layers (Split instead of indexing, a multiplication by -1 instead of the negation,
+# Concat instead of repeat_interleave); the positional encoding's Cos/Sin (once, at the input) and the assignment head's
+# Log / LogSoftmax (once, at the output) stay: two small CPU partitions at either end of the graph.
+def posenc_static(posenc: nn.Module, x: torch.Tensor) -> torch.Tensor:
+    """Upstream LearnableFourierPositionalEncoding.forward with repeat_interleave(2, -1) written as stack + flatten
+    (the same [a0, a0, a1, a1, ...] layout) - Concat and Reshape instead of an Expand node."""
+    projected = posenc.Wr(x)
+    emb = torch.stack([torch.cos(projected), torch.sin(projected)], 0).unsqueeze(-3)
+    return torch.stack([emb, emb], -1).flatten(-2)
+
+
+def rotate_half_static(x: torch.Tensor) -> torch.Tensor:
+    """Upstream rotate_half: pairs (x1, x2) -> (-x2, x1); Split instead of unbind (Gather), * -1 instead of Neg."""
+    x1, x2 = x.unflatten(-1, (-1, 2)).split(1, dim=-1)
+    return torch.cat((x2 * -1.0, x1), dim=-1).flatten(start_dim=-2)
+
+
+def apply_rotary_static(freqs: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    return (t * freqs[0]) + (rotate_half_static(t) * freqs[1])
+
+
+def self_block_padded(block: nn.Module, x: torch.Tensor, encoding: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+    """Upstream SelfBlock.forward with the key mask as an additive bias [b,1,1,L] on the attention logits - what
+    F.scaled_dot_product_attention does internally with upstream's boolean mask (-inf where False), written with
+    floats so the graph holds only Add and Softmax (Core ML has no boolean ops). A padded query row attends to the
+    real keys and stays finite: no nan_to_num. q/k/v come out of the fused projection by Split (not Gather)."""
+    qkv = block.Wqkv(x).unflatten(-1, (block.num_heads, -1, 3)).transpose(1, 2)
+    q, k, v = (t.squeeze(-1) for t in qkv.split(1, dim=-1))
+    q, k = apply_rotary_static(encoding, q), apply_rotary_static(encoding, k)
+    context = F.scaled_dot_product_attention(q.contiguous(), k.contiguous(), v.contiguous(), attn_mask=bias)
+    message = block.out_proj(context.transpose(1, 2).flatten(start_dim=-2))
+    return x + block.ffn(torch.cat([x, message], -1))
+
+
+def cross_block_padded(block: nn.Module, x0: torch.Tensor, x1: torch.Tensor, bias0: torch.Tensor,
+                       bias1: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Upstream CrossBlock.forward (the einsum path the CPU trace takes: scale**0.5 on both sides) with the attended
+    side's key bias added before each softmax: bias1 [b,1,1,L1] when side 0 reads side 1, bias0 for the reverse.
+    The einsums are written as the matmuls they are: an ONNX Einsum node is not a Core ML op (a partition each)."""
+    qk0, qk1, v0, v1 = (t.unflatten(-1, (block.heads, -1)).transpose(1, 2)
+                        for t in (block.to_qk(x0), block.to_qk(x1), block.to_v(x0), block.to_v(x1)))
+    qk0, qk1 = qk0 * block.scale**0.5, qk1 * block.scale**0.5
+    sim = qk0 @ qk1.transpose(-2, -1)                                      # [b,h,L0,L1]
+    attn01 = F.softmax(sim + bias1, dim=-1)
+    attn10 = F.softmax(sim.transpose(-2, -1).contiguous() + bias0, dim=-1)   # [b,h,L1,L0]
+    m0 = attn01 @ v1
+    m1 = attn10 @ v0
+    m0, m1 = (block.to_out(t.transpose(1, 2).flatten(start_dim=-2)) for t in (m0, m1))
+    x0 = x0 + block.ffn(torch.cat([x0, m0], -1))
+    x1 = x1 + block.ffn(torch.cat([x1, m1], -1))
+    return x0, x1
+
+
+def log_assignment_padded(head: nn.Module, desc0: torch.Tensor, desc1: torch.Tensor, bias0: torch.Tensor,
+                          bias1: torch.Tensor) -> torch.Tensor:
+    """`log_assignment` with the key bias on each log-softmax: bias1 [b,1,L1] over the columns (side 0's distribution
+    over side 1), bias0 [b,L0,1] over the rows. The [N0,N1] block of real keypoints equals the unpadded head on them;
+    the padded rows and columns hold values the host never reads."""
+    mdesc0, mdesc1 = head.final_proj(desc0), head.final_proj(desc1)
+    d = mdesc0.shape[-1]
+    mdesc0, mdesc1 = mdesc0 / d**0.25, mdesc1 / d**0.25
+    sim = mdesc0 @ mdesc1.transpose(-1, -2)                                # einsum bmd,bnd->bmn as a matmul (Core ML)
+    z0, z1 = head.matchability(desc0), head.matchability(desc1)
+    certainties = F.logsigmoid(z0) + F.logsigmoid(z1).transpose(1, 2)
+    scores0 = F.log_softmax(sim + bias1, 2)
+    scores1 = F.log_softmax((sim + bias0).transpose(-1, -2).contiguous(), 2).transpose(-1, -2)
+    inner = scores0 + scores1 + certainties
+    col = F.logsigmoid(-z0)
+    row = F.logsigmoid(-z1).transpose(1, 2)
+    corner = torch.zeros_like(inner[:, :1, :1])
+    return torch.cat([torch.cat([inner, col], 2), torch.cat([row, corner], 2)], 1)
+
+
+class LightGluePaddedExport(LightGlueExport):
+    """LightGlueExport with both sides padded to a fixed length L (plan §7.2: Core ML compiles only bounded shapes,
+    so the dynamic matcher fell back to the CPU, 242 ms per pair on the M1 Pro). Two more inputs, mask_0 / mask_1
+    [1,L] float32: 0 for a real keypoint, PAD_MASK_VALUE for a padded row (zeros in its keypoints and descriptors).
+    Every softmax adds the attended side's mask over its key axis - upstream's `masked_forward` path with float masks -
+    so the real keypoints compute exactly what the dynamic graph computes on them. Output [1,L+1,L+1]; the host reads
+    the top-left [N0,N1] block (row stride L+1). Cost: attention is O(L^2) whatever N is."""
+
+    def match_padded(self, pos0: torch.Tensor, desc0: torch.Tensor, mask0: torch.Tensor,
+                     pos1: torch.Tensor, desc1: torch.Tensor, mask1: torch.Tensor) -> torch.Tensor:
+        lg = self.lg
+        desc0, desc1 = lg.input_proj(desc0), lg.input_proj(desc1)
+        enc0, enc1 = posenc_static(lg.posenc, pos0), posenc_static(lg.posenc, pos1)
+        bias0, bias1 = mask0[:, None, None, :], mask1[:, None, None, :]      # [b,1,1,L]: over heads and queries
+        for layer in lg.transformers:
+            desc0 = self_block_padded(layer.self_attn, desc0, enc0, bias0)
+            desc1 = self_block_padded(layer.self_attn, desc1, enc1, bias1)
+            desc0, desc1 = cross_block_padded(layer.cross_attn, desc0, desc1, bias0, bias1)
+        return log_assignment_padded(lg.log_assignment[-1], desc0, desc1, mask0[:, :, None], mask1[:, None, :])
+
+    def forward(self, keypoints0: torch.Tensor, descriptors0: torch.Tensor, mask0: torch.Tensor,  # type: ignore[override]
+                keypoints1: torch.Tensor, descriptors1: torch.Tensor, mask1: torch.Tensor) -> torch.Tensor:
+        return self.match_padded(keypoints0, descriptors0, mask0, keypoints1, descriptors1, mask1)
+
+
+class LightGlueScaleOriPaddedExport(LightGluePaddedExport):
+    def forward(self, keypoints0: torch.Tensor, scales0: torch.Tensor, oris0: torch.Tensor,  # type: ignore[override]
+                descriptors0: torch.Tensor, mask0: torch.Tensor, keypoints1: torch.Tensor, scales1: torch.Tensor,
+                oris1: torch.Tensor, descriptors1: torch.Tensor, mask1: torch.Tensor) -> torch.Tensor:
+        pos0 = torch.cat([keypoints0, scales0.unsqueeze(-1), oris0.unsqueeze(-1)], -1)
+        pos1 = torch.cat([keypoints1, scales1.unsqueeze(-1), oris1.unsqueeze(-1)], -1)
+        return self.match_padded(pos0, descriptors0, mask0, pos1, descriptors1, mask1)
+
+
+def pad_side(f: dict, k_norm: torch.Tensor, length: int, add_scale_ori: bool) -> dict:
+    """One side's padded inputs: normalised keypoints [1,L,2], descriptors [1,L,D] (and scales / oris [1,L]) with
+    zeros after the N real rows, and the mask [1,L]: 0 for those rows, PAD_MASK_VALUE after them."""
+    n = k_norm.shape[1]
+    if n > length:
+        raise ValueError(f"{n} keypoints do not fit the padded length {length}")
+    pad = length - n
+    out = {"keypoints": F.pad(k_norm, (0, 0, 0, pad)), "descriptors": F.pad(f["descriptors"][None], (0, 0, 0, pad)),
+           "mask": torch.cat([torch.zeros(1, n), torch.full((1, pad), PAD_MASK_VALUE)], 1)}
+    if add_scale_ori:
+        out["scales"], out["oris"] = F.pad(f["scales"][None], (0, pad)), F.pad(f["oris"][None], (0, pad))
+    return out
+
+
+def padded_input_names(add_scale_ori: bool) -> list[str]:
+    """The padded graph's inputs in order (the wrapper's positional arguments and the sidecar's list)."""
+    per_side = ["keypoints", "scales", "oris", "descriptors", "mask"] if add_scale_ori else ["keypoints", "descriptors", "mask"]
+    return [f"{name}_{side}" for side in (0, 1) for name in per_side]
+
+
+def padded_feed(lg: nn.Module, f0: dict, k0: torch.Tensor, f1: dict, k1: torch.Tensor, length: int) -> dict:
+    """The named inputs of the padded matcher graph for one pair (padded_input_names order)."""
+    p0, p1 = pad_side(f0, k0, length, lg.conf.add_scale_ori), pad_side(f1, k1, length, lg.conf.add_scale_ori)
+    feed = {"keypoints_0": p0["keypoints"], "descriptors_0": p0["descriptors"], "mask_0": p0["mask"],
+            "keypoints_1": p1["keypoints"], "descriptors_1": p1["descriptors"], "mask_1": p1["mask"]}
+    if lg.conf.add_scale_ori:
+        feed.update(scales_0=p0["scales"], oris_0=p0["oris"], scales_1=p1["scales"], oris_1=p1["oris"])
+    return {name: feed[name] for name in padded_input_names(lg.conf.add_scale_ori)}
+
+
+def unpad_scores(scores: torch.Tensor, n0: int, n1: int) -> torch.Tensor:
+    """The [N0,N1] block of a padded [1,L+1,L+1] log-assignment plus a dummy dustbin row/column: upstream
+    filter_matches reads only the block (`scores[:, :-1, :-1]`)."""
+    return F.pad(scores[:, :n0, :n1], (0, 1, 0, 1))
+
+
 def deform_conv2d_onnx(input, weight, offset, mask, bias, stride_h: int, stride_w: int, pad_h: int, pad_w: int,
                        dilation_h: int, dilation_w: int, groups: int, offset_groups: int, use_mask: bool):
     """ONNX translation of torchvision::deform_conv2d (the op the exporter has no rule for): one DeformConv node
@@ -607,14 +763,20 @@ def upstream_match(lg: nn.Module, f0: dict, f1: dict, size_wh: tuple[int, int]) 
     return out["matches0"][0], out["matching_scores0"][0]
 
 
-def wrapper_match(lg: nn.Module, f0: dict, f1: dict, size_wh: tuple[int, int]) -> tuple[torch.Tensor, torch.Tensor]:
-    """Column (b): normalise the keypoints as the C++ side will, run the wrapper, apply upstream filter_matches."""
+def wrapper_match(lg: nn.Module, f0: dict, f1: dict, size_wh: tuple[int, int],
+                  padded_length: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
+    """Column (b): normalise the keypoints as the C++ side will, run the wrapper, apply upstream filter_matches.
+    `padded_length` > 0: the padded wrapper with both sides padded to that length (the static export)."""
     from lightglue.lightglue import filter_matches, normalize_keypoints
 
     size = torch.tensor([size_wh], dtype=torch.float32)
     k0 = normalize_keypoints(f0["keypoints"][None], size)
     k1 = normalize_keypoints(f1["keypoints"][None], size)
-    if lg.conf.add_scale_ori:
+    if padded_length:
+        wrapper = (LightGlueScaleOriPaddedExport if lg.conf.add_scale_ori else LightGluePaddedExport)(lg)
+        scores = wrapper(*padded_feed(lg, f0, k0, f1, k1, padded_length).values())
+        scores = unpad_scores(scores, k0.shape[1], k1.shape[1])
+    elif lg.conf.add_scale_ori:
         scores = LightGlueScaleOriExport(lg)(k0, f0["scales"][None], f0["oris"][None], f0["descriptors"][None],
                                              k1, f1["scales"][None], f1["oris"][None], f1["descriptors"][None])
     else:
@@ -624,11 +786,13 @@ def wrapper_match(lg: nn.Module, f0: dict, f1: dict, size_wh: tuple[int, int]) -
 
 
 def check_wrappers(models: dict[str, nn.Module], images: list[Path], max_keypoints: int,
-                   aliked_top_k: int = 0) -> None:
+                   aliked_top_k: int = 0, padded_length: int = 0) -> None:
     """(a) vs (b) for every wrapper: the detectors on each frame, the matchers on consecutive pairs (0,1), (2,3), ...
-    `aliked_top_k` > 0: the static ALIKED wrapper (top-k mode, decomposed deformable convs) instead of the dynamic."""
+    `aliked_top_k` > 0: the static ALIKED wrapper (top-k mode, decomposed deformable convs) instead of the dynamic;
+    `padded_length` > 0: the matchers also through the padded wrapper of that length."""
     print(f"\n(a) upstream vs (b) export wrapper, in PyTorch, {len(images)} frames, top-k {max_keypoints}"
-          f"{f', static ALIKED (top-{aliked_top_k}, decomposed deform conv)' if aliked_top_k else ''}:")
+          f"{f', static ALIKED (top-{aliked_top_k}, decomposed deform conv)' if aliked_top_k else ''}"
+          f"{f', matchers padded to {padded_length}' if padded_length else ''}:")
     sp_dense = SuperPointDense(models["superpoint"])
     al_export = AlikedExport(models["aliked"], aliked_top_k, decompose_deform=aliked_top_k > 0)
     feats: list[dict[str, dict]] = []
@@ -652,11 +816,13 @@ def check_wrappers(models: dict[str, nn.Module], images: list[Path], max_keypoin
         for name in ("superpoint", "aliked", "sift"):
             lg = models[f"lightglue_{name}"]
             m_a, s_a = upstream_match(lg, feats[i][name], feats[i + 1][name], (W, H))
-            m_b, s_b = wrapper_match(lg, feats[i][name], feats[i + 1][name], (W, H))
-            n_a = int((m_a >= 0).sum())
-            same = int(((m_a == m_b)).sum())
-            print(f"  {'lightglue_' + name:34s} matches={n_a:4d}  identical assignments={same}/{m_a.numel()}  "
-                  f"max|dscore|={(s_a - s_b).abs().max().item():.2e}")
+            for length in [0] + ([padded_length] if padded_length else []):
+                label = f"lightglue_{name}" + (f" padded to {length}" if length else "")
+                m_b, s_b = wrapper_match(lg, feats[i][name], feats[i + 1][name], (W, H), length)
+                n_a = int((m_a >= 0).sum())
+                same = int(((m_a == m_b)).sum())
+                print(f"  {label:34s} matches={n_a:4d}  identical assignments={same}/{m_a.numel()}  "
+                      f"max|dscore|={(s_a - s_b).abs().max().item():.2e}")
 
 
 # --------------------------------------------------------------------------------------
@@ -874,11 +1040,20 @@ def aliked_contract(m: nn.Module) -> list[str]:
     ]
 
 
-def lightglue_contract(lg: nn.Module, feat: str) -> list[str]:
+def lightglue_contract(lg: nn.Module, feat: str, padded_length: int = 0) -> list[str]:
     c = lg.conf
     sides = ["keypoints_0", "scales_0", "oris_0", "descriptors_0", "keypoints_1", "scales_1", "oris_1", "descriptors_1"] \
         if c.add_scale_ori else ["keypoints_0", "descriptors_0", "keypoints_1", "descriptors_1"]
-    return [
+    if padded_length:
+        sides = padded_input_names(c.add_scale_ori)
+    padded = [] if not padded_length else [
+        f"padded_length: {padded_length}   # static export: both sides padded to exactly this many rows (Core ML compiles",
+        "#   only bounded shapes); the host routes a pair with more keypoints on a side to the dynamic file",
+        f"mask_padded_value: {PAD_MASK_VALUE:g}   # mask_0 / mask_1 [1,L] float32: 0 for a real keypoint, this for a padded row",
+        "#   (zeros in its keypoints / descriptors); added to every attention and assignment logit over the key axis.",
+        "#   Output [1,L+1,L+1]: the host reads the [N0,N1] block (row stride L+1); the rest is not meaningful.",
+    ]
+    return padded + [
         f"features: {feat}",
         f"input_dim: {c.input_dim}   # descriptor size the input projection expects",
         f"add_scale_ori: {'true' if c.add_scale_ori else 'false'}   # scales [1,N] (px) and oris [1,N] (rad) inputs per side",
@@ -898,16 +1073,21 @@ ALL_EXPORTS = ("superpoint", "aliked", "lightglue_superpoint", "lightglue_aliked
 
 
 def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None = None,
-               static_size: tuple[int, int] | None = None, top_k: int = 2048) -> dict[str, Path]:
+               static_size: tuple[int, int] | None = None, top_k: int = 2048,
+               static_length: int | None = None) -> dict[str, Path]:
     """The fp32 exports + fp16 twins + sidecars into feature_models/ (`only`: a subset of ALL_EXPORTS, e.g. the
     `export-superpoint` pixi task - SuperPoint is the one model every machine exports itself, plan Q6).
     `static_size` (W, H): export the two detectors with that fixed input size as '<stem>_<W>x<H>.onnx' instead of
     the dynamic-axis files - Core ML compiles only bounded shapes (step 7: with dynamic H, W every partition fell
     back to the CPU); ALIKED then also runs its detector in top-k mode (`top_k` keypoints, every shape static).
+    `static_length` L: export the matchers padded to L keypoints per side as 'lightglue_<feat>_L<L>.onnx'. With one
+    static option given, only that family is exported (the other's dynamic files are not rewritten).
     Returns {key: fp32 path}."""
     from torch.export import Dim
 
     wanted = set(ALL_EXPORTS) if not only else only
+    export_detectors = static_size is not None or static_length is None
+    export_matchers = static_length is not None or static_size is None
     paths: dict[str, Path] = {}
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     if static_size:
@@ -920,7 +1100,7 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
         dyn = ({2: Dim("height", min=64), 3: Dim("width", min=64)},)
 
     # SuperPoint: dynamic H, W unless static_size
-    if "superpoint" in wanted:
+    if "superpoint" in wanted and export_detectors:
         path = MODELS_DIR / f"superpoint_v1{suffix}.onnx"
         export_onnx(SuperPointDense(models["superpoint"]), path, (torch.rand(1, 1, H, W),), ["image"],
                     ["scores", "descriptors"], dyn, opset=18)
@@ -932,7 +1112,7 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
     aliked_k = top_k if static_size else 0
     aliked_lines = size_lines + ([f"topk: {aliked_k}   # the graph returns exactly topk entries by NMS score; those failing "
                                   "the detection_threshold carry score -1 - the host drops them"] if aliked_k else [])
-    if "aliked" in wanted:
+    if "aliked" in wanted and export_detectors:
         path = MODELS_DIR / f"aliked_n16{suffix}.onnx"
         # static (Core ML): deformable convs decomposed into GridSample + 1x1 conv, no DeformConv node (plan Q5 b)
         export_onnx(AlikedExport(models["aliked"], aliked_k, decompose_deform=bool(static_size)), path,
@@ -944,28 +1124,41 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
             export_onnx(AlikedTrunk(models["aliked"], 0, decompose_deform=True), MODELS_DIR / f"aliked_n16{suffix}_trunk.onnx",
                         (torch.rand(1, 3, H, W),), ["image"], ["score_map", "feature_map"], None, opset=18)
 
-    # LightGlue x3: dynamic N0, N1 (>= 2: the graph has no empty/single-keypoint branch and 0/1 sizes specialise)
+    # LightGlue x3: dynamic N0, N1 (>= 2: the graph has no empty/single-keypoint branch and 0/1 sizes specialise),
+    # or padded to static_length rows per side with the mask inputs (every shape bounded, for Core ML)
     n0, n1 = Dim("n0", min=2), Dim("n1", min=2)
+    L = static_length or 0
     for feat, cfg in LIGHTGLUE_FEATURES.items():
-        if f"lightglue_{feat}" not in wanted or static_size:   # the matchers have no image-size axis
+        if f"lightglue_{feat}" not in wanted or not export_matchers:
             continue
         lg = models[f"lightglue_{feat}"]
-        path = MODELS_DIR / f"lightglue_{feat}.onnx"
+        path = MODELS_DIR / (f"lightglue_{feat}_L{L}.onnx" if L else f"lightglue_{feat}.onnx")
         d = cfg["input_dim"]
-        k0, k1 = torch.rand(1, 512, 2) * 2 - 1, torch.rand(1, 384, 2) * 2 - 1
-        d0, d1 = F.normalize(torch.randn(1, 512, d), dim=-1), F.normalize(torch.randn(1, 384, d), dim=-1)
+        na, nb = (L, L) if L else (512, 384)    # sample sizes: with L, the last quarter / third of the rows is padding
+        k0, k1 = torch.rand(1, na, 2) * 2 - 1, torch.rand(1, nb, 2) * 2 - 1
+        d0, d1 = F.normalize(torch.randn(1, na, d), dim=-1), F.normalize(torch.randn(1, nb, d), dim=-1)
+        if L:
+            m0 = torch.cat([torch.zeros(1, L - L // 4), torch.full((1, L // 4), PAD_MASK_VALUE)], 1)
+            m1 = torch.cat([torch.zeros(1, L - L // 3), torch.full((1, L // 3), PAD_MASK_VALUE)], 1)
         if cfg["add_scale_ori"]:
-            s0, o0 = torch.rand(1, 512) * 10, torch.rand(1, 512) * 6.28 - 3.14
-            s1, o1 = torch.rand(1, 384) * 10, torch.rand(1, 384) * 6.28 - 3.14
-            export_onnx(LightGlueScaleOriExport(lg), path, (k0, s0, o0, d0, k1, s1, o1, d1),
-                        ["keypoints_0", "scales_0", "oris_0", "descriptors_0",
-                         "keypoints_1", "scales_1", "oris_1", "descriptors_1"], ["log_assignment"],
-                        ({1: n0}, {1: n0}, {1: n0}, {1: n0}, {1: n1}, {1: n1}, {1: n1}, {1: n1}), opset=18)
+            s0, o0 = torch.rand(1, na) * 10, torch.rand(1, na) * 6.28 - 3.14
+            s1, o1 = torch.rand(1, nb) * 10, torch.rand(1, nb) * 6.28 - 3.14
+            if L:
+                export_onnx(LightGlueScaleOriPaddedExport(lg), path, (k0, s0, o0, d0, m0, k1, s1, o1, d1, m1),
+                            padded_input_names(True), ["log_assignment"], None, opset=18)
+            else:
+                export_onnx(LightGlueScaleOriExport(lg), path, (k0, s0, o0, d0, k1, s1, o1, d1),
+                            ["keypoints_0", "scales_0", "oris_0", "descriptors_0",
+                             "keypoints_1", "scales_1", "oris_1", "descriptors_1"], ["log_assignment"],
+                            ({1: n0}, {1: n0}, {1: n0}, {1: n0}, {1: n1}, {1: n1}, {1: n1}, {1: n1}), opset=18)
+        elif L:
+            export_onnx(LightGluePaddedExport(lg), path, (k0, d0, m0, k1, d1, m1), padded_input_names(False),
+                        ["log_assignment"], None, opset=18)
         else:
             export_onnx(LightGlueExport(lg), path, (k0, d0, k1, d1),
                         ["keypoints_0", "descriptors_0", "keypoints_1", "descriptors_1"], ["log_assignment"],
                         ({1: n0}, {1: n0}, {1: n1}, {1: n1}), opset=18)
-        write_sidecar(path, "lightglue", f"lightglue_{feat}", commit, 18, "fp32", lightglue_contract(lg, feat))
+        write_sidecar(path, "lightglue", f"lightglue_{feat}", commit, 18, "fp32", lightglue_contract(lg, feat, L))
         paths[f"lightglue_{feat}"] = path
 
     for key, path in paths.items():
@@ -974,7 +1167,7 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
         opset = 19 if key == "aliked" else 18
         contract = {"superpoint": lambda: superpoint_contract(models["superpoint"]) + size_lines,
                     "aliked": lambda: aliked_contract(models["aliked"]) + aliked_lines}.get(
-            key, lambda: lightglue_contract(models[key], key.split("_", 1)[1]))()
+            key, lambda: lightglue_contract(models[key], key.split("_", 1)[1], L))()
         weights_key = {"superpoint": "superpoint", "aliked": "aliked-n16"}.get(key, key)
         write_sidecar(fp16, key.split("_")[0], weights_key, commit, opset, "fp16", contract)
     return paths
@@ -1015,18 +1208,23 @@ def ort_detect(key: str, sess: OrtModel, grey: torch.Tensor, rgb: torch.Tensor, 
     return {"keypoints": kp[keep], "scores": s[keep], "descriptors": d[keep]}
 
 
-def ort_match(lg: nn.Module, sess: OrtModel, f0: dict, f1: dict, size_wh: tuple[int, int]):
+def ort_match(lg: nn.Module, sess: OrtModel, f0: dict, f1: dict, size_wh: tuple[int, int], padded_length: int = 0):
     from lightglue.lightglue import filter_matches, normalize_keypoints
 
     size = torch.tensor([size_wh], dtype=torch.float32)
     k0 = normalize_keypoints(f0["keypoints"][None], size)
     k1 = normalize_keypoints(f1["keypoints"][None], size)
-    feed = {"keypoints_0": k0, "descriptors_0": f0["descriptors"][None],
-            "keypoints_1": k1, "descriptors_1": f1["descriptors"][None]}
-    if lg.conf.add_scale_ori:
-        feed.update(scales_0=f0["scales"][None], oris_0=f0["oris"][None],
-                    scales_1=f1["scales"][None], oris_1=f1["oris"][None])
+    if padded_length:
+        feed = padded_feed(lg, f0, k0, f1, k1, padded_length)
+    else:
+        feed = {"keypoints_0": k0, "descriptors_0": f0["descriptors"][None],
+                "keypoints_1": k1, "descriptors_1": f1["descriptors"][None]}
+        if lg.conf.add_scale_ori:
+            feed.update(scales_0=f0["scales"][None], oris_0=f0["oris"][None],
+                        scales_1=f1["scales"][None], oris_1=f1["oris"][None])
     (scores,) = sess.run(**feed)
+    if padded_length:
+        scores = unpad_scores(scores, k0.shape[1], k1.shape[1])
     m0, _, ms0, _ = filter_matches(scores, lg.conf.filter_threshold)
     return m0[0], ms0[0]
 
@@ -1039,10 +1237,12 @@ def compare_matches(label: str, a: tuple, b: tuple, ms: float) -> None:
 
 
 def check_ort(models: dict[str, nn.Module], paths: dict[str, Path], images: list[Path], max_keypoints: int,
-              static: bool = False) -> None:
-    """(c) fp32 and (d) fp16 exports on ORT CPU against upstream (a); plus, for the dynamic exports, the fp32
-    detectors on a 640x480 resize of the first frame against upstream on the same resize (the dynamic axes at
-    work). Static exports: only the detectors, ALIKED through the host threshold of its top-k output."""
+              static_size: tuple[int, int] | None = None, static_length: int | None = None) -> None:
+    """(c) fp32 and (d) fp16 exports on ORT CPU against upstream (a), for the files in `paths`; plus, for the dynamic
+    detectors, the fp32 files on a 640x480 resize of the first frame against upstream on the same resize (the
+    dynamic axes at work). Static ALIKED goes through the host threshold of its top-k output; the padded matchers
+    through the padded feed and the [N0,N1] block of their output."""
+    static = static_size is not None or static_length is not None
     print(f"\n(a) upstream vs (c) ONNX fp32 / (d) ONNX fp16 on ONNX Runtime CPU, {len(images)} frames"
           f"{' (static exports)' if static else ''}:")
     sess = {col: {k: OrtModel(p if col == "c" else p.with_name(p.stem + "_fp16.onnx")) for k, p in paths.items()}
@@ -1060,18 +1260,21 @@ def check_ort(models: dict[str, nn.Module], paths: dict[str, Path], images: list
                 compare_detections(f"({col}) {key}", fa[key], fb)
                 print(f"  {'':34s} {sess[col][key].ms:7.1f} ms")
         feats.append(fa)
-    if static:
-        return
     for i in range(0, len(images) - 1, 2):
         grey, _ = load_image(images[i])
         H, W = grey.shape[-2:]
-        print(f" pair {images[i].name} - {images[i + 1].name}")
-        for name in ("superpoint", "aliked", "sift"):
+        matchers = [n for n in ("superpoint", "aliked", "sift") if f"lightglue_{n}" in paths]
+        if matchers:
+            print(f" pair {images[i].name} - {images[i + 1].name}"
+                  f"{f' (matchers padded to {static_length})' if static_length else ''}")
+        for name in matchers:
             lg, key = models[f"lightglue_{name}"], f"lightglue_{name}"
             ref = upstream_match(lg, feats[i][name], feats[i + 1][name], (W, H))
             for col in ("c", "d"):
-                got = ort_match(lg, sess[col][key], feats[i][name], feats[i + 1][name], (W, H))
+                got = ort_match(lg, sess[col][key], feats[i][name], feats[i + 1][name], (W, H), static_length or 0)
                 compare_matches(f"({col}) {key}", ref, got, sess[col][key].ms)
+    if static or not {"superpoint", "aliked"} <= set(paths):
+        return
     # dynamic axes: another size
     grey, rgb = load_image(images[0])
     g2 = F.interpolate(grey, size=(480, 640), mode="area")
@@ -1128,6 +1331,9 @@ def main() -> None:
                         help="export the detectors with this fixed input size as <stem>_<W>x<H>.onnx (Core ML)")
     parser.add_argument("--topk", type=int, default=2048,
                         help="static ALIKED: keypoints returned by the graph (top-k mode; the host thresholds)")
+    parser.add_argument("--static-length", metavar="L", type=int, default=None,
+                        help="export the matchers padded to L keypoints per side as lightglue_<feat>_L<L>.onnx (Core ML); "
+                             "with --static given too, only the static files are exported")
     args = parser.parse_args()
     static_size = None
     if args.static:
@@ -1141,14 +1347,15 @@ def main() -> None:
         models = load_models(args.max_keypoints)
         describe_models(models)
         if args.images:
-            check_wrappers(models, args.images, args.max_keypoints, args.topk if static_size else 0)
+            check_wrappers(models, args.images, args.max_keypoints, args.topk if static_size else 0,
+                           args.static_length or 0)
         print()
-        paths = export_all(models, commit, set(args.only) if args.only else None, static_size, args.topk)
-        if args.images and static_size:
-            check_ort(models, paths, args.images, args.max_keypoints, static=True)
-        elif args.images and not args.only:
-            check_ort(models, paths, args.images, args.max_keypoints)
-            write_references(models, args.images, commit)
+        paths = export_all(models, commit, set(args.only) if args.only else None, static_size, args.topk,
+                           args.static_length)
+        if args.images:
+            check_ort(models, paths, args.images, args.max_keypoints, static_size, args.static_length)
+            if not args.only and not static_size and not args.static_length:
+                write_references(models, args.images, commit)
 
 
 if __name__ == "__main__":

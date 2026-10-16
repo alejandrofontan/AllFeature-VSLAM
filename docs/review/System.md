@@ -13,24 +13,24 @@ commit that was read. Tags: `→ #<issue>`, `→ reference`, `→ paper:<file>.t
 | Function | Source | State | Notes |
 |---|---|---|---|
 | `System::System` | [System.cc#L27](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L27 "System::System(") | unread |  |
-| `System::TrackStereo` | [System.cc#L306](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L306 "System::TrackStereo(") | unread |  |
-| `System::TrackRGBD` | [System.cc#L360](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L360 "System::TrackRGBD(") | unread |  |
-| `System::Track` | [System.cc#L413](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L413 "System::Track(") | unread |  |
-| `System::MapChanged` | [System.cc#L462](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L462 "System::MapChanged(") | unread |  |
-| `System::reset` | [System.cc#L475](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L475 "System::reset(") | unread |  |
-| `System::Shutdown` | [System.cc#L481](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L481 "System::Shutdown(") | unread |  |
-| `System::SavePlaceCellDiagnostics` | [System.cc#L546](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L546 "System::SavePlaceCellDiagnostics(") | unread |  |
-| `System::GetPlaceCell` | [System.cc#L581](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L581 "System::GetPlaceCell(") | unread |  |
-| `System::SetSequenceInfo` | [System.cc#L586](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L586 "System::SetSequenceInfo(") | unread |  |
-| `System::GetModalityDescription` | [System.cc#L592](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L592 "System::GetModalityDescription(") | unread |  |
-| `System::SaveKeyFrameTrajectoryVSLAMLAB` | [System.cc#L607](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L607 "System::SaveKeyFrameTrajectoryVSLAMLAB(") | unread |  |
-| `System::SavePointCloudVSLAMLAB` | [System.cc#L686](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L686 "System::SavePointCloudVSLAMLAB(") | unread |  |
-| `System::GetTrackingState` | [System.cc#L712](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L712 "System::GetTrackingState(") | unread |  |
-| `System::GetTrackedMapPoints` | [System.cc#L718](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L718 "System::GetTrackedMapPoints(") | unread |  |
-| `System::GetTrackedKeyPointsUn` | [System.cc#L724](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L724 "System::GetTrackedKeyPointsUn(") | unread |  |
-| `System::SaveStatistics` | [System.cc#L730](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L730 "System::SaveStatistics(") | unread |  |
-| `System::setImageSize` | [System.cc#L798](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L798 "System::setImageSize(") | unread |  |
-| `System::GBA` | [System.cc#L803](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L803 "System::GBA(") | unread |  |
+| `System::TrackStereo` | [System.cc#L310](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L310 "System::TrackStereo(") | unread |  |
+| `System::TrackRGBD` | [System.cc#L364](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L364 "System::TrackRGBD(") | unread |  |
+| `System::Track` | [System.cc#L417](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L417 "System::Track(") | unread |  |
+| `System::MapChanged` | [System.cc#L466](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L466 "System::MapChanged(") | unread |  |
+| `System::reset` | [System.cc#L479](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L479 "System::reset(") | unread |  |
+| `System::Shutdown` | [System.cc#L485](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L485 "System::Shutdown(") | unread |  |
+| `System::SavePlaceCellDiagnostics` | [System.cc#L550](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L550 "System::SavePlaceCellDiagnostics(") | unread |  |
+| `System::GetPlaceCell` | [System.cc#L585](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L585 "System::GetPlaceCell(") | unread |  |
+| `System::SetSequenceInfo` | [System.cc#L590](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L590 "System::SetSequenceInfo(") | unread |  |
+| `System::GetModalityDescription` | [System.cc#L596](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L596 "System::GetModalityDescription(") | unread |  |
+| `System::SaveKeyFrameTrajectoryVSLAMLAB` | [System.cc#L611](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L611 "System::SaveKeyFrameTrajectoryVSLAMLAB(") | unread |  |
+| `System::SavePointCloudVSLAMLAB` | [System.cc#L690](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L690 "System::SavePointCloudVSLAMLAB(") | unread |  |
+| `System::GetTrackingState` | [System.cc#L716](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L716 "System::GetTrackingState(") | unread |  |
+| `System::GetTrackedMapPoints` | [System.cc#L722](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L722 "System::GetTrackedMapPoints(") | unread |  |
+| `System::GetTrackedKeyPointsUn` | [System.cc#L728](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L728 "System::GetTrackedKeyPointsUn(") | unread |  |
+| `System::SaveStatistics` | [System.cc#L734](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L734 "System::SaveStatistics(") | unread |  |
+| `System::setImageSize` | [System.cc#L802](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L802 "System::setImageSize(") | unread |  |
+| `System::GBA` | [System.cc#L807](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L807 "System::GBA(") | unread |  |
 
 ## Notes
 

@@ -1,7 +1,7 @@
 # `src/LocalMapping.cc`
 
 The map back-end. `LocalMapping::run` is the body of the local-mapping thread started by
-[`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L270 "mptLocalMapping = make_shared<thread>"):
+[`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L274 "mptLocalMapping = make_shared<thread>"):
 it drains the keyframe queue that Tracking fills and, for every keyframe, computes its global
 descriptor, culls the map points on probation, creates new map points (from sensor depth and by
 two-view triangulation), fuses duplicates with the covisible neighbours, runs the local bundle
@@ -86,9 +86,9 @@ LocalMapping::LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureTy
   given feature types and image size. The loop closer, viewer and keyframe information kernel are
   injected afterwards through `set_loop_closer` / `set_viewer` / `set_keyframe_information` (header
   inlines), because `LoopClosing` is constructed after `LocalMapping` and the viewer and kernel are optional.
-- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L269 "localMapper = make_shared<LocalMapping>"),
+- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L273 "localMapper = make_shared<LocalMapping>"),
   which then starts [`run`](#run) on its own `std::thread` and wires the three setters
-  ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L299 "localMapper->set_loop_closer") — `set_keyframe_information` only when the system has an information kernel).
+  ([`System.cc`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L303 "localMapper->set_loop_closer") — `set_keyframe_information` only when the system has an information kernel).
 
 ### `run`
 
@@ -184,7 +184,7 @@ void LocalMapping::create_new_map_points()
   against them ([`cache_neighbor_matches`](#cache_neighbor_matches)), then for each neighbour whose
   baseline over its median scene depth ([`KeyFrame::compute_scene_median_depth`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/KeyFrame.cc#L685)) is at least
   `CreateNewMapPointsMinBaselineDepthRatio`, fetches the matched keypoint pairs per feature type
-  ([`FeatureMatcher::match_keyframes_for_triangulation`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L381)) and places each pair in 3D.
+  ([`FeatureMatcher::match_keyframes_for_triangulation`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L387)) and places each pair in 3D.
 - 3D position, in priority order: both views have sensor depth (`inv_depth > 0`) → back-project from
   each and average; one view has depth → back-project from that view; neither → linear two-view
   triangulation (SVD of the 4×4 system) only if `0 < cos(parallax) < CreateNewMapPointsMaxParallaxCos`;
@@ -214,7 +214,7 @@ void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors
   `collapse(2)` parallel loop, then stores the results serially: per feature type in both keyframes'
   `cache_matched_pairs_feat_type` (reversed for the neighbour) and stacked over feature types with
   keypoint-index offsets in `cache_matched_pairs` (reversed via
-  [`FeatureMatcher::swap_match_direction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L77)).
+  [`FeatureMatcher::swap_match_direction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L83)).
 - the cache is what `match_keyframes_for_triangulation` reads; a neighbour already cached (for
   example by the matcher itself in an earlier call) is skipped.
 - differs from ORB-SLAM2: no counterpart (stock uses the BoW feature vector to restrict matching).
@@ -249,7 +249,7 @@ void LocalMapping::search_in_neighbors()
   covisible keyframes plus, for each, its `SearchInNeighborsSecondKeyframes` best covisible
   keyframes, deduplicated with the `fuse_target_for_keyframe` mark (the current keyframe excluded).
 - per feature type: projects the current keyframe's map points into every target and fuses
-  duplicates ([`FeatureMatcher::fuse_map_points_to_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L420), radius
+  duplicates ([`FeatureMatcher::fuse_map_points_to_keyframe`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/FeatureMatcher.cpp#L426), radius
   `SearchInNeighborsRadius`); collects the targets' map points (deduplicated with
   `fuse_candidate_for_keyframe`) and fuses them into the current keyframe; then recomputes the
   descriptor and normal/depth of every surviving match. Finally refreshes the covisibility graph.
@@ -506,7 +506,7 @@ void LocalMapping::request_finish()
 ```
 - raises `finish_requested_` under `finish_mutex_`; [`run`](#run) exits at its next check, also
   from inside the stop idle loop.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L483 "localMapper->request_finish()").
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L487 "localMapper->request_finish()").
 
 ### `is_finish_requested`
 
@@ -532,7 +532,7 @@ bool LocalMapping::is_finished() const
 ```
 - `finished_` under `finish_mutex_`. Starts `true` (`finished_{true}`) and is cleared by
   [`run`](#run)'s first statement.
-- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L493 "while(!localMapper->is_finished()") (spin, then join the
+- called from: [`System::Shutdown`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L497 "while(!localMapper->is_finished()") (spin, then join the
   thread), [`LoopClosing::apply_gba_correction`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/LoopClosing.cc#L599 "!local_mapper_->is_finished()"),
   [`release`](#release).
 

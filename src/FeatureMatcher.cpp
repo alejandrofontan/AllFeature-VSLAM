@@ -70,6 +70,12 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
             const auto& lg = onnx::shared_lightglue(variant);
             AF_INFO("LightGlue (" << variant << ") ready for " << name << ": " << lg.model_path() << " (" << lg.precision()
                     << " weights) on onnxruntime/" << lg.provider());
+            if (onnx::feature_models_config().static_shapes) {
+                // the smallest padded export, loaded now so a missing file fails here and not on the first pair
+                const auto& lgs = onnx::shared_lightglue(variant, 2);
+                AF_INFO("LightGlue (" << variant << ") static exports for " << name << ": " << lgs.model_path()
+                        << " (padded to " << lgs.padded_length() << ") on onnxruntime/" << lgs.provider());
+            }
         }
     }
 }
@@ -1077,7 +1083,8 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
             case LIGHTGLUE_ALIKED:
             case LIGHTGLUE_SUPERPOINT:
             {
-                matches = onnx::shared_lightglue(lightglue_variant(matcherType))
+                matches = onnx::shared_lightglue(lightglue_variant(matcherType),
+                                                 static_cast<int>(std::max(kps1.size(), kps2.size())))
                               .match(kps1, desc1, kps2, desc2, image_width, image_height);
                 break;
             }

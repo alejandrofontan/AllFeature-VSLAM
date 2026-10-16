@@ -39,7 +39,9 @@ YAML_RE = re.compile(r'^(?P<key>[A-Za-z][\w.]*)\s*:\s*(?P<val>[^#]*?)\s*(?:#\s*(
 # top-level (block-less) keys of the settings YAML, so `settings["features"]`-style reads count but
 # `map["orb32"]`-style indexing of other containers does not
 TOP_LEVEL_KEYS = {"cam_mono", "features", "vpr", "feature_vpr", "megaloc_onnx", "megaloc_precision",
-                  "segmentation", "segmentation_onnx", "debug", "max_frame_wait"}
+                  "megaloc_provider", "megaloc_threads", "megaloc_coreml_units",
+                  "features_models_dir", "features_provider", "features_threads", "features_coreml_units",
+                  "features_static_shapes", "segmentation", "segmentation_onnx", "debug", "max_frame_wait"}
 
 # reference page per source-file stem (a file family shares one page)
 PAGE_OF = {

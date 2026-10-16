@@ -16,21 +16,42 @@
 AF_VSLAM::FeatureExtractor_aliked128::FeatureExtractor_aliked128(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
     AF_INFO("Initializing ALIKED128 feature extractor (ONNX Runtime)...");
-    extractor_ = std::make_unique<onnx::AlikedOnnx>(onnx::feature_model_path(Aliked128::kModelFile),
-                                                    onnx::feature_models_config().ort);
+    if (onnx::feature_models_config().static_shapes)
+        AF_INFO("ALIKED128: features_static_shapes is on - the fixed-size export for the frame size loads on the first frame");
+    else
+        load(onnx::feature_model_path(Aliked128::kModelFile), 640, 480);
+}
+
+void AF_VSLAM::FeatureExtractor_aliked128::load(const std::string& path, const int width, const int height)
+{
+    extractor_ = std::make_unique<onnx::AlikedOnnx>(path, onnx::feature_models_config().ort);
     std::vector<cv::KeyPoint> kps;
     cv::Mat desc;
-    extractor_->detect(cv::Mat::zeros(480, 640, CV_8UC3), kps, desc);   // warm-up
+    extractor_->detect(cv::Mat::zeros(height, width, CV_8UC3), kps, desc);   // warm-up
     AF_INFO("ALIKED128 ready: " << extractor_->model_path() << " (" << extractor_->precision()
             << " weights) on onnxruntime/" << extractor_->provider() << ", budget " << settings->maxNumFeatures
-            << " keypoints, threshold " << extractor_->detection_threshold());
+            << " keypoints, threshold " << extractor_->detection_threshold() << ", warm-up "
+            << extractor_->last_graph_ms() << " ms");
+}
+
+AF_VSLAM::onnx::AlikedOnnx& AF_VSLAM::FeatureExtractor_aliked128::extractor_for(const int width, const int height)
+{
+    if (onnx::feature_models_config().static_shapes && (!extractor_ || width != loaded_width_ || height != loaded_height_))
+    {
+        if (extractor_)
+            AF_WARN("ALIKED128: frame size changed to " << width << "x" << height << " - loading its static export");
+        load(onnx::static_model_path(Aliked128::kModelFile, width, height, "aliked"), width, height);
+        loaded_width_ = width;
+        loaded_height_ = height;
+    }
+    return *extractor_;
 }
 
 void AF_VSLAM::FeatureExtractor_aliked128::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
     // The graph converts nothing: AlikedOnnx takes the BGR frame (cv::imread order) and feeds RGB, as the model expects
     std::vector<cv::KeyPoint> keypoints_;
     cv::Mat descriptors_;
-    extractor_->detect(img.img, keypoints_, descriptors_);
+    extractor_for(img.img.cols, img.img.rows).detect(img.img, keypoints_, descriptors_);
 
     // Discard keypoints outside the mask (if one was loaded for this frame)
     FilterKeypointsByMask(keypoints_, descriptors_, img.mask);

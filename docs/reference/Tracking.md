@@ -78,7 +78,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
 - the per-frame entry point: converts the image to gray (honouring the calibration's colour order), resizes it to the nominal area when `fix_image_size_` is set, keeps the colour image (`color_image_`, drawn by the viewer), the segmentation mask and the image name for the drawers, builds `current_frame_` and calls [`track`](#track). Returns `current_frame_.Tcw` (identity-less/unset when the frame did not track).
 - feature extraction happens in the `Frame` constructor with one extractor per feature type; before the map exists the denser `init_feature_extractor_` set is used (`Tracking.InitExtractorFeaturesScale` times more keypoints), afterwards `feature_extractor_left_`.
 - profiling: `GrabProfiler` ([`Tracking_aux.h`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/include/Tracking_aux.h#L92 "struct GrabProfiler")) fills the resize / frame-creation / tracking / total histograms; the total is only counted for frames that ended in state `OK`, and the running median is pushed to the viewer when one exists.
-- called from: [`System::Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L446 "tracker->grab_image"), once per image.
+- called from: [`System::Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L450 "tracker->grab_image"), once per image.
 - differs from ORB-SLAM2: one entry point for mono and RGB-D (`GrabImageMonocular`/`GrabImageRGBD` are gone; depth travels inside `Image` and becomes per-keypoint inverse depth in the `Frame`); the mask and the multi-feature extractor map are new.
 - settings: `Tracking.InitExtractorFeaturesScale` (4).
 
@@ -288,7 +288,7 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
                    const bool fix_image_size)
 ```
 - loads the camera ([`load_camera_parameters`](#load_camera_parameters)), sets `max_frames_` to one second of frames, builds the normal and the initialization extractor per feature type ([`get_feature_extractor`](#get_feature_extractor)) and the `FeatureMatcher`. Local Mapping, Loop Closing and the Viewer are attached later through the `set_*` setters.
-- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L262 "make_shared<Tracking>").
+- called from: [`System::System`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L266 "make_shared<Tracking>").
 
 ### `load_camera_parameters`
 
@@ -327,7 +327,7 @@ void Tracking::log_profile()
 void Tracking::request_relocalization()
 ```
 - `OK` → `LOST`, nothing else: the next [`track`](#track) goes through [`relocalize`](#relocalize) against the existing map instead of trusting the pose from before a pause. Any other state is left alone (an uninitialized tracker keeps initializing). Tracking thread only.
-- called from: [`System::Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L431 "tracker->request_relocalization()") when the Viewer's pause is lifted.
+- called from: [`System::Track`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L435 "tracker->request_relocalization()") when the Viewer's pause is lifted.
 
 ### `reset`
 
@@ -335,7 +335,7 @@ void Tracking::request_relocalization()
 void Tracking::reset()
 ```
 - stops the viewer, resets Local Mapping and Loop Closing (both block until done), clears the VPR database and the map, restarts the keyframe and frame id counters, returns to `NO_IMAGES_YET`, drops the initializer, and clears the per-run state anchored to frame ids (reloc embargo, emergency cooldown, inlier history) and the profiling histograms; releases the viewer. Every step logs before it runs.
-- called from: [`create_initial_map`](#create_initial_map) on a degenerate map and [`System::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L399 "tracker->reset").
+- called from: [`create_initial_map`](#create_initial_map) on a degenerate map and [`System::reset`](https://github.com/alejandrofontan/AllFeature-VSLAM/blob/main/src/System.cc#L403 "tracker->reset").
 
 ## Settings read by this file
 

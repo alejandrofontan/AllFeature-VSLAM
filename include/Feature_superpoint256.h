@@ -10,7 +10,9 @@
  * superpoint256: SuperPoint keypoints + 256-d descriptors on ONNX Runtime (onnx/SuperPointOnnx.h), matched by
  * LightGlue-SuperPoint (LIGHTGLUE_SUPERPOINT -> onnx::shared_lightglue("superpoint") in FeatureMatcher). The model
  * file is `<features_models_dir>/superpoint_v1.onnx` (exported locally by `pixi run export-superpoint`: the Magic
- * Leap weights are not redistributable, plan Q6); the runtime provider comes from the features_* settings.
+ * Leap weights are not redistributable, plan Q6); the runtime provider comes from the features_* settings. With
+ * `features_static_shapes` the fixed-size export `superpoint_v1_<W>x<H>.onnx` for the frame size is loaded on the
+ * first frame instead (Core ML compiles only bounded shapes; `export-features --only superpoint --static WxH`).
  */
 
 #ifndef AF_VSLAM_FEATURE_superpoint256_H
@@ -57,7 +59,13 @@ namespace AF_VSLAM {
         [[nodiscard]] float GetKeypointSize(const cv::KeyPoint &keypoint) const override;
 
     private:
+        /// Create the session on `path` and warm it up on a blank width x height frame.
+        void load(const std::string& path, int width, int height);
+        /// The session for a width x height frame: the one loaded, or (static shapes) the export for that size.
+        onnx::SuperPointOnnx& extractor_for(int width, int height);
+
         std::unique_ptr<onnx::SuperPointOnnx> extractor_;
+        int loaded_width_{0}, loaded_height_{0};   // the static export's size (static shapes only)
     };
 
     inline std::shared_ptr<FeatureExtractor> Superpoint256::createExtractor(

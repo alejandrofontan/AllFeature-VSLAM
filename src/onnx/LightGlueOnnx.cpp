@@ -31,38 +31,45 @@ double ms_since(const Clock::time_point& t0)
     return std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 }
 
-/// One side's inputs: normalised keypoints [1,N,2], descriptors [1,N,D], and for SIFT scales [1,N] / oris [1,N].
+/// One side's inputs: normalised keypoints [1,L,2], descriptors [1,L,D], for SIFT scales [1,L] / oris [1,L], and
+/// for a padded file the mask [1,L]; L = the padded length, or N for the dynamic file (then no mask).
 struct SideBuffers
 {
-    std::vector<float> keypoints, descriptors, scales, oris;
+    std::vector<float> keypoints, descriptors, scales, oris, mask;
 };
 
 void pack_side(const std::vector<cv::KeyPoint>& kps, const cv::Mat& desc, int input_dim, bool add_scale_ori,
-               float shift_x, float shift_y, float scale, SideBuffers& b)
+               float shift_x, float shift_y, float scale, int padded_length, float mask_padded_value, SideBuffers& b)
 {
     const int n = static_cast<int>(kps.size());
     if (desc.rows != n || desc.cols != input_dim || desc.type() != CV_32F)
         throw std::runtime_error("LightGlueOnnx: descriptors must be [" + std::to_string(n) + ", " +
                                  std::to_string(input_dim) + "] CV_32F, got [" + std::to_string(desc.rows) + ", " +
                                  std::to_string(desc.cols) + "] type " + std::to_string(desc.type()));
-    b.keypoints.resize(static_cast<size_t>(n) * 2);
+    const int rows = padded_length > 0 ? padded_length : n;                   // rows past n stay zero
+    b.keypoints.assign(static_cast<size_t>(rows) * 2, 0.0f);
     for (int i = 0; i < n; ++i)
     {
         b.keypoints[2 * i] = (kps[i].pt.x - shift_x) / scale;        // upstream normalize_keypoints
         b.keypoints[2 * i + 1] = (kps[i].pt.y - shift_y) / scale;
     }
-    b.descriptors.resize(static_cast<size_t>(n) * input_dim);
+    b.descriptors.assign(static_cast<size_t>(rows) * input_dim, 0.0f);
     for (int i = 0; i < n; ++i)
         std::copy_n(desc.ptr<float>(i), input_dim, b.descriptors.data() + static_cast<size_t>(i) * input_dim);
     if (add_scale_ori)
     {
-        b.scales.resize(n);
-        b.oris.resize(n);
+        b.scales.assign(rows, 0.0f);
+        b.oris.assign(rows, 0.0f);
         for (int i = 0; i < n; ++i)
         {
             b.scales[i] = kps[i].size;                                        // px, as cv::SIFT reports it
             b.oris[i] = kps[i].angle * static_cast<float>(CV_PI / 180.0);     // upstream: np.deg2rad(k.angle)
         }
+    }
+    if (padded_length > 0)
+    {
+        b.mask.assign(rows, mask_padded_value);                               // 0 = real row, else padding
+        std::fill_n(b.mask.begin(), n, 0.0f);
     }
 }
 
@@ -73,7 +80,7 @@ LightGlueOnnx::LightGlueOnnx(const std::string& onnx_path, const OrtSettings& se
     : session_(onnx_path, settings)
 {
     read_sidecar(sidecar_path.empty() ? onnx_path + ".yaml" : sidecar_path);
-    const size_t expected_inputs = add_scale_ori_ ? 8 : 4;
+    const size_t expected_inputs = (add_scale_ori_ ? 8 : 4) + (padded_length_ > 0 ? 2 : 0);
     const auto& out = session_.output_names();
     if (session_.input_names().size() != expected_inputs || out.size() != 1 || out[0] != output_name_)
         throw std::runtime_error("LightGlueOnnx: the sidecar's tensor names disagree with " + onnx_path + ":\n" +
@@ -81,7 +88,9 @@ LightGlueOnnx::LightGlueOnnx(const std::string& onnx_path, const OrtSettings& se
     AF_INFO("LightGlueOnnx: " << onnx_path << " (" << features_ << ", " << input_dim_ << "-d"
                               << (add_scale_ori_ ? " + scale/ori" : "") << ", " << precision_
                               << " weights) on onnxruntime/" << session_.provider() << ", threshold "
-                              << filter_threshold_);
+                              << filter_threshold_
+                              << (padded_length_ > 0 ? ", padded to " + std::to_string(padded_length_) + " keypoints per side"
+                                                     : std::string(", dynamic keypoint counts")));
 }
 
 void LightGlueOnnx::read_sidecar(const std::string& path)
@@ -106,6 +115,12 @@ void LightGlueOnnx::read_sidecar(const std::string& path)
         output_name_ = root["output_tensor"].as<std::string>();
         if (root["min_keypoints"])
             min_keypoints_ = root["min_keypoints"].as<int>();
+        if (root["padded_length"])
+            padded_length_ = root["padded_length"].as<int>();
+        if (root["mask_padded_value"])
+            mask_padded_value_ = root["mask_padded_value"].as<float>();
+        if (padded_length_ < 0 || (padded_length_ > 0 && padded_length_ < min_keypoints_))
+            throw std::runtime_error("padded_length " + std::to_string(padded_length_) + " is not usable");
         if (root["precision"])
             precision_ = root["precision"].as<std::string>();
     }
@@ -128,36 +143,47 @@ std::vector<cv::DMatch> LightGlueOnnx::match(const std::vector<cv::KeyPoint>& ke
         last_total_ms_ = ms_since(t_start);
         return matches;
     }
+    if (padded_length_ > 0 && (n0 > padded_length_ || n1 > padded_length_))
+        throw std::runtime_error("LightGlueOnnx: " + std::to_string(std::max(n0, n1)) + " keypoints do not fit " +
+                                 session_.model_path() + " (padded to " + std::to_string(padded_length_) + ")");
+    const int rows = padded_length_ > 0 ? padded_length_ : 0;                 // the graph's rows per side (0: n0 / n1)
+    const int r0 = rows > 0 ? rows : n0, r1 = rows > 0 ? rows : n1;
 
     // upstream normalize_keypoints with image_size = [W, H]: shift = size / 2, scale = max(size) / 2
     const float shift_x = image_width / 2.0f, shift_y = image_height / 2.0f;
     const float scale = std::max(image_width, image_height) / 2.0f;
     SideBuffers s0, s1;
-    pack_side(keypoints0, descriptors0, input_dim_, add_scale_ori_, shift_x, shift_y, scale, s0);
-    pack_side(keypoints1, descriptors1, input_dim_, add_scale_ori_, shift_x, shift_y, scale, s1);
+    pack_side(keypoints0, descriptors0, input_dim_, add_scale_ori_, shift_x, shift_y, scale, rows, mask_padded_value_, s0);
+    pack_side(keypoints1, descriptors1, input_dim_, add_scale_ori_, shift_x, shift_y, scale, rows, mask_padded_value_, s1);
 
     std::vector<TensorView> inputs{
-        {"keypoints_0", s0.keypoints.data(), {1, n0, 2}},
-        {"descriptors_0", s0.descriptors.data(), {1, n0, input_dim_}},
-        {"keypoints_1", s1.keypoints.data(), {1, n1, 2}},
-        {"descriptors_1", s1.descriptors.data(), {1, n1, input_dim_}},
+        {"keypoints_0", s0.keypoints.data(), {1, r0, 2}},
+        {"descriptors_0", s0.descriptors.data(), {1, r0, input_dim_}},
+        {"keypoints_1", s1.keypoints.data(), {1, r1, 2}},
+        {"descriptors_1", s1.descriptors.data(), {1, r1, input_dim_}},
     };
     if (add_scale_ori_)
     {
-        inputs.push_back({"scales_0", s0.scales.data(), {1, n0}});
-        inputs.push_back({"oris_0", s0.oris.data(), {1, n0}});
-        inputs.push_back({"scales_1", s1.scales.data(), {1, n1}});
-        inputs.push_back({"oris_1", s1.oris.data(), {1, n1}});
+        inputs.push_back({"scales_0", s0.scales.data(), {1, r0}});
+        inputs.push_back({"oris_0", s0.oris.data(), {1, r0}});
+        inputs.push_back({"scales_1", s1.scales.data(), {1, r1}});
+        inputs.push_back({"oris_1", s1.oris.data(), {1, r1}});
+    }
+    if (rows > 0)
+    {
+        inputs.push_back({"mask_0", s0.mask.data(), {1, r0}});
+        inputs.push_back({"mask_1", s1.mask.data(), {1, r1}});
     }
     const auto t_graph = Clock::now();
     const std::vector<Tensor> outputs = session_.run(inputs);
     last_graph_ms_ = ms_since(t_graph);
 
-    // upstream filter_matches on the [N0+1, N1+1] log-assignment (dustbin row/column excluded from the argmax)
+    // upstream filter_matches on the [N0, N1] block of the [R0+1, R1+1] log-assignment (dustbin row/column and, in a
+    // padded file, the padded rows/columns excluded from the argmax)
     const Tensor& la = outputs[0];
-    if (la.shape.size() != 3 || la.dim(1) != n0 + 1 || la.dim(2) != n1 + 1)
+    if (la.shape.size() != 3 || la.dim(1) != r0 + 1 || la.dim(2) != r1 + 1)
         throw std::runtime_error("LightGlueOnnx: unexpected log_assignment shape");
-    const int stride = n1 + 1;
+    const int stride = r1 + 1;
     const float* S = la.data.data();
     std::vector<int> m0(n0, -1), m1(n1, -1);
     std::vector<float> max0(n0, -INFINITY), max1(n1, -INFINITY);

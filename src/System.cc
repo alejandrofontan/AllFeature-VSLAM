@@ -84,6 +84,9 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //   features_provider, features_threads, features_coreml_units: their ONNX Runtime
     //                      execution provider / CPU threads / Core ML units (same semantics
     //                      as the megaloc_* keys; "auto", 4, "ALL" by default)
+    //   features_static_shapes: false (default) — load the fixed-shape exports instead
+    //                      (detectors '<stem>_<W>x<H>.onnx' for the frame size, matchers
+    //                      'lightglue_<f>_L<L>.onnx' padded to L): the Core ML path
     //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:
     //                      see PlaceRecognitionMegaLocParameters
     //   PlaceCell.*:       placecell's print manager / profiler / recorder / visualizer
@@ -112,6 +115,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         if(settingsNode["features_provider"]) feature_models.ort.provider = settingsNode["features_provider"].as<std::string>();
         if(settingsNode["features_threads"]) feature_models.ort.threads = settingsNode["features_threads"].as<int>();
         if(settingsNode["features_coreml_units"]) feature_models.ort.coreml_compute_units = settingsNode["features_coreml_units"].as<std::string>();
+        if(settingsNode["features_static_shapes"]) feature_models.static_shapes = settingsNode["features_static_shapes"].as<bool>();
         if(settingsNode["PlaceRecognition.MegaLocMinSimilarity"])
             megaloc_params.min_similarity = settingsNode["PlaceRecognition.MegaLocMinSimilarity"].as<float>();
         if(settingsNode["PlaceRecognition.MaxCandidates"])
