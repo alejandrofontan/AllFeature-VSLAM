@@ -18,6 +18,10 @@ Thirdparty/MegaLoc-TensorRT/convert2onnx/megaloc/
 megaloc_models/
 superpoint_models/
 lightglue_models/
+# learned features on ONNX Runtime (docs/plans/learned_features_onnxruntime.md): the pinned cvg/LightGlue clone the
+# export tool works from, and the exported models + weights cache + references
+tools/lightglue/
+feature_models/
 .cache/
 
 # MkDocs build output (pixi run docs-build)

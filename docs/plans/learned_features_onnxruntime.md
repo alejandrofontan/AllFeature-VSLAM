@@ -122,6 +122,24 @@ One session class and three thin model wrappers, all in AllFeature (Q2):
 diff them against the Python `(c)` column before writing any post-processing — the same "descriptor first, SLAM
 later" order phase 2 used.
 
+## 4b. More extractors from the same clone — **later** (an `enhancement` issue once step 4 lands)
+
+`cvg/LightGlue` ships LightGlue weights for three more extractors. None is part of phase 4 (the goal is the Mac
+port, and each one is a full lane: a `FeatureType`, a `Feature_*` class, a settings file, references, gym entries on
+both machines), but steps 2–4 are built so that adding one is a table row plus a class:
+
+| Extractor | What it is | Export cost | Note |
+|---|---|---|---|
+| **DISK** (Tyszkiewicz et al., 2020) | U-Net detector + 128-d descriptor, Apache-2.0, weights through kornia (`kornia.feature.DISK`), `disk_lightglue` matcher weights | plain CNN, no new operator; full-resolution U-Net, the slowest of the family and the most keypoints | the speed question of §7 applies with more force |
+| **DoGHardNet** | classical DoG keypoints + learned HardNet 128-d descriptor (both via kornia), scale + orientation like SIFT, `doghardnet_lightglue` | the detector is `cv::SIFT`'s (reuse the step-4 `Feature_sift128` detector), only HardNet (a small patch CNN) exports; matcher takes `scales`/`oris` like LightGlue-SIFT | a second descriptor on the SIFT detector — settings `features: [...]` would need "detector/descriptor" pairing it does not express today |
+| **RaCo-ALIKED** (2026) | newer ALIKED variant trained for rotation/scale consistency, `raco_aliked_lightglue` | same wrapper and `DeformConv` translation as ALIKED, different weights | the cheapest of the three: one row in the weights table, one in the LightGlue table, one `FeatureType` |
+
+Recipe (what steps 2–4 must leave in place): `tools/export_features.py` keeps the extractors and the LightGlue
+variants in name-keyed tables; the C++ `LightGlueOnnx` reads `input_dim` and `add_scale_ori` from the sidecar, not
+from code; `FeatureType` is additive (next free index after `superpoint256 = 7`); `include/FeatureFactory.h` is the
+one registration point. Then: enum entry, `Feature_<name>.h/.cpp`, `settings/<name>_settings.yaml`, export row,
+reference, gym entry.
+
 ## 5. Build system — **new**
 
 - CMake: `ALLFEATURE_WITH_TORCH` and `ALLFEATURE_WITH_SIFTGPU` disappear (step 9); `ALLFEATURE_WITH_TENSORRT` keeps
@@ -206,6 +224,7 @@ dynamic-shape declarations, the SIFT scale/ori inputs, fp16 numbers), `docs/note
 
 1. Plan + the three bug reports as GitHub issues (`bug`): SP-LightGlue 320×240 normalisation, `sift128` matched with
    ALIKED-LightGlue weights and zeroed scale/orientation, ALIKED fed BGR.
+   After step 4: an `enhancement` issue for §4b (DISK, DoGHardNet, RaCo-ALIKED).
 2. Step 1 + 2 + 3: `tools/export_features.py`, `export-features` env, five exports with sidecars and references;
    note on the export findings. **User runs the exports** (phase-2 convention).
 3. Step 4: `OrtSession` + `SuperPointOnnx` + T2 for SuperPoint only (the static-shape warm-up).

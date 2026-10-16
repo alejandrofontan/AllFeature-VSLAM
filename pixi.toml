@@ -204,10 +204,40 @@ docs-checklists = { cmd = "python docs/tools/review_checklist.py --all" }
 # everything a docs commit should pass: fresh line numbers, fresh settings page, strict site build
 docs-check = { cmd = "python docs/tools/resolve_links.py --check && python docs/tools/settings_keys.py --check && mkdocs build --strict", env = { DISABLE_MKDOCS_2_WARNING = "true" } }
 
+# export-features env = the ONNX export of the learned feature models (docs/plans/learned_features_onnxruntime.md,
+# steps 1-3): torch CPU + onnx tooling, linux-64 only (the exports are files; the Mac consumes them). Its own
+# environment without the default feature: the default feature carries the runtime pytorch-gpu 2.7 on linux-64,
+# which cannot share an environment with pytorch-cpu.
+[feature.export-features]
+platforms = ["linux-64-cuda"]
+
+[feature.export-features.tasks]
+# PYTHONNOUSERSITE: keep ~/.local/lib/pythonX.Y/site-packages out of the env (a stale user-site package there, e.g.
+# an empty `triton` folder, shadows the real module and breaks torch's import) - the placecell export task's lesson
+export-features = { cmd = "python tools/export_features.py", env = { PYTHONNOUSERSITE = "1" } }
+
+[feature.export-features.dependencies]
+python = "3.11.*"
+# Torch libraries: >=2.9 for the torch.export-based ONNX exporter (dynamo=True, the default since 2.9). CPU build:
+# the exports and the self-checks run on the CPU in seconds to minutes, no CUDA packages needed.
+pytorch-cpu = ">=2.9"
+torchvision = "*"            # torchvision.ops.deform_conv2d (ALIKED) - the op that gets a custom ONNX translation
+kornia = "*"                 # imported by the upstream lightglue/superpoint.py and aliked.py (colour conversion)
+# ONNX libraries
+onnx = "*"
+onnxscript = "*"             # the dynamo exporter's op translations + graph optimiser; the DeformConv translation
+onnxruntime = "*"            # self-check column (c): the export on ORT CPU
+onnxconverter-common = "*"   # fp16-weights twins
+huggingface_hub = "*"
+opencv = "4.12.*"            # cv2: the C++-equivalent preprocessing in the self-check, and cv2.SIFT for the reference
+git = "*"
+numpy = "<2"
+
 [environments]
 build = ["build"]
 cpu = { features = ["cpu"], no-default-feature = true }
 docs = { features = ["docs"], no-default-feature = true }
+export-features = { features = ["export-features"], no-default-feature = true }
 
 ########################################################################################################################
 # Package: `allfeature` (the three executables, libAllFeature-VSLAM + its shared libraries, headers under
