@@ -6,8 +6,11 @@
   "the ONNX file is the contract" rule, same sidecar / reference / parity discipline.
 - **Branches:** AllFeature `features-onnx` (off `main`). No placecell work. The two feature submodules
   (`Thirdparty/Light_Glue_CPP`, `Thirdparty/SuperPoint-LightGlue-TensorRT`) are removed at step 9, not forked.
-- **Status:** draft 2026-10-16; **decisions Q1–Q8 taken 2026-10-16** (all the recommended options, see Decisions);
-  nothing implemented. Next: the three bug issues, then steps 1–3 (export tool, user runs the exports).
+- **Status:** draft 2026-10-16; **decisions Q1–Q8 taken 2026-10-16** (all the recommended options, see Decisions).
+  **Steps 1–3 done 2026-10-16** (branch `features-onnx`): `tools/export_features.py` + `export-features` env; the five
+  fp32 exports reproduce upstream to float32 precision on ONNX Runtime CPU (DeformConv and the data-dependent keypoint
+  count included), fp16 twins usable but not exact, sidecars and references in `feature_models/` —
+  `docs/notes/2026-10-16_learned_features_onnx_export.md`. Next: step 4 (`OrtSession` + `SuperPointOnnx` first).
 - **Written as a walkthrough on purpose**, like phase 2: every step says what it does and why, so the path
   *git repo → ONNX → C++ → ONNX Runtime on two platforms* can be followed end to end for three models at once. What is
   new versus MegaLoc, and therefore where the learning is: (i) **variable-size outputs and inputs** — a detector
