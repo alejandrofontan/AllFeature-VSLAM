@@ -337,6 +337,52 @@ def deform_conv2d_onnx(input, weight, offset, mask, bias, stride_h: int, stride_
 DEFORM_CONV_TRANSLATION = {torch.ops.torchvision.deform_conv2d.default: deform_conv2d_onnx}
 
 
+def deform_conv2d_decomposed(x: torch.Tensor, offset: torch.Tensor, weight: torch.Tensor, bias, padding: int) -> torch.Tensor:
+    """torchvision.ops.deform_conv2d for stride 1, dilation 1, one offset group, no modulation mask (ALIKED's case),
+    written as 9 bilinear samplings + a 1x1 convolution (plan Q5 option b): Core ML has no DeformConv, so with the
+    native op the trunk splits around four CPU nodes (20 partitions, 153 ms on the M1 Pro). Exact: torchvision's
+    bilinear_interpolate with out-of-image corners at zero is grid_sample(mode=bilinear, padding_mode=zeros,
+    align_corners=True) on pixel coordinates. torchvision's offset layout: offset[:, 2t] = dy, offset[:, 2t+1] = dx
+    for tap t = i*kw + j."""
+    B, C, H, W = x.shape
+    out_ch, _, kh, kw = weight.shape
+    ys = torch.arange(H, dtype=x.dtype, device=x.device).view(1, H, 1).expand(B, H, W)
+    xs = torch.arange(W, dtype=x.dtype, device=x.device).view(1, 1, W).expand(B, H, W)
+    taps = []
+    for i in range(kh):
+        for j in range(kw):
+            t = i * kw + j
+            py = ys + (i - padding) + offset[:, 2 * t]
+            px = xs + (j - padding) + offset[:, 2 * t + 1]
+            grid = torch.stack([px / (W - 1) * 2 - 1, py / (H - 1) * 2 - 1], -1)      # [B,H,W,2], (x, y)
+            taps.append(F.grid_sample(x, grid, mode="bilinear", padding_mode="zeros", align_corners=True))
+    columns = torch.cat(taps, dim=1)                                                 # [B, kh*kw*C, H, W], tap-major
+    w_flat = weight.permute(0, 2, 3, 1).reshape(out_ch, kh * kw * C, 1, 1)           # same (tap, channel) order
+    return F.conv2d(columns, w_flat, bias)
+
+
+def decompose_deformable_convs(model: nn.Module) -> int:
+    """Replace the forward of every upstream DeformableConv2d in `model` (a deep copy of the ALIKED module) by the
+    decomposition above; the offset conv and the clamp stay upstream's. Returns the number of modules patched."""
+    import types
+
+    from lightglue.aliked import DeformableConv2d
+
+    def forward(self, x):
+        h, w = x.shape[2:]
+        max_offset = torch.sym_max(h, w) / 4.0
+        offset = self.offset_conv(x).clamp(-max_offset, max_offset)
+        return deform_conv2d_decomposed(x, offset, self.regular_conv.weight, self.regular_conv.bias, self.padding[0])
+
+    count = 0
+    for module in model.modules():
+        if isinstance(module, DeformableConv2d):
+            assert not module.mask, "the decomposition covers the unmasked case only"
+            module.forward = types.MethodType(forward, module)
+            count += 1
+    return count
+
+
 def scale_xy(t: torch.Tensor, sx, sy) -> torch.Tensor:
     """[..., 2] (x, y) tensor with x scaled by `sx` and y by `sy`, the scalars being Python numbers or symbolic sizes
     (W - 1, 2 / (H - 1), ...). The export-friendly way to apply image-size factors: a tensor times a symbolic scalar is
@@ -437,8 +483,13 @@ class AlikedExport(nn.Module):
     Outputs: keypoints [N,2] in pixels of the input frame, descriptors [N,128], scores [N]; N is data-dependent in
     threshold mode (top_k 0) and exactly K in top-k mode (the static exports for Core ML; the host thresholds)."""
 
-    def __init__(self, m: nn.Module, top_k: int = 0):
+    def __init__(self, m: nn.Module, top_k: int = 0, decompose_deform: bool = False):
         super().__init__()
+        if decompose_deform:
+            import copy
+
+            m = copy.deepcopy(m)                   # the upstream module (column (a)) keeps its native deform_conv2d
+            self.n_decomposed = decompose_deformable_convs(m)
         self.m = m
         self.top_k = top_k
 
@@ -545,10 +596,14 @@ def wrapper_match(lg: nn.Module, f0: dict, f1: dict, size_wh: tuple[int, int]) -
     return m0[0], ms0[0]
 
 
-def check_wrappers(models: dict[str, nn.Module], images: list[Path], max_keypoints: int) -> None:
-    """(a) vs (b) for every wrapper: the detectors on each frame, the matchers on consecutive pairs (0,1), (2,3), ..."""
-    print(f"\n(a) upstream vs (b) export wrapper, in PyTorch, {len(images)} frames, top-k {max_keypoints}:")
-    sp_dense, al_export = SuperPointDense(models["superpoint"]), AlikedExport(models["aliked"])
+def check_wrappers(models: dict[str, nn.Module], images: list[Path], max_keypoints: int,
+                   aliked_top_k: int = 0) -> None:
+    """(a) vs (b) for every wrapper: the detectors on each frame, the matchers on consecutive pairs (0,1), (2,3), ...
+    `aliked_top_k` > 0: the static ALIKED wrapper (top-k mode, decomposed deformable convs) instead of the dynamic."""
+    print(f"\n(a) upstream vs (b) export wrapper, in PyTorch, {len(images)} frames, top-k {max_keypoints}"
+          f"{f', static ALIKED (top-{aliked_top_k}, decomposed deform conv)' if aliked_top_k else ''}:")
+    sp_dense = SuperPointDense(models["superpoint"])
+    al_export = AlikedExport(models["aliked"], aliked_top_k, decompose_deform=aliked_top_k > 0)
     feats: list[dict[str, dict]] = []
     for path in images:
         grey, rgb = load_image(path)
@@ -559,7 +614,8 @@ def check_wrappers(models: dict[str, nn.Module], images: list[Path], max_keypoin
         kp, s, d = superpoint_tail(scores, desc, models["superpoint"].conf.detection_threshold, max_keypoints)
         compare_detections("superpoint: dense graph + tail", fa["superpoint"], {"keypoints": kp, "scores": s, "descriptors": d})
         kp, d, s = al_export(rgb)
-        compare_detections("aliked: full graph", fa["aliked"], {"keypoints": kp, "scores": s, "descriptors": d})
+        keep = s >= 0                                              # top-k mode marks the failed entries with -1
+        compare_detections("aliked: full graph", fa["aliked"], {"keypoints": kp[keep], "scores": s[keep], "descriptors": d[keep]})
         print(f"  {'sift: reference only':34s} N={fa['sift']['keypoints'].shape[0]:5d}  (cv2.SIFT + RootSIFT, no wrapper)")
         feats.append(fa)
     for i in range(0, len(images) - 1, 2):
@@ -851,8 +907,10 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
                                   "the detection_threshold carry score -1 - the host drops them"] if aliked_k else [])
     if "aliked" in wanted:
         path = MODELS_DIR / f"aliked_n16{suffix}.onnx"
-        export_onnx(AlikedExport(models["aliked"], aliked_k), path, (torch.rand(1, 3, H, W),), ["image"],
-                    ["keypoints", "descriptors", "scores"], dyn, opset=19, translation=DEFORM_CONV_TRANSLATION)
+        # static (Core ML): deformable convs decomposed into GridSample + 1x1 conv, no DeformConv node (plan Q5 b)
+        export_onnx(AlikedExport(models["aliked"], aliked_k, decompose_deform=bool(static_size)), path,
+                    (torch.rand(1, 3, H, W),), ["image"], ["keypoints", "descriptors", "scores"], dyn, opset=19,
+                    translation=DEFORM_CONV_TRANSLATION)
         write_sidecar(path, "aliked", "aliked-n16", commit, 19, "fp32", aliked_contract(models["aliked"]) + aliked_lines)
         paths["aliked"] = path
 
@@ -1053,7 +1111,7 @@ def main() -> None:
         models = load_models(args.max_keypoints)
         describe_models(models)
         if args.images:
-            check_wrappers(models, args.images, args.max_keypoints)
+            check_wrappers(models, args.images, args.max_keypoints, args.topk if static_size else 0)
         print()
         paths = export_all(models, commit, set(args.only) if args.only else None, static_size, args.topk)
         if args.images and static_size:
