@@ -76,6 +76,11 @@ side (step 4, T4).
    file. `fix_cast_targets` makes every cast's `to` agree with the declared output type (2 casts in SuperPoint, 9 in
    ALIKED). `DeformConv` and `GridSample` stay float32 in the twins (ORT's CPU kernels are float-only); shape
    inference on (phase 2 had it off for the 912 MB graph).
+8. **No rank-5 tensors with dynamic shapes if Core ML must run the graph** (step 7, found on the Mac): upstream's
+   pixel shuffle `reshape(b,h,w,8,8).permute(0,1,3,2,4)` exports as a Reshape whose target comes from the dynamic
+   size plus a 5-D Transpose; the Core ML provider cannot rank-infer that Reshape and refuses the session
+   ("axis 4 is not in valid range [-4,3]"). `F.pixel_shuffle(scores, 8)` is the same mapping and exports as one
+   4-D `DepthToSpace`: 83 nodes instead of 91, bit-identical on CPU and CUDA.
 7. **`torch.export` specialises 0/1 sizes**: the matcher axes are declared `Dim(min=2)`; the C++ side returns no
    matches below two keypoints per side (sidecar `min_keypoints: 2`).
 

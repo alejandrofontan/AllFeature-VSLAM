@@ -232,9 +232,11 @@ class SuperPointDense(nn.Module):
 
         scores = sp.convPb(sp.relu(sp.convPa(x)))
         scores = F.softmax(scores, 1)[:, :-1]                       # drop the "no keypoint" dustbin channel
-        b, _, h, w = scores.shape
-        scores = scores.permute(0, 2, 3, 1).reshape(b, h, w, 8, 8)  # 64 channels -> 8x8 cell pixels
-        scores = scores.permute(0, 1, 3, 2, 4).reshape(b, h * 8, w * 8)
+        # 64 channels -> the 8x8 pixels of each cell. Upstream writes this as reshape(b,h,w,8,8).permute(0,1,3,2,4):
+        # rank-5 tensors whose Reshape target is computed from the dynamic size, which the Core ML provider cannot
+        # rank-infer (it rejected the permutation of axis 4 at session creation). pixel_shuffle is the same mapping
+        # (channel k -> row k // 8, col k % 8, one output channel) and exports as one 4-D DepthToSpace node.
+        scores = F.pixel_shuffle(scores, 8)[:, 0]                   # [b, 1, 8h, 8w] -> [b, 8h, 8w]
         scores = simple_nms(scores, sp.conf.nms_radius)
         scores = torch.where(border_mask(scores, sp.conf.remove_borders), scores, torch.full_like(scores, -1.0))
 
