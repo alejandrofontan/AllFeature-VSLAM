@@ -522,6 +522,33 @@ class AlikedExport(nn.Module):
         return scale_xy(kp + 1, W - 1, H - 1) / 2.0, desc, kp_scores
 
 
+class AlikedTrunk(AlikedExport):
+    """ALIKED up to the dense maps only (the convolutional trunk, deformable convs decomposed): score_map [1,1,H,W]
+    and the L2-normalised feature_map [1,128,H,W]. A measurement graph for the Core ML split question (step 7): what
+    the GPU costs for the trunk alone, before the detector / descriptor heads."""
+
+    def forward(self, image: torch.Tensor):   # type: ignore[override]
+        m = self.m
+        _, _, H, W = image.shape
+        div = 32
+        ph = (((H // div) + 1) * div - H) % div
+        pw = (((W // div) + 1) * div - W) % div
+        pl, pt = pw // 2, ph // 2
+        x = F.pad(image, [pl, pw - pl, pt, ph - pt], mode="replicate")
+        x1 = m.block1(x)
+        x2 = m.block2(m.pool2(x1))
+        x3 = m.block3(m.pool4(x2))
+        x4 = m.block4(m.pool4(x3))
+        x1 = m.gate(m.conv1(x1))
+        x2 = m.gate(m.conv2(x2))
+        x3 = m.gate(m.conv3(x3))
+        x4 = m.gate(m.conv4(x4))
+        x1234 = torch.cat([x1, m.upsample2(x2), m.upsample8(x3), m.upsample32(x4)], dim=1)
+        score_map = crop(torch.sigmoid(m.score_head(x1234)), pt, H, pl, W)
+        feature_map = crop(x1234 / x1234.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12), pt, H, pl, W)
+        return score_map, feature_map
+
+
 # --------------------------------------------------------------------------------------
 # Step 2 check: wrapper (b) against upstream (a), in PyTorch, on real frames
 # --------------------------------------------------------------------------------------
@@ -913,6 +940,9 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
                     translation=DEFORM_CONV_TRANSLATION)
         write_sidecar(path, "aliked", "aliked-n16", commit, 19, "fp32", aliked_contract(models["aliked"]) + aliked_lines)
         paths["aliked"] = path
+        if static_size:   # the trunk alone, for the Core ML timing question (no sidecar, no twin: a measurement graph)
+            export_onnx(AlikedTrunk(models["aliked"], 0, decompose_deform=True), MODELS_DIR / f"aliked_n16{suffix}_trunk.onnx",
+                        (torch.rand(1, 3, H, W),), ["image"], ["score_map", "feature_map"], None, opset=18)
 
     # LightGlue x3: dynamic N0, N1 (>= 2: the graph has no empty/single-keypoint branch and 0/1 sizes specialise)
     n0, n1 = Dim("n0", min=2), Dim("n1", min=2)
