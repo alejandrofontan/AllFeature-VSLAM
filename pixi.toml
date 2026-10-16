@@ -210,7 +210,8 @@ platforms = ["linux-64-cuda", "osx-arm64"]   # osx-arm64 too: every machine expo
 # an empty `triton` folder, shadows the real module and breaks torch's import) - the placecell export task's lesson
 export-features = { cmd = "python tools/export_features.py", env = { PYTHONNOUSERSITE = "1" } }
 # SuperPoint only (feature_models/superpoint_v1.onnx + fp16 twin + sidecars) - the one model that is not downloaded
-export-superpoint = { cmd = "python tools/export_features.py --only superpoint", env = { PYTHONNOUSERSITE = "1" }, outputs = ["feature_models/superpoint_v1.onnx"] }
+# inputs: a changed export tool invalidates the cached output (pixi skips the task while the output exists otherwise)
+export-superpoint = { cmd = "python tools/export_features.py --only superpoint", env = { PYTHONNOUSERSITE = "1" }, inputs = ["tools/export_features.py"], outputs = ["feature_models/superpoint_v1.onnx"] }
 # publish the four redistributable exports + sidecars (never SuperPoint, never the references / cache); needs `hf auth login`
 upload-feature-models = { cmd = "hf upload vslamlab/allfeature-vslamlab feature_models feature_models --include='aliked_*.onnx*' --include='lightglue_*.onnx*'" }
 

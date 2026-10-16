@@ -565,6 +565,37 @@ def print_graph_stats(model) -> None:
     print("  ops:   " + ", ".join(f"{k}x{v}" for k, v in sorted(ops.items(), key=lambda kv: -kv[1])))
 
 
+def rewrite_shape_slices(model) -> int:
+    """Shape(start=k, end=k+1) -> Shape() + Slice([k:k+1]) on the 1-D shape tensor. The exporter reads one symbolic
+    size as a sliced Shape node; ONNX Runtime's Core ML provider (MLProgram) validates `end` with HandleNegativeAxis
+    against the tensor rank, and `end` is exclusive, so reading the last dimension (end == rank) throws at session
+    creation ("axis 4 is not in valid range [-4,3]", found on the Mac in step 7). The plain-Shape path has no such
+    check; the values are identical. Returns the number of nodes rewritten."""
+    from onnx import helper, numpy_helper
+
+    count = 0
+    new_nodes = []
+    for node in model.graph.node:
+        attrs = {a.name: helper.get_attribute_value(a) for a in node.attribute}
+        if node.op_type != "Shape" or ("end" not in attrs and attrs.get("start", 0) == 0):
+            new_nodes.append(node)
+            continue
+        start = int(attrs.get("start", 0))
+        end = attrs.get("end", None)
+        full = node.output[0] + "_full"
+        new_nodes.append(helper.make_node("Shape", [node.input[0]], [full], name=node.name + "_full"))
+        starts = numpy_helper.from_array(np.array([start], dtype=np.int64), node.output[0] + "_starts")
+        ends = numpy_helper.from_array(np.array([end if end is not None else np.iinfo(np.int64).max], dtype=np.int64),
+                                       node.output[0] + "_ends")
+        model.graph.initializer.extend([starts, ends])
+        new_nodes.append(helper.make_node("Slice", [full, starts.name, ends.name], [node.output[0]],
+                                          name=node.name + "_slice"))
+        count += 1
+    del model.graph.node[:]
+    model.graph.node.extend(new_nodes)
+    return count   # the sliced outputs keep their names and their 1-D value_info
+
+
 def export_onnx(wrapper: nn.Module, path: Path, sample: tuple, input_names: list[str], output_names: list[str],
                 dynamic_shapes: tuple, opset: int, translation: dict | None = None):
     """Capture a wrapper with PyTorch's torch.export-based exporter (dynamo=True): torch.export records the program as
@@ -579,13 +610,17 @@ def export_onnx(wrapper: nn.Module, path: Path, sample: tuple, input_names: list
         torch.onnx.export(wrapper, sample, str(path), opset_version=opset, input_names=input_names,
                           output_names=output_names, dynamic_shapes=dynamic_shapes, dynamo=True,
                           external_data=False, optimize=True, custom_translation_table=translation)
-    onnx.checker.check_model(str(path))
     model = onnx.load(str(path), load_external_data=False)
+    n_shape = rewrite_shape_slices(model)
+    if n_shape:
+        onnx.save(model, str(path))
+    onnx.checker.check_model(str(path))
 
     def shp(v):
         return [d.dim_param or d.dim_value for d in v.type.tensor_type.shape.dim]
 
-    print(f"exported: {path.name} ({path.stat().st_size / 2**20:.1f} MB, opset {opset})")
+    print(f"exported: {path.name} ({path.stat().st_size / 2**20:.1f} MB, opset {opset}"
+          f"{f', {n_shape} sliced Shape nodes rewritten' if n_shape else ''})")
     print(f"  inputs  {[(i.name, shp(i)) for i in model.graph.input]}")
     print(f"  outputs {[(o.name, shp(o)) for o in model.graph.output]}")
     print_graph_stats(model)

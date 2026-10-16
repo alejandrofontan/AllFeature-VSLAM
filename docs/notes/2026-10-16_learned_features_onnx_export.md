@@ -80,7 +80,12 @@ side (step 4, T4).
    pixel shuffle `reshape(b,h,w,8,8).permute(0,1,3,2,4)` exports as a Reshape whose target comes from the dynamic
    size plus a 5-D Transpose; the Core ML provider cannot rank-infer that Reshape and refuses the session
    ("axis 4 is not in valid range [-4,3]"). `F.pixel_shuffle(scores, 8)` is the same mapping and exports as one
-   4-D `DepthToSpace`: 83 nodes instead of 91, bit-identical on CPU and CUDA.
+   4-D `DepthToSpace`: 83 nodes instead of 91, bit-identical on CPU and CUDA. The error survived that fix: its
+   real source is the exporter's `Shape(start=k, end=k+1)` read of one symbolic size - ORT's Core ML provider
+   (MLProgram) validates the exclusive `end` with `HandleNegativeAxis(end, rank)`, so reading the last dimension
+   (`end == rank`) throws (`coreml/builders/impl/shape_op_builder.cc`, an ORT bug). `rewrite_shape_slices` turns
+   every sliced Shape into Shape + Slice on the 1-D shape tensor (2 nodes in SuperPoint, 3 in ALIKED; the
+   matchers have none); same values, exports still exact.
 7. **`torch.export` specialises 0/1 sizes**: the matcher axes are declared `Dim(min=2)`; the C++ side returns no
    matches below two keypoints per side (sidecar `min_keypoints: 2`).
 
