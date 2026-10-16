@@ -168,9 +168,10 @@ void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector
     const std::vector<Tensor> outputs = session_.run({{input_name_, input.data(), {1, 1, H, W}}});
     last_graph_ms_ = ms_since(t_graph);
 
-    const Tensor& scores = outputs[0];        // [1, H8, W8]
+    const Tensor& scores = outputs[0];        // [1, 1, H8, W8] (rank 3 in older exports: the last two dims count)
     const Tensor& desc_map = outputs[1];      // [1, dim, H8/8, W8/8]
-    const int h8 = static_cast<int>(scores.dim(1)), w8 = static_cast<int>(scores.dim(2));
+    const int h8 = static_cast<int>(scores.shape[scores.shape.size() - 2]);
+    const int w8 = static_cast<int>(scores.shape[scores.shape.size() - 1]);
     const int dim = static_cast<int>(desc_map.dim(1));
     const int map_h = static_cast<int>(desc_map.dim(2)), map_w = static_cast<int>(desc_map.dim(3));
     if (dim != descriptor_dim_)

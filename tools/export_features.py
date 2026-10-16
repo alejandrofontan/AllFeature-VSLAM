@@ -211,7 +211,9 @@ class SuperPointDense(nn.Module):
     does not run, so it cut the graph into 8 partitions (120 ms on the M1 Pro GPU regardless of precision); the
     trunk alone is one partition. Every learned layer is upstream's; the three max-pools floor the size, so a
     739x458 image gives 736x456 maps with no explicit crop (the TensorRT path behaves the same today).
-    Input: [1,1,H,W] grey in [0,1]. Outputs: scores [1,H8,W8], descriptors [1,256,H8/8,W8/8]."""
+    Input: [1,1,H,W] grey in [0,1]. Outputs: scores [1,1,H8,W8], descriptors [1,256,H8/8,W8/8]. Both outputs come
+    straight from Core ML-supported nodes (DepthToSpace, Div): a Gather-produced rank-3 `scores` output came back
+    empty from Core ML ("output_features has no value for scores"), and F.normalize's Expand was a CPU node."""
 
     def __init__(self, sp: nn.Module):
         super().__init__()
@@ -237,10 +239,12 @@ class SuperPointDense(nn.Module):
         # rank-5 tensors whose Reshape target is computed from the dynamic size, which the Core ML provider cannot
         # rank-infer (it rejected the permutation of axis 4 at session creation). pixel_shuffle is the same mapping
         # (channel k -> row k // 8, col k % 8, one output channel) and exports as one 4-D DepthToSpace node.
-        scores = F.pixel_shuffle(scores, 8)[:, 0]                   # [b, 1, 8h, 8w] -> [b, 8h, 8w]
+        scores = F.pixel_shuffle(scores, 8)                         # [b, 1, 8h, 8w]
 
         descriptors = sp.convDb(sp.relu(sp.convDa(x)))
-        descriptors = F.normalize(descriptors, p=2, dim=1)
+        # F.normalize, written as a broadcasting division (same numbers: x / max(||x||, 1e-12)) - F.normalize exports
+        # an Expand node, which the Core ML provider does not run
+        descriptors = descriptors / descriptors.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)
         return scores, descriptors
 
 
@@ -253,6 +257,7 @@ def superpoint_tail(scores: torch.Tensor, descriptors: torch.Tensor, threshold: 
     against (cv::dilate is the max-pool). Returns keypoints [N,2] (x,y), scores [N], descriptors [N,256]."""
     from lightglue.superpoint import sample_descriptors, simple_nms, top_k_keypoints
 
+    scores = scores.reshape(1, scores.shape[-2], scores.shape[-1])   # [1,1,H8,W8] or [1,H8,W8] -> [1,H8,W8]
     scores = simple_nms(scores, nms_radius)
     scores = torch.where(border_mask(scores, remove_borders), scores, torch.full_like(scores, -1.0))
     best = torch.where(scores[0] > threshold)
@@ -736,7 +741,7 @@ def superpoint_contract(sp: nn.Module) -> list[str]:
         "# max-pools floor the size, so the maps cover the top-left (W//8*8) x (H//8*8) pixels of the image.",
         "input_tensor: image",
         "color: gray",
-        "# Outputs: the dense maps. scores [1,H8,W8] after softmax and pixel shuffle (raw, no NMS: its boolean ops would",
+        "# Outputs: the dense maps. scores [1,1,H8,W8] after softmax and pixel shuffle (raw, no NMS: its boolean ops would",
         "# split the Core ML graph into 8 partitions); descriptors [1,256,H8/8,W8/8] L2-normalised. The graph ends here.",
         "output_tensors: [scores, descriptors]",
         "# Tail (C++, tools/export_features.py superpoint_tail is the specification): NMS with nms_radius (upstream",
