@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -52,6 +53,26 @@ Ort::Env& shared_env()
 bool has_provider(const std::vector<std::string>& available, const char* name)
 {
     return std::find(available.begin(), available.end(), name) != available.end();
+}
+
+/// FNV-1a over the file's bytes, as hex: the Core ML model cache is keyed by the graph's inputs and outputs, not
+/// its content, and ONNX Runtime never notices a re-exported model (its documentation says so; met in step 7 of
+/// docs/plans/learned_features_onnxruntime.md: three different SuperPoint graphs ran through the first one's
+/// compiled Core ML model). A per-content sub-folder makes a stale compiled model unreachable.
+std::string file_content_hash(const std::string& path)
+{
+    std::ifstream file(path, std::ios::binary);
+    uint64_t hash = 1469598103934665603ULL;
+    std::vector<char> buffer(1 << 20);
+    while (file.read(buffer.data(), static_cast<std::streamsize>(buffer.size())) || file.gcount() > 0)
+    {
+        const std::streamsize n = file.gcount();
+        for (std::streamsize i = 0; i < n; ++i)
+            hash = (hash ^ static_cast<unsigned char>(buffer[i])) * 1099511628211ULL;
+    }
+    std::ostringstream oss;
+    oss << std::hex << hash;
+    return oss.str();
 }
 
 std::string shape_to_string(const std::vector<int64_t>& shape)
@@ -161,9 +182,13 @@ std::string OrtSession::append_providers(Ort::SessionOptions& options, const Ort
     else if (chosen == "coreml")
     {
         // MLProgram: the Core ML format with the widest operator coverage (macOS 12+). Dynamic input shapes are
-        // allowed here (image size, keypoint counts change per call); the compiled model is cached next to the
-        // ONNX so later sessions skip the compile. Whether dynamic shapes cost Core ML speed is a step-7 measurement.
-        const std::filesystem::path cache_dir = std::filesystem::path(model_path_).parent_path() / "coreml_cache";
+        // allowed here, but Core ML compiles only bounded ones: the static '<model>_<W>x<H>.onnx' exports are what
+        // runs on the GPU (step 7). The compiled model is cached next to the ONNX, in a sub-folder named after the
+        // file's content (see file_content_hash), so later sessions skip the compile and a re-export never meets a
+        // stale compiled model.
+        const std::filesystem::path cache_dir = std::filesystem::path(model_path_).parent_path() / "coreml_cache" /
+                                                (std::filesystem::path(model_path_).stem().string() + "_" +
+                                                 file_content_hash(model_path_));
         std::unordered_map<std::string, std::string> coreml_options{
             {"ModelFormat", "MLProgram"},
             {"MLComputeUnits", settings.coreml_compute_units},
