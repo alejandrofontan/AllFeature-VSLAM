@@ -19,7 +19,7 @@
  * keypoint can land in the last W%8 columns or H%8 rows. Keypoint coordinates are integer pixel positions in the
  * image frame (upstream SuperPoint has no sub-pixel refinement); the score goes to cv::KeyPoint::response.
  *
- * Threading: detect() uses a per-call input buffer and OrtSession::run is concurrency-safe, so one instance may
+ * Threading: detect() uses a per-call input buffer and OrtSession::run serialises the session's runs, so one instance may
  * serve several threads; the host's extractor runs on the tracking thread only.
  */
 

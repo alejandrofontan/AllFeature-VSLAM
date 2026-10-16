@@ -21,8 +21,8 @@
   call; Core ML compiles only bounded shapes, hence the static exports — `--static WxH` (SuperPoint 16 ms exact on
   the GPU, 2 partitions; ALIKED in top-k mode with decomposed deformable convs 136 ms exact, 16 partitions, its trunk
   alone 54 ms in 2) and `--static-length L` (the matchers padded to L with additive attention masks, written without
-  the ops the Core ML EP lacks; exact on Linux, Mac timing pending) — selected by the `features_static_shapes`
-  setting (detectors by frame size, matchers by the smallest L that fits). Next: Mac numbers for the padded matchers,
+  the ops the Core ML EP lacks; exact, 57 ms per pair on the Mac GPU in 4 partitions vs 242 ms on its CPU) — selected by the `features_static_shapes`
+  setting (detectors by frame size, matchers by the smallest L that fits). **Concurrent `Run` calls on one CUDA session returned zero matches** to one caller (tracking vs local mapping on the shared LightGlue session): `OrtSession::run` serialises each session (host note finding 7). Next: Mac numbers for the padded matchers,
   T5 gym runs (user), step 9 removals, step 10 write-up.
 - **Written as a walkthrough on purpose**, like phase 2: every step says what it does and why, so the path
   *git repo → ONNX → C++ → ONNX Runtime on two platforms* can be followed end to end for three models at once. What is

@@ -26,7 +26,7 @@
  * if a provider measurement asks for them.
  *
  * Sharing: Tracking, LocalMapping and LoopClosing each own a FeatureMatcher; the LightGlue sessions are loaded once
- * per process here and handed out by variant (OrtSession::run is concurrency-safe). The extractors stay per
+ * per process here and handed out by variant (OrtSession::run serialises each session's runs). The extractors stay per
  * Tracking instance (one process has one).
  */
 

@@ -25,8 +25,13 @@
  * writes '<model>.onnx' in fp32 and '<model>_fp16.onnx' with fp16 weights; I/O float32 in both) and is read by
  * the model wrappers from the sidecar '<model>.onnx.yaml'.
  *
- * Threading: Ort::Session::Run may be called concurrently (ONNX Runtime guarantee); run() keeps no per-call state
- * in the object, so one OrtSession can serve the tracking and the local-mapping threads at once.
+ * Threading: run() keeps no per-call state, but the calls on one session are SERIALISED by a mutex. ONNX Runtime
+ * documents Ort::Session::Run as safe to call concurrently; with the CUDA provider (ORT 1.31) two threads running the
+ * LightGlue session at once (Tracking's reference-keyframe match + LocalMapping's five parallel neighbour matches)
+ * returned zero matches to one of them on almost every keyframe (2026-10-16, host note finding 7). The GPU runs the
+ * kernels one after the other anyway, so the lock costs nothing there; it only removes the overlap of the host-side
+ * packing, which is microseconds. One OrtSession still serves the tracking and the local-mapping threads; they
+ * take turns.
  */
 
 #ifndef AF_VSLAM_ONNX_ORT_SESSION_H
@@ -34,6 +39,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -97,6 +103,7 @@ class OrtSession
 
     std::string model_path_;
     std::string provider_;
+    mutable std::mutex run_mutex_;   // one Run at a time per session (see the header comment)
     Ort::SessionOptions options_;
     std::unique_ptr<Ort::Session> session_;
     Ort::MemoryInfo memory_info_;

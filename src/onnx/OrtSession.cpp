@@ -236,6 +236,7 @@ std::vector<Tensor> OrtSession::run(const std::vector<TensorView>& inputs)
         out_names.push_back(name.c_str());
 
     std::vector<Ort::Value> out_values;
+    std::lock_guard<std::mutex> run_lock(run_mutex_);   // one Run at a time per session (header: Threading)
     try
     {
         out_values = session_->Run(Ort::RunOptions{nullptr}, in_names.data(), in_values.data(), in_values.size(),

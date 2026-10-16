@@ -18,7 +18,7 @@
  * Input contract (sidecar '<model>.onnx.yaml'): RGB in [0,1]. The host's images are BGR (cv::imread), so this
  * class converts - the libtorch path handed ALIKED the BGR image as RGB (plan Q8, fixed by construction).
  *
- * Threading: per-call buffers only; OrtSession::run is concurrency-safe.
+ * Threading: per-call buffers only; OrtSession::run serialises the session's runs.
  */
 
 #ifndef AF_VSLAM_ONNX_ALIKED_ONNX_H

@@ -31,7 +31,8 @@
  * Output: cv::DMatch with queryIdx in set 0, trainIdx in set 1 and distance = 1 - matching score (the host's
  * convention for learned matchers).
  *
- * Threading: per-call buffers only; OrtSession::run is concurrency-safe, so one instance serves the tracking and
+ * Threading: per-call buffers only; OrtSession::run serialises the session's runs (concurrent CUDA runs returned zero
+ * matches to one caller, host note finding 7), so one instance serves the tracking and
  * the local-mapping threads.
  */
 

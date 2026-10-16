@@ -46,6 +46,20 @@ on CUDA, ~300 ms on the CPU; SIFT + LightGlue-SIFT ~22 + 18 ms (the extractor on
    block-list candidates of the export note.
 6. **SIFT on the CPU is 21–23 ms** at 739×458 with OpenCV 4.12's parallel implementation — the same class as AKAZE,
    not the 40–80 ms feared (Q7's SiftGPU fallback is not needed).
+7. **Concurrent `Run` calls on one CUDA session return wrong results** (found 2026-10-16 evening, from "unstable
+   features" in the demo with aliked128 or superpoint256 alone). With `Tracking.Sequential: 0`, tracking was lost on
+   the frame after almost every keyframe insertion — 38 losses in 41 keyframes for superpoint256, 39 in 53 for
+   aliked128, none for orb32 — each time with exactly `num_matches=0` to the new reference keyframe and an immediate
+   MegaLoc relocalization hiding it. A diagnostic showed LightGlue itself returning **zero raw matches** between a
+   330-keypoint keyframe and its 330-keypoint successor frame, while the keypoints and map points were all valid, and
+   only while LocalMapping was matching that same keyframe against its five neighbours in an OpenMP loop on the same
+   shared session (the Sequential-1 smoke runs never lost). ONNX Runtime documents `Session::Run` as thread-safe; a
+   mutex around it in `OrtSession::run` removed every loss (aliked128: 0 losses, 65 keyframes, 352 points, median
+   tracking 29 ms instead of 40 ms with the relocalizations). The GPU serialises the kernels anyway, so the lock costs
+   nothing measurable. Open question for an issue: per-thread sessions or `user_compute_stream` as the way back to
+   overlapping calls, and whether the Core ML provider has the same problem (the Mac session reported no losses
+   with static shapes, but was not looking for them). Tracking *does* call LightGlue once per frame
+   (`match_keyframe_to_frame` → `match_descriptors`), which the step 5–6 paragraph above understated.
 
 ## Steps 5–6 — the host on the new path (2026-10-16)
 
@@ -68,7 +82,11 @@ Smoke (150 `table_3` frames, `vpr: none`, `Tracking.Sequential: 1`, information 
 
 All three run to the end and save their trajectories; the tracking times include the sequential wait for local
 mapping at ~1 keyframe per frame (the shipped YAML's covisibility-kernel keyframe runaway, phase 6 material), so
-they are not per-frame front-end costs. Three `FeatureMatcher`s log the same shared session: by design.
+they are not per-frame front-end costs: the same superpoint256 run with `Tracking.Sequential: 0` (the repo default)
+has a median tracking time of **0.011 s** (mean 0.015 s, 526 points). Three `FeatureMatcher`s log the same shared
+session: by design. LightGlue is called once per frame by tracking (`track_reference_keyframe` →
+`match_keyframe_to_frame`) and by local mapping for the 5 covisible keyframes of each new keyframe (OpenMP loop);
+the local-map and motion-model stages match by projection on the CPU.
 
 ## Step 7 — the Mac (2026-10-16, M1 Pro 16 GB, macOS 26.6, `table_3` 739×458)
 
@@ -93,7 +111,10 @@ the provider falls back to the CPU inside `OrtSession` (the dynamic matcher's ca
 | ALIKED trunk only, `_739x458` (measurement graph) | Core ML CPUAndGPU | 2 partitions (582/584 nodes) | 53.9 ms |
 | LightGlue fp32, dynamic | CPU fallback | exact | 242 ms |
 | LightGlue fp32, `_L1024` padded (Linux check) | CUDA / CPU 4 threads | exact match sets, Δscore ≤ 1.4e-4 | 21 ms / see below |
-| LightGlue fp32, `_L1024` padded | Core ML CPUAndGPU | **pending** | — |
+| LightGlue fp32, `_L1024` padded | Core ML CPUAndGPU | exact (478/478), 4 partitions, 1632/1650 nodes | 57.9 ms graph (`time_onnx.py`: 57.2) |
+| LightGlue fp16, `_L1024_fp16` | Core ML CPUAndGPU | approximate (Linux column d) | 52.6 ms: not worth the accuracy |
+| LightGlue fp32, `_L768` padded | Core ML CPUAndGPU | same graph, 4 partitions | 40.7 ms (the cost is near-linear in L, not quadratic: the per-token linear layers dominate, not attention) |
+| LightGlue fp32, `_L512` padded (ALIKED variant) | Core ML CPUAndGPU | same graph, 4 partitions | 26.7 ms: 512 / 768 / 1024 ≈ 27 / 41 / 57 ms, linear in L |
 
 The padded matcher costs O(L²) whatever the pair's size: 21 ms on CUDA at L=1024 against 9–19 ms for the dynamic
 file, the price of a bounded graph (on the Mac the alternative is the 242 ms CPU path). The host setting
@@ -109,8 +130,8 @@ Linux smoke run: the tracker resizes every frame to a nominal area (`NOMINAL_IMA
 
 ## Open
 
-- Mac: time the padded matchers on Core ML (`time_onnx.py`, then `test_feature_parity --model ..._L1024.onnx`), then a
-  `table_3` run with `features_static_shapes: true`; fp16 twins and `features_threads` 2 vs 4 (plan §7 items 3–4).
+- Mac: a `table_3` run with `features_static_shapes: true` (L=512/768/1024 files present, the host picks the
+  smallest that fits each pair); `features_threads` 2 vs 4.
 - ALIKED on the Mac: the head split (plan §7b), 136 → ≈ 60 ms.
 - ALIKED CPU 217 ms: profile per op; the Memcpy partition on CUDA (10 nodes, 16 ms all included).
 - The two ORT "nodes not assigned to the preferred provider" warnings print per session; keep (informative) or
