@@ -100,32 +100,69 @@ std::string static_model_path(const std::string& file, int width, int height, co
     return path;
 }
 
-LightGlueOnnx& shared_lightglue(const std::string& features, int n_max)
+namespace
+{
+
+std::mutex& variants_mutex()
 {
     static std::mutex mutex;
-    static std::map<std::string, Variant> variants;
-    std::lock_guard<std::mutex> lock(mutex);
-    Variant& v = variants[features];
+    return mutex;
+}
+
+std::map<std::string, Variant>& variants()
+{
+    static std::map<std::string, Variant> map;
+    return map;
+}
+
+/// The padded exports of `features`, scanned once (caller holds variants_mutex()).
+void scan_padded(Variant& v, const std::string& features)
+{
+    if (v.scanned)
+        return;
+    v.lengths = padded_lengths(features);
+    v.scanned = true;
+    if (v.lengths.empty())
+        throw std::runtime_error("features_static_shapes is on but " + feature_models_config().models_dir +
+                                 " has no lightglue_" + features + "_L<L>.onnx; export one with: pixi run -e "
+                                 "export-features export-features --only lightglue_" + features + " --static-length 1024");
+}
+
+LightGlueOnnx& padded_session(Variant& v, const std::string& features, int length)
+{
+    auto& slot = v.padded[length];
+    if (!slot)
+        slot = load_matcher("lightglue_" + features + "_L" + std::to_string(length) + ".onnx", features);
+    return *slot;
+}
+
+} // namespace
+
+std::vector<int> preload_lightglue(const std::string& features)
+{
+    std::lock_guard<std::mutex> lock(variants_mutex());
+    Variant& v = variants()[features];
+    if (!v.dynamic)
+        v.dynamic = load_matcher("lightglue_" + features + ".onnx", features);
+    if (!feature_models_config().static_shapes)
+        return {};
+    scan_padded(v, features);
+    for (const int length : v.lengths)
+        padded_session(v, features, length);
+    return v.lengths;
+}
+
+LightGlueOnnx& shared_lightglue(const std::string& features, int n_max)
+{
+    std::lock_guard<std::mutex> lock(variants_mutex());
+    Variant& v = variants()[features];
     const FeatureModelsConfig& config = feature_models_config();
     if (config.static_shapes && n_max > 0)
     {
-        if (!v.scanned)
-        {
-            v.lengths = padded_lengths(features);
-            v.scanned = true;
-            if (v.lengths.empty())
-                throw std::runtime_error("features_static_shapes is on but " + config.models_dir + " has no lightglue_" +
-                                         features + "_L<L>.onnx; export one with: pixi run -e export-features "
-                                         "export-features --only lightglue_" + features + " --static-length 1024");
-        }
+        scan_padded(v, features);
         const auto it = std::lower_bound(v.lengths.begin(), v.lengths.end(), n_max);   // smallest L >= n_max
         if (it != v.lengths.end())
-        {
-            auto& slot = v.padded[*it];
-            if (!slot)
-                slot = load_matcher("lightglue_" + features + "_L" + std::to_string(*it) + ".onnx", features);
-            return *slot;
-        }
+            return padded_session(v, features, *it);
         if (!v.warned_overflow)
         {
             AF_WARN("LightGlue (" << features << "): " << n_max << " keypoints on a side exceed the largest padded export (L="

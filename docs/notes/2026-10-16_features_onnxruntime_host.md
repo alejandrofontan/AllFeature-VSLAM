@@ -83,7 +83,11 @@ Smoke (150 `table_3` frames, `vpr: none`, `Tracking.Sequential: 1`, information 
 All three run to the end and save their trajectories; the tracking times include the sequential wait for local
 mapping at ~1 keyframe per frame (the shipped YAML's covisibility-kernel keyframe runaway, phase 6 material), so
 they are not per-frame front-end costs: the same superpoint256 run with `Tracking.Sequential: 0` (the repo default)
-has a median tracking time of **0.011 s** (mean 0.015 s, 526 points). Three `FeatureMatcher`s log the same shared
+has a median tracking time of 0.011 s (mean 0.015 s, 526 points) — with that smoke YAML's keyframe policy, which
+inserted 3 keyframes in 150 frames. **The Linux reference for the Mac's configuration** (repo YAML, superpoint256
+only, `vpr: none`, Sequential 0, after finding 7's fix): median **34 ms** on the dynamic files (70 keyframes, 647
+points) and **48 ms** with `features_static_shapes: true` (the 672×416 + L512/768/1024 files; the padded matcher
+costs more on CUDA, 70 keyframes, 613 points). Three `FeatureMatcher`s log the same shared
 session: by design. LightGlue is called once per frame by tracking (`track_reference_keyframe` →
 `match_keyframe_to_frame`) and by local mapping for the 5 covisible keyframes of each new keyframe (OpenMP loop);
 the local-map and motion-model stages match by projection on the CPU.
@@ -130,8 +134,13 @@ Linux smoke run: the tracker resizes every frame to a nominal area (`NOMINAL_IMA
 
 ## Open
 
-- Mac: a `table_3` run with `features_static_shapes: true` (L=512/768/1024 files present, the host picks the
-  smallest that fits each pair); `features_threads` 2 vs 4.
+- Mac (`docs/notes/2026-10-16_mac_tracking_latency.md`, measured on the Mac before finding 7's fix): median tracking
+  73–84 ms with superpoint256, 39 ms with orb32; the per-frame LightGlue call of `track_reference_keyframe` (a padded
+  L768 call, 41 ms isolated, 53–96 ms with the mapper's five calls in flight) is the gap, SuperPoint itself stays at
+  16 ms. Fixed here: every padded session is created at startup (`preload_lightglue`; the lazy L1024 creation cost a
+  9 s stall on the tracking thread) and the mapper's calls are serialised per session (finding 7). Remaining levers,
+  phase 6: motion-model projection tracking instead of a LightGlue match per frame; L512 / fp16 for the tracker's
+  call if it stays.
 - ALIKED on the Mac: the head split (plan §7b), 136 → ≈ 60 ms.
 - ALIKED CPU 217 ms: profile per op; the Memcpy partition on CUDA (10 nodes, 16 ms all included).
 - The two ORT "nodes not assigned to the preferred provider" warnings print per session; keep (informative) or

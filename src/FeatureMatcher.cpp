@@ -67,15 +67,16 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
     }
     for(const auto& feat_type : feature_types) {
         if (const char* variant = lightglue_variant(get_feature(feat_type).getMatcherType())) {
+            // Every session now (dynamic + each padded export): a missing file fails here, and no session is created
+            // on the tracking thread later (seconds on Core ML even from its cache)
+            const std::vector<int> lengths = onnx::preload_lightglue(variant);
             const auto& lg = onnx::shared_lightglue(variant);
+            std::ostringstream padded;
+            for (const int length : lengths)
+                padded << " L" << length;
             AF_INFO("LightGlue (" << variant << ") ready for " << name << ": " << lg.model_path() << " (" << lg.precision()
-                    << " weights) on onnxruntime/" << lg.provider());
-            if (onnx::feature_models_config().static_shapes) {
-                // the smallest padded export, loaded now so a missing file fails here and not on the first pair
-                const auto& lgs = onnx::shared_lightglue(variant, 2);
-                AF_INFO("LightGlue (" << variant << ") static exports for " << name << ": " << lgs.model_path()
-                        << " (padded to " << lgs.padded_length() << ") on onnxruntime/" << lgs.provider());
-            }
+                    << " weights) on onnxruntime/" << lg.provider()
+                    << (lengths.empty() ? std::string() : " + padded exports" + padded.str()));
         }
     }
 }

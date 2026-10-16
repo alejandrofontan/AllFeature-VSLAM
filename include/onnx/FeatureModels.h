@@ -34,6 +34,7 @@
 #define AF_VSLAM_ONNX_FEATURE_MODELS_H
 
 #include <string>
+#include <vector>
 
 #include "onnx/LightGlueOnnx.h"
 #include "onnx/OrtSession.h"
@@ -66,6 +67,13 @@ std::string static_model_path(const std::string& file, int width, int height, co
 /// @throws std::runtime_error if the model file or its sidecar is missing or inconsistent, or if static shapes are
 /// on and no padded export of the variant exists at all.
 LightGlueOnnx& shared_lightglue(const std::string& features, int n_max = 0);
+
+/// Create every session of `features` now: the dynamic file and, with `static_shapes` on, every padded export in
+/// models_dir. FeatureMatcher calls this at construction so that no session is created on the tracking thread later
+/// (a Core ML session takes seconds to instantiate even from its compiled cache: a 9 s stall on the first pair that
+/// outgrew the smallest padded file, Mac note 2026-10-16). Returns the padded lengths found, ascending.
+/// @throws std::runtime_error as shared_lightglue.
+std::vector<int> preload_lightglue(const std::string& features);
 
 } // namespace AF_VSLAM::onnx
 
