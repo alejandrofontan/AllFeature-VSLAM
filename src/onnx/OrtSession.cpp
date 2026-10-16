@@ -91,7 +91,26 @@ OrtSession::OrtSession(const std::string& onnx_path, const OrtSettings& settings
     }
     catch (const Ort::Exception& e)
     {
-        throw std::runtime_error("OrtSession: session creation failed for " + model_path_ + ": " + e.what());
+        if (provider_ == "cpu")
+            throw std::runtime_error("OrtSession: session creation failed for " + model_path_ + ": " + e.what());
+        // A provider that cannot take this graph (Core ML compiles only bounded shapes: a dynamic-axis model may
+        // fail here rather than fall back node by node) must not take the SLAM down - the CPU provider always can.
+        AF_WARN("OrtSession: provider '" << provider_ << "' cannot create a session for " << model_path_ << " ("
+                << e.what() << ") - falling back to the CPU provider");
+        options_ = Ort::SessionOptions();
+        options_.SetIntraOpNumThreads(settings.threads);
+        options_.SetInterOpNumThreads(1);
+        options_.SetExecutionMode(ORT_SEQUENTIAL);
+        options_.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        provider_ = "cpu";
+        try
+        {
+            session_ = std::make_unique<Ort::Session>(shared_env(), model_path_.c_str(), options_);
+        }
+        catch (const Ort::Exception& e2)
+        {
+            throw std::runtime_error("OrtSession: session creation failed for " + model_path_ + ": " + e2.what());
+        }
     }
     read_io_names();
 }
