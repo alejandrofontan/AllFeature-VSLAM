@@ -437,6 +437,8 @@ void Viewer::Run()
         // Status panel (map-size query locks the map, so refresh it sparingly)
         if(menuPause.GuiChanged())
             system->set_paused(menuPause);
+        else if(menuPause != system->is_paused())
+            menuPause = system->is_paused();  // paused or resumed from code (Viewer.StartPaused, a stop signal)
         menuState = system->is_paused() ? std::string("PAUSED") : trackingStateName(tracker->state_);
         {
             const size_t nTotal = system->GetSequenceImageCount();

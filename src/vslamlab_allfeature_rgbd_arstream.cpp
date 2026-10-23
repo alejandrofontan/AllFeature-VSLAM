@@ -120,6 +120,10 @@ int main(int argc, char** argv) {
     const std::vector<std::string> features = settings["features"].as<std::vector<std::string>>();
     const bool debug = settings["debug"].as<bool>();
     AF_CONFIG_FIELD("Debug mode: ", debug);
+    // Viewer.StartPaused: track one black frame (loads every model session, starts no map), then pause until the
+    // Viewer's Pause is unticked, so the phone can wait on the table while Core ML warms up. Needs the viewer.
+    const bool start_paused = verbose && settings["Viewer.StartPaused"] && settings["Viewer.StartPaused"].as<int>() != 0;
+    AF_CONFIG_FIELD("Start paused: ", start_paused);
 
     // Depth scale factor: metric_depth = raw_depth / depth_factor, from the calibration.yaml camera entry matching
     // settings_yaml's cam_mono (the relay writes 1000: millimetres). Defaults to 1 if the calibration declares none.
@@ -199,6 +203,20 @@ int main(int argc, char** argv) {
                 break;
             }
             ++received;
+            if (received == 1 && start_paused) {
+                // Warm-up: a black frame (no depth) of the stream's size runs every extractor (the fixed-shape exports
+                // load on the first frame) and has no keypoints, so no map starts; the real frame is dropped
+                const cv::Mat black = cv::Mat::zeros(frame.image.size(), frame.image.type());
+                AF_VSLAM::Image warm(black);
+                warm.depthImg = cv::Mat::zeros(frame.image.size(), CV_32F);
+                if (segmenter)
+                    warm.mask = segmenter->inferMask(warm.img);
+                SLAM.Track(warm, frame.timestamp);
+                SLAM.set_paused(true);
+                AF_INFO("Warm-up frame done: paused until the Viewer's Pause is unticked (Viewer.StartPaused)");
+                std::cout.flush();
+                continue;
+            }
             AF_VSLAM::Image im(frame.image);
             frame.depthResized(min_confidence).convertTo(im.depthImg, CV_32F, 1.0 / depth_factor);  // metres, 0 = none
             if (segmenter)

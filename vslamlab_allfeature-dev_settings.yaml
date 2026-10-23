@@ -66,6 +66,9 @@ Viewer.ViewpointX: 0
 Viewer.ViewpointY: -0.7
 Viewer.ViewpointZ: -1.8
 Viewer.ViewpointF: 500
+Viewer.StartPaused: 0             # ARStream entry points with the viewer (verbose:1): track one black frame of the stream's size
+                                  # (loads every model session, starts no map), then pause until the Viewer's Pause is unticked;
+                                  # 0 = track from the first frame (default); missing key = 0
 
 #--------------------------------------------------------------------------------------------
 # Optimizer Parameters
