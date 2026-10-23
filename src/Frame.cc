@@ -59,10 +59,9 @@ Frame::Frame(const Image & img, const double &timeStamp,
     // Scale Level Info (assumes every feature type shares the same pyramid scale factor)
     size_tolerance = feature_extractors.begin()->second->GetScaleFactor();
 
-    // Feature extraction
+    // Feature extraction. A frame without keypoints (black image, covered lens) is still built in full: every
+    // per-feature container exists (empty), since Tracking reads them with .at(ft)
     extract_features(0, img);
-    if(num_keypoints_total == 0)
-        return;
 
     undistort_keypoints();
     get_depth(img);
@@ -352,7 +351,7 @@ void Frame::undistort_keypoints()
 {
     for(auto& [ft,extractor] : feature_extractors)
     {
-        if(mDistCoef.at<float>(0)==0.0)
+        if(mDistCoef.at<float>(0)==0.0 || N.at(ft)==0)
         {
             keypoints[ft] = raw_keypoints[ft];
             continue;
