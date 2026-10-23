@@ -616,7 +616,10 @@ map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_
     // Filter outliers jointly across all feature types using fundamental matrix (LMEDS)
     auto filtered_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
 
+    // One entry per requested feature type, empty when none of its matches survive (callers read them with .at(ft))
     std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs;
+    for (const auto& ft : feat_types)
+        matched_pairs[ft];
     for (const auto& m : filtered_matches) {
         const size_t query_idx = kps1_indexes[m.queryIdx];
         const size_t train_idx = kps2_indexes[m.trainIdx];
