@@ -28,8 +28,8 @@ features_provider: "auto"                            # their ONNX Runtime execut
                                                      # Measured 2026-10-16, 739x458: SuperPoint 9 ms / ALIKED 16 ms / LightGlue 9-19 ms per call on CUDA (RTX 4000 Ada),
                                                      # 97 / 217 / 83-178 ms on 4 CPU threads; cv::SIFT 22 ms on the CPU either way
 features_threads: 4                                  # CPU-provider threads per model session (also the CPU-fallback nodes under CUDA / CoreML)
-features_coreml_units: "ALL"                         # CoreML compute units for those models: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
-features_static_shapes: false                        # true: load the fixed-shape exports instead of the dynamic files - the detectors' <stem>_<W>x<H>.onnx for the
+features_coreml_units: "CPUAndGPU"                         # CoreML compute units for those models: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
+features_static_shapes: true                        # true: load the fixed-shape exports instead of the dynamic files - the detectors' <stem>_<W>x<H>.onnx for the
                                                      # frame size (on the first frame) and the matchers' lightglue_<f>_L<L>.onnx padded to L keypoints per side
                                                      # (the smallest L that fits each pair; the dynamic file beyond). Core ML compiles only bounded shapes, so this
                                                      # is the Mac's GPU path (`export-features --static 672x416 --static-length 1024`; the size the tracker logs, not the raw frame size); a missing file is a hard error.
@@ -66,9 +66,12 @@ Viewer.ViewpointX: 0
 Viewer.ViewpointY: -0.7
 Viewer.ViewpointZ: -1.8
 Viewer.ViewpointF: 500
-Viewer.StartPaused: 0             # ARStream entry points with the viewer (verbose:1): track one black frame of the stream's size
+Viewer.StartPaused: 1             # ARStream entry points with the viewer (verbose:1): track one black frame of the stream's size
                                   # (loads every model session, starts no map), then pause until the Viewer's Pause is unticked;
                                   # 0 = track from the first frame (default); missing key = 0
+Viewer.StreamStatus: 1            # ARStream entry points: 1 = report the SLAM state to the relay 10 times a second, shown as a banner
+                                  # on the phone app (green TRACKING, red LOST, blue PAUSED, amber INITIALIZING, grey NO SLAM when
+                                  # silent). Needs libarstream >= 0.3.0 and the app with the banner. 0 = off (default); missing key = 0
 
 #--------------------------------------------------------------------------------------------
 # Optimizer Parameters
@@ -117,7 +120,7 @@ Tracking.ImageWidth: 0                  # both > 0: resize every frame to exactl
 Tracking.ImageHeight: 0                 # are scaled per axis). Use multiples of 32 (640x480 is), or the crop trims the remainder
 
 # Frame-to-frame tracking
-Tracking.FrameTracking: "reference_keyframe"    # "reference_keyframe": a descriptor match (LightGlue for the learned features) against the reference
+Tracking.FrameTracking: "optical_flow"          # "reference_keyframe": a descriptor match (LightGlue for the learned features) against the reference
                                                 # keyframe on every frame | "optical_flow": KLT of the last frame's tracked points, snapped to the
                                                 # current frame's detected keypoints; the reference-keyframe match only as the fallback. Saves the
                                                 # per-frame matcher call (41 ms on the M1 Pro GPU, 13 ms on CUDA); measured on the gym before it is the default

@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -27,6 +28,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <arstream/arstream.hpp>
@@ -71,6 +73,46 @@ static std::string padding_zeros(const std::string& number, const size_t numberO
         zeros += "0";
     return zeros + number;
 }
+
+#ifdef ARSTREAM_HAS_STATUS
+// Reports the SLAM state to the relay, which shows it as the phone app's banner (Viewer.StreamStatus). Its own
+// thread sends 10 times a second, so a pause (the tracking loop blocked in System::Track) still reports PAUSED, and
+// silence (the app turns the banner grey) means this process is gone or stuck.
+class StatusReporter {
+public:
+    explicit StatusReporter(AF_VSLAM::System& slam) : slam_(slam), thread_([this] { run(); }) {}
+    ~StatusReporter() {
+        stop_ = true;
+        thread_.join();
+    }
+
+private:
+    void run() {
+        arstream::StatusPublisher publisher;   // never blocks: dropped while the relay is not there
+        while (!stop_) {
+            publisher.send(state_name(), slam_.GetFramesProcessedCount());
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
+    std::string state_name() {
+        if (slam_.is_paused())
+            return "PAUSED";
+        switch (static_cast<TrackingState>(slam_.GetTrackingState())) {
+            case TrackingState::SYSTEM_NOT_READY: return "NOT READY";
+            case TrackingState::NO_IMAGES_YET:    return "WAITING";
+            case TrackingState::NOT_INITIALIZED:  return "INITIALIZING";
+            case TrackingState::OK:               return "OK";
+            case TrackingState::LOST:             return "LOST";
+        }
+        return "?";
+    }
+
+    AF_VSLAM::System& slam_;
+    std::atomic<bool> stop_{false};
+    std::thread thread_;   // last member: started once the others exist
+};
+#endif
 
 int main(int argc, char** argv) {
     std::set_terminate(on_terminate);
@@ -124,6 +166,15 @@ int main(int argc, char** argv) {
     // Viewer's Pause is unticked, so the phone can wait on the table while Core ML warms up. Needs the viewer.
     const bool start_paused = verbose && settings["Viewer.StartPaused"] && settings["Viewer.StartPaused"].as<int>() != 0;
     AF_CONFIG_FIELD("Start paused: ", start_paused);
+    // Viewer.StreamStatus: report the SLAM state to the relay, which shows it as the phone app's banner
+    // (libarstream >= 0.3.0 and an app that shows it; off by default)
+    const bool stream_status = settings["Viewer.StreamStatus"] && settings["Viewer.StreamStatus"].as<int>() != 0;
+#ifdef ARSTREAM_HAS_STATUS
+    AF_CONFIG_FIELD("Stream status: ", stream_status);
+#else
+    if (stream_status)
+        AF_WARN("Viewer.StreamStatus needs libarstream >= 0.3.0 (status messages): ignored");
+#endif
 
     // Depth scale factor: metric_depth = raw_depth / depth_factor, from the calibration.yaml camera entry matching
     // settings_yaml's cam_mono (the relay writes 1000: millimetres). Defaults to 1 if the calibration declares none.
@@ -183,6 +234,12 @@ int main(int argc, char** argv) {
 
     // Stream length is unknown; 0 keeps the frame counter unset while still reporting whether masks are in use.
     SLAM.SetSequenceInfo(0, segmenter != nullptr);
+#ifdef ARSTREAM_HAS_STATUS
+    // Declared after SLAM, so it stops before SLAM is destroyed
+    std::unique_ptr<StatusReporter> statusReporter;
+    if (stream_status)
+        statusReporter = std::make_unique<StatusReporter>(SLAM);
+#endif
 
     bool noDepth = false;
     // The whole run (tracking loop, GBA, Shutdown, saves) as one unit: on macOS with the viewer on, System::Run
