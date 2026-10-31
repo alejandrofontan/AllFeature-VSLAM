@@ -97,7 +97,21 @@ std::optional<KeyframeInformationValue> KeyframeInformationMegaLoc::information(
     if(frame.global_descriptor.size() != 0)
         information = place_cell_->unexplained_information(frame.global_descriptor, &ids, centred);
     else if(!frame.image.empty())
-        information = place_cell_->unexplained_information(frame.image, &ids, centred, &frame.global_descriptor);
+    {
+        // Embeds the image: a failed embed (Core ML / ONNX Runtime error) leaves this frame without an information
+        // value instead of ending the tracking thread
+        try
+        {
+            information = place_cell_->unexplained_information(frame.image, &ids, centred, &frame.global_descriptor);
+        }
+        catch(const std::exception& e)
+        {
+            AF_WARN("[KeyframeInformation] frame " << frame.frame_id << " not embedded, no information value: "
+                    << e.what());
+            frame.global_descriptor.resize(0);
+            return std::nullopt;
+        }
+    }
     else
     {
         static std::atomic<bool> warned{false};

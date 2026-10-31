@@ -123,6 +123,12 @@ bool Tracking::run_tracking_stage(const std::function<bool()>& stage)
         AF_WARN("Tracking lost — " << e.what());
         return false;
     }
+    // Any other exception in a tracking stage (an OpenCV assertion in optical flow or matching, an out-of-range
+    // lookup) fails the stage, so the frame goes LOST and relocalizes, instead of ending the tracking thread
+    catch(const std::exception& e) {
+        AF_WARN("Tracking stage failed (" << e.what() << ") — treating the frame as lost");
+        return false;
+    }
 }
 
 // Low-rate heartbeat so post-mortems can see the inlier/map trend leading

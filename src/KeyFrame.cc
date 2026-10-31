@@ -61,10 +61,14 @@ KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> 
     }
     set_pose(F.Tcw);
 
+    // Every feature type gets its entry, an empty Mat when the frame has no keypoints of that type: LocalMapping,
+    // LoopClosing and the matchers read descriptors.at(ft) for every type (a missing key was std::out_of_range,
+    // inside OpenMP regions std::terminate); FeatureMatcher::match_descriptors returns no matches for an empty side
     for(auto& [ft, N_] : N)
-        if (N_ > 0){
-            descriptors[ft] = F.descriptors.at(ft).clone();
-        }
+    {
+        const auto it = F.descriptors.find(ft);
+        descriptors[ft] = (N_ > 0 && it != F.descriptors.end()) ? it->second.clone() : cv::Mat();
+    }
 }
 
 void KeyFrame::compute_global_descriptor()
@@ -405,6 +409,17 @@ void KeyFrame::update_connections()
         weights.push_front(vPairs[i].first);
     }
 
+    // First parent: the strongest covisible keyframe that is not being culled (chosen before taking our lock).
+    // A bad parent is never re-hung (set_bad_flag already ran), so this keyframe's subtree would hang off a
+    // keyframe with no vertex in the essential graph and no global-BA correction.
+    Keyframe first_parent;
+    for(const Keyframe& candidate : keyframes)
+        if(candidate && !candidate->is_bad())
+        {
+            first_parent = candidate;
+            break;
+        }
+
     {
         unique_lock<mutex> lockCon(connections_mutex_);
 
@@ -413,9 +428,9 @@ void KeyFrame::update_connections()
         ordered_connected_keyframes_ = vector<Keyframe>(keyframes.begin(),keyframes.end());
         ordered_weights_ = vector<int>(weights.begin(), weights.end());
 
-        if(first_connection_ && keyId!=0)
+        if(first_connection_ && keyId!=0 && first_parent)
         {
-            parent_ = ordered_connected_keyframes_.front();
+            parent_ = first_parent;
             parent_->add_child(this_keyframe());
             first_connection_ = false;
         }
@@ -481,31 +496,46 @@ void KeyFrame::set_not_erase()
 
 void KeyFrame::set_erase()
 {
+    bool erase_now = false;
     {
         unique_lock<mutex> lock(connections_mutex_);
         if(loop_edges_.empty())
         {
             not_erase_ = false;
         }
+        erase_now = to_be_erased_;
     }
 
-    if(to_be_erased_)
+    if(erase_now)
     {
         set_bad_flag();
     }
 }
 
+std::mutex KeyFrame::set_bad_mutex_;
+
 void KeyFrame::set_bad_flag()
 {
     {
         unique_lock<mutex> lock(connections_mutex_);
-        if(keyId==0)
+        if(keyId==0 || bad_)   // bad_ once set is final: culling twice must not re-run the erasures below
             return;
         else if(not_erase_)
         {
             to_be_erased_ = true;
             return;
         }
+    }
+
+    // One culling at a time, process-wide: the spanning-tree update below holds this keyframe's connections lock
+    // while it locks its children (is_bad, get_covisible_keyframes, change_parent) and its parent (erase_child).
+    // LocalMapping culls while LoopClosing runs a deferred cull (set_erase); two concurrent calls on a parent and
+    // its child took those locks in opposite orders (deadlock: both threads, then every is_bad() on either).
+    std::lock_guard<std::mutex> serialise(set_bad_mutex_);
+    {
+        unique_lock<mutex> lock(connections_mutex_);
+        if(bad_)
+            return;
     }
 
     // Snapshots: other threads mutate both containers (update_connections, add_map_point)

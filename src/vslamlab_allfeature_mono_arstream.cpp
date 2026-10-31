@@ -230,7 +230,25 @@ int main(int argc, char** argv) {
 
         arstream::Frame frame;
         size_t received = 0;
-        while (subscriber.next(frame)) {
+        // A message the subscriber cannot decode (truncated JPEG, inconsistent lengths) is skipped instead of ending
+        // the run through an uncaught exception; only a persistent failure gives up.
+        int undecodable = 0;
+        const auto next_frame = [&]() -> bool {
+            while (true) {
+                try {
+                    const bool got = subscriber.next(frame);
+                    undecodable = 0;
+                    return got;
+                } catch (const std::exception& e) {
+                    AF_WARN("Skipping a stream message that cannot be decoded: " << e.what());
+                    if (++undecodable >= 50) {
+                        AF_ERROR("50 undecodable stream messages in a row: stopping");
+                        return false;
+                    }
+                }
+            }
+        };
+        while (next_frame()) {
             ++received;
             if (received == 1 && start_paused) {
                 // Warm-up: a black frame of the stream's size runs every extractor (the fixed-shape exports load on

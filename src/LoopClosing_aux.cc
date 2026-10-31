@@ -96,6 +96,10 @@ void LoopClosing::reset_if_requested()
     if(!reset_requested_)
         return;
 
+    // A global BA of the wiped map must not run on (or apply to) the new one: Tracking::reset clears the map as
+    // soon as this returns
+    abort_global_bundle_adjustment();
+
     {
         std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
         new_keyframes_.clear();

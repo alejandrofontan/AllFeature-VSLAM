@@ -335,10 +335,14 @@ void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors
     const int num_feature_types = int(feature_types.size());
 
     std::vector<char> cached(num_neighbors, 0);
-    for(int k = 0; k < num_neighbors; k++)
     {
-        const auto it = current_keyframe_->cache_matched_pairs.find(neighbors[k]->frame_id);
-        cached[k] = it != current_keyframe_->cache_matched_pairs.end() && !it->second.empty();
+        // The caches are shared with Tracking and LoopClosing (KeyFrame::cache_mutex_)
+        std::lock_guard<std::mutex> lock(current_keyframe_->cache_mutex_);
+        for(int k = 0; k < num_neighbors; k++)
+        {
+            const auto it = current_keyframe_->cache_matched_pairs.find(neighbors[k]->frame_id);
+            cached[k] = it != current_keyframe_->cache_matched_pairs.end() && !it->second.empty();
+        }
     }
 
     std::vector<std::vector<std::vector<cv::DMatch>>> matches(
@@ -366,6 +370,9 @@ void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors
         if(cached[k])
             continue;
         const Keyframe& neighbor = neighbors[k];
+        if(neighbor == current_keyframe_)
+            continue;
+        std::scoped_lock lock(current_keyframe_->cache_mutex_, neighbor->cache_mutex_);
 
         auto& forward_by_type = current_keyframe_->cache_matched_pairs_feat_type[neighbor->frame_id];
         auto& backward_by_type = neighbor->cache_matched_pairs_feat_type[current_keyframe_->frame_id];

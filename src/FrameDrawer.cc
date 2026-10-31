@@ -109,9 +109,12 @@ cv::Mat FrameDrawer::DrawFrame()
 
         for (auto const& [featType, N_] : N) {
             cv::Scalar color = getFeatureColor(featType, 0);
+            const auto& ini = vIniKeys[featType];
+            const auto& cur = vCurrentKeys[featType];
             for(unsigned int i=0; i<vMatches[featType].size(); i++)
             {
-                if(vMatches[featType][i]>=0)
+                // The matches must index this snapshot's two keypoint sets; skip any that do not
+                if(vMatches[featType][i]>=0 && i < ini.size() && size_t(vMatches[featType][i]) < cur.size())
                 {
                     cv::line(im,vIniKeys[featType][i].pt,vCurrentKeys[featType][vMatches[featType][i]].pt,
                             cv::Scalar(color));

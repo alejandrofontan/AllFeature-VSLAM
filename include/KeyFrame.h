@@ -155,14 +155,23 @@ public:
     [[nodiscard]] mat2f get_keypoint_information_2d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
     [[nodiscard]] float get_keypoint_sigma(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
 
-    // The following variables are accesed from only 1 thread or never change (no mutex needed).
+    // The following variables are accesed from only 1 thread or never change (no mutex needed),
+    // except the two match caches (see cache_mutex_).
 public:
 
     std::vector<FeatureType> featureTypes{};
+    // Match caches, keyed by the other (key)frame's frame_id: cache_matched_pairs holds the matches stacked over all
+    // feature types (keypoint indices offset by the earlier types' counts), cache_matched_pairs_feat_type the same
+    // matches per type with per-type keypoint indices (queryIdx: this keyframe, trainIdx: the other one). Written
+    // by Tracking (match_keyframe_to_frame), LocalMapping (cache_neighbor_matches, match_keyframes) and LoopClosing
+    // (match_keyframes) and read by them: every access holds cache_mutex_, a leaf lock (take no other lock while
+    // holding it; two keyframes' caches together with std::scoped_lock).
     std::map<FrameId, std::vector<cv::DMatch>> cache_matched_pairs{};
     std::map<FrameId, std::map<FeatureType, std::vector<cv::DMatch>>> cache_matched_pairs_feat_type{};
+    mutable std::mutex cache_mutex_;
 
     static long unsigned int next_id;
+    static std::mutex set_bad_mutex_;   // serialises set_bad_flag's spanning-tree update across threads (see there)
     KeyframeId keyId;
     const long unsigned int frame_id;
 
@@ -182,8 +191,8 @@ public:
     long unsigned int ba_fixed_for_keyframe;
 
     // Variables used by loop closing
-    mat4f Tcw_gba;
-    mat4f Tcw_before_gba;
+    mat4f Tcw_gba{mat4f::Identity()};          // Eigen leaves matrices uninitialized: never read garbage poses
+    mat4f Tcw_before_gba{mat4f::Identity()};
     long unsigned int ba_global_for_keyframe;
 
     // Calibration parameters

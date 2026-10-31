@@ -117,11 +117,24 @@ long unsigned int Map::GetMaxKFid()
 
 void Map::clear()
 {
-    mspMapPoints.clear();
-    mspKeyFrames.clear();
-    mnMaxKFid = 0;
-    mvpReferenceMapPoints.clear();
-    keyframe_origins_.clear();
+    // Under the map lock like every other accessor; the contents are released after it (the last references to
+    // keyframes and points may go here, and their destruction must not run under mMutexMap)
+    decltype(mspMapPoints) map_points;
+    decltype(mspKeyFrames) keyframes;
+    decltype(mvpReferenceMapPoints) reference_points;
+    decltype(keyframe_origins_) origins;
+    {
+        unique_lock<mutex> lock(mMutexMap);
+        map_points.swap(mspMapPoints);
+        keyframes.swap(mspKeyFrames);
+        reference_points.swap(mvpReferenceMapPoints);
+        origins.swap(keyframe_origins_);
+        mspMapPoints.clear();
+        mspKeyFrames.clear();
+        mnMaxKFid = 0;
+        mvpReferenceMapPoints.clear();
+        keyframe_origins_.clear();
+    }
 }
 
 float Map::NormalizeMap()

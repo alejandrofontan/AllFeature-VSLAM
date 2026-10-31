@@ -788,7 +788,12 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
         Keyframe pKF = *lit;
         g2o::VertexSE3Expmap* vSE3 = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(pKF->keyId));
         g2o::SE3Quat SE3quat = vSE3->estimate();
-        pKF->set_pose(Converter::to_matrix4f(SE3quat));
+        // A degenerate edge (a point at ~zero depth) can drive the solution to NaN: keep the previous pose rather
+        // than write NaN into the map (from where it reaches tracking, grids and indices)
+        const mat4f Tcw = Converter::to_matrix4f(SE3quat);
+        if(!Tcw.allFinite())
+            continue;
+        pKF->set_pose(Tcw);
     }
 
     //Points
@@ -796,7 +801,10 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
     {
         Pt pMP = *lit;
         g2o::VertexSBAPointXYZ* vPoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pMP->ptId + maxKFid+1));
-        pMP->set_world_pos(vPoint->estimate().cast<float>());
+        const vec3f position = vPoint->estimate().cast<float>();
+        if(!position.allFinite())
+            continue;
+        pMP->set_world_pos(position);
         pMP->update_normal_and_depth();
     }
 }
@@ -870,6 +878,23 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
 
     const Eigen::Matrix<double,7,7> matLambda = Eigen::Matrix<double,7,7>::Identity();
 
+    // Every edge between keyframes that both have a vertex: bad keyframes get none (above), yet a bad keyframe can
+    // still be a parent, a loop edge or a loop connection of a good one, and g2o's addEdge dereferences a null vertex
+    const auto add_sim3_edge = [&](const long unsigned int id_j, const long unsigned int id_i, const g2o::Sim3& Sji) -> bool
+    {
+        auto* vj = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(int(id_j)));
+        auto* vi = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(int(id_i)));
+        if(!vj || !vi)
+            return false;
+        g2o::EdgeSim3* e = new g2o::EdgeSim3();
+        e->setVertex(1, vj);
+        e->setVertex(0, vi);
+        e->setMeasurement(Sji);
+        e->information() = matLambda;
+        optimizer.addEdge(e);
+        return true;
+    };
+
     // Set Loop edges
     for(auto& mit : loopConnections)
     {
@@ -888,16 +913,8 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
             const g2o::Sim3 Sjw = vScw[nIDj];
             const g2o::Sim3 Sji = Sjw * Swi;
 
-            g2o::EdgeSim3* e = new g2o::EdgeSim3();
-            e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(nIDj)));
-            e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(nIDi)));
-            e->setMeasurement(Sji);
-
-            e->information() = matLambda;
-
-            optimizer.addEdge(e);
-
-            sInsertedEdges.insert(make_pair(min(nIDi,nIDj),max(nIDi,nIDj)));
+            if(add_sim3_edge(nIDj, nIDi, Sji))
+                sInsertedEdges.insert(make_pair(min(nIDi,nIDj),max(nIDi,nIDj)));
         }
     }
 
@@ -935,13 +952,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
 
             g2o::Sim3 Sji = Sjw * Swi;
 
-            g2o::EdgeSim3* e = new g2o::EdgeSim3();
-            e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(nIDj)));
-            e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(nIDi)));
-            e->setMeasurement(Sji);
-
-            e->information() = matLambda;
-            optimizer.addEdge(e);
+            add_sim3_edge(nIDj, nIDi, Sji);
         }
 
         // Loop edges
@@ -961,12 +972,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
                     Slw = vScw[pLKF->keyId];
 
                 g2o::Sim3 Sli = Slw * Swi;
-                g2o::EdgeSim3* el = new g2o::EdgeSim3();
-                el->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pLKF->keyId)));
-                el->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(nIDi)));
-                el->setMeasurement(Sli);
-                el->information() = matLambda;
-                optimizer.addEdge(el);
+                add_sim3_edge(pLKF->keyId, nIDi, Sli);
             }
         }
 
@@ -993,12 +999,7 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
 
                     g2o::Sim3 Sni = Snw * Swi;
 
-                    g2o::EdgeSim3* en = new g2o::EdgeSim3();
-                    en->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFn->keyId)));
-                    en->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(nIDi)));
-                    en->setMeasurement(Sni);
-                    en->information() = matLambda;
-                    optimizer.addEdge(en);
+                    add_sim3_edge(pKFn->keyId, nIDi, Sni);
                 }
             }
         }
@@ -1018,6 +1019,8 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         const int nIDi = pKFi->keyId;
 
         g2o::VertexSim3Expmap* VSim3 = static_cast<g2o::VertexSim3Expmap*>(optimizer.vertex(nIDi));
+        if(!VSim3)   // a bad keyframe (no vertex): nothing was optimized for it
+            continue;
         g2o::Sim3 CorrectedSiw =  VSim3->estimate();
         vCorrectedSwc[nIDi]=CorrectedSiw.inverse();
         Eigen::Matrix3d eigR = CorrectedSiw.rotation().toRotationMatrix();
@@ -1047,9 +1050,12 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
         else
         {
             Keyframe pRefKF = pMP->get_reference_keyframe();
+            if(!pRefKF)
+                continue;
             nIDr = pRefKF->keyId;
         }
-
+        if(nIDr < 0 || size_t(nIDr) >= vScw.size() || size_t(nIDr) >= vCorrectedSwc.size())
+            continue;
 
         g2o::Sim3 Srw = vScw[nIDr];
         g2o::Sim3 correctedSwr = vCorrectedSwc[nIDr];
@@ -1117,11 +1123,15 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
 
     for(int i=0; i<N; i++)
     {
-        if(!vpMatches1[i])
+        if(!vpMatches1[i] || i >= int(vpMapPoints1.size()))
             continue;
 
+        // vpMapPoints1 is a fresh snapshot: LocalMapping keeps running during the Sim3 search and may have erased
+        // the current keyframe's point in this slot since the matches were collected
         Pt pMP1 = vpMapPoints1[i];
         Pt pMP2 = vpMatches1[i];
+        if(!pMP1 || !pMP2)
+            continue;
         const FeatureType featType1 = pMP1->featureType;
         const FeatureType featType2 = pMP2->featureType;
         if (featType1 != featType2)

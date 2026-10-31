@@ -185,9 +185,9 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
                 << " ], filter=" << int(msFilter) << "ms (nMatches=" << all_matches.size() << ")");
     }
 
-    // Associate surviving matches to map points
-    auto& it1 = keyframe->cache_matched_pairs_feat_type[frame.frame_id];
-    auto& it2 = frame.cache_matched_pairs_feat_type[keyframe->frame_id];
+    // Associate surviving matches to map points. The per-type caches take per-type keypoint indices (query_idx /
+    // train_idx), like cache_neighbor_matches: the stacked m.queryIdx / m.trainIdx are offset by the earlier types.
+    std::map<FeatureType, std::vector<cv::DMatch>> keyframe_side, frame_side;
 
     // One entry per requested feature type, zero for types with no match: callers index this
     // with .at(ft) (a type with zero matches used to be a missing key -> std::out_of_range)
@@ -204,13 +204,19 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
         map_pts_matches[feat_type][train_idx] = pt;
         matches_count[feat_type]++;
 
-        it1[feat_type].push_back(cv::DMatch(m.queryIdx, m.trainIdx, m.distance));
-        it2[feat_type].push_back(cv::DMatch(m.trainIdx, m.queryIdx, m.distance));
+        keyframe_side[feat_type].push_back(cv::DMatch(query_idx, train_idx, m.distance));
+        frame_side[feat_type].push_back(cv::DMatch(train_idx, query_idx, m.distance));
     }
 
-    // Cache matched pairs in both keyframe and frame for downstream use
+    // Cache matched pairs in both keyframe and frame for downstream use. The frame is this (Tracking) thread's own;
+    // the keyframe's caches are shared with LocalMapping and LoopClosing (KeyFrame::cache_mutex_).
+    frame.cache_matched_pairs_feat_type.insert_or_assign(keyframe->frame_id, std::move(frame_side));
     frame.cache_matched_pairs.insert_or_assign(keyframe->frame_id, swap_match_direction(robust_matches));
-    keyframe->cache_matched_pairs.insert_or_assign(frame.frame_id, std::move(robust_matches));
+    {
+        std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
+        keyframe->cache_matched_pairs_feat_type.insert_or_assign(frame.frame_id, std::move(keyframe_side));
+        keyframe->cache_matched_pairs.insert_or_assign(frame.frame_id, std::move(robust_matches));
+    }
 
     return matches_count;
 }
@@ -299,9 +305,19 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
 map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
                                 const std::vector<FeatureType>& feat_types){
 
-    // Reuse cached matches if keyframe1 already has matches stored for keyframe2
-    auto cache_it = keyframe1->cache_matched_pairs.find(keyframe2->frame_id);
-    const bool cached = (cache_it != keyframe1->cache_matched_pairs.end() && !cache_it->second.empty());
+    if (keyframe1 == keyframe2)   // nothing to match (and the two-keyframe cache lock below needs two mutexes)
+        return {};
+
+    // Reuse cached matches if keyframe1 already has matches stored for keyframe2 (a copy: the caches are shared
+    // between threads, KeyFrame::cache_mutex_)
+    vector<cv::DMatch> cached_matches;
+    {
+        std::lock_guard<std::mutex> lock(keyframe1->cache_mutex_);
+        const auto cache_it = keyframe1->cache_matched_pairs.find(keyframe2->frame_id);
+        if (cache_it != keyframe1->cache_matched_pairs.end())
+            cached_matches = cache_it->second;
+    }
+    const bool cached = !cached_matches.empty();
 
     // No cache — run parallel descriptor matching across all feature types
     map<FeatureType, vector<cv::DMatch>> matches_by_type;
@@ -360,10 +376,10 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
 
         computed_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
     }
-    const vector<cv::DMatch>& filtered_matches = cached ? cache_it->second : computed_matches;
+    const vector<cv::DMatch>& filtered_matches = cached ? cached_matches : computed_matches;
 
-    auto& it1 = keyframe1->cache_matched_pairs_feat_type[keyframe2->frame_id];
-    auto& it2 = keyframe2->cache_matched_pairs_feat_type[keyframe1->frame_id];
+    // Per-type caches with per-type keypoint indices (query_idx / train_idx), like cache_neighbor_matches
+    std::map<FeatureType, vector<cv::DMatch>> forward_by_type, backward_by_type;
     map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs;
     for (const auto& m : filtered_matches) {
         const size_t query_idx = kps1_indexes[m.queryIdx];
@@ -373,12 +389,15 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
         // Only triangulate points that don't already have a 3D MapPoint
         matched_pairs[feat_type].emplace_back(query_idx, train_idx);
         if (!cached){
-            it1[feat_type].push_back(cv::DMatch(m.queryIdx, m.trainIdx, m.distance));
-            it2[feat_type].push_back(cv::DMatch(m.trainIdx, m.queryIdx, m.distance));
+            forward_by_type[feat_type].push_back(cv::DMatch(int(query_idx), int(train_idx), m.distance));
+            backward_by_type[feat_type].push_back(cv::DMatch(int(train_idx), int(query_idx), m.distance));
         }
     }
 
     if(!cached){
+        std::scoped_lock lock(keyframe1->cache_mutex_, keyframe2->cache_mutex_);
+        keyframe1->cache_matched_pairs_feat_type.insert_or_assign(keyframe2->frame_id, std::move(forward_by_type));
+        keyframe2->cache_matched_pairs_feat_type.insert_or_assign(keyframe1->frame_id, std::move(backward_by_type));
         keyframe2->cache_matched_pairs.insert_or_assign(keyframe1->frame_id, swap_match_direction(computed_matches));
         keyframe1->cache_matched_pairs.insert_or_assign(keyframe2->frame_id, std::move(computed_matches));
     }
@@ -665,21 +684,27 @@ int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyfra
         if (pt->is_bad() || pts_already_found.count(pt))
             continue;
 
-        // Look up cached match index for this map point
+        // Look up cached match index for this map point (per-type indices; read-only lookups under the keyframe's
+        // cache lock, which is a leaf: get_index_in_keyframe takes the point's own lock, so it runs first)
         const Keyframe& ref_kf = pt_to_keyframe_id.at(pt->ptId);
-        const auto cache_it = keyframe->cache_matched_pairs_feat_type.find(ref_kf->frame_id);
-        if (cache_it == keyframe->cache_matched_pairs_feat_type.end())
-            continue;
-
         const int ref_idx = pt->get_index_in_keyframe(ref_kf);
         int bestIdx{-1};
-        for (const auto& m : cache_it->second[pt->featureType]) {
-            if (m.trainIdx == ref_idx) {
-                bestIdx = m.queryIdx;
-                break;
+        {
+            std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
+            const auto cache_it = keyframe->cache_matched_pairs_feat_type.find(ref_kf->frame_id);
+            if (cache_it == keyframe->cache_matched_pairs_feat_type.end())
+                continue;
+            const auto type_it = cache_it->second.find(pt->featureType);
+            if (type_it == cache_it->second.end())
+                continue;
+            for (const auto& m : type_it->second) {
+                if (m.trainIdx == ref_idx) {
+                    bestIdx = m.queryIdx;
+                    break;
+                }
             }
         }
-        if (bestIdx == -1)
+        if (bestIdx < 0 || static_cast<size_t>(bestIdx) >= pts_matched.size())
             continue;
 
         // Project map point into the keyframe
@@ -1080,6 +1105,10 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
         const MatcherType matcherType = ft.getMatcherType();
 
         std::vector<cv::DMatch> matches;
+        // A side without keypoints (a type a frame did not detect: its descriptors are an empty Mat) has nothing to
+        // match, and its shape would fail the matchers' checks
+        if(desc1.empty() || desc2.empty() || kps1.empty() || kps2.empty())
+            return matches;
         switch(matcherType) {
             // LightGlue on ONNX Runtime: the keypoints are normalised with the real image size inside
             // (the TensorRT path normalised with a 320x240 config until 2026-10-16)
@@ -1087,9 +1116,20 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
             case LIGHTGLUE_ALIKED:
             case LIGHTGLUE_SUPERPOINT:
             {
-                matches = onnx::shared_lightglue(lightglue_variant(matcherType),
-                                                 static_cast<int>(std::max(kps1.size(), kps2.size())))
-                              .match(kps1, desc1, kps2, desc2, image_width, image_height);
+                // A failed Run (a transient Core ML / ONNX Runtime error) costs this match, not the process: this
+                // runs on the tracking, mapping (inside OpenMP regions) and loop-closing threads, where an escaping
+                // exception is std::terminate
+                try
+                {
+                    matches = onnx::shared_lightglue(lightglue_variant(matcherType),
+                                                     static_cast<int>(std::max(kps1.size(), kps2.size())))
+                                  .match(kps1, desc1, kps2, desc2, image_width, image_height);
+                }
+                catch(const std::exception& e)
+                {
+                    AF_WARN("LightGlue match failed, no matches for this pair: " << e.what());
+                    matches.clear();
+                }
                 break;
             }
             case BF_L2:

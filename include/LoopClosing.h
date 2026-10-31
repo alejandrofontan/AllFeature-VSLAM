@@ -168,6 +168,9 @@ protected:
     // writes the result and propagates it to what Local Mapping created meanwhile.
     void run_global_bundle_adjustment(KeyframeId loop_keyframe_id);
     void apply_gba_correction(KeyframeId loop_keyframe_id);
+    // Stops a running global BA (gba_stop_, new generation: it drops its result) and joins its thread. LoopClosing
+    // thread only, no lock held: correct_loop before a new BA, reset_if_requested before the map is cleared.
+    void abort_global_bundle_adjustment();
 
     // Called by run(): perform a pending reset
     void reset_if_requested();

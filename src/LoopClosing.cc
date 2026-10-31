@@ -33,6 +33,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 
 #include "Converter.h"
@@ -100,7 +101,30 @@ void LoopClosing::run()
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
+    // A global BA still running completes (System::Shutdown waits for it, and its correction still applies:
+    // apply_gba_correction stops waiting for Local Mapping once that has finished); its thread must not outlive
+    // this one
+    if(gba_thread_.joinable())
+        gba_thread_.join();
+
     set_finished();
+}
+
+void LoopClosing::abort_global_bundle_adjustment()
+{
+    {
+        std::lock_guard<std::mutex> lock(gba_mutex_);
+        if(gba_running_)
+        {
+            gba_stop_ = true;        // g2o polls it between iterations
+            ++gba_generation_;       // the BA drops its result when it returns
+            gba_running_ = false;    // the caller starts the next one, or none (reset)
+        }
+    }
+    // No lock held here: the BA thread takes gba_mutex_ on its way out (and holds it in apply_gba_correction,
+    // which itself only waits for Local Mapping to stop)
+    if(gba_thread_.joinable())
+        gba_thread_.join();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -116,6 +140,14 @@ bool LoopClosing::detect_loop()
         // set_erase lifts the guard (a culling deferred meanwhile is applied then); on
         // success compute_sim3/correct_loop keep it until the loop is closed or rejected.
         current_keyframe_->set_not_erase();
+    }
+
+    // Culled while it waited in the queue: no loop detection for (and no place-recognition entry from) a keyframe
+    // that is no longer in the map; a loop accepted on it would re-link it into the graph (update_connections)
+    if(current_keyframe_->is_bad())
+    {
+        current_keyframe_->set_erase();
+        return false;
     }
 
     // Candidates retrieved by the VPR backend (covisible keyframes excluded), kept only
@@ -383,24 +415,20 @@ void LoopClosing::correct_loop()
     AF_INFO("[LoopClosing] loop detected: keyframe " << current_keyframe_->keyId << " -> " << matched_keyframe_->keyId);
     std::cout.flush();
 
-    // Pause Local Mapping: no keyframe may be inserted while the map is corrected
+    // A running global BA belongs to a superseded loop: make it abort, drop its result, and wait for its thread
+    // (never detached: a detached BA kept writing the *_gba fields next to the new one once gba_stop_ was reset
+    // for it, and could outlive Shutdown)
+    abort_global_bundle_adjustment();
+
+    // Pause Local Mapping: no keyframe may be inserted while the map is corrected. The request is re-asserted
+    // while waiting: LocalMapping::release() (the end of a global BA's apply_gba_correction) clears it, and a
+    // lost request left this loop waiting forever.
     local_mapper_->request_stop();
-
-    // A running global BA belongs to a superseded loop: make it abort and drop its result
+    while(!local_mapper_->is_stopped() && !local_mapper_->is_finished())
     {
-        std::lock_guard<std::mutex> lock(gba_mutex_);
-        if(gba_running_)
-        {
-            gba_stop_ = true;
-            ++gba_generation_;
-            if(gba_thread_.joinable())
-                gba_thread_.detach();   // exits on its own once g2o sees gba_stop_ (or its generation check fails)
-        }
-    }
-
-    // Wait until Local Mapping has effectively stopped
-    while(!local_mapper_->is_stopped())
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        local_mapper_->request_stop();
+    }
 
     // Refresh the current keyframe's covisibility before propagating the correction
     current_keyframe_->update_connections();
@@ -495,8 +523,7 @@ void LoopClosing::correct_loop()
     matched_keyframe_->add_loop_edge(current_keyframe_);
     current_keyframe_->add_loop_edge(matched_keyframe_);
 
-    // Global BA in its own thread; Local Mapping resumes meanwhile. A previous BA has
-    // either finished (joinable, join returns at once) or was detached above.
+    // Global BA in its own thread; Local Mapping resumes meanwhile. A previous BA was aborted and joined above.
     if(gba_thread_.joinable())
         gba_thread_.join();
     {
@@ -597,21 +624,34 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
 
     local_mapper_->request_stop();
     while(!local_mapper_->is_stopped() && !local_mapper_->is_finished())
+    {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        local_mapper_->request_stop();   // re-asserted: a release() elsewhere clears the request
+    }
 
     std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
 
-    // Keyframes, breadth-first from the map origins along the spanning tree
-    std::list<Keyframe> pending(map_->keyframe_origins_.begin(), map_->keyframe_origins_.end());
+    // Keyframes, breadth-first from the map origins along the spanning tree. Each keyframe once (the tree can hold
+    // a cycle after culling re-hangs children: without the visited set this loop never ended, under gba_mutex_ and
+    // map_update_mutex_), and only keyframes with a BA result (or one propagated from their parent) are moved.
+    std::unordered_set<KeyframeId> corrected;
+    std::unordered_set<KeyframeId> visited;
+    std::list<Keyframe> pending;
+    for(const Keyframe& origin : map_->keyframe_origins_)
+        if(origin && visited.insert(origin->keyId).second)
+            pending.push_back(origin);
     while(!pending.empty())
     {
         const Keyframe keyframe = pending.front();
         pending.pop_front();
+        const bool has_result = keyframe->ba_global_for_keyframe == loop_keyframe_id;
 
         const mat4f Twc = keyframe->get_pose_inverse();
         for(const Keyframe& child : keyframe->get_children())
         {
-            if(child->ba_global_for_keyframe != loop_keyframe_id)
+            if(!child || !visited.insert(child->keyId).second)
+                continue;
+            if(has_result && child->ba_global_for_keyframe != loop_keyframe_id)
             {
                 const mat4f Tchild_parent = child->get_pose() * Twc;
                 child->Tcw_gba = Tchild_parent * keyframe->Tcw_gba;
@@ -620,8 +660,11 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
             pending.push_back(child);
         }
 
+        if(!has_result)
+            continue;
         keyframe->Tcw_before_gba = keyframe->get_pose();
         keyframe->set_pose(keyframe->Tcw_gba);
+        corrected.insert(keyframe->keyId);
     }
 
     // Map points: optimized ones take their BA position, the others follow their reference keyframe
@@ -636,8 +679,10 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
             continue;
         }
 
+        // Only through a keyframe corrected above: its Tcw_before_gba is set (a keyframe tagged by the BA but not
+        // reached from the origins has none)
         const Keyframe reference = point->get_reference_keyframe();
-        if(reference->ba_global_for_keyframe != loop_keyframe_id)
+        if(!reference || !corrected.count(reference->keyId))
             continue;
 
         // Un-project with the reference's pose before the BA, re-project with the corrected one

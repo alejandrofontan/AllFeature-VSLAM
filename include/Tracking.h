@@ -361,6 +361,9 @@ protected:
     // need_new_keyframe); nullopt when the system has no information measure.
     std::optional<float> last_keyframe_information_{};
 
+    // Set by a degenerate initialization (create_initial_map): track() resets on the next frame, outside the map lock
+    bool reset_after_failed_initialization_{false};
+
     // Last Frame, KeyFrame and Relocalisation Info
     Keyframe last_keyframe_;
     Frame last_frame_;

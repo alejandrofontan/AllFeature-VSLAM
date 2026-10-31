@@ -36,6 +36,28 @@ message(STATUS "AllFeature architecture flag: '${ALLFEATURE_MARCH_FLAG}' (${CMAK
 # C/C++ only: these flags must not reach nvcc (the CUDA language stays enabled for Segmentation-TensorRT)
 add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra;-Wpedantic;-O3;${ALLFEATURE_MARCH_FLAG}>")
 
+# Sanitizer builds for crash hunting: "address" (AddressSanitizer + UndefinedBehaviorSanitizer) or "thread"
+# (ThreadSanitizer). Every C/C++ target is instrumented, -O1 -g with frame pointers for readable reports, and the
+# executables are linked WITHOUT mimalloc (a sanitizer must own malloc). Use a separate build directory with
+# ALLFEATURE_OUTPUT_IN_SOURCE=OFF so bin/ and lib/ keep the normal build, e.g.
+#   cmake -G Ninja -S . -B build-asan -DALLFEATURE_SANITIZE=address -DALLFEATURE_OUTPUT_IN_SOURCE=OFF
+# ThreadSanitizer does not see libomp's own synchronisation: reports inside OpenMP regions need care.
+set(ALLFEATURE_SANITIZE "" CACHE STRING "Sanitizer build: '' (off), 'address' or 'thread'")
+set(ALLFEATURE_ALLOCATOR mimalloc)
+if(ALLFEATURE_SANITIZE STREQUAL "address")
+  set(ALLFEATURE_SANITIZE_FLAGS -fsanitize=address,undefined -fno-sanitize-recover=undefined)
+elseif(ALLFEATURE_SANITIZE STREQUAL "thread")
+  set(ALLFEATURE_SANITIZE_FLAGS -fsanitize=thread)
+elseif(NOT ALLFEATURE_SANITIZE STREQUAL "")
+  message(FATAL_ERROR "ALLFEATURE_SANITIZE must be '', 'address' or 'thread', got '${ALLFEATURE_SANITIZE}'")
+endif()
+if(ALLFEATURE_SANITIZE_FLAGS)
+  add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${ALLFEATURE_SANITIZE_FLAGS};-O1;-g;-fno-omit-frame-pointer>")
+  add_link_options(${ALLFEATURE_SANITIZE_FLAGS})
+  set(ALLFEATURE_ALLOCATOR)
+  message(STATUS "AllFeature sanitizer build: ${ALLFEATURE_SANITIZE} (executables without mimalloc)")
+endif()
+
 # GPU backend (docs/plans/mac_port.md phase 1, docs/plans/learned_features_onnxruntime.md phase 4). The learned
 # features (superpoint256, aliked128, the LightGlue matchers) and MegaLoc run on ONNX Runtime on every platform -
 # the CUDA / CoreML / CPU execution provider is a runtime setting - and sift128 on OpenCV's CPU SIFT, so no option
@@ -266,13 +288,13 @@ else()
   set(ALLFEATURE_SEGMENTATION_LIB)
 endif()
 add_executable(vslamlab_allfeature_mono src/vslamlab_allfeature_mono.cpp)
-target_link_libraries(vslamlab_allfeature_mono mimalloc ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB})
+target_link_libraries(vslamlab_allfeature_mono ${ALLFEATURE_ALLOCATOR} ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB})
 
 add_executable(vslamlab_allfeature_mono_stream src/vslamlab_allfeature_mono_stream.cpp)
-target_link_libraries(vslamlab_allfeature_mono_stream mimalloc ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB})
+target_link_libraries(vslamlab_allfeature_mono_stream ${ALLFEATURE_ALLOCATOR} ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB})
 
 add_executable(vslamlab_allfeature_rgbd src/vslamlab_allfeature_rgbd.cpp)
-target_link_libraries(vslamlab_allfeature_rgbd mimalloc ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB})
+target_link_libraries(vslamlab_allfeature_rgbd ${ALLFEATURE_ALLOCATOR} ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB})
 
 # Online entry points on an ARStream relay (github.com/VSLAM-LAB/arstream, conda package libarstream: header-only
 # ZeroMQ subscriber; VSLAM-LAB's `pixi run stream-iphone --run allfeature-dev [--mode rgbd]`). Built only when the
@@ -281,20 +303,20 @@ find_package(arstream QUIET)
 if(arstream_FOUND)
   message(STATUS "arstream found: building vslamlab_allfeature_mono_arstream and vslamlab_allfeature_rgbd_arstream")
   add_executable(vslamlab_allfeature_mono_arstream src/vslamlab_allfeature_mono_arstream.cpp)
-  target_link_libraries(vslamlab_allfeature_mono_arstream mimalloc ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB} arstream::arstream)
+  target_link_libraries(vslamlab_allfeature_mono_arstream ${ALLFEATURE_ALLOCATOR} ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB} arstream::arstream)
   add_executable(vslamlab_allfeature_rgbd_arstream src/vslamlab_allfeature_rgbd_arstream.cpp)
-  target_link_libraries(vslamlab_allfeature_rgbd_arstream mimalloc ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB} arstream::arstream)
+  target_link_libraries(vslamlab_allfeature_rgbd_arstream ${ALLFEATURE_ALLOCATOR} ${PROJECT_NAME} ${ALLFEATURE_SEGMENTATION_LIB} arstream::arstream)
   install(TARGETS vslamlab_allfeature_mono_arstream vslamlab_allfeature_rgbd_arstream RUNTIME DESTINATION bin)
 endif()
 
 # Parity/benchmark harness for the brute-force matcher (issue #13 P2) — not installed.
 add_executable(test_bfmatcher_parity src/test_bfmatcher_parity.cpp)
-target_link_libraries(test_bfmatcher_parity mimalloc ${PROJECT_NAME})
+target_link_libraries(test_bfmatcher_parity ${ALLFEATURE_ALLOCATOR} ${PROJECT_NAME})
 
 # Parity/timing harness for the learned feature models on ONNX Runtime against the Python references
 # (docs/plans/learned_features_onnxruntime.md, T2) — not installed.
 add_executable(test_feature_parity src/test_feature_parity.cpp)
-target_link_libraries(test_feature_parity mimalloc ${PROJECT_NAME} ${YAML_CPP_LIBRARIES})
+target_link_libraries(test_feature_parity ${ALLFEATURE_ALLOCATOR} ${PROJECT_NAME} ${YAML_CPP_LIBRARIES})
 
 # Install targets and headers
 install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mono_stream vslamlab_allfeature_rgbd

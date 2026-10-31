@@ -172,6 +172,15 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
 
 void Tracking::track()
 {
+    // A degenerate initialization asked for a reset (create_initial_map): run it here, before the map lock is
+    // taken. reset() waits for Local Mapping and Loop Closing, and a global-BA correction holding Local Mapping
+    // stopped while it waits for map_update_mutex_ deadlocked against a reset run under that lock.
+    if(reset_after_failed_initialization_)
+    {
+        reset_after_failed_initialization_ = false;
+        reset();
+    }
+
     if(state_ == TrackingState::NO_IMAGES_YET)
         state_ = TrackingState::NOT_INITIALIZED;
 
@@ -203,13 +212,13 @@ void Tracking::track()
     {
         // Local Mapping might have changed some MapPoints tracked in last frame
         check_replaced_in_last_frame();
-        if(params.frame_tracking == "optical_flow")
-            ok = track_with_optical_flow();                  // false: not lost, fall back to the descriptor match
+        if(params.frame_tracking == "optical_flow")             // false: not lost, fall back to the descriptor match
+            ok = run_tracking_stage([this] { return track_with_optical_flow(); });
         if(!ok)
             ok = run_tracking_stage([this] { return track_reference_keyframe(); });
     }
     else
-        ok = relocalize();
+        ok = run_tracking_stage([this] { return relocalize(); });
 
     current_frame_.ref_keyframe = ref_keyframe_;
     profiler.track_ref_done();
@@ -266,7 +275,9 @@ void Tracking::track()
     {
         profiler.emergency_wait_begin();
         lock.unlock();
-        while(!local_mapper_->accepts_keyframes())
+        // ... or until it is stopped (a loop correction: accepts_keyframes stays false for the whole correction)
+        // or finished, which no longer process anything this frame could wait for
+        while(!local_mapper_->accepts_keyframes() && !local_mapper_->is_stopped() && !local_mapper_->is_finished())
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         emergency_keyframe_ = false;
         profiler.emergency_wait_end();
@@ -298,6 +309,11 @@ void Tracking::attempt_monocular_initialization()
             n += frame.keypoints.at(ft).size();
         return n;
     };
+
+    // The previous attempt's matches index the previous reference / current frames: never let them reach the
+    // FrameDrawer with this frame's keypoints (it draws matches_per_feature_ while NOT_INITIALIZED). They are
+    // refilled below when this attempt matches.
+    matches_per_feature_.clear();
 
     if(!initializer_)
     {
@@ -520,7 +536,7 @@ void Tracking::create_initial_map()
         AF_WARN("create_initial_map: degenerate initialization (median_depth=" << median_depth
                 << ", tracked map points=" << tracked_map_points << " < " << params.init_min_tracked_points
                 << ") — resetting...");
-        reset();
+        reset_after_failed_initialization_ = true;   // run at the start of the next frame, outside the map lock
         return;
     }
 
@@ -1177,7 +1193,10 @@ void Tracking::create_new_keyframe()
     // Lock Local Mapping against stopping while the keyframe is inserted;
     // fails (and skips insertion) if a loop closure already stopped it.
     if(!local_mapper_->set_insertion_lock(true))
+    {
+        emergency_keyframe_ = false;   // nothing inserted: nothing to wait for
         return;
+    }
 
     const Keyframe keyframe = std::make_shared<KeyFrame>(current_frame_, map_, place_recognition_);
 
@@ -1355,7 +1374,8 @@ void Tracking::reset()
     if(viewer_)
     {
         viewer_->request_stop();
-        while(!viewer_->is_stopped())
+        // A finished viewer never stops (Viewer::Stop refuses once finish is requested): do not wait for it
+        while(!viewer_->is_stopped() && !viewer_->isFinished())
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
     }
 
@@ -1378,6 +1398,18 @@ void Tracking::reset()
     Frame::next_id = 0;
     state_ = TrackingState::NO_IMAGES_YET;
     initializer_ = nullptr;
+
+    // Everything that points into the wiped map: ids restart at 0, so a stale keyframe here would alias the new
+    // map's ones (local_keyframes_ also used to keep growing: create_initial_map appends to it)
+    ref_keyframe_.reset();
+    last_keyframe_.reset();
+    local_keyframes_.clear();
+    local_points_.clear();
+    last_frame_ = Frame();
+    initial_frame_ = Frame();
+    matches_per_feature_.clear();
+    init_matches_.clear();
+    last_grey_image_.release();
 
     // Per-run tracking state: frame ids restart at 0, so id-anchored state from
     // the previous run (reloc embargo, emergency cooldown) must not leak into the

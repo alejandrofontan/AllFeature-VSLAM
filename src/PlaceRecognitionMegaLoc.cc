@@ -43,7 +43,18 @@ void PlaceRecognitionMegaLoc::compute(Frame& frame)
                     << " has no image to embed (Frame::image empty) — relocalization query skipped");
         return;
     }
-    frame.global_descriptor = place_cell_->embedder().embed(frame.image);
+    // A failed embed (Core ML / ONNX Runtime error, an image cv::resize rejects) skips this frame's query: an
+    // exception escaping here ended the tracking thread
+    try
+    {
+        frame.global_descriptor = place_cell_->embedder().embed(frame.image);
+    }
+    catch(const std::exception& e)
+    {
+        AF_WARN("[PlaceRecognitionMegaLoc] frame " << frame.frame_id << " not embedded, relocalization query skipped: "
+                << e.what());
+        frame.global_descriptor.resize(0);
+    }
 }
 
 void PlaceRecognitionMegaLoc::compute(KeyFrame& keyframe)
@@ -56,7 +67,19 @@ void PlaceRecognitionMegaLoc::compute(KeyFrame& keyframe)
         if(keyframe.global_descriptor.size() != 0)
             place_cell_->add(keyframe.frame_id, keyframe.global_descriptor);
         else if(!keyframe.image.empty())
-            place_cell_->add_image(keyframe.frame_id, keyframe.image);
+        {
+            // A failed embed leaves the keyframe out of the store (never retrieved) instead of ending the thread
+            try
+            {
+                place_cell_->add_image(keyframe.frame_id, keyframe.image);
+            }
+            catch(const std::exception& e)
+            {
+                AF_WARN("[PlaceRecognitionMegaLoc] keyframe " << keyframe.keyId << " not embedded (it will never be "
+                        "retrieved): " << e.what());
+                return;
+            }
+        }
         else
         {
             static std::atomic<bool> warned{false};
