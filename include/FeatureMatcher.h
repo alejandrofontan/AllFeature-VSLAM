@@ -11,7 +11,7 @@
 #include "MapPoint.h"
 
 // Learned matching: the three LightGlue variants (superpoint / aliked / sift) run on ONNX Runtime through the
-// process-wide sessions of onnx/FeatureModels.h (docs/plans/learned_features_onnxruntime.md); classical descriptors
+// process-wide sessions of onnx/FeatureModels.h; classical descriptors
 // go through the brute-force matcher (BruteForceMatcher.h). No CMake backend option gates the dispatch any more.
 
 namespace AF_VSLAM

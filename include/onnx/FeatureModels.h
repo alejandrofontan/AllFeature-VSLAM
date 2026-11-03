@@ -7,8 +7,7 @@
  * - Updated: 2026-10-16 (static-shape exports: features_static_shapes)
  * - License: GPLv3 License
  *
- * The process-wide configuration of the learned feature models on ONNX Runtime and the sessions they share
- * (docs/plans/learned_features_onnxruntime.md, steps 5-7; decisions Q1, Q3).
+ * The process-wide configuration of the learned feature models on ONNX Runtime and the sessions they share.
  *
  * Settings (the dev YAML, read by System before any extractor or matcher exists):
  *   features_models_dir    "feature_models"  the folder with superpoint_v1.onnx, aliked_n16.onnx,

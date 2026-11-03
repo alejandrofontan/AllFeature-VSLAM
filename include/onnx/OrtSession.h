@@ -7,8 +7,8 @@
  * - License: GPLv3 License
  *
  * OrtSession: one ONNX Runtime session for one exported model file, shared by the learned feature models
- * (SuperPoint, ALIKED, the LightGlue matchers; docs/plans/learned_features_onnxruntime.md step 4). The same
- * design as placecell's MegaLoc backend (Thirdparty/placecell/src/megaloc/onnxruntime_megaloc.cpp, phase 2),
+ * (SuperPoint, ALIKED, the LightGlue matchers). The same
+ * design as placecell's MegaLoc backend (Thirdparty/placecell/src/megaloc/onnxruntime_megaloc.cpp),
  * generalised to graphs whose tensor shapes change on every call - an image of any size in, a data-dependent
  * number of keypoints out - so inputs are passed with their shape per call and output shapes are read back.
  *
@@ -49,7 +49,7 @@ namespace AF_VSLAM::onnx
 {
 
 /// The runtime choices the settings YAML makes for every learned feature model (features_provider,
-/// features_threads, features_coreml_units; plan Q1).
+/// features_threads, features_coreml_units).
 struct OrtSettings
 {
     std::string provider{"auto"};

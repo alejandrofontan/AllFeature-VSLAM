@@ -1078,7 +1078,7 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
         std::vector<cv::DMatch> matches;
         switch(matcherType) {
             // descriptor-only matching of every float descriptor, learned or not: the cross-checked brute force
-            // (SIFT came through SiftMatchGPU's ratio test until 2026-10-16; plan Q7)
+            // (SIFT came through SiftMatchGPU's ratio test until 2026-10-16)
             case LIGHTGLUE_SUPERPOINT:
             case LIGHTGLUE_ALIKED:
             case LIGHTGLUE_SIFT:

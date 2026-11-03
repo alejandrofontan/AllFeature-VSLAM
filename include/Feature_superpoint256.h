@@ -2,7 +2,7 @@
  * Module: AllFeature-VSLAM - Feature_superpoint256.h
  * - Author: Alejandro Fontan Villacampa
  * - Assisted by: Claude (Fable 5.1)
- * - Version: 2.0 (ONNX Runtime; the TensorRT engine left in docs/plans/learned_features_onnxruntime.md step 6)
+ * - Version: 2.0 (ONNX Runtime; the TensorRT engine was removed)
  * - Created: 2024-06-07
  * - Updated: 2026-10-16
  * - License: GPLv3 License
@@ -10,7 +10,7 @@
  * superpoint256: SuperPoint keypoints + 256-d descriptors on ONNX Runtime (onnx/SuperPointOnnx.h), matched by
  * LightGlue-SuperPoint (LIGHTGLUE_SUPERPOINT -> onnx::shared_lightglue("superpoint") in FeatureMatcher). The model
  * file is `<features_models_dir>/superpoint_v1.onnx` (exported locally by `pixi run export-superpoint`: the Magic
- * Leap weights are not redistributable, plan Q6); the runtime provider comes from the features_* settings. With
+ * Leap weights are not redistributable); the runtime provider comes from the features_* settings. With
  * `features_static_shapes` the fixed-size export `superpoint_v1_<W>x<H>.onnx` for the frame size is loaded on the
  * first frame instead (Core ML compiles only bounded shapes; `export-features --only superpoint --static WxH`).
  */

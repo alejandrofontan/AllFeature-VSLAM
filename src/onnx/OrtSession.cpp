@@ -56,9 +56,9 @@ bool has_provider(const std::vector<std::string>& available, const char* name)
 }
 
 /// FNV-1a over the file's bytes, as hex: the Core ML model cache is keyed by the graph's inputs and outputs, not
-/// its content, and ONNX Runtime never notices a re-exported model (its documentation says so; met in step 7 of
-/// docs/plans/learned_features_onnxruntime.md: three different SuperPoint graphs ran through the first one's
-/// compiled Core ML model). A per-content sub-folder makes a stale compiled model unreachable.
+/// its content, and ONNX Runtime never notices a re-exported model (its documentation says so; met in practice:
+/// three different SuperPoint graphs ran through the first one's compiled Core ML model). A per-content
+/// sub-folder makes a stale compiled model unreachable.
 std::string file_content_hash(const std::string& path)
 {
     std::ifstream file(path, std::ios::binary);

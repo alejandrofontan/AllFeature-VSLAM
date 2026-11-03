@@ -15,7 +15,7 @@
 #ifdef ALLFEATURE_WITH_BRISK
 #include "Feature_brisk48.h"
 #endif
-// The learned features run on ONNX Runtime on every platform (docs/plans/learned_features_onnxruntime.md), SIFT on
+// The learned features run on ONNX Runtime on every platform, SIFT on
 // OpenCV's CPU implementation: no CMake option gates them any more. A feature compiled out (brisk / akaze without
 // their conda package) keeps its FeatureType value (Types.h) but has no Feature instance, so requesting it in the
 // settings is an error at startup (feature_compiled_out below) instead of a link error.
@@ -29,7 +29,7 @@
 // compute_distinctive_descriptors inner loops (issue #13 addendum, factory-singletons item).
 [[noreturn]] inline void feature_compiled_out(const std::string& feature, const std::string& cmake_option) {
     AF_ERROR("Feature '" << feature << "' is not available in this build: it needs " << cmake_option
-             << " (docs/plans/mac_port.md). Remove it from `features:` in the settings yaml or rebuild with it.");
+             << ". Remove it from `features:` in the settings yaml or rebuild with it.");
     std::terminate();
 }
 

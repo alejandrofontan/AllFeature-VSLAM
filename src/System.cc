@@ -164,7 +164,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
 #ifndef ALLFEATURE_WITH_MEGALOC
         (void)megaloc_params; (void)megaloc_settings;
         AF_ERROR("[System] vpr: megaloc is not available in this build: it needs the CMake option "
-                 "ALLFEATURE_WITH_MEGALOC=ON (docs/plans/mac_port.md). Set vpr: none or rebuild with that backend.");
+                 "ALLFEATURE_WITH_MEGALOC=ON. Set vpr: none or rebuild with that backend.");
         exit(-1);
 #else
         if(!std::ifstream(megaloc_onnx).good()){

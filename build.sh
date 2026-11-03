@@ -44,7 +44,7 @@ build_library() {
   # Local builds are tuned for this machine (-march=native, CUDA kernels for this GPU); the conda package
   # builds the same CMake project with ALLFEATURE_NATIVE off (x86-64-v3) and an explicit CUDA architecture list.
   local extra_flags=(-DALLFEATURE_NATIVE=ON)
-  # -c: GPU-free build (docs/plans/mac_port.md phase 1) in its own build directory, same bin/ and lib/ outputs
+  # -c: GPU-free build in its own build directory, same bin/ and lib/ outputs
   if [ "$cpu_only" = true ]; then
     build_folder="$source_folder/build-cpu"
     extra_flags+=(-DALLFEATURE_WITH_TENSORRT=OFF)

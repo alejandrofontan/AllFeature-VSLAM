@@ -3,7 +3,7 @@ authors = ["alejandrofontan <fontanvillacampa@gmail.com>"]
 channels = ["https://prefix.dev/conda-forge", "https://prefix.dev/vslamlab/vslamlab", "https://repo.prefix.dev/spqr-tests"]
 
 name = "AllFeature-VSLAM-DEV"
-# osx-arm64 (docs/plans/mac_port.md): the GPU packages (CUDA, TensorRT, libtorch, SiftGPU) and the X11 display stack are
+# osx-arm64: the GPU packages (CUDA, TensorRT, libtorch, SiftGPU) and the X11 display stack are
 # linux-64 target dependencies below, so the default / build environments resolve on the Mac without them and the
 # GPU-free build (`./build.sh -c`, ALLFEATURE_WITH_* OFF) is what gets built there.
 platforms = [{ name = "linux-64-cuda", platform = "linux-64", cuda = "12.0" }, "osx-arm64"]
@@ -26,7 +26,7 @@ git-clone = "git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git -
 # cached next to them)
 download-megaloc-models = { cmd = "hf download vslamlab/megaloc-models --local-dir megaloc_models", outputs = ["megaloc_models/*.onnx"] }
 download-segmentation-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'efficientvit-seg*' --local-dir segmentation_models", outputs = ["segmentation_models/*.onnx"] }
-# Learned feature models on ONNX Runtime (docs/plans/learned_features_onnxruntime.md): the four redistributable
+# Learned feature models on ONNX Runtime: the four redistributable
 # exports (ALIKED, BSD-3; the three LightGlue matchers, Apache-2.0) with their sidecars come from the HF repo's
 # feature_models/ folder. SuperPoint's weights are Magic Leap's (non-commercial research, no redistribution: plan
 # Q6), so superpoint_v1.onnx is exported locally from the official file by `export-superpoint` (export-features env).
@@ -58,7 +58,7 @@ brisk = ">=1.0.1"
 akaze = ">=1.0.1"
 # ONNX Runtime: the MegaLoc VPR backend (Thirdparty/placecell, vpr: megaloc) on every platform; the execution
 # provider is a runtime choice (megaloc_provider: cuda on linux-64 with the cuda129 build below, coreml / cpu on
-# osx-arm64 with the cpu build, which carries the CoreML provider) — docs/plans/megaloc_onnxruntime.md
+# osx-arm64 with the cpu build, which carries the CoreML provider)
 onnxruntime-cpp = "1.31.*"
 
 [target.osx-arm64.dependencies]
@@ -182,28 +182,12 @@ libegl-devel = "*"
 libglvnd-devel = "*"
 libopengl-devel = "*"
 
-# docs env = MkDocs site only (no CUDA/torch): `pixi run docs-serve`, `pixi run docs-build`
-[feature.docs.dependencies]
-python = "3.12.*"
-mkdocs-material = "*"
-mkdocs-mermaid2-plugin = "*"
-mkdocs-literate-nav = "*"
-
-[feature.docs.tasks]
-docs-serve = { cmd = "mkdocs serve", env = { DISABLE_MKDOCS_2_WARNING = "true" } }
-docs-build = { cmd = "mkdocs build --strict", env = { DISABLE_MKDOCS_2_WARNING = "true" } }
-docs-links = { cmd = "python docs/tools/resolve_links.py" }
-docs-settings = { cmd = "python docs/tools/settings_keys.py" }
-docs-checklists = { cmd = "python docs/tools/review_checklist.py --all" }
-# everything a docs commit should pass: fresh line numbers, fresh settings page, strict site build
-docs-check = { cmd = "python docs/tools/resolve_links.py --check && python docs/tools/settings_keys.py --check && mkdocs build --strict", env = { DISABLE_MKDOCS_2_WARNING = "true" } }
-
-# export-features env = the ONNX export of the learned feature models (docs/plans/learned_features_onnxruntime.md,
-# steps 1-3): torch CPU + onnx tooling, linux-64 only (the exports are files; the Mac consumes them). Its own
+# export-features env = the ONNX export of the learned feature models: torch CPU + onnx tooling, linux-64 only
+# (the exports are files; the Mac consumes them). Its own
 # environment without the default feature: the default feature carries the runtime pytorch-gpu 2.7 on linux-64,
 # which cannot share an environment with pytorch-cpu.
 [feature.export-features]
-platforms = ["linux-64-cuda", "osx-arm64"]   # osx-arm64 too: every machine exports SuperPoint itself (plan Q6)
+platforms = ["linux-64-cuda", "osx-arm64"]   # osx-arm64 too: every machine exports SuperPoint itself
 
 [feature.export-features.tasks]
 # PYTHONNOUSERSITE: keep ~/.local/lib/pythonX.Y/site-packages out of the env (a stale user-site package there, e.g.
@@ -235,7 +219,6 @@ numpy = "<2"
 [environments]
 build = ["build"]
 cpu = { features = ["cpu"], no-default-feature = true }
-docs = { features = ["docs"], no-default-feature = true }
 export-features = { features = ["export-features"], no-default-feature = true }
 
 ########################################################################################################################

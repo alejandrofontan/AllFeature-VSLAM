@@ -1,6 +1,5 @@
 /**
- * test_feature_parity - parity + timing harness for the learned feature models on ONNX Runtime
- * (docs/plans/learned_features_onnxruntime.md, test T2).
+ * test_feature_parity - parity + timing harness for the learned feature models on ONNX Runtime.
  *
  * Runs one exported model on one frame (or pair) and compares the C++ output against the upstream PyTorch
  * reference that tools/export_features.py dumped into feature_models/reference/: keypoints matched to the

@@ -58,10 +58,10 @@ if(ALLFEATURE_SANITIZE_FLAGS)
   message(STATUS "AllFeature sanitizer build: ${ALLFEATURE_SANITIZE} (executables without mimalloc)")
 endif()
 
-# GPU backend (docs/plans/mac_port.md phase 1, docs/plans/learned_features_onnxruntime.md phase 4). The learned
+# GPU backend. The learned
 # features (superpoint256, aliked128, the LightGlue matchers) and MegaLoc run on ONNX Runtime on every platform -
 # the CUDA / CoreML / CPU execution provider is a runtime setting - and sift128 on OpenCV's CPU SIFT, so no option
-# gates them. TensorRT remains for online segmentation only (Thirdparty/Segmentation-TensorRT, phase 5 ports it):
+# gates them. TensorRT remains for online segmentation only (Thirdparty/Segmentation-TensorRT):
 # ON on Linux, OFF on macOS; a `segmentation:` request without it is a clear error at startup
 # (SegmentationSettings.h).
 if(APPLE)
@@ -81,8 +81,8 @@ endforeach()
 message(STATUS "AllFeature backends: learned features + MegaLoc on ONNX Runtime (MegaLoc=${ALLFEATURE_WITH_MEGALOC}), TensorRT segmentation=${ALLFEATURE_WITH_TENSORRT}")
 
 # brisk / akaze (standalone feature libraries from prefix.dev/vslamlab, VSLAM-LAB/conda-recipes): optional, so a
-# platform without the packages yet (osx-arm64 until their recipes are built there, docs/plans/mac_port.md
-# decision 2) still builds with the other features; brisk48 / akaze61 are then refused at startup like the
+# platform without the packages yet (osx-arm64 until their recipes are built there) still builds with the other
+# features; brisk48 / akaze61 are then refused at startup like the
 # GPU-backed features (FeatureFactory.h).
 find_package(brisk QUIET)
 find_package(akaze QUIET)
@@ -139,9 +139,9 @@ endif()
 if(ALLFEATURE_WITH_MEGALOC)
   list(APPEND SRCS_ALLFEATURE src/PlaceRecognitionMegaLoc.cc)
 endif()
-# Learned feature models on ONNX Runtime (docs/plans/learned_features_onnxruntime.md): one session class, one thin
+# Learned feature models on ONNX Runtime: one session class, one thin
 # wrapper per model, the process-wide configuration + shared matchers, and the three features built on them; SIFT on
-# OpenCV's CPU implementation (plan Q7), the extractor the LightGlue-SIFT matcher was trained with. Every platform.
+# OpenCV's CPU implementation, the extractor the LightGlue-SIFT matcher was trained with. Every platform.
 list(APPEND SRCS_ALLFEATURE src/onnx/OrtSession.cpp src/onnx/SuperPointOnnx.cpp src/onnx/LightGlueOnnx.cpp
                             src/onnx/AlikedOnnx.cpp src/onnx/FeatureModels.cpp
                             src/Feature_superpoint256.cpp src/Feature_aliked128.cpp
@@ -313,8 +313,7 @@ endif()
 add_executable(test_bfmatcher_parity src/test_bfmatcher_parity.cpp)
 target_link_libraries(test_bfmatcher_parity ${ALLFEATURE_ALLOCATOR} ${PROJECT_NAME})
 
-# Parity/timing harness for the learned feature models on ONNX Runtime against the Python references
-# (docs/plans/learned_features_onnxruntime.md, T2) — not installed.
+# Parity/timing harness for the learned feature models on ONNX Runtime against the Python references — not installed.
 add_executable(test_feature_parity src/test_feature_parity.cpp)
 target_link_libraries(test_feature_parity ${ALLFEATURE_ALLOCATOR} ${PROJECT_NAME} ${YAML_CPP_LIBRARIES})
 

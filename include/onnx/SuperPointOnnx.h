@@ -7,12 +7,12 @@
  * - License: GPLv3 License
  *
  * SuperPointOnnx: grey image -> SuperPoint keypoints + 256-d descriptors on ONNX Runtime. The exported graph
- * (tools/export_features.py, SuperPointDense; plan Q4) ends at the dense maps: the raw score per pixel after
+ * (tools/export_features.py, SuperPointDense) ends at the dense maps: the raw score per pixel after
  * softmax and pixel shuffle, and the L2-normalised descriptor map at 1/8 resolution. This class runs that graph and
  * then the tail that `superpoint_tail` in the export tool specifies, in upstream's order: NMS (radius 4, cv::dilate
  * as the max-pool), border masking, keep scores > detection_threshold, the best `max_keypoints` by score, bilinear
  * descriptor sampling with SuperPoint's s=8 normalisation and align_corners, L2-normalise. The NMS is here and not
- * in the graph because its boolean operators split the Core ML graph into 8 partitions (step 7). The sidecar
+ * in the graph because its boolean operators split the Core ML graph into 8 partitions. The sidecar
  * '<model>.onnx.yaml' supplies the tensor names, thresholds, descriptor size and the file's weight precision.
  *
  * Any image size: the three max-pools floor it, so the maps cover the top-left (W//8*8) x (H//8*8) pixels and no

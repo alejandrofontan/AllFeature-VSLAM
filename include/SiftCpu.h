@@ -7,7 +7,7 @@
  * - License: GPLv3 License
  *
  * SiftCpu: grey image -> SIFT keypoints with scale and orientation + RootSIFT descriptors, on OpenCV's CPU
- * implementation (docs/plans/learned_features_onnxruntime.md, decision Q7: cv::SIFT everywhere, SiftGPU leaves).
+ * implementation (cv::SIFT everywhere; the SiftGPU backend was removed).
  * It mirrors the LightGlue repository's SIFT extractor (lightglue/sift.py, OpenCV backend) exactly, because the
  * LightGlue-SIFT weights were trained on that output and the C++ parity reference is that code on the same
  * library:
@@ -20,9 +20,9 @@
  *   3. RootSIFT (`sift_to_rootsift`): L1-normalise, clip at 1e-6, square root, L2-normalise.
  *
  * Scale (cv::KeyPoint::size, px) and orientation (cv::KeyPoint::angle, degrees) are kept on the keypoints: the
- * LightGlue-SIFT matcher takes them as inputs (LightGlueOnnx converts the angle to radians). Today's SiftGPU
+ * LightGlue-SIFT matcher takes them as inputs (LightGlueOnnx converts the angle to radians). The old SiftGPU
  * extractor zeroed both and the libtorch matcher ran with the ALIKED weights; this class is the fix by
- * construction (plan Q8).
+ * construction.
  */
 
 #ifndef AF_VSLAM_SIFT_CPU_H

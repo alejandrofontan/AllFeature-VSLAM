@@ -16,7 +16,7 @@
  * the ones above the threshold - the same set whenever fewer than K pass. The host applies its own budget afterwards.
  *
  * Input contract (sidecar '<model>.onnx.yaml'): RGB in [0,1]. The host's images are BGR (cv::imread), so this
- * class converts - the libtorch path handed ALIKED the BGR image as RGB (plan Q8, fixed by construction).
+ * class converts - the libtorch path handed ALIKED the BGR image as RGB; this class is the fix by construction.
  *
  * Threading: per-call buffers only; OrtSession::run serialises the session's runs.
  */

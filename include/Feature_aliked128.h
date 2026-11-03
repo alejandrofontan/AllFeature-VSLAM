@@ -2,7 +2,7 @@
  * Module: AllFeature-VSLAM - Feature_aliked128.h
  * - Author: Alejandro Fontan Villacampa
  * - Assisted by: Claude (Fable 5.1)
- * - Version: 2.0 (ONNX Runtime; the libtorch port left in docs/plans/learned_features_onnxruntime.md step 6)
+ * - Version: 2.0 (ONNX Runtime; the libtorch port was removed)
  * - Created: 2024-06-07
  * - Updated: 2026-10-16
  * - License: GPLv3 License

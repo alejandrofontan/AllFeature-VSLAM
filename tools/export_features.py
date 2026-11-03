@@ -2,7 +2,7 @@
 """Export the learned feature models to ONNX: SuperPoint, ALIKED and the three LightGlue matchers.
 
 Author: Alejandro Fontan (with Claude, Fable 5.1)
-Version: 0.3 (steps 1-3 of docs/plans/learned_features_onnxruntime.md: clone, weights, wrappers, exports, references)
+Version: 0.3 (clone, weights, wrappers, exports, references)
 Created: 2026-10-16
 Updated: 2026-10-16
 
@@ -71,9 +71,9 @@ LIGHTGLUE_COMMIT = "eb42fee2d71449efb0aa5c10549752b5d75384d8"  # main, 2026-02-1
 LIGHTGLUE_RELEASE = "v0.1_arxiv"  # the GitHub release the upstream code downloads its .pth files from
 ALIKED_COMMIT = "683d7c65197395c0b3f01ebe76e1084a27e73a65"  # Shiaoming/ALIKED main, 2024-05-05 (models/*.pth)
 
-# What each model is, where its weights come from, and the licence that governs them (docs/plans/
-# learned_features_onnxruntime.md, Q6: the SuperPoint weights are Magic Leap's, non-commercial research use only and
-# no redistribution - the SuperPoint export is produced locally on every machine and never uploaded).
+# What each model is, where its weights come from, and the licence that governs them: the SuperPoint weights are
+# Magic Leap's, non-commercial research use only and no redistribution - the SuperPoint export is produced locally
+# on every machine and never uploaded.
 # `file` is the name under which the upstream constructor looks the file up in torch.hub's cache (superpoint.py and
 # aliked.py: the URL's basename; lightglue.py: f"{weights}_{version with '.'->'-'}.pth") - download under that name
 # and the constructors load from disk instead of downloading themselves.
@@ -168,7 +168,7 @@ def load_models(max_keypoints: int) -> dict[str, nn.Module]:
 
     models: dict[str, nn.Module] = {}
     # SuperPoint: upstream defaults (nms_radius 4, detection_threshold 0.0005, remove_borders 4); max_num_keypoints
-    # left unset - the top-k lives in C++ (plan Q4: the graph ends at the dense maps)
+    # left unset - the top-k lives in C++ (the graph ends at the dense maps)
     models["superpoint"] = SuperPoint(max_num_keypoints=max_keypoints).eval()
     # ALIKED n16: threshold mode as the host uses it today (detection_threshold 0.2, no top-k cap)
     models["aliked"] = ALIKED(model_name="aliked-n16", max_num_keypoints=-1, detection_threshold=0.2,
@@ -210,9 +210,9 @@ def border_mask(scores: torch.Tensor, pad: int) -> torch.Tensor:
 
 
 class SuperPointDense(nn.Module):
-    """SuperPoint up to the dense maps (plan Q4): the exported graph ends at the raw score map (softmax + pixel
+    """SuperPoint up to the dense maps: the exported graph ends at the raw score map (softmax + pixel
     shuffle) and the L2-normalised descriptor map; NMS, border masking, threshold, top-k and descriptor sampling are
-    `superpoint_tail` below in Python and the C++ tail in AllFeature. The NMS left the graph in step 7: upstream's
+    `superpoint_tail` below in Python and the C++ tail in AllFeature. The NMS left the graph because upstream's
     `simple_nms` is max-pools interleaved with Equal / Greater / Not / And / Or / Where, which the Core ML provider
     does not run, so it cut the graph into 8 partitions (120 ms on the M1 Pro GPU regardless of precision); the
     trunk alone is one partition. Every learned layer is upstream's; the three max-pools floor the size, so a
@@ -495,7 +495,7 @@ DEFORM_CONV_TRANSLATION = {torch.ops.torchvision.deform_conv2d.default: deform_c
 
 def deform_conv2d_decomposed(x: torch.Tensor, offset: torch.Tensor, weight: torch.Tensor, bias, padding: int) -> torch.Tensor:
     """torchvision.ops.deform_conv2d for stride 1, dilation 1, one offset group, no modulation mask (ALIKED's case),
-    written as 9 bilinear samplings + a 1x1 convolution (plan Q5 option b): Core ML has no DeformConv, so with the
+    written as 9 bilinear samplings + a 1x1 convolution: Core ML has no DeformConv, so with the
     native op the trunk splits around four CPU nodes (20 partitions, 153 ms on the M1 Pro). Exact: torchvision's
     bilinear_interpolate with out-of-image corners at zero is grid_sample(mode=bilinear, padding_mode=zeros,
     align_corners=True) on pixel coordinates. torchvision's offset layout: offset[:, 2t] = dy, offset[:, 2t+1] = dx
@@ -963,7 +963,7 @@ def convert_fp16(fp32_path: Path, fp16_path: Path) -> None:
 
     warnings.filterwarnings("ignore", message="the float32 number .* will be truncated")   # one line per tiny constant
     model = onnx.load(str(fp32_path))
-    # shape inference ON (phase 2 disabled it for the 912 MB MegaLoc graph): the converter needs the intermediate
+    # shape inference ON (it was disabled for the 912 MB MegaLoc graph): the converter needs the intermediate
     # value types to keep the Cast nodes (bool masks, int indices) consistent, else ORT refuses the file
     model16 = float16.convert_float_to_float16(
         model, keep_io_types=True, op_block_list=float16.DEFAULT_OP_BLOCK_LIST + FP16_OP_BLOCK_EXTRA)
@@ -1076,9 +1076,9 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
                static_size: tuple[int, int] | None = None, top_k: int = 2048,
                static_length: int | None = None) -> dict[str, Path]:
     """The fp32 exports + fp16 twins + sidecars into feature_models/ (`only`: a subset of ALL_EXPORTS, e.g. the
-    `export-superpoint` pixi task - SuperPoint is the one model every machine exports itself, plan Q6).
+    `export-superpoint` pixi task - SuperPoint is the one model every machine exports itself).
     `static_size` (W, H): export the two detectors with that fixed input size as '<stem>_<W>x<H>.onnx' instead of
-    the dynamic-axis files - Core ML compiles only bounded shapes (step 7: with dynamic H, W every partition fell
+    the dynamic-axis files - Core ML compiles only bounded shapes (with dynamic H, W every partition fell
     back to the CPU); ALIKED then also runs its detector in top-k mode (`top_k` keypoints, every shape static).
     `static_length` L: export the matchers padded to L keypoints per side as 'lightglue_<feat>_L<L>.onnx'. With one
     static option given, only that family is exported (the other's dynamic files are not rewritten).
@@ -1114,7 +1114,7 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
                                   "the detection_threshold carry score -1 - the host drops them"] if aliked_k else [])
     if "aliked" in wanted and export_detectors:
         path = MODELS_DIR / f"aliked_n16{suffix}.onnx"
-        # static (Core ML): deformable convs decomposed into GridSample + 1x1 conv, no DeformConv node (plan Q5 b)
+        # static (Core ML): deformable convs decomposed into GridSample + 1x1 conv, no DeformConv node
         export_onnx(AlikedExport(models["aliked"], aliked_k, decompose_deform=bool(static_size)), path,
                     (torch.rand(1, 3, H, W),), ["image"], ["keypoints", "descriptors", "scores"], dyn, opset=19,
                     translation=DEFORM_CONV_TRANSLATION)

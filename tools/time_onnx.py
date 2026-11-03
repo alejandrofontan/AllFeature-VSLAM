@@ -5,7 +5,7 @@ Author: Alejandro Fontan (with Claude, Fable 5.1)
 Version: 0.1
 Created: 2026-10-16
 
-The measurement tool of the Core ML partitioning work (docs/plans/learned_features_onnxruntime.md, step 7): graph
+The measurement tool of the Core ML partitioning work: graph
 variants are compared by wall time without touching the C++ side. Static shapes only (a symbolic dimension is
 replaced by the --dim value). Prints the provider's partition line (log level 2) and the median of --iters runs.
 
