@@ -28,6 +28,7 @@
 #include "FeatureFactory.h"
 
 #include <mutex>
+#include <set>
 
 
 namespace AF_VSLAM
@@ -116,16 +117,16 @@ public:
                       const FeatureType& featureType);
 
     void add_map_point(const Pt& pt, const KeypointIndex& index);
-    void erase_map_point_match(const size_t &idx, const FeatureType& featType);
+    void erase_map_point_match(const size_t &idx, const FeatureType& feature_type);
     void erase_map_point_match(const Pt& pMP);
     void replace_map_point_match(const size_t &idx, const Pt& pMP);
-    std::set<Pt> get_map_points(const FeatureType& featType) const;
+    std::set<Pt> get_map_points(const FeatureType& feature_type) const;
     std::vector<Pt> get_map_point_matches(const FeatureType& feat_type) const;
     int tracked_map_points(const int &minObs) const;
-    Pt get_map_point(const size_t &idx, const FeatureType& featType) const;
+    Pt get_map_point(const size_t &idx, const FeatureType& feature_type) const;
 
     // KeyPoint functions
-    std::vector<size_t> get_features_in_area(const float &x, const float  &y, const float  &r, const FeatureType& featType) const;
+    [[nodiscard]] std::vector<size_t> get_features_in_area(float x, float y, float r, const FeatureType& feature_type) const;
 
     // Image
     bool is_in_image(const float &x, const float &y) const;
@@ -149,39 +150,31 @@ public:
         return pKF1->keyId < pKF2->keyId;
     }
 
-    [[nodiscard]] float get_keypoint_size(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float get_keypoint_sigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float get_keypoint_information_1d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] mat2f get_keypoint_information_2d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float get_keypoint_sigma(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] float get_keypoint_size(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const;
+    [[nodiscard]] float get_keypoint_sigma2(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const;
+    [[nodiscard]] float get_keypoint_information_1d(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const;
+    [[nodiscard]] mat2f get_keypoint_information_2d(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const;
+    [[nodiscard]] float get_keypoint_sigma(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const;
 
     // The following variables are accesed from only 1 thread or never change (no mutex needed),
     // except the two match caches (see cache_mutex_).
 public:
 
-    std::vector<FeatureType> featureTypes{};
-    // Match caches, keyed by the other (key)frame's frame_id: cache_matched_pairs holds the matches stacked over all
-    // feature types (keypoint indices offset by the earlier types' counts), cache_matched_pairs_feat_type the same
-    // matches per type with per-type keypoint indices (queryIdx: this keyframe, trainIdx: the other one). Written
-    // by Tracking (match_keyframe_to_frame), LocalMapping (cache_neighbor_matches, match_keyframes) and LoopClosing
-    // (match_keyframes) and read by them: every access holds cache_mutex_, a leaf lock (take no other lock while
-    // holding it; two keyframes' caches together with std::scoped_lock).
-    std::map<FrameId, std::vector<cv::DMatch>> cache_matched_pairs{};
+    std::vector<FeatureType> feature_types{};
+    // Match cache, keyed by the other (key)frame's frame_id, then by feature type, with per-type keypoint
+    // indices (queryIdx: this keyframe, trainIdx: the other one). Written by Tracking (match_keyframe_to_frame),
+    // LocalMapping (cache_neighbor_matches, match_keyframes) and LoopClosing (match_keyframes) and read by them:
+    // every access holds cache_mutex_, a leaf lock (take no other lock while holding it; two keyframes' caches
+    // together with std::scoped_lock). Never pruned: entries live as long as the keyframe.
     std::map<FrameId, std::map<FeatureType, std::vector<cv::DMatch>>> cache_matched_pairs_feat_type{};
     mutable std::mutex cache_mutex_;
 
-    static long unsigned int next_id;
+    static inline KeyframeId next_id{0};
     static std::mutex set_bad_mutex_;   // serialises set_bad_flag's spanning-tree update across threads (see there)
     KeyframeId keyId;
     const long unsigned int frame_id;
 
     const double timestamp;
-
-    // Grid (to speed up feature matching)
-    const int grid_cols;
-    const int grid_rows;
-    const float grid_element_width_inv;
-    const float grid_element_height_inv;
 
     // Variables used by the tracking
     long unsigned int fuse_target_for_keyframe;
@@ -195,14 +188,16 @@ public:
     mat4f Tcw_before_gba{mat4f::Identity()};
     long unsigned int ba_global_for_keyframe;
 
-    // Calibration parameters
-    const float fx, fy, cx, cy, invfx, invfy, mbf, mb, mThDepth;
+    // The camera and everything derived from it (Calibration.h), shared with the Frame this
+    // keyframe was made from.
+    std::shared_ptr<const Calibration> calibration;
 
     // Number of KeyPoints
     const std::map<FeatureType, int> N;
 
-    // KeyPoints, stereo coordinate and descriptors (all associated by an index)
-    const std::map<FeatureType, std::vector<cv::KeyPoint>> raw_keypoints;
+    // KeyPoints, stereo coordinate and descriptors (all associated by an index). Undistorted only:
+    // the distorted positions a Frame keeps in raw_keypoints are used while the frame is being
+    // built (depth and colour sampling) and by optical flow, none of which runs on a keyframe.
     const std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
     const std::map<FeatureType, std::vector<float>> inv_depth; // inverse depth; 0 where no valid depth
     const std::map<FeatureType, std::vector<float>> sigma2_inv_depth; // variance of inv_depth; 0 where no valid depth
@@ -221,20 +216,19 @@ public:
     Eigen::VectorXf global_descriptor;
 
     // Scale
-    float size_tolerance{};
     std::map<FeatureType, vector<mat2f>> keyPtsSigma2{};
     std::map<FeatureType, vector<mat2f>> keyPtsInf{};
     std::map<FeatureType, vector<float>> keyPtsSize{};
     float maxKeyPtSize{};
-    float maxKeyPtSigma{};
 
-    // Image bounds and calibration
+    // Image bounds, TRUNCATED TO int from the calibration's float bounds — which is what this
+    // has always done (they were narrowed on the way in from the Frame). Frame tests the same
+    // bounds as floats, so the two disagree by up to a pixel wherever the undistorted bounds
+    // are not whole; kept as-is here so this refactor moves no values. Worth reconciling.
     const int min_x;
     const int min_y;
     const int max_x;
     const int max_y;
-
-    const cv::Mat mK;
 
     // The following variables need to be accessed trough a mutex to be thread safe.
 protected:
@@ -252,7 +246,7 @@ protected:
     shared_ptr<PlaceRecognition> place_recognition_;
 
     // Grid over the image to speed up feature matching
-    std::map<FeatureType, std::vector< std::vector <std::vector<size_t>>>> grid_;
+    std::map<FeatureType, Frame::Grid> grid_;
 
     std::map<KeyframeId, Keyframe> connected_keyframes_;
     std::map<KeyframeId,int> connected_keyframe_weights_;

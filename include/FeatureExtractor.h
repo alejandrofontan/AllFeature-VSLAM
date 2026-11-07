@@ -5,7 +5,9 @@
 #include "Definitions.h"
 #include "Image.h"
 
-#include <opencv2/opencv.hpp>
+#include <list>
+
+#include <opencv2/core.hpp>
 
 namespace AF_VSLAM {
 
@@ -54,7 +56,6 @@ namespace AF_VSLAM {
         float minKeyPtSize{std::numeric_limits<float>::max()};
 
         float maxKeyPtSize0{};
-        float maxKeyPtSigma0{};
         const float scaleFactorOrb{1.2f};
         const int nOctavesOrb{8};
 
@@ -80,9 +81,7 @@ namespace AF_VSLAM {
                          std::vector<float>& keyPtsSize);
 
         int inline GetLevels(){return settings->nOctaves;}
-        float inline GetScaleFactor(){return settings->scaleFactor;}
         [[nodiscard]] float inline GetMaxKeyPtSize() const{return settings->maxKeyPtSize0;}
-        [[nodiscard]] float inline GetMaxKeyPtSigma() const{return settings->maxKeyPtSigma0;}
 
     protected:
         void computeSize(std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints);

@@ -27,9 +27,9 @@ namespace AF_VSLAM
 System::System(const string &strCalibrationFile, const string &strSettingsFile,
                const eSensor sensor,
                const bool activateVisualization,
-               const vector<FeatureType>& featureTypes,
+               const vector<FeatureType>& feature_types,
                const bool& fixImageSize):
-               featureTypes(featureTypes), mSensor(sensor), viewer(static_cast<shared_ptr<Viewer>>(nullptr)), mbReset(false)
+               feature_types(feature_types), mSensor(sensor), viewer(static_cast<shared_ptr<Viewer>>(nullptr)), mbReset(false)
 {
     // Output welcome message
 
@@ -126,14 +126,14 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     }
 
     std::string feature_list{};
-    for (const auto& ft : featureTypes)
+    for (const auto& ft : feature_types)
         feature_list += (feature_list.empty() ? "" : ", ") + feature_name(ft);
 
     // Explicit feature_vpr must name a configured feature — hard error otherwise
-    FeatureType vpr_feature{featureTypes[0]};
+    FeatureType vpr_feature{feature_types[0]};
     if(!feature_vpr_name.empty()){
         bool found{false};
-        for (const auto& ft : featureTypes)
+        for (const auto& ft : feature_types)
             if(feature_name(ft) == feature_vpr_name){ vpr_feature = ft; found = true; break; }
         if(!found){
             AF_ERROR("[System] feature_vpr '" + feature_vpr_name + "' is not in features: [" + feature_list + "]");
@@ -246,18 +246,18 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     mpMap = make_shared<Map>();
 
     //Create Drawers. These are used by the Viewer
-    frameDrawer = make_shared<FrameDrawer>(mpMap,featureTypes);
-    mapDrawer = make_shared<MapDrawer>(mpMap, strSettingsFile,featureTypes);
+    frameDrawer = make_shared<FrameDrawer>(mpMap,feature_types);
+    mapDrawer = make_shared<MapDrawer>(mpMap, strSettingsFile,feature_types);
 
     // Feature settings yaml file
     std::map<FeatureType, string> feature_settings_yaml_file;
-    for (const auto& featureType : featureTypes){
+    for (const auto& featureType : feature_types){
         const AF_VSLAM::Feature& ft = get_feature(featureType);
         feature_settings_yaml_file[featureType] = ft.getSettingsYamlFile();
     }
 
     // Initialize matching thresholds
-    for (const auto& featureType : featureTypes){
+    for (const auto& featureType : feature_types){
          FeatureMatcher::setDescriptorDistanceThresholds(feature_settings_yaml_file.at(featureType), featureType);
     }
 
@@ -267,10 +267,10 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                              mpMap,
                              strCalibrationFile, strSettingsFile,
                              feature_settings_yaml_file,
-                             featureTypes, fixImageSize);
+                             feature_types, fixImageSize);
 
     //Initialize the Local Mapping thread and launch
-    localMapper = make_shared<LocalMapping>(mpMap, featureTypes, tracker->get_image_width(), tracker->get_image_height());
+    localMapper = make_shared<LocalMapping>(mpMap, feature_types, tracker->get_image_width(), tracker->get_image_height());
     mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::run, localMapper);
 
     //Initialize the Loop Closing thread and launch. Without an active VPR backend the object
@@ -278,7 +278,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //thread never starts: LoopClosing starts with finished_ = true, so Shutdown()'s
     //is_finished()/is_gba_running() waits pass immediately.
     loopCloser =  make_shared<LoopClosing>(mpMap, place_recognition, localMapper, mapDrawer,
-        mSensor!=MONOCULAR, featureTypes,
+        mSensor!=MONOCULAR, feature_types,
         tracker->get_image_width(), tracker->get_image_height());
     if(place_recognition->is_active())
         mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::run, loopCloser);
@@ -288,7 +288,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     {
         viewer = make_shared<Viewer>(this, frameDrawer,mapDrawer,tracker,
                                     strCalibrationFile, strSettingsFile,
-                                    featureTypes);
+                                    feature_types);
 #ifndef __APPLE__
         mptViewer = make_shared<thread>(&Viewer::Run, viewer);
 #endif  // on macOS Cocoa needs Pangolin on the main thread: System::Run drives the Viewer there
@@ -453,8 +453,6 @@ mat4f System::Track(Image &im, const double &timestamp)
 
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = static_cast<int>(tracker->state_);
-    mTrackedMapPoints = tracker->current_frame_.pts;
-    mTrackedKeyPointsUn = tracker->current_frame_.keypoints;
 
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
@@ -717,18 +715,6 @@ int System::GetTrackingState()
 {
     unique_lock<mutex> lock(mMutexState);
     return mTrackingState;
-}
-
-std::map<FeatureType,std::vector<Pt>> System::GetTrackedMapPoints()
-{
-    unique_lock<mutex> lock(mMutexState);
-    return mTrackedMapPoints;
-}
-
-std::map<FeatureType, std::vector<cv::KeyPoint>> System::GetTrackedKeyPointsUn()
-{
-    unique_lock<mutex> lock(mMutexState);
-    return mTrackedKeyPointsUn;
 }
 
 void System::SaveStatistics(const std::string &filename){

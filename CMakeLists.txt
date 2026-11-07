@@ -116,6 +116,7 @@ set(SRCS_ALLFEATURE
         src/Optimizer.cc
         src/PnPsolver.cc
         src/Frame.cc
+        src/Calibration.cc
         src/Sim3Solver.cc
         src/Initializer.cc
         src/Viewer.cc
@@ -237,11 +238,14 @@ foreach(_dir ${_ort_includes})
 endforeach()
 find_package(Python REQUIRED COMPONENTS Interpreter)
 
+# Optional: the #pragma omp directives (Frame::extract_features, FeatureMatcher, LocalMapping,
+# BruteForceMatcher) are ignored without -fopenmp, so the code is correct either way, just serial.
+# Kept optional rather than REQUIRED because AppleClang ships no OpenMP by default.
 find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
   message(STATUS "OpenMP found: ${OpenMP_CXX_VERSION}")
 else()
-  message(WARNING "OpenMP NOT found")
+  message(WARNING "OpenMP NOT found - feature extraction and matching will run serially")
 endif()
 
 
@@ -261,12 +265,15 @@ target_link_libraries(${PROJECT_NAME}
         ${YAML_CPP_LIBRARIES}
         g2o
         ${Pangolin_LIBRARIES}
-        OpenMP::OpenMP_CXX
         PoseLib::PoseLib
         placecell::placecell
         placecell::viz
         onnxruntime::onnxruntime
 )
+
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(${PROJECT_NAME} OpenMP::OpenMP_CXX)
+endif()
 if(ALLFEATURE_WITH_MEGALOC)
   target_link_libraries(${PROJECT_NAME} placecell::megaloc)
 endif()

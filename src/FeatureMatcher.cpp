@@ -81,14 +81,6 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
     }
 }
 
-std::vector<cv::DMatch> FeatureMatcher::swap_match_direction(const std::vector<cv::DMatch>& in)
-{
-    std::vector<cv::DMatch> out = in;
-    for (auto& m : out)
-        std::swap(m.queryIdx, m.trainIdx);
-    return out;
-}
-
 // Matches features from a keyframe to a frame across all requested feature types,
 // then associates the surviving matches to 3D map points.
 //
@@ -185,7 +177,7 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
                 << " ], filter=" << int(msFilter) << "ms (nMatches=" << all_matches.size() << ")");
     }
 
-    // Associate surviving matches to map points. The per-type caches take per-type keypoint indices (query_idx /
+    // Associate surviving matches to map points. The caches take per-type keypoint indices (query_idx /
     // train_idx), like cache_neighbor_matches: the stacked m.queryIdx / m.trainIdx are offset by the earlier types.
     std::map<FeatureType, std::vector<cv::DMatch>> keyframe_side, frame_side;
 
@@ -198,24 +190,25 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
         const int query_idx = kps1_indexes[m.queryIdx];
         const int train_idx = kps2_indexes[m.trainIdx];
         const FeatureType feat_type = used_feature_types[m.queryIdx];
+
+        // Cache every robust match, map point or not: match_keyframes reuses these caches for
+        // triangulation, which wants precisely the pairs that have no map point yet.
+        keyframe_side[feat_type].push_back(cv::DMatch(query_idx, train_idx, m.distance));
+        frame_side[feat_type].push_back(cv::DMatch(train_idx, query_idx, m.distance));
+
         const Pt pt = map_pts_kf[feat_type][query_idx];
         if (!pt || pt->is_bad())
             continue;
         map_pts_matches[feat_type][train_idx] = pt;
         matches_count[feat_type]++;
-
-        keyframe_side[feat_type].push_back(cv::DMatch(query_idx, train_idx, m.distance));
-        frame_side[feat_type].push_back(cv::DMatch(train_idx, query_idx, m.distance));
     }
 
     // Cache matched pairs in both keyframe and frame for downstream use. The frame is this (Tracking) thread's own;
-    // the keyframe's caches are shared with LocalMapping and LoopClosing (KeyFrame::cache_mutex_).
+    // the keyframe's cache is shared with LocalMapping and LoopClosing (KeyFrame::cache_mutex_).
     frame.cache_matched_pairs_feat_type.insert_or_assign(keyframe->frame_id, std::move(frame_side));
-    frame.cache_matched_pairs.insert_or_assign(keyframe->frame_id, swap_match_direction(robust_matches));
     {
         std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
         keyframe->cache_matched_pairs_feat_type.insert_or_assign(frame.frame_id, std::move(keyframe_side));
-        keyframe->cache_matched_pairs.insert_or_assign(frame.frame_id, std::move(robust_matches));
     }
 
     return matches_count;
@@ -225,7 +218,8 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
 // by descriptor similarity, then verifies each match via a spatial projection check.
 // Returns the number of new map point assignments made to the frame.
 // Used in: Tracking::track_local_map
-int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& map_pts)
+int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& map_pts,
+                                              const vector<cv::Point2f>& projections)
 {
     map<FeatureType, vector<size_t>> pt_idx, frame_idx;
     map<FeatureType, cv::Mat> desc_pts, desc_frame;
@@ -277,19 +271,25 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
         // Match frame keypoint descriptors against map point descriptors
         vector<cv::DMatch> matches = match_descriptors_only(it1->second, it2->second, ft);
 
-        // Validate each match: accept only if the map point projects near the matched keypoint
+        // Validate each match: accept only if the map point projects near the matched keypoint.
+        // A direct distance test, not a get_features_in_area query: the keypoint is already known,
+        // so there is nothing to search for. (That query also made grid membership an implicit
+        // acceptance criterion — a keypoint pos_in_grid rejected lost its match even when the
+        // distance was fine.)
         const auto& f_idx = frame_idx.at(ft);
         const auto& p_idx = pt_idx.at(ft);
+        const auto& keypoints_ft = frame.keypoints.at(ft);
+        const float radius2 = projection_match_radius_th * projection_match_radius_th;
         for (const auto& m : matches) {
             const size_t query_idx = f_idx[m.queryIdx];
             const size_t train_idx = p_idx[m.trainIdx];
-            const Pt pt = map_pts[train_idx];
-            const vector<size_t> area_indices = frame.get_features_in_area(pt->track_proj_x, pt->track_proj_y, projection_match_radius_th, ft);
-            if (area_indices.empty())
-                continue;
+            const cv::Point2f& uv = projections[train_idx];
 
-            if (std::find(area_indices.begin(), area_indices.end(), query_idx) != area_indices.end()) {
-                frame.pts.at(ft)[query_idx] = pt;
+            const cv::Point2f& kp = keypoints_ft[query_idx].pt;
+            const float dist_x = kp.x - uv.x;
+            const float dist_y = kp.y - uv.y;
+            if (dist_x * dist_x + dist_y * dist_y < radius2) {
+                frame.pts.at(ft)[query_idx] = map_pts[train_idx];
                 num_matches++;
             }
         }
@@ -308,16 +308,16 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
     if (keyframe1 == keyframe2)   // nothing to match (and the two-keyframe cache lock below needs two mutexes)
         return {};
 
-    // Reuse cached matches if keyframe1 already has matches stored for keyframe2 (a copy: the caches are shared
+    // Reuse cached matches if keyframe1 already has matches stored for keyframe2 (a copy: the cache is shared
     // between threads, KeyFrame::cache_mutex_)
-    vector<cv::DMatch> cached_matches;
+    map<FeatureType, vector<cv::DMatch>> cached_by_type;
     {
         std::lock_guard<std::mutex> lock(keyframe1->cache_mutex_);
-        const auto cache_it = keyframe1->cache_matched_pairs.find(keyframe2->frame_id);
-        if (cache_it != keyframe1->cache_matched_pairs.end())
-            cached_matches = cache_it->second;
+        const auto cache_it = keyframe1->cache_matched_pairs_feat_type.find(keyframe2->frame_id);
+        if (cache_it != keyframe1->cache_matched_pairs_feat_type.end())
+            cached_by_type = cache_it->second;
     }
-    const bool cached = !cached_matches.empty();
+    const bool cached = !cached_by_type.empty();
 
     // No cache — run parallel descriptor matching across all feature types
     map<FeatureType, vector<cv::DMatch>> matches_by_type;
@@ -326,7 +326,19 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
             keyframe1->descriptors, keyframe2->descriptors, keyframe1->keypoints, keyframe2->keypoints);
     }
 
-    // Offset match indices to account for previously appended feature types
+    map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs;
+
+    // The cache already stores per-type keypoint indices, so a hit needs no stacking and no decoding
+    if (cached) {
+        for (const auto& [ft, matches] : cached_by_type)
+            for (const auto& m : matches)
+                matched_pairs[ft].emplace_back(size_t(m.queryIdx), size_t(m.trainIdx));
+        return matched_pairs;
+    }
+
+    // Stack all feature types into one index space (each type's indices offset by the keypoint counts of
+    // the earlier ones) so the fundamental matrix is estimated from every feature jointly, and keep the
+    // tables that decode a stacked index back to its feature type and per-type index.
     vector<cv::KeyPoint> kps1, kps2;
     vector<size_t> kps1_indexes, kps2_indexes;
     vector<cv::DMatch> all_matches;
@@ -343,21 +355,19 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
         auto const& v1 = keyframe1->keypoints.at(ft);
         auto const& v2 = keyframe2->keypoints.at(ft);
 
-        if (!cached) {
-            auto matches = std::move(matches_by_type[ft]);
-            const size_t size_kpts1 = kps1.size();
-            const size_t size_kpts2 = kps2.size();
-            for (auto& m : matches) {
-                m.queryIdx += size_kpts1;
-                m.trainIdx += size_kpts2;
-            }
-            all_matches.insert(all_matches.end(),
-                std::make_move_iterator(matches.begin()),
-                std::make_move_iterator(matches.end()));
-
-            kps1.insert(kps1.end(), v1.begin(), v1.end());
-            kps2.insert(kps2.end(), v2.begin(), v2.end());
+        auto matches = std::move(matches_by_type[ft]);
+        const size_t size_kpts1 = kps1.size();
+        const size_t size_kpts2 = kps2.size();
+        for (auto& m : matches) {
+            m.queryIdx += size_kpts1;
+            m.trainIdx += size_kpts2;
         }
+        all_matches.insert(all_matches.end(),
+            std::make_move_iterator(matches.begin()),
+            std::make_move_iterator(matches.end()));
+
+        kps1.insert(kps1.end(), v1.begin(), v1.end());
+        kps2.insert(kps2.end(), v2.begin(), v2.end());
 
         const size_t base1 = kps1_indexes.size();
         kps1_indexes.resize(base1 + v1.size());
@@ -368,38 +378,28 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
         used_feature_types.insert(used_feature_types.end(), v1.size(), ft);
     }
 
-    // Filter outliers jointly across all feature types, or retrieve from cache
-    vector<cv::DMatch> computed_matches;
-    if (!cached) {
-        if (all_matches.size() < min_match_keyframes)
-            return map<FeatureType, vector<pair<size_t,size_t>>>(); // Not enough matches to reliably estimate fundamental matrix
+    // Filter outliers jointly across all feature types
+    if (all_matches.size() < min_match_keyframes)
+        return matched_pairs; // Not enough matches to reliably estimate fundamental matrix
 
-        computed_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
-    }
-    const vector<cv::DMatch>& filtered_matches = cached ? cached_matches : computed_matches;
+    const vector<cv::DMatch> filtered_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
 
-    // Per-type caches with per-type keypoint indices (query_idx / train_idx), like cache_neighbor_matches
+    // Decode the stacked indices back to per-type ones, both for the caller and for the cache
     std::map<FeatureType, vector<cv::DMatch>> forward_by_type, backward_by_type;
-    map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs;
     for (const auto& m : filtered_matches) {
         const size_t query_idx = kps1_indexes[m.queryIdx];
         const size_t train_idx = kps2_indexes[m.trainIdx];
         const FeatureType feat_type = used_feature_types[m.queryIdx];
 
-        // Only triangulate points that don't already have a 3D MapPoint
         matched_pairs[feat_type].emplace_back(query_idx, train_idx);
-        if (!cached){
-            forward_by_type[feat_type].push_back(cv::DMatch(int(query_idx), int(train_idx), m.distance));
-            backward_by_type[feat_type].push_back(cv::DMatch(int(train_idx), int(query_idx), m.distance));
-        }
+        forward_by_type[feat_type].push_back(cv::DMatch(int(query_idx), int(train_idx), m.distance));
+        backward_by_type[feat_type].push_back(cv::DMatch(int(train_idx), int(query_idx), m.distance));
     }
 
-    if(!cached){
+    {
         std::scoped_lock lock(keyframe1->cache_mutex_, keyframe2->cache_mutex_);
         keyframe1->cache_matched_pairs_feat_type.insert_or_assign(keyframe2->frame_id, std::move(forward_by_type));
         keyframe2->cache_matched_pairs_feat_type.insert_or_assign(keyframe1->frame_id, std::move(backward_by_type));
-        keyframe2->cache_matched_pairs.insert_or_assign(keyframe1->frame_id, swap_match_direction(computed_matches));
-        keyframe1->cache_matched_pairs.insert_or_assign(keyframe2->frame_id, std::move(computed_matches));
     }
     return matched_pairs;
 }
@@ -447,10 +447,10 @@ int FeatureMatcher::fuse_map_points_to_keyframe(const Keyframe& keyframe, const 
 {
     const mat3f Rcw = keyframe->get_rotation();
     const vec3f tcw = keyframe->get_translation();
-    const float fx = keyframe->fx;
-    const float fy = keyframe->fy;
-    const float cx = keyframe->cx;
-    const float cy = keyframe->cy;
+    const float fx = keyframe->calibration->fx;
+    const float fy = keyframe->calibration->fy;
+    const float cx = keyframe->calibration->cx;
+    const float cy = keyframe->calibration->cy;
 
     const Descriptor_Distance_Type th_low = TH_LOW[feat_type];
 
@@ -663,10 +663,10 @@ int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyfra
     const vector<Pt>& pts, vector<Pt>& pts_matched,
     const map<PtId, Keyframe>& pt_to_keyframe_id)
 {
-    const float fx = keyframe->fx;
-    const float fy = keyframe->fy;
-    const float cx = keyframe->cx;
-    const float cy = keyframe->cy;
+    const float fx = keyframe->calibration->fx;
+    const float fy = keyframe->calibration->fy;
+    const float cx = keyframe->calibration->cx;
+    const float cy = keyframe->calibration->cy;
 
     // Decompose Sim3 into rotation and translation
     const mat3f sRcw = Scw.block<3,3>(0,0);
@@ -679,6 +679,7 @@ int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyfra
     pts_already_found.erase(nullptr);
 
     int num_matches = 0;
+    const float radius2 = radiusTh_factor * radiusTh_factor;
 
     for (const Pt& pt : pts) {
         if (pt->is_bad() || pts_already_found.count(pt))
@@ -719,9 +720,13 @@ int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyfra
         if (!keyframe->is_in_image(u, v))
             continue;
 
-        // Accept match only if bestIdx falls within the projected search radius
-        const vector<size_t> area_indices = keyframe->get_features_in_area(u, v, radiusTh_factor, pt->featureType);
-        if (std::find(area_indices.begin(), area_indices.end(), static_cast<size_t>(bestIdx)) != area_indices.end()) {
+        // Accept match only if bestIdx falls within the projected search radius. A direct distance
+        // test, not a get_features_in_area query: bestIdx is already known, so there is nothing to
+        // search for. (That query also made grid membership an implicit acceptance criterion.)
+        const cv::Point2f& kp = keyframe->keypoints.at(pt->featureType)[bestIdx].pt;
+        const float dist_x = kp.x - u;
+        const float dist_y = kp.y - v;
+        if (dist_x * dist_x + dist_y * dist_y < radius2) {
             pts_matched[bestIdx] = pt;
             num_matches++;
         }
@@ -736,10 +741,10 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f&
 {
 
     // Get Calibration Parameters for later projection
-    const float &fx = keyframe->fx;
-    const float &fy = keyframe->fy;
-    const float &cx = keyframe->cx;
-    const float &cy = keyframe->cy;
+    const float &fx = keyframe->calibration->fx;
+    const float &fy = keyframe->calibration->fy;
+    const float &cx = keyframe->calibration->cx;
+    const float &cy = keyframe->calibration->cy;
 
     // Decompose Scw
     const mat3f sRcw = Scw.block<3,3>(0,0);
@@ -817,10 +822,6 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f&
 
         for(const size_t idx : vIndices)
         {
-            //const float keyPtSize = pKF->get_keypoint_size(KeypointIndex (idx), featType);
-            //if((keyPtSize < predictedSize / pKF->size_tolerance) || (keyPtSize > predictedSize * pKF->size_tolerance))
-            //    continue;
-
             const cv::Mat &descriptor = keyframe->descriptors.at(feat_type).row(idx);
             const Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
 
@@ -855,14 +856,15 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f&
 // Projects map points from a keyframe into a current frame for relocalization.
 // Applies rotation histogram filtering to reject orientation-inconsistent matches.
 int FeatureMatcher::search_by_projection(Frame &CurrentFrame, Keyframe pKF, const set<Pt> &sAlreadyFound, const float& radiusTh,
-     const bool& useHighMatchingThreshold, const FeatureType& featType)
+     const bool& useHighMatchingThreshold, const FeatureType& feature_type)
 {
-    Descriptor_Distance_Type descDistanceTh = descDistTh_low_reloc[featType];
+    Descriptor_Distance_Type descDistanceTh = descDistTh_low_reloc[feature_type];
     if(useHighMatchingThreshold)
-        descDistanceTh = descDistTh_high_reloc[featType];
+        descDistanceTh = descDistTh_high_reloc[feature_type];
 
-    const mat3f Rcw = CurrentFrame.Tcw.block<3,3>(0,0);
-    const vec3f tcw = CurrentFrame.Tcw.block<3,1>(0,3);
+    const mat4f& Tcw = CurrentFrame.get_pose();
+    const mat3f Rcw = Tcw.block<3,3>(0,0);
+    const vec3f tcw = Tcw.block<3,1>(0,3);
     const vec3f Ow = -Rcw.transpose() * tcw;
 
     // Rotation Histogram (to check rotation consistency)
@@ -870,7 +872,8 @@ int FeatureMatcher::search_by_projection(Frame &CurrentFrame, Keyframe pKF, cons
     float rotFactor{};
     vector<vector<int>>& rotHist = initRotationHistogram(rotFactor,HISTO_LENGTH);
 
-    const vector<Pt> vpMPs = pKF->get_map_point_matches(featType);
+    const vector<Pt> vpMPs = pKF->get_map_point_matches(feature_type);
+    const Calibration& cal = *CurrentFrame.calibration;   // hoisted out of the loop below
 
     for(size_t i=0, iend=vpMPs.size(); i<iend; i++)
     {
@@ -888,12 +891,12 @@ int FeatureMatcher::search_by_projection(Frame &CurrentFrame, Keyframe pKF, cons
                 const float yc = x3Dc(1);
                 const float invzc = 1.0f / x3Dc(2);
 
-                const float u = CurrentFrame.fx*xc*invzc+CurrentFrame.cx;
-                const float v = CurrentFrame.fy*yc*invzc+CurrentFrame.cy;
+                const float u = cal.fx*xc*invzc+cal.cx;
+                const float v = cal.fy*yc*invzc+cal.cy;
 
-                if(u<CurrentFrame.min_x || u>CurrentFrame.max_x)
+                if(u<cal.min_x || u>cal.max_x)
                     continue;
-                if(v<CurrentFrame.min_y || v>CurrentFrame.max_y)
+                if(v<cal.min_y || v>cal.max_y)
                     continue;
 
                 // Compute predicted scale level
@@ -911,7 +914,7 @@ int FeatureMatcher::search_by_projection(Frame &CurrentFrame, Keyframe pKF, cons
                 const float predictedSize = pMP->predict_size(dist3D);
                 const float radius = radiusScale * radiusTh * predictedSize;
 
-                const vector<size_t> vIndices2 = CurrentFrame.get_features_in_area(u, v, radius, featType);
+                const vector<size_t> vIndices2 = CurrentFrame.get_features_in_area(u, v, radius, feature_type);
 
                 if(vIndices2.empty())
                     continue;
@@ -922,10 +925,10 @@ int FeatureMatcher::search_by_projection(Frame &CurrentFrame, Keyframe pKF, cons
 
                 for(const size_t i2 : vIndices2)
                 {
-                    if(CurrentFrame.pts.at(featType)[i2])
+                    if(CurrentFrame.pts.at(feature_type)[i2])
                         continue;
 
-                    const cv::Mat &descriptor = CurrentFrame.descriptors.at(featType).row(i2);
+                    const cv::Mat &descriptor = CurrentFrame.descriptors.at(feature_type).row(i2);
                     const Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
 
                     if(descDist < bestDist)
@@ -937,18 +940,18 @@ int FeatureMatcher::search_by_projection(Frame &CurrentFrame, Keyframe pKF, cons
 
                 if(bestDist <= descDistanceTh)
                 {
-                    CurrentFrame.pts.at(featType)[bestIdx2]=pMP;
+                    CurrentFrame.pts.at(feature_type)[bestIdx2]=pMP;
                     nMatches++;
 
                     if(mbCheckOrientation)
-                        updateRotationHistogram(rotHist,bestIdx2, pKF->keypoints.at(featType)[i],CurrentFrame.keypoints.at(featType)[bestIdx2],rotFactor,HISTO_LENGTH);
+                        updateRotationHistogram(rotHist,bestIdx2, pKF->keypoints.at(feature_type)[i],CurrentFrame.keypoints.at(feature_type)[bestIdx2],rotFactor,HISTO_LENGTH);
                 }
             }
         }
     }
 
     if(mbCheckOrientation)
-        filterMatchesWithOrientation(rotHist,CurrentFrame.pts.at(featType),nMatches);
+        filterMatchesWithOrientation(rotHist,CurrentFrame.pts.at(feature_type),nMatches);
 
     return nMatches;
 }
@@ -1239,7 +1242,7 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
     }
 
     std::map<FeatureType, std::vector<cv::DMatch>> FeatureMatcher::match_descriptors_parallel(
-        const std::vector<FeatureType>& featureTypes,
+        const std::vector<FeatureType>& feature_types,
         const std::map<FeatureType, cv::Mat> &desc1_, const std::map<FeatureType, cv::Mat> &desc2_,
         const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps1_, const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps2_
     ){
@@ -1252,8 +1255,8 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
         };
 
         std::vector<FeatureType> jobs;
-        jobs.reserve(featureTypes.size());
-        for (const auto ft : featureTypes) {
+        jobs.reserve(feature_types.size());
+        for (const auto ft : feature_types) {
             auto it1 = desc1_.find(ft);
             auto it2 = desc2_.find(ft);
             if (it1 == desc1_.end() || it2 == desc2_.end())

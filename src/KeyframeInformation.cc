@@ -134,7 +134,7 @@ KeyframeInformationCovisibility::KeyframeInformationCovisibility(const placecell
 std::vector<placecell::PlaceCell::ItemId> KeyframeInformationCovisibility::observed_point_ids(const KeyFrame& keyframe)
 {
     std::vector<placecell::PlaceCell::ItemId> items;
-    for(const FeatureType feature_type : keyframe.featureTypes)
+    for(const FeatureType feature_type : keyframe.feature_types)
     {
         // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
         const std::vector<Pt> map_points = keyframe.get_map_point_matches(feature_type);

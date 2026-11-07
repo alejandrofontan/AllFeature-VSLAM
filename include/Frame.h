@@ -1,267 +1,166 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
-
-#ifndef FRAME_H
-#define FRAME_H
+#pragma once
 
 #include <array>
+#include <map>
+#include <memory>
+#include <optional>
 #include <vector>
 
-#include "MapPoint.h"
-#include "Image.h"
+#include <opencv2/core.hpp>
 
-#include "KeyFrame.h"
+#include "Calibration.h"
+#include "Types.h"
+#include "Image.h"
 #include "FeatureExtractor.h"
-#include "FeatureFactory.h"
 #include "PlaceRecognition.h"
-#include <opencv2/opencv.hpp>
 
 namespace AF_VSLAM
 {
-// Legacy ORB-SLAM2 headers use unqualified std types throughout; this using-directive
-// previously arrived transitively through the (now removed) DBoW2 vocabulary headers.
 using namespace std;
-#define FRAME_GRID_ROWS 48
-#define FRAME_GRID_COLS 64
+
+inline constexpr int FRAME_GRID_ROWS = 48;
+inline constexpr int FRAME_GRID_COLS = 64;
 
 class MapPoint;
-typedef shared_ptr<AF_VSLAM::MapPoint> Pt;
+typedef std::shared_ptr<AF_VSLAM::MapPoint> Pt;
 
 class KeyFrame;
-typedef shared_ptr<AF_VSLAM::KeyFrame> Keyframe;
+typedef std::shared_ptr<AF_VSLAM::KeyFrame> Keyframe;
 
 class Frame
 {
 public:
-    // Copies are memberwise. Every cv::Mat member (mK, mDistCoef, descriptors, image) is
-    // only ever rebound at construction, never written in place afterwards, so the shallow
-    // header copy cv::Mat's own copy performs is exactly the sharing the old hand-written
-    // copy constructor implemented for descriptors -- and KeyFrame's constructor clones its
-    // own descriptors. The default constructor yields an empty frame (Tcw zero = no pose).
+
+    // ========================================================================
+    // Construction
+    // ========================================================================
+
     Frame() = default;
     Frame(const Frame&) = default;
     Frame& operator=(const Frame&) = default;
     Frame(Frame&&) = default;
     Frame& operator=(Frame&&) = default;
 
-    // Constructor for mono cameras.
-    Frame(const Image & img, const double &timeStamp,
-          const std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
-          shared_ptr<PlaceRecognition> place_recognition, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth);
+    Frame(const Image& img, double timestamp_,
+        const std::map<FeatureType, std::shared_ptr<FeatureExtractor>>& extractors,
+        std::shared_ptr<PlaceRecognition> place_recognition_,
+        std::shared_ptr<const Calibration> calibration_);
 
-    // Extract ORB on the image. 0 for left image and 1 for right image.
-    void extract_features(int flag, const Image & img);
+    // ========================================================================
+    // Pose
+    // ========================================================================
 
-    // Compute the global descriptor with the active VPR backend (a MegaLoc image
-    // embedding); no-op when VPR is inactive.
-    void compute_global_descriptor();
-
-    // Drop matches to map points that no observation backs (matched during
-    // tracking but never added to the map); clears their outlier flags.
-    void drop_unobserved_points();
-
-    // Drop matches flagged as outliers by pose optimization.
-    void drop_outlier_points();
-
-    // Number of matches to map points that survived pose optimization as
-    // inliers and are backed by at least one observation.
-    int count_inlier_map_points() const;
-
-    // Set the camera pose.
     void set_pose(const mat4f& Tcw_);
 
-    // Computes rotation, translation and camera center matrices from the camera pose.
-    void update_pose_matrices();
-
-    // Returns the camera center.
-    inline vec3f get_camera_center() const {
-        return twc;
+    [[nodiscard]] inline const mat4f& get_pose() const {
+        return Tcw;
     }
 
-    // Check if a MapPoint is in the frustum of the camera
-    // and fill variables of the MapPoint to be used by the tracking
-    bool is_in_frustum(const Pt& pMP, float viewingCosLimit) const;
+    // ========================================================================
+    // Per-frame queries
+    // ========================================================================
 
-    // Compute the cell of a keypoint (return false if outside the grid)
-    bool pos_in_grid(const cv::KeyPoint &kp, int &posX, int &posY) const;
+    void compute_global_descriptor();
 
-    vector<size_t> get_features_in_area(const float &x, const float  &y, const float  &r,  const FeatureType& featType) const;
+    [[nodiscard]] int count_inlier_map_points() const;
+    void drop_outlier_points();
 
-    [[nodiscard]] float get_keypoint_size(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float get_keypoint_sigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] float get_keypoint_information_1d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
-    [[nodiscard]] mat2f get_keypoint_information_2d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const;
+    [[nodiscard]] std::optional<cv::Point2f> project_if_visible(const Pt& pt, float viewing_cos_limit) const;
 
-    float get_overlap() const;
+    [[nodiscard]] float get_keypoint_sigma2(KeypointIndex keypoint_index, FeatureType feature_type) const
+    {
+        return 0.5f * (keyPtsSigma2.at(feature_type)[keypoint_index](0,0) + keyPtsSigma2.at(feature_type)[keypoint_index](1,1));
+    }
 
-public:
+    [[nodiscard]] mat2f get_keypoint_information_2d(KeypointIndex keypoint_index, FeatureType feature_type) const
+    {
+        return keyPtsInf.at(feature_type)[keypoint_index];
+    }
 
-    std::vector<FeatureType> featureTypes;
-    std::map<FrameId, std::vector<cv::DMatch>> cache_matched_pairs{};
+    // ========================================================================
+    // Spatial index
+    // ========================================================================
+
+    [[nodiscard]] std::vector<std::size_t> get_features_in_area(float x, float y, float r,
+                                                                FeatureType feature_type) const;
+
+    // ========================================================================
+    // Data
+    // ========================================================================
+
+    std::vector<FeatureType> feature_types;
     std::map<FrameId, std::map<FeatureType, std::vector<cv::DMatch>>> cache_matched_pairs_feat_type{};
 
-    // Visual place recognition backend (relocalization queries, keyframe descriptors).
-    shared_ptr<PlaceRecognition> place_recognition;
-
-    // The frame's image (OpenCV-native BGR, after the tracking resize/crop) — shared
-    // header, kept only when the VPR backend embeds images (needs_image()) so a
-    // keyframe made from this frame can be embedded later; empty otherwise.
-    cv::Mat image;
-
-    // Transient global descriptor of the frame (MegaLoc: 8448-d unit vector; size 0
-    // when VPR is inactive), computed on the tracking thread by the keyframe-information
-    // query (Tracking::need_new_keyframe with LocalMapping.InformationKernel: megaloc) or
-    // a relocalization query, whichever comes first — never twice. Keyframe descriptors do NOT live here: a KeyFrame made from
-    // this frame carries this copy only until PlaceRecognitionMegaLoc::compute(KeyFrame&)
-    // stores it in placecell (System::place_cell), keyed by frame_id.
     Eigen::VectorXf global_descriptor;
 
-    // Feature extractors, one per feature type.
-    std::map<FeatureType, shared_ptr<FeatureExtractor>> feature_extractors;
-
-    // Frame timestamp.
+    cv::Mat image;
     double timestamp{0.0};
 
-    // Calibration matrix and OpenCV distortion parameters.
-    cv::Mat mK;
+    std::shared_ptr<const Calibration> calibration;
 
-    static float fx;
-    static float fy;
-    static float cx;
-    static float cy;
-    static float invfx;
-    static float invfy;
-    cv::Mat mDistCoef;
-    int w{0};
-    int h{0};
-
-    // Stereo baseline multiplied by fx.
-    float mbf{0.0f};
-
-    // Stereo baseline in meters.
-    float mb{0.0f};
-
-    // Threshold close/far points. Close points are inserted from 1 view.
-    // Far points are inserted as in the monocular case from 2 views.
-    float mThDepth{0.0f};
-
-    // Number of KeyPoints.
-    int num_keypoints_total{0};
     std::map<FeatureType, int> N;
 
-    // Keypoints as extracted (distorted pixel coordinates: visualization, and the index
-    // into the depth/color images) and undistorted (what the system works with).
-    std::map<FeatureType, std::vector<cv::KeyPoint>> raw_keypoints;
-    std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
-
-    // Inverse depth (1/depth) per keypoint, from the RGB-D sensor's depth image.
-    // 0 where no valid depth is available (monocular, or a missing/invalid depth pixel).
+    std::map<FeatureType, std::vector<cv::KeyPoint>> raw_keypoints;   // distorted
+    std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;       // undistorted
+    std::map<FeatureType, cv::Mat> descriptors;
     std::map<FeatureType, std::vector<float>> inv_depth;
-
-    // Variance of inv_depth, from a quadratic depth-sensor noise model (sigma_depth = k*depth^2,
-    // standard for RGB-D/ToF sensors) propagated through inv_depth=1/depth. 0 wherever inv_depth is 0.
     std::map<FeatureType, std::vector<float>> sigma2_inv_depth;
-
-    // Image color (OpenCV-native BGR) under each keypoint, sampled once at construction. The
-    // only place a pixel is ever read for a keypoint: the image is not retained afterwards
-    // (vpr: none) or is released after MegaLoc embeds it, so map points inherit their color
-    // from here at creation. Gray input replicates the intensity into all three channels.
     std::map<FeatureType, std::vector<cv::Vec3b>> keypoint_colors;
 
-
-    // Descriptors, each row associated to a keypoint.
-    std::map<FeatureType, cv::Mat> descriptors;
-
-    // MapPoints associated to keypoints, NULL pointer if no association.
     std::map<FeatureType, std::vector<Pt>> pts;
+    std::map<FeatureType, std::vector<bool>> outliers;
 
-    // Flag to identify outlier associations.
-    std::map<FeatureType,std::vector<bool>> outliers;
+    std::map<FeatureType, std::vector<mat2f>> keyPtsSigma2{};
+    std::map<FeatureType, std::vector<mat2f>> keyPtsInf{};
+    std::map<FeatureType, std::vector<float>> keyPtsSize{};
 
-    // Keypoints are assigned to cells in a grid to reduce matching complexity when projecting MapPoints.
-    static float grid_element_width_inv;
-    static float grid_element_height_inv;
-    using Grid = std::array<std::array<std::vector<std::size_t>, FRAME_GRID_ROWS>, FRAME_GRID_COLS>;   // [col][row]
-    std::map<FeatureType, Grid> grid;
-
-    // Camera pose.
-    mat4f Tcw{mat4f::Zero()};
-
-    // Current and Next Frame id.
-    static long unsigned int next_id;
+    static inline FrameId next_id{0};
     FrameId frame_id{0};
 
-    // Reference Keyframe.
     Keyframe ref_keyframe;
 
-    // Scale pyramid info.
-    float size_tolerance{};
-    std::map<FeatureType, vector<mat2f>> keyPtsSigma2{};
-    std::map<FeatureType, vector<mat2f>> keyPtsInf{};
-    std::map<FeatureType, vector<float>> keyPtsSize{};
     float maxKeyPtSize{};
-    float maxKeyPtSigma{};
 
-    // Undistorted Image Bounds (computed once).
-    static float min_x;
-    static float max_x;
-    static float min_y;
-    static float max_y;
+    using Grid = std::array<std::array<std::vector<std::size_t>, FRAME_GRID_ROWS>, FRAME_GRID_COLS>;
 
-    static bool initial_computations;
+    mutable std::map<FeatureType, Grid> grid;
+    void build_grids() const;
 
 private:
 
-    // Undistort keypoints given OpenCV distortion parameters.
-    // Only for the RGB-D case. Stereo must be already rectified!
-    // (called in the constructor).
+    // ========================================================================
+    // Construction
+    // ========================================================================
+
+    void extract_features(const Image& img,
+                          const std::map<FeatureType, std::shared_ptr<FeatureExtractor>>& extractors);
     void undistort_keypoints();
-
-    // Populate inv_depth (and sigma2_inv_depth) by sampling img.depthImg at each keypoint's (distorted)
-    // pixel coordinates, matching how the depth image itself is indexed (called in the constructor).
     void get_depth(const Image& img);
-
-    // Populate keypoint_colors by sampling img.img (BGR, same resize/crop as the keypoints) at each
-    // keypoint's (distorted) pixel coordinates, like get_depth (called in the constructor).
     void get_colors(const Image& img);
 
-    // Quadratic depth-sensor noise coefficient k in sigma_depth(z) = k*z^2 (e.g. Khoshelham &
-    // Elberink 2012, Nguyen et al. 2012 for Kinect-style RGB-D sensors). Propagated through
-    // inv_depth=1/depth, Var(inv_depth) collapses to k^2 — depth-independent, the classical
-    // justification for inverse-depth parameterization. Starting estimate, not yet calibrated
-    // against real sensors/datasets (same caveat as Optimizer's invDepthInfo, see issue #3).
-    static constexpr float depthNoiseCoeff{0.0028f};
+    std::shared_ptr<PlaceRecognition> place_recognition;
 
-    // Computes image bounds for the undistorted image (called in the constructor).
-    void compute_image_bounds(const cv::Mat &imLeft);
+    // ========================================================================
+    // Pose
+    // ========================================================================
 
-    // Assign keypoints to the grid for speed up feature matching (called in the constructor).
-    void assign_features_to_grid();
-
-    // Rotation, translation and camera center (derived from Tcw by set_pose)
+    mat4f Tcw{mat4f::Zero()};
     mat3f Rcw{mat3f::Identity()};
     vec3f tcw{vec3f::Zero()};
     mat3f Rwc{mat3f::Identity()};
     vec3f twc{vec3f::Zero()};
+
+    // ========================================================================
+    // Spatial index
+    // ========================================================================
+
+    const Grid& grid_for(FeatureType feature_type) const;
+    [[nodiscard]] cv::Point2i pos_in_grid(const cv::KeyPoint& kp) const;
 };
 
-}// namespace ORB_SLAM
+[[nodiscard]] std::vector<std::size_t> features_in_area(const Frame::Grid& grid,
+                                                        const std::vector<cv::KeyPoint>& keypoints,
+                                                        const Calibration& cal,
+                                                        float x, float y, float r);
 
-#endif // FRAME_H
+}

@@ -77,8 +77,8 @@ void applyLineWidth(const float width)
 }
 }
 
-MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const vector<FeatureType>& featureTypes):
-    mpMap(pMap),featureTypes(featureTypes)
+MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const vector<FeatureType>& feature_types):
+    mpMap(pMap),feature_types(feature_types)
 {
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
 
@@ -131,10 +131,10 @@ MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const v
         mDefaultStyle.fogEnd = 6.0f;
     }
 
-    for (size_t i = 0; i < featureTypes.size(); i++)
+    for (size_t i = 0; i < feature_types.size(); i++)
     {
-        const cv::Scalar c = getFeatureColor(featureTypes[i], 0, true);
-        featureColors[featureTypes[i]] = {float(c[0]), float(c[1]), float(c[2])};
+        const cv::Scalar c = getFeatureColor(feature_types[i], 0, true);
+        featureColors[feature_types[i]] = {float(c[0]), float(c[1]), float(c[2])};
     }
 }
 

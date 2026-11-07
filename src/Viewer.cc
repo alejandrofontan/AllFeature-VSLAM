@@ -48,10 +48,10 @@ namespace AF_VSLAM
 Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
                std::shared_ptr<MapDrawer> mapDrawer, std::shared_ptr<Tracking> tracker,
                const string &strCalibrationPath, const string &strSettingPath,
-               const vector<FeatureType>& featureTypes):
+               const vector<FeatureType>& feature_types):
         system(system), frameDrawer(frameDrawer),mapDrawer(mapDrawer), tracker(tracker),
     mbFinishRequested(false), mbFinished(true), mbStopped(true), mbStopRequested(false),
-    featureTypes(featureTypes)
+    feature_types(feature_types)
 {
 
     YAML::Node settings = YAML::LoadFile(strSettingPath);
@@ -102,9 +102,9 @@ Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
     AF_CONFIG_END();
 
     windowTitle = "VSLAM-LAB | AllFeature-VSLAM (";
-    for(size_t i=0; i<featureTypes.size(); i++){
-        windowTitle += " " + feature_name(featureTypes[i]);
-        if (i != featureTypes.size() - 1){
+    for(size_t i=0; i<feature_types.size(); i++){
+        windowTitle += " " + feature_name(feature_types[i]);
+        if (i != feature_types.size() - 1){
             windowTitle += ",";
         }
     }

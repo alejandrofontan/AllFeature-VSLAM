@@ -1,6 +1,8 @@
 #ifndef AF_VSLAM_FEATURE_KAZE64_H
 #define AF_VSLAM_FEATURE_KAZE64_H
 
+#include <opencv2/features2d.hpp>
+
 #include "Feature.h"
 #include "FeatureExtractor.h"
 

@@ -30,8 +30,7 @@ AF_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
     AF_CONFIG_FIELD("maxNumFeatures:     ", maxNumFeatures);
     AF_CONFIG_END();
 
-    maxKeyPtSize0  = pow(scaleFactorOrb,float(nOctavesOrb - 1.0));
-    maxKeyPtSigma0 = pow(scaleFactorOrb,float(nOctavesOrb - 1.0));
+    maxKeyPtSize0 = pow(scaleFactorOrb,float(nOctavesOrb - 1.0));
     maxKeyPtSize = pow(scaleFactorOrb,float(nOctavesOrb - 1.0));
     minKeyPtSize = 1.0f;
 }

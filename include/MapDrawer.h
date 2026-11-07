@@ -96,7 +96,7 @@ struct ViewerStyle
 class MapDrawer
 {
 public:
-    MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const vector<FeatureType>& featureTypes);
+    MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const vector<FeatureType>& feature_types);
 
     shared_ptr<Map> mpMap;
 
@@ -164,7 +164,7 @@ private:
     std::mutex mutexLoopClosures;
     std::vector<vec3f>loopClosures{};
 
-    vector<FeatureType> featureTypes{};
+    vector<FeatureType> feature_types{};
 
     // Feature color lookup cached once at construction: getFeatureColor() heap-allocates a
     // Feature instance per call, far too expensive to call per point in RefreshPointSnapshot.

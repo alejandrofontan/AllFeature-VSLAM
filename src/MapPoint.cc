@@ -26,7 +26,6 @@
 namespace AF_VSLAM
 {
 
-long unsigned int MapPoint::next_id=0;
 mutex MapPoint::global_mutex;
 
 MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType,
@@ -352,7 +351,7 @@ void MapPoint::update_normal_and_depth()
     const auto ref_obs = observations_tmp.find(refKeyframe_->keyId);
     if(ref_obs == observations_tmp.end())
         return;
-    const KeypointIndex keyPtIdx = ref_obs->second->projIndex;
+    const KeypointIndex keypoint_index = ref_obs->second->projIndex;
 
     vec3f normal{vec3f::Zero()};
     int n = 0;
@@ -367,14 +366,14 @@ void MapPoint::update_normal_and_depth()
 
     vec3f PC = XYZ_ - refKeyframe_->get_camera_center();
     const float dist = PC.norm();
-    const float levelScaleFactor = refKeyframe_->get_keypoint_size(keyPtIdx, featureType);
+    const float levelScaleFactor = refKeyframe_->get_keypoint_size(keypoint_index, featureType);
 
     {
         unique_lock<mutex> lock3(position_mutex_);
 
         ref_distance_ = dist;
         ref_size_  = reference_keypoint_size;
-        ref_sigma_ = refKeyframe_->get_keypoint_sigma(keyPtIdx, featureType);
+        ref_sigma_ = refKeyframe_->get_keypoint_sigma(keypoint_index, featureType);
 
         max_distance_ = dist * levelScaleFactor;
         min_distance_ = max_distance_ / refKeyframe_->maxKeyPtSize ;

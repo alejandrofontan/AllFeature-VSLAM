@@ -44,9 +44,6 @@ struct OptimizerParameters
     float thHuber_2dof{2.4477f};
     float thHuber_3dof_rgbd{2.7955f};
 
-    // RGB-D depth-channel measurement information (1/variance) for the inverse-depth residual
-    double invDepthInfo{20000.0};
-
     // pose_optimization()
     int numItPoseOpt{10};
 

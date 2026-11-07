@@ -38,7 +38,7 @@ class Viewer;
 class FrameDrawer
 {
 public:
-    FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& featureTypes);
+    FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& feature_types);
 
     // Update info from the last processed frame.
     void update(Tracking *pTracker);
@@ -67,7 +67,7 @@ protected:
     shared_ptr<Map> mpMap;
 
     std::mutex mMutex;
-    vector<FeatureType> featureTypes{};
+    vector<FeatureType> feature_types{};
 };
 
 } //namespace ORB_SLAM

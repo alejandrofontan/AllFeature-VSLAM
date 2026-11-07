@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <cstring>
 
+#include <opencv2/features2d.hpp>
+#include <opencv2/imgproc.hpp>
+
 // Implementation details private to ORB descriptor/orientation computation -- moved here from
 // Feature_orb32.h (where they were `static` free functions defined directly in the header) since
 // nothing outside this translation unit uses them; leaving them in the header meant every other

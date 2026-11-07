@@ -45,10 +45,10 @@ int main(int argc, char** argv) {
     bool debug = (bool)settings["debug"].as<bool>();
     std::cout << "[vslamlab_allfeature_mono_stream.cpp] Debug mode = " << debug << std::endl;
 
-    std::vector<FeatureType> featureTypes{};
+    std::vector<FeatureType> feature_types{};
     for(const auto& feat : features) {
         auto featureType = get_feature_type(feat);
-        featureTypes.push_back(featureType);
+        feature_types.push_back(featureType);
         std::cout << "[vslamlab_allfeature_mono_stream.cpp] Loaded feature from settings YAML: " << feat << std::endl;
     }
 
@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
     AF_VSLAM::System SLAM(calibration_yaml, settings_yaml,
                                   AF_VSLAM::System::MONOCULAR,
                                   verbose,
-                                  featureTypes,
+                                  feature_types,
                                   fixImageSize);
 
     // Stream length is unknown; 0 keeps the frame counter unset while still

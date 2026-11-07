@@ -29,6 +29,7 @@
 
 #include <opencv2/core/core.hpp>
 
+#include "Calibration.h"
 #include "FeatureExtractor.h"
 #include "FeatureMatcher.h"
 #include "Frame.h"
@@ -119,12 +120,9 @@ struct TrackingParameters
     // need_new_keyframe()
     float keyframe_min_information{0.05f}; // unexplained information (placecell, [0,1]) below which the local map already explains the view: no keyframe
     bool log_keyframe_information{false};  // one diagnostic line per tracked frame with the information, the flow, the triggers, and the decision
-    float ref_matches_ratio{0.9f};      // weak tracking: inliers < ratio x reference-KF tracked points...
-    int min_inliers_for_keyframe{15};   // ...but above this floor (below it suggests loss, not a keyframe)
     int min_observations_high{3};       // reference-KF match counting: min observations per point
     int min_observations_low{2};        //   relaxed bar while the map is young
     int young_map_keyframes{2};         //   map considered young at <= this many keyframes
-    float min_ref_overlap{0.7f};        // insert when frame/reference-keyframe overlap drops below this
     float emergency_inlier_drop_ratio{0.5f}; // emergency keyframe: inliers < ratio x recent median
     int inliers_history_size{30};       // recent-inlier reference window (frames)
     int emergency_keyframe_cooldown{10}; // min frames between emergency keyframes
@@ -327,22 +325,27 @@ protected:
 
     std::shared_ptr<FeatureMatcher> matcher_;
 
-    //Calibration matrix
-    cv::Mat mK;
-    cv::Mat mDistCoef;
+    // The camera as the calibration yaml declares it, scaled for any resize. These are the
+    // INPUTS to the Calibration below, which owns everything derived from them; nothing but
+    // load_camera_parameters and that construction should read them.
+    cv::Mat K;
+    cv::Mat distortion_coefficients;
+    // The camera and everything derived from it (Calibration.h), built on the first frame from
+    // the image as the tracker actually sees it. One instance serves the run; per-frame
+    // intrinsics would build one per frame here.
+    std::shared_ptr<const Calibration> calibration_;
     // Stereo baseline x fx. Nothing sets it yet (its only writer was the dead
     // ChangeCalibration); zero-initialized so Frame gets a defined value.
-    float mbf{0.0f};
     int image_width_{};
     int image_height_{};
+
+    // sigma_depth(z) = k*z^2, from calibration.yaml's optional depth_noise_coeff. The default is
+    // the uncalibrated Kinect-era estimate this used to hardcode in Frame (issue #3).
+    float depth_noise_coeff_{0.0028f};
 
     // New KeyFrame rules (according to fps)
     size_t max_frames_{0};
     float fps_{0.0f};
-
-    // Close/far point threshold (depth units). Nothing sets it yet; zero-initialized
-    // so Frame gets a defined value.
-    float mThDepth{0.0f};
 
     //Current matches in frame
     int num_inlier_matches_{0};
@@ -364,11 +367,9 @@ protected:
     // Set by a degenerate initialization (create_initial_map): track() resets on the next frame, outside the map lock
     bool reset_after_failed_initialization_{false};
 
-    // Last Frame, KeyFrame and Relocalisation Info
-    Keyframe last_keyframe_;
+    // Last Frame and Relocalisation Info
     Frame last_frame_;
     mat4f last_frame_relative_pose_; // Tlr of last_frame_ (see store_relative_pose)
-    KeyframeId last_keyframe_id_{0};
     FrameId last_reloc_frame_id_{0};
 
     //Color order (true RGB, false BGR, ignored if grayscale)

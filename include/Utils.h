@@ -9,6 +9,7 @@
 
 #include<opencv2/core/core.hpp>
 
+#include <map>
 #include <vector>
 #include <mutex>
 #include <random>

@@ -100,8 +100,8 @@ Sim3Solver::Sim3Solver(Keyframe pKF1, Keyframe pKF2, const vector<Pt> &vpMatched
         }
     }
 
-    mK1 = pKF1->mK;
-    mK2 = pKF2->mK;
+    mK1 = pKF1->calibration->K;
+    mK2 = pKF2->calibration->K;
 
     FromCameraToImage(mvX3Dc1,mvP1im1,mK1);
     FromCameraToImage(mvX3Dc2,mvP2im2,mK2);

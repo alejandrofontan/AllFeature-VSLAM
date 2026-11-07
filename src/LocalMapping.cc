@@ -126,7 +126,7 @@ void LocalMapping::process_new_keyframe()
     // (add_observation also refreshes the point's descriptor and normal/depth). Points
     // that already observe this keyframe -- created WITH it by the initializer -- enter
     // the probation list instead (cull_map_points).
-    for(const FeatureType feature_type : current_keyframe_->featureTypes)
+    for(const FeatureType feature_type : current_keyframe_->feature_types)
     {
         // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
         const std::vector<Pt> map_points = current_keyframe_->get_map_point_matches(feature_type);
@@ -168,7 +168,7 @@ void LocalMapping::cull_map_points()
 
         // Visible (in frustum) often but actually matched rarely: unreliable point.
         // Applies to every feature type uniformly (issue #11: an earlier version
-        // exempted all but featureTypes[0]).
+        // exempted all but feature_types[0]).
         if(map_point->get_found_ratio() < params.map_point_culling_min_found_ratio)
         {
             map_point->set_bad_flag();
@@ -197,9 +197,9 @@ void LocalMapping::create_new_map_points()
         current_keyframe_->get_best_covisibility_keyframes(params.create_new_map_points_keyframes);
 
     const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose_matrices();
-    const float fx1 = current_keyframe_->fx, fy1 = current_keyframe_->fy;
-    const float cx1 = current_keyframe_->cx, cy1 = current_keyframe_->cy;
-    const float invfx1 = current_keyframe_->invfx, invfy1 = current_keyframe_->invfy;
+    const float fx1 = current_keyframe_->calibration->fx, fy1 = current_keyframe_->calibration->fy;
+    const float cx1 = current_keyframe_->calibration->cx, cy1 = current_keyframe_->calibration->cy;
+    const float invfx1 = current_keyframe_->calibration->invfx, invfy1 = current_keyframe_->calibration->invfy;
 
     cache_neighbor_matches(neighbors);
 
@@ -209,9 +209,9 @@ void LocalMapping::create_new_map_points()
     for(const Keyframe& neighbor : neighbors)
     {
         const auto [Tcw2, Twc2, Rcw2, Rwc2, tcw2, twc2] = neighbor->get_pose_matrices();
-        const float fx2 = neighbor->fx, fy2 = neighbor->fy;
-        const float cx2 = neighbor->cx, cy2 = neighbor->cy;
-        const float invfx2 = neighbor->invfx, invfy2 = neighbor->invfy;
+        const float fx2 = neighbor->calibration->fx, fy2 = neighbor->calibration->fy;
+        const float cx2 = neighbor->calibration->cx, cy2 = neighbor->calibration->cy;
+        const float invfx2 = neighbor->calibration->invfx, invfy2 = neighbor->calibration->invfy;
 
         // Discard neighbors whose baseline is too short relative to their scene depth:
         // a near-zero-parallax pair only yields ill-conditioned triangulations
@@ -221,7 +221,7 @@ void LocalMapping::create_new_map_points()
 
         std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_indices;
         matcher_->match_keyframes_for_triangulation(current_keyframe_, neighbor, matched_indices,
-                                                    current_keyframe_->featureTypes);
+                                                    current_keyframe_->feature_types);
 
         for(const auto& [feature_type, pairs] : matched_indices)
         {
@@ -328,9 +328,8 @@ void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors
 {
     // Brute-force descriptor matching of the new keyframe against every neighbor it has no
     // cached matches with yet, all (neighbor, feature type) pairs in parallel. Results are
-    // stored symmetrically in both keyframes' caches, per feature type and stacked (with
-    // keypoint-index offsets) over all feature types.
-    const auto& feature_types = current_keyframe_->featureTypes;
+    // stored symmetrically in both keyframes' caches, per feature type.
+    const auto& feature_types = current_keyframe_->feature_types;
     const int num_neighbors = int(neighbors.size());
     const int num_feature_types = int(feature_types.size());
 
@@ -340,8 +339,8 @@ void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors
         std::lock_guard<std::mutex> lock(current_keyframe_->cache_mutex_);
         for(int k = 0; k < num_neighbors; k++)
         {
-            const auto it = current_keyframe_->cache_matched_pairs.find(neighbors[k]->frame_id);
-            cached[k] = it != current_keyframe_->cache_matched_pairs.end() && !it->second.empty();
+            const auto it = current_keyframe_->cache_matched_pairs_feat_type.find(neighbors[k]->frame_id);
+            cached[k] = it != current_keyframe_->cache_matched_pairs_feat_type.end() && !it->second.empty();
         }
     }
 
@@ -364,7 +363,7 @@ void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors
         }
     }
 
-    // Store (serial): per-feature-type caches in both directions, plus the stacked list
+    // Store (serial): per-feature-type caches in both directions
     for(int k = 0; k < num_neighbors; k++)
     {
         if(cached[k])
@@ -377,30 +376,15 @@ void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors
         auto& forward_by_type = current_keyframe_->cache_matched_pairs_feat_type[neighbor->frame_id];
         auto& backward_by_type = neighbor->cache_matched_pairs_feat_type[current_keyframe_->frame_id];
 
-        std::vector<cv::DMatch> stacked;
-        int query_offset = 0;
-        int train_offset = 0;
         for(int f = 0; f < num_feature_types; f++)
         {
             const FeatureType feature_type = feature_types[f];
-            stacked.reserve(stacked.size() + matches[k][f].size());
             for(const cv::DMatch& match : matches[k][f])
             {
                 forward_by_type[feature_type].push_back(match);
                 backward_by_type[feature_type].push_back(cv::DMatch(match.trainIdx, match.queryIdx, match.distance));
-
-                cv::DMatch stacked_match = match;
-                stacked_match.queryIdx += query_offset;
-                stacked_match.trainIdx += train_offset;
-                stacked.push_back(stacked_match);
             }
-            query_offset += int(current_keyframe_->keypoints.at(feature_type).size());
-            train_offset += int(neighbor->keypoints.at(feature_type).size());
         }
-
-        neighbor->cache_matched_pairs.insert_or_assign(current_keyframe_->frame_id,
-                                                       FeatureMatcher::swap_match_direction(stacked));
-        current_keyframe_->cache_matched_pairs.insert_or_assign(neighbor->frame_id, std::move(stacked));
     }
 }
 
@@ -412,10 +396,10 @@ void LocalMapping::create_depth_seeded_points()
     // region, repeated pattern, fast motion) is exactly where sensor depth helps most.
     // Same trust policy as the triangulation depth branches: any inv_depth > 0, no range gate.
     const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose_matrices();
-    const float cx1 = current_keyframe_->cx, cy1 = current_keyframe_->cy;
-    const float invfx1 = current_keyframe_->invfx, invfy1 = current_keyframe_->invfy;
+    const float cx1 = current_keyframe_->calibration->cx, cy1 = current_keyframe_->calibration->cy;
+    const float invfx1 = current_keyframe_->calibration->invfx, invfy1 = current_keyframe_->calibration->invfy;
 
-    for(const FeatureType feature_type : current_keyframe_->featureTypes)
+    for(const FeatureType feature_type : current_keyframe_->feature_types)
     {
         const auto& inv_depth = current_keyframe_->inv_depth.at(feature_type);
         const auto& keypoints = current_keyframe_->keypoints.at(feature_type);
@@ -463,7 +447,7 @@ void LocalMapping::search_in_neighbors()
         }
     }
 
-    for(const FeatureType feature_type : current_keyframe_->featureTypes)
+    for(const FeatureType feature_type : current_keyframe_->feature_types)
     {
         // Project this keyframe's map points into each target and fuse duplicates.
         // By-value snapshot: get_map_point_matches copies under the keyframe's mutex.
@@ -552,7 +536,7 @@ void LocalMapping::cull_keyframes_heuristic()
         if(keyframe->keyId == 0)
             continue; // the first keyframe anchors the map and is never culled
 
-        for(const FeatureType ft : keyframe->featureTypes){
+        for(const FeatureType ft : keyframe->feature_types){
             // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
             const std::vector<Pt> map_points = keyframe->get_map_point_matches(ft);
 

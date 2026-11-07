@@ -1,425 +1,156 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #include "Frame.h"
-#include "Converter.h"
-#include <thread>
+#include "MapPoint.h"
 
-#include <vector>
+#include <algorithm>
+#include <cmath>
+#include <exception>
+#include <stdexcept>
+#include <string>
 #include <utility>
-#include <type_traits>
-#include <opencv2/features2d.hpp> // for cv::KeyPoint
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+#include <vector>
 
 namespace AF_VSLAM
 {
 
-long unsigned int Frame::next_id=0;
-bool Frame::initial_computations=true;
-float Frame::cx, Frame::cy, Frame::fx, Frame::fy, Frame::invfx, Frame::invfy;
-float Frame::min_x, Frame::min_y, Frame::max_x, Frame::max_y;
-float Frame::grid_element_width_inv, Frame::grid_element_height_inv;
+// ============================================================================
+// Construction
+// ============================================================================
 
-Frame::Frame(const Image & img, const double &timeStamp,
-             const std::map<FeatureType, shared_ptr<FeatureExtractor>>& extractor,
-             shared_ptr<PlaceRecognition> place_recognition, const cv::Mat &K, const cv::Mat &distCoef, const float &bf, const float &thDepth)
-    :place_recognition(place_recognition),
-    feature_extractors(extractor),
-    timestamp(timeStamp), mK(K.clone()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
+Frame::Frame(const Image& img, double timestamp_,
+    const std::map<FeatureType, std::shared_ptr<FeatureExtractor>>& extractors,
+    std::shared_ptr<PlaceRecognition> place_recognition_,
+    std::shared_ptr<const Calibration> calibration_):
+    timestamp(timestamp_), calibration(std::move(calibration_)),
+    frame_id(next_id++), place_recognition(std::move(place_recognition_))
 {
-    // Frame ID
-    frame_id = next_id++;
-    w = img.img.cols;
-    h = img.img.rows;
-
-    // Image-embedding VPR backends (MegaLoc) embed keyframes after creation, off the
-    // tracking thread: keep a shared header of the image (no copy) for that purpose.
     if(place_recognition && place_recognition->needs_image())
         image = img.img;
 
-    // Scale Level Info (assumes every feature type shares the same pyramid scale factor)
-    size_tolerance = feature_extractors.begin()->second->GetScaleFactor();
-
-    // Feature extraction. A frame without keypoints (black image, covered lens) is still built in full: every
-    // per-feature container exists (empty), since Tracking reads them with .at(ft)
-    extract_features(0, img);
+    extract_features(img, extractors);
 
     undistort_keypoints();
     get_depth(img);
     get_colors(img);
 
-    // No map-point associations yet
-    for(auto& [ft, N_] : N){
-        pts[ft] = vector<Pt>(N_, static_cast<Pt>(nullptr));
-        outliers[ft] = vector<bool>(N_, false);
-    }
-
-    // This is done only for the first Frame (or after a change in the calibration)
-    if(initial_computations)
-    {
-        compute_image_bounds(img.grayImg);
-
-        grid_element_width_inv = static_cast<float>(FRAME_GRID_COLS) / static_cast<float>(max_x - min_x);
-        grid_element_height_inv = static_cast<float>(FRAME_GRID_ROWS) / static_cast<float>(max_y - min_y);
-
-        fx = K.at<float>(0,0);
-        fy = K.at<float>(1,1);
-        cx = K.at<float>(0,2);
-        cy = K.at<float>(1,2);
-        invfx = 1.0f / fx;
-        invfy = 1.0f / fy;
-
-        initial_computations = false;
-    }
-
-    mb = mbf / fx;
-    assign_features_to_grid();
-}
-
-void Frame::assign_features_to_grid()
-{
-    for(const auto [ft, N_]: N){
-        int nReserve = 0.5f * N_ / (FRAME_GRID_COLS*FRAME_GRID_ROWS);
-
-
-        for(unsigned int i=0; i<FRAME_GRID_COLS;i++){
-            for (unsigned int j=0; j<FRAME_GRID_ROWS;j++){
-                grid[ft][i][j].reserve(nReserve);
-            }
-        }
-
-        for(int i = 0; i < N_; i++)
-        {
-            const cv::KeyPoint &kp = keypoints.at(ft)[i];
-            int nGridPosX, nGridPosY;
-            if(pos_in_grid(kp,nGridPosX,nGridPosY)){
-                grid[ft][nGridPosX][nGridPosY].push_back(i);
-            }
-        }
+    for(const auto& [ft, N_] : N){
+        pts[ft].assign(N_, nullptr);
+        outliers[ft].assign(N_, false);
     }
 }
 
-void Frame::extract_features(int, const Image& img)
+void Frame::extract_features(const Image& img,
+                             const std::map<FeatureType, std::shared_ptr<FeatureExtractor>>& extractors)
 {
-    featureTypes.clear();
-    num_keypoints_total = 0;
+    std::vector<std::pair<FeatureType, FeatureExtractor*>> jobs;
+    jobs.reserve(extractors.size());
+    for(const auto& [ft, extractor] : extractors)
+        jobs.emplace_back(ft, extractor.get());
 
-    // 1) Stable job list
-    std::vector<std::pair<FeatureType, shared_ptr<FeatureExtractor>>> jobs;
-    jobs.reserve(feature_extractors.size());
-    for (auto& [ft, extractor] : feature_extractors) {
-        jobs.emplace_back(ft, extractor);
-    }
-
-    // 2) Per-job outputs (no shared writes here)
     struct Out {
-        std::vector<cv::KeyPoint>   keys;
-        cv::Mat   desc;
-        vector<mat2f> sigma2;
-        vector<mat2f>    inf;
-        vector<float>   size;
-        int n = 0;
+        std::vector<cv::KeyPoint> keys;
+        cv::Mat desc;
+        std::vector<mat2f> sigma2;
+        std::vector<mat2f> inf;
+        std::vector<float> sizes;
     };
-
     std::vector<Out> outs(jobs.size());
 
-    // 3) Parallel extraction (OpenMP if enabled; otherwise runs serially)
-    #pragma omp parallel for
-    for (int i = 0; i < (int)jobs.size(); ++i) {
-        auto& extractor = jobs[i].second;
-        auto& o = outs[i];
+    std::vector<std::exception_ptr> errors(jobs.size());
 
-        (*extractor)(img, o.keys, o.desc, o.sigma2, o.inf, o.size);
-        o.n = (int)o.keys.size();
+    #pragma omp parallel for schedule(dynamic, 1)
+    for(int i = 0; i < static_cast<int>(jobs.size()); ++i) {
+        try {
+            Out& o = outs[i];
+            (*jobs[i].second)(img, o.keys, o.desc, o.sigma2, o.inf, o.sizes);
+        } catch(...) {
+            errors[i] = std::current_exception();
+        }
     }
 
-    // 4) Serial merge into your maps/vectors (safe)
-    featureTypes.reserve(jobs.size());
-    for (size_t i = 0; i < jobs.size(); ++i) {
-        const auto ft = jobs[i].first;
-        auto& o = outs[i];
+    for(const std::exception_ptr& error : errors)
+        if(error)
+            std::rethrow_exception(error);
 
-        raw_keypoints[ft]        = std::move(o.keys);
-        descriptors[ft]  = std::move(o.desc);
+    feature_types.reserve(jobs.size());
+    for(size_t i = 0; i < jobs.size(); ++i) {
+        const FeatureType ft = jobs[i].first;
+        Out& o = outs[i];
+
+        N[ft] = static_cast<int>(o.keys.size());
+        raw_keypoints[ft] = std::move(o.keys);
+        descriptors[ft]   = std::move(o.desc);
         keyPtsSigma2[ft]  = std::move(o.sigma2);
         keyPtsInf[ft]     = std::move(o.inf);
-        keyPtsSize[ft]    = std::move(o.size);
+        keyPtsSize[ft]    = std::move(o.sizes);
 
-        N[ft] = o.n;
-        num_keypoints_total += o.n;
-        featureTypes.push_back(ft);
+        feature_types.push_back(ft);
     }
 
-    maxKeyPtSize  = feature_extractors.begin()->second->GetMaxKeyPtSize();
-    maxKeyPtSigma = feature_extractors.begin()->second->GetMaxKeyPtSigma();
-}
-
-void Frame::set_pose(const mat4f& Tcw_)
-{
-    Tcw = Tcw_;
-    update_pose_matrices();
-}
-
-void Frame::update_pose_matrices()
-{
-    Rcw = Tcw.block<3,3>(0,0);
-    tcw = Tcw.block<3,1>(0,3);
-    Rwc = Rcw.transpose();
-    twc = -Rwc * tcw;
-}
-
-bool Frame::is_in_frustum(const Pt& pMP, float viewingCosLimit) const
-{
-    pMP->track_in_view = false;
-
-    // 3D in absolute coordinates
-    vec3f P = pMP->get_world_pos();
-
-    // 3D in camera coordinates
-    const vec3f Pc = Rcw * P + tcw;
-    const float &PcX = Pc(0);
-    const float &PcY = Pc(1);
-    const float &PcZ = Pc(2);
-
-    // Check positive depth
-    if(PcZ < 0.0f)
-        return false;
-
-    // Project in image and check it is not outside
-    const float invz = 1.0f / PcZ;
-    const float u = fx * PcX * invz + cx;
-    const float v = fy * PcY * invz + cy;
-
-    if(u < min_x || u > max_x)
-        return false;
-    if(v < min_y || v > max_y)
-        return false;
-
-    // Check distance is in the scale invariance region of the MapPoint
-    const float maxDistance = pMP->get_max_distance_invariance();
-    const float minDistance = pMP->get_min_distance_invariance();
-    const vec3f PO = P - twc;
-    const float dist = PO.norm();
-
-    if(dist < minDistance || dist > maxDistance)
-        return false;
-
-    // Check viewing angle
-    vec3f Pn = pMP->get_normal();
-
-    const float viewCos = PO.dot(Pn) / dist;
-
-    if(viewCos < viewingCosLimit)
-        return false;
-
-    // Data used by the tracking
-    pMP->track_in_view = true;
-    pMP->track_proj_x = u;
-    pMP->track_proj_y = v;
-
-    return true;
-}
-
-vector<size_t> Frame::get_features_in_area(const float &x, const float  &y, const float  &r, const FeatureType& featType) const
-{
-    vector<size_t> vIndices;
-    vIndices.reserve(N.at(featType));
-
-    const int nMinCellX = max(0,(int)floor((x-min_x-r)*grid_element_width_inv));
-    if(nMinCellX>=FRAME_GRID_COLS)
-        return vIndices;
-
-    const int nMaxCellX = min((int)FRAME_GRID_COLS-1,(int)ceil((x-min_x+r)*grid_element_width_inv));
-    if(nMaxCellX<0)
-        return vIndices;
-
-    const int nMinCellY = max(0,(int)floor((y-min_y-r)*grid_element_height_inv));
-    if(nMinCellY>=FRAME_GRID_ROWS)
-        return vIndices;
-
-    const int nMaxCellY = min((int)FRAME_GRID_ROWS-1,(int)ceil((y-min_y+r)*grid_element_height_inv));
-    if(nMaxCellY<0)
-        return vIndices;
-
-    for(int ix = nMinCellX; ix<=nMaxCellX; ix++)
-    {
-        for(int iy = nMinCellY; iy<=nMaxCellY; iy++)
-        {
-            const vector<size_t>& vCell = grid.at(featType)[ix][iy];
-            if(vCell.empty())
-                continue;
-
-            for(size_t j=0, jend=vCell.size(); j<jend; j++)
-            {
-                const cv::KeyPoint &kpUn = keypoints.at(featType)[vCell[j]];
-
-                // if(keyPtsSize.at(featType)[vCell[j]] < minSize)
-                //     continue;
-                // if(keyPtsSize.at(featType)[vCell[j]] > maxSize)
-                //     continue;
-
-                const float distx = kpUn.pt.x - x;
-                const float disty = kpUn.pt.y - y;
-
-                if(fabs(distx)<r && fabs(disty)<r)
-                    vIndices.push_back(vCell[j]);
-            }
-        }
-    }
-
-    return vIndices;
-}
-
-bool Frame::pos_in_grid(const cv::KeyPoint &kp, int &posX, int &posY) const
-{
-    posX = round((kp.pt.x-min_x)*grid_element_width_inv);
-    posY = round((kp.pt.y-min_y)*grid_element_height_inv);
-
-    //Keypoint's coordinates are undistorted, which could cause to go out of the image
-    if(posX<0 || posX>=FRAME_GRID_COLS || posY<0 || posY>=FRAME_GRID_ROWS)
-        return false;
-
-    return true;
-}
-
-
-void Frame::drop_unobserved_points()
-{
-    for (auto& [ft, num_keypoints] : N) {
-        for(int i = 0; i < num_keypoints; i++)
-        {
-            const Pt& map_point = pts.at(ft)[i];
-            if(map_point && map_point->number_of_observations() < 1)
-            {
-                outliers.at(ft)[i] = false;
-                pts.at(ft)[i] = nullptr;
-            }
-        }
-    }
-}
-
-int Frame::count_inlier_map_points() const
-{
-    int count = 0;
-    for (const auto& [ft, num_keypoints] : N)
-        for(int i = 0; i < num_keypoints; i++)
-        {
-            const Pt& map_point = pts.at(ft)[i];
-            if(map_point && !outliers.at(ft)[i] && map_point->number_of_observations() > 0)
-                count++;
-        }
-    return count;
-}
-
-void Frame::drop_outlier_points()
-{
-    for (auto& [ft, num_keypoints] : N) {
-        for(int i = 0; i < num_keypoints; i++)
-        {
-            if(pts.at(ft)[i] && outliers.at(ft)[i])
-                pts.at(ft)[i] = nullptr;
-        }
-    }
-}
-
-void Frame::compute_global_descriptor()
-{
-    if(place_recognition)
-        place_recognition->compute(*this);
+    if(!jobs.empty())
+        maxKeyPtSize = jobs.front().second->GetMaxKeyPtSize();
 }
 
 void Frame::undistort_keypoints()
 {
-    for(auto& [ft,extractor] : feature_extractors)
+    const bool has_distortion = calibration->has_distortion();
+
+    for(const auto& [ft, N_] : N)
     {
-        if(mDistCoef.at<float>(0)==0.0 || N.at(ft)==0)
-        {
-            keypoints[ft] = raw_keypoints[ft];
+        const std::vector<cv::KeyPoint>& raw = raw_keypoints.at(ft);
+        std::vector<cv::KeyPoint>& undistorted = keypoints[ft];
+        undistorted = raw;
+
+        if(!has_distortion || N_ == 0)
             continue;
-        }
 
-        // Fill matrix with points
-        cv::Mat mat(N.at(ft),2,CV_32F);
-        for(int i=0; i<N.at(ft); i++)
-        {
-            mat.at<float>(i,0) = raw_keypoints[ft][i].pt.x;
-            mat.at<float>(i,1) = raw_keypoints[ft][i].pt.y;
-        }
+        std::vector<cv::Point2f> pts_in(N_);
+        for(int i = 0; i < N_; i++)
+            pts_in[i] = raw[i].pt;
 
-        // Undistort points
-        mat=mat.reshape(2);
-        cv::undistortPoints(mat,mat,mK,mDistCoef,cv::Mat(),mK);
-        mat=mat.reshape(1);
-
-        // Fill undistorted keypoint vector
-        keypoints[ft].resize(N.at(ft));
-        for(int i = 0; i < N.at(ft); i++)
-        {
-            cv::KeyPoint kp = raw_keypoints[ft][i];
-            kp.pt.x=mat.at<float>(i,0);
-            kp.pt.y=mat.at<float>(i,1);
-            keypoints[ft][i]=kp;
-        }
+        const std::vector<cv::Point2f> pts_out = calibration->undistort(pts_in);
+        for(int i = 0; i < N_; i++)
+            undistorted[i].pt = pts_out[i];
     }
 }
 
 void Frame::get_depth(const Image& img)
 {
-    for(auto& [ft, N_] : N)
+    const cv::Mat& depth_img = img.depthImg;
+
+    for(const auto& [ft, N_] : N)
     {
-        inv_depth[ft] = vector<float>(N_, 0.0f);
-        sigma2_inv_depth[ft] = vector<float>(N_, 0.0f);
+        inv_depth[ft].assign(N_, 0.0f);
+        sigma2_inv_depth[ft].assign(N_, 0.0f);
+    }
 
-        if(img.depthImg.empty())
-            continue;
+    if(depth_img.empty())
+        return;
 
-        const vector<cv::KeyPoint>& kps = raw_keypoints.at(ft);
+    if(depth_img.type() != CV_32F)
+        throw std::runtime_error("Frame::get_depth: unsupported depthImg type: " + std::to_string(depth_img.type()));
+
+    const float k = calibration->depth_noise_coeff;
+    const float inv_depth_variance = k * k;
+
+    for(const auto& [ft, N_] : N)
+    {
+        std::vector<float>& inv_depth_ft = inv_depth.at(ft);
+        std::vector<float>& sigma2_inv_depth_ft = sigma2_inv_depth.at(ft);
+        const std::vector<cv::KeyPoint>& kps = raw_keypoints.at(ft);
+
         for(int i = 0; i < N_; i++)
         {
-            // Sample at the keypoint's distorted pixel coordinates: the depth image
-            // is indexed the same way as the original (pre-undistortion) RGB image.
             const int u = cvRound(kps[i].pt.x);
             const int v = cvRound(kps[i].pt.y);
 
-            if(u < 0 || v < 0 || u >= img.depthImg.cols || v >= img.depthImg.rows)
+            if(u < 0 || v < 0 || u >= depth_img.cols || v >= depth_img.rows)
                 continue;
 
-            float depth;
-            switch(img.depthImg.type())
-            {
-                case CV_16U:
-                    depth = static_cast<float>(img.depthImg.at<uint16_t>(v, u));
-                    break;
-                case CV_32F:
-                    depth = img.depthImg.at<float>(v, u);
-                    break;
-                default:
-                    throw std::runtime_error("Frame::get_depth: unsupported depthImg type: " + std::to_string(img.depthImg.type()));
-            }
-
+            const float depth = depth_img.at<float>(v, u);
             if(depth > 0.0f)
             {
-                inv_depth[ft][i] = 1.0f / depth;
-                sigma2_inv_depth[ft][i] = depthNoiseCoeff * depthNoiseCoeff;
+                inv_depth_ft[i] = 1.0f / depth;
+                sigma2_inv_depth_ft[i] = inv_depth_variance;
             }
         }
     }
@@ -427,23 +158,27 @@ void Frame::get_depth(const Image& img)
 
 void Frame::get_colors(const Image& img)
 {
-    // Prefer the color image; fall back to the gray one (both share the keypoints' resize/crop).
     const cv::Mat& im = img.img.empty() ? img.grayImg : img.img;
-    const int channels = im.empty() ? 0 : im.channels();
-    if(!im.empty() && im.depth() != CV_8U)
+
+    for(const auto& [ft, N_] : N)
+        keypoint_colors[ft].assign(N_, cv::Vec3b(0, 0, 0));
+
+    if(im.empty())
+        return;
+
+    const int channels = im.channels();
+    if(im.depth() != CV_8U)
         throw std::runtime_error("Frame::get_colors: unsupported image depth: " + std::to_string(im.depth()));
+    if(channels != 1 && channels != 3 && channels != 4)
+        throw std::runtime_error("Frame::get_colors: unsupported number of channels: " + std::to_string(channels));
 
-    for(auto& [ft, N_] : N)
+    for(const auto& [ft, N_] : N)
     {
-        std::vector<cv::Vec3b>& colors = keypoint_colors[ft];
-        colors.assign(N_, cv::Vec3b(0, 0, 0));
-        if(im.empty())
-            continue;
+        std::vector<cv::Vec3b>& colors = keypoint_colors.at(ft);
+        const std::vector<cv::KeyPoint>& kps = raw_keypoints.at(ft);
 
-        const vector<cv::KeyPoint>& kps = raw_keypoints.at(ft);
         for(int i = 0; i < N_; i++)
         {
-            // Distorted pixel coordinates: the image is indexed like the depth image in get_depth.
             const int u = cvRound(kps[i].pt.x);
             const int v = cvRound(kps[i].pt.y);
             if(u < 0 || v < 0 || u >= im.cols || v >= im.rows)
@@ -464,125 +199,188 @@ void Frame::get_colors(const Image& img)
                     colors[i] = cv::Vec3b(bgra[0], bgra[1], bgra[2]);
                     break;
                 }
-                default:
-                    throw std::runtime_error("Frame::get_colors: unsupported number of channels: " + std::to_string(channels));
             }
         }
     }
 }
 
-void Frame::compute_image_bounds(const cv::Mat &imLeft)
+// ============================================================================
+// Pose
+// ============================================================================
+
+void Frame::set_pose(const mat4f& Tcw_)
 {
-    if(mDistCoef.at<float>(0)!=0.0)
-    {
-        cv::Mat mat(4,2,CV_32F);
-        mat.at<float>(0,0)=0.0; mat.at<float>(0,1)=0.0;
-        mat.at<float>(1,0)=imLeft.cols; mat.at<float>(1,1)=0.0;
-        mat.at<float>(2,0)=0.0; mat.at<float>(2,1)=imLeft.rows;
-        mat.at<float>(3,0)=imLeft.cols; mat.at<float>(3,1)=imLeft.rows;
+    Tcw = Tcw_;
+    Rcw = Tcw.block<3,3>(0,0);
+    tcw = Tcw.block<3,1>(0,3);
+    Rwc = Rcw.transpose();
+    twc = -Rwc * tcw;
+}
 
-        // Undistort corners
-        mat=mat.reshape(2);
-        cv::undistortPoints(mat,mat,mK,mDistCoef,cv::Mat(),mK);
-        mat=mat.reshape(1);
+// ============================================================================
+// Per-frame queries
+// ============================================================================
 
-        min_x = min(mat.at<float>(0,0),mat.at<float>(2,0));
-        max_x = max(mat.at<float>(1,0),mat.at<float>(3,0));
-        min_y = min(mat.at<float>(0,1),mat.at<float>(1,1));
-        max_y = max(mat.at<float>(2,1),mat.at<float>(3,1));
+std::optional<cv::Point2f> Frame::project_if_visible(const Pt& pt, float viewing_cos_limit) const
+{
+    const Calibration& cal = *calibration;
 
+    const vec3f P = pt->get_world_pos();
+    const vec3f Pc = Rcw * P + tcw;
+    const float PcX = Pc(0);
+    const float PcY = Pc(1);
+    const float PcZ = Pc(2);
+
+    if(PcZ <= 0.0f)
+        return std::nullopt;
+
+    const float inv_z = 1.0f / PcZ;
+    const float u = cal.fx * PcX * inv_z + cal.cx;
+    const float v = cal.fy * PcY * inv_z + cal.cy;
+
+    if(u < cal.min_x || u > cal.max_x)
+        return std::nullopt;
+    if(v < cal.min_y || v > cal.max_y)
+        return std::nullopt;
+
+    const float max_distance = pt->get_max_distance_invariance();
+    const float min_distance = pt->get_min_distance_invariance();
+    const vec3f PO = P - twc;
+    const float dist = PO.norm();
+
+    if(dist < min_distance || dist > max_distance)
+        return std::nullopt;
+
+    const vec3f Pn = pt->get_normal();
+    const float view_cos = PO.dot(Pn) / dist;
+
+    if(view_cos < viewing_cos_limit)
+        return std::nullopt;
+
+    return cv::Point2f(u, v);
+}
+
+int Frame::count_inlier_map_points() const
+{
+    int count = 0;
+    for (const auto& [ft, num_keypoints] : N) {
+        const auto& pts_ft = pts.at(ft);
+        const auto& out_ft = outliers.at(ft);
+        for(int i = 0; i < num_keypoints; i++)
+            if(pts_ft[i] && !out_ft[i])
+                ++count;
     }
-    else
-    {
-        min_x = 0.0f;
-        max_x = imLeft.cols;
-        min_y = 0.0f;
-        max_y = imLeft.rows;
+    return count;
+}
+
+void Frame::drop_outlier_points()
+{
+    for (const auto& [ft, num_keypoints] : N) {
+        auto& pts_ft = pts.at(ft);
+        auto& out_ft = outliers.at(ft);
+        for(int i = 0; i < num_keypoints; i++)
+            if(pts_ft[i] && out_ft[i])
+            {
+                pts_ft[i] = nullptr;
+                out_ft[i] = false;
+            }
     }
 }
 
-    float Frame::get_keypoint_size(const KeypointIndex &keyPtIdx, const FeatureType& featType) const {
-        return keyPtsSize.at(featType)[keyPtIdx];
+void Frame::compute_global_descriptor()
+{
+    if(place_recognition)
+        place_recognition->compute(*this);
+}
+
+// ============================================================================
+// Spatial index
+// ============================================================================
+
+const Frame::Grid& Frame::grid_for(FeatureType feature_type) const
+{
+    const auto it = grid.find(feature_type);
+    if(it != grid.end())
+        return it->second;
+
+    Grid& grid_ft = grid[feature_type];
+    const std::vector<cv::KeyPoint>& keypoints_ft = keypoints.at(feature_type);
+    const int N_ = N.at(feature_type);
+
+    for(int i = 0; i < N_; i++)
+    {
+        const cv::Point2i cell = pos_in_grid(keypoints_ft[i]);
+        grid_ft[cell.x][cell.y].push_back(static_cast<std::size_t>(i));
     }
 
-    float Frame::get_keypoint_sigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
-    {
-        return 0.5f * (keyPtsSigma2.at(featType)[keyPtIdx](0,0) + keyPtsSigma2.at(featType)[keyPtIdx](1,1));
-    }
+    return grid_ft;
+}
 
-    float Frame::get_keypoint_information_1d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
-    {
-        return 0.5f * (keyPtsInf.at(featType)[keyPtIdx](0,0) + keyPtsInf.at(featType)[keyPtIdx](1,1));
-    }
+void Frame::build_grids() const
+{
+    for(const auto& [ft, N_] : N)
+        grid_for(ft);
+}
 
-    mat2f Frame::get_keypoint_information_2d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
-    {
-        return keyPtsInf.at(featType)[keyPtIdx];
-    }
+cv::Point2i Frame::pos_in_grid(const cv::KeyPoint& kp) const
+{
+    const Calibration& cal = *calibration;
 
-    float Frame::get_overlap() const
-    {
-        cv::Mat1b mask(h, w, uchar(0));
-        cv::Mat1b mask_0(h, w, uchar(0));
-        const int radius = 30; // pixels
+    const int x = static_cast<int>(std::floor((kp.pt.x - cal.min_x) * cal.grid_element_width_inv));
+    const int y = static_cast<int>(std::floor((kp.pt.y - cal.min_y) * cal.grid_element_height_inv));
 
-        for(const auto& [ft, pts]: pts)
+    return {std::clamp(x, 0, FRAME_GRID_COLS - 1), std::clamp(y, 0, FRAME_GRID_ROWS - 1)};
+}
+
+std::vector<std::size_t> Frame::get_features_in_area(const float x, const float y, const float r,
+                                                     const FeatureType feature_type) const
+{
+    return features_in_area(grid_for(feature_type), keypoints.at(feature_type), *calibration, x, y, r);
+}
+
+std::vector<std::size_t> features_in_area(const Frame::Grid& grid,
+                                          const std::vector<cv::KeyPoint>& keypoints,
+                                          const Calibration& cal,
+                                          const float x, const float y, const float r)
+{
+    std::vector<std::size_t> indices;
+    indices.reserve(keypoints.size());
+
+    const int min_cell_x = std::max(0, static_cast<int>(std::floor((x - cal.min_x - r) * cal.grid_element_width_inv)));
+    if(min_cell_x >= FRAME_GRID_COLS)
+        return indices;
+
+    const int max_cell_x = std::min(FRAME_GRID_COLS - 1, static_cast<int>(std::floor((x - cal.min_x + r) * cal.grid_element_width_inv)));
+    if(max_cell_x < 0)
+        return indices;
+
+    const int min_cell_y = std::max(0, static_cast<int>(std::floor((y - cal.min_y - r) * cal.grid_element_height_inv)));
+    if(min_cell_y >= FRAME_GRID_ROWS)
+        return indices;
+
+    const int max_cell_y = std::min(FRAME_GRID_ROWS - 1, static_cast<int>(std::floor((y - cal.min_y + r) * cal.grid_element_height_inv)));
+    if(max_cell_y < 0)
+        return indices;
+
+    const float r2 = r * r;
+
+    for(int cell_x = min_cell_x; cell_x <= max_cell_x; cell_x++)
+    {
+        for(int cell_y = min_cell_y; cell_y <= max_cell_y; cell_y++)
         {
-            for(const auto& pt : pts)
+            for(const std::size_t index : grid[cell_x][cell_y])
             {
-                if((!pt) || pt->is_bad())
-                    continue;
+                const cv::KeyPoint& kp = keypoints[index];
+                const float dist_x = kp.pt.x - x;
+                const float dist_y = kp.pt.y - y;
 
-                const int x = (int) pt->track_proj_x;
-                const int y = (int) pt->track_proj_y;
-
-                if (0 <= x && x < w && 0 <= y && y < h)
-                {
-                    // filled circle of 1s (non-zero) around (x,y)
-                    cv::circle(mask, cv::Point(x, y), radius, cv::Scalar(1), cv::FILLED, cv::LINE_8);
-                }
+                if(dist_x * dist_x + dist_y * dist_y < r2)
+                    indices.push_back(index);
             }
         }
-
-        for(const auto& [ft, kpts]: keypoints)
-        {
-            for(const auto& kpt : kpts)
-            {
-
-                const int x = (int) kpt.pt.x;
-                const int y = (int) kpt.pt.y;
-
-                if (0 <= x && x < w && 0 <= y && y < h)
-                {
-                    // filled circle of 1s (non-zero) around (x,y)
-                    cv::circle(mask_0, cv::Point(x, y), radius, cv::Scalar(1), cv::FILLED, cv::LINE_8);
-                }
-            }
-        }
-        // --- overlap metrics ---
-        cv::Mat1b inter, uni;
-        cv::bitwise_and(mask, mask_0, inter);
-        cv::bitwise_or(mask, mask_0, uni);
-
-        // const int A = cv::countNonZero(mask);
-        const int B = cv::countNonZero(mask_0);
-        const int I = cv::countNonZero(inter);
-        // const int U = cv::countNonZero(uni);
-
-        // const float iou  = (U > 0) ? (float)I / (float)U : 0.0f;              // |A∩B|/|A∪B|
-        const float covB = (B > 0) ? (float)I / (float)B : 0.0f;              // coverage of mask_0 by mask
-        // const float covA = (A > 0) ? (float)I / (float)A : 0.0f;              // coverage of mask by mask_0
-        // const float dice = (A + B > 0) ? (2.0f * (float)I) / (float)(A + B) : 0.0f;
-
-        //std::cout << "Frame " << frame_id << " cov(B)=" << covB << std::endl;
-
-        // std::cout << "Frame " << frame_id
-        //         << " A=" << A << " B=" << B << " I=" << I << " U=" << U
-        //         << " IoU=" << iou << " Dice=" << dice
-        //         << " cov(B)=" << covB << " cov(A)=" << covA
-        //         << std::endl;
-
-        return covB; // or return c
     }
 
-} //namespace ORB_SLAM
+    return indices;
+}
+
+}

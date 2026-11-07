@@ -470,7 +470,7 @@ void LoopClosing::correct_loop()
             const g2o::Sim3 g2o_corrected_Swi = g2o_corrected_Siw.inverse();
             const g2o::Sim3& g2o_Siw = uncorrected_poses[keyframe];
 
-            for(const FeatureType feature_type : keyframe->featureTypes)
+            for(const FeatureType feature_type : keyframe->feature_types)
             {
                 for(const Pt& point : keyframe->get_map_point_matches(feature_type))
                 {

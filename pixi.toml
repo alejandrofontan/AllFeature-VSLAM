@@ -130,7 +130,7 @@ cuda-profiler-api = "*"
 tensorrt-cxx-headers = "*"   # NvInfer.h etc. for compilation (the runtime libs live in default)
 
 [feature.build.tasks]
-build = { cmd = "./build.sh" }
+build = { cmd = "./build.sh -v" }
 build-cpu = { cmd = "./build.sh -c" }   # GPU-free build (build-cpu/, same bin/ and lib/): the Mac build, also testable on Linux
 # setup = everything a fresh clone needs to run: fetch the models, then compile
 setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "download-feature-models", { task = "export-superpoint", environment = "export-features" }, "build"] }

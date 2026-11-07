@@ -175,9 +175,9 @@ int main(int argc, char** argv) {
 
     AF_VSLAM::FrameDrawer::exp_folder = exp_folder;
 
-    std::vector<FeatureType> featureTypes{};
+    std::vector<FeatureType> feature_types{};
     for (const auto& feat : features) {
-        featureTypes.push_back(get_feature_type(feat));  // an unknown name terminates the process (FeatureFactory.h)
+        feature_types.push_back(get_feature_type(feat));  // an unknown name terminates the process (FeatureFactory.h)
         AF_CONFIG_FIELD("Feature added: ", feat);
     }
     segmentation::SegmentationSettings segmentationSettings{};
@@ -206,7 +206,7 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, on_signal);
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
-    AF_VSLAM::System SLAM(calibration_yaml, settings_yaml, AF_VSLAM::System::MONOCULAR, verbose, featureTypes, fixImageSize);
+    AF_VSLAM::System SLAM(calibration_yaml, settings_yaml, AF_VSLAM::System::MONOCULAR, verbose, feature_types, fixImageSize);
 
     g_system = &SLAM;
 

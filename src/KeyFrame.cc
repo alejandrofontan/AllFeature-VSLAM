@@ -31,35 +31,24 @@ static bool KeyframeComparison(const pair<int, Keyframe>& a, const pair<int, Key
     return (a.first != b.first) ? (a.first < b.first) : (a.second->keyId < b.second->keyId);
 }
 
-long unsigned int KeyFrame::next_id=0;
-
 KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> place_recognition):
-    featureTypes(F.featureTypes), cache_matched_pairs(F.cache_matched_pairs), cache_matched_pairs_feat_type(F.cache_matched_pairs_feat_type),
-    frame_id(F.frame_id),  timestamp(F.timestamp), grid_cols(FRAME_GRID_COLS), grid_rows(FRAME_GRID_ROWS),
-    grid_element_width_inv(F.grid_element_width_inv), grid_element_height_inv(F.grid_element_height_inv),
+    feature_types(F.feature_types), cache_matched_pairs_feat_type(F.cache_matched_pairs_feat_type),
+    frame_id(F.frame_id),  timestamp(F.timestamp),
     fuse_target_for_keyframe(0), ba_local_for_keyframe(0), ba_fixed_for_keyframe(0), ba_global_for_keyframe(0),
-    fx(F.fx), fy(F.fy), cx(F.cx), cy(F.cy), invfx(F.invfx), invfy(F.invfy),
-    mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), raw_keypoints(F.raw_keypoints), keypoints(F.keypoints),
+    calibration(F.calibration),
+    N(F.N), keypoints(F.keypoints),
     inv_depth(F.inv_depth), sigma2_inv_depth(F.sigma2_inv_depth),
-    keypoint_colors(F.keypoint_colors), image(F.image), global_descriptor(F.global_descriptor), size_tolerance(F.size_tolerance),
+    keypoint_colors(F.keypoint_colors), image(F.image), global_descriptor(F.global_descriptor),
     keyPtsSigma2(F.keyPtsSigma2),keyPtsInf(F.keyPtsInf),keyPtsSize(F.keyPtsSize),
-    maxKeyPtSize(F.maxKeyPtSize),maxKeyPtSigma(F.maxKeyPtSigma),
-    min_x(F.min_x), min_y(F.min_y), max_x(F.max_x), max_y(F.max_y),
-    mK(F.mK), map_points_(F.pts), place_recognition_(std::move(place_recognition)),
+    maxKeyPtSize(F.maxKeyPtSize),
+    min_x(F.calibration->min_x), min_y(F.calibration->min_y),
+    max_x(F.calibration->max_x), max_y(F.calibration->max_y),
+    map_points_(F.pts), place_recognition_(std::move(place_recognition)),
     first_connection_(true), parent_(NULL), not_erase_(false),
-    to_be_erased_(false), bad_(false), map_(pMap)
+    to_be_erased_(false), bad_(false), map_(pMap), grid_((F.build_grids(), std::move(F.grid)))
 {
     keyId = next_id++;
-    for(auto& [ft, N_] : N){
-        grid_[ft].resize(grid_cols);
-        for(int i=0; i<grid_cols;i++)
-        {
-            grid_[ft][i].resize(grid_rows);
-            for(int j=0; j<grid_rows; j++)
-                grid_[ft][i][j] = F.grid[ft][i][j];
-        }
-    }
-    set_pose(F.Tcw);
+    set_pose(F.get_pose());
 
     // Every feature type gets its entry, an empty Mat when the frame has no keypoints of that type: LocalMapping,
     // LoopClosing and the matchers read descriptors.at(ft) for every type (a missing key was std::out_of_range,
@@ -252,10 +241,10 @@ void KeyFrame::add_map_point(const Pt& pt, const KeypointIndex& index)
     map_points_[pt->featureType][index] = pt;
 }
 
-void KeyFrame::erase_map_point_match(const size_t &idx, const FeatureType& featType)
+void KeyFrame::erase_map_point_match(const size_t &idx, const FeatureType& feature_type)
 {
     unique_lock<mutex> lock(features_mutex_);
-    map_points_[featType][idx] = nullptr;
+    map_points_[feature_type][idx] = nullptr;
 }
 
 void KeyFrame::erase_map_point_match(const Pt& pMP)
@@ -277,15 +266,15 @@ void KeyFrame::replace_map_point_match(const size_t &idx, const Pt& pMP)
     map_points_[pMP->featureType][idx] = pMP;
 }
 
-set<Pt> KeyFrame::get_map_points(const FeatureType& featType) const
+set<Pt> KeyFrame::get_map_points(const FeatureType& feature_type) const
 {
     unique_lock<mutex> lock(features_mutex_);
     set<Pt> s;
-    for(size_t i=0, iend=map_points_.at(featType).size(); i<iend; i++)
+    for(size_t i=0, iend=map_points_.at(feature_type).size(); i<iend; i++)
     {
-        if(!map_points_.at(featType)[i])
+        if(!map_points_.at(feature_type)[i])
             continue;
-        Pt pMP = map_points_.at(featType)[i];
+        Pt pMP = map_points_.at(feature_type)[i];
         if(!pMP->is_bad())
             s.insert(pMP);
     }
@@ -328,10 +317,10 @@ vector<Pt> KeyFrame::get_map_point_matches(const FeatureType& feat_type) const
     return map_points_.at(feat_type);
 }
 
-Pt KeyFrame::get_map_point(const size_t &idx, const FeatureType& featType) const
+Pt KeyFrame::get_map_point(const size_t &idx, const FeatureType& feature_type) const
 {
     unique_lock<mutex> lock(features_mutex_);
-    return map_points_.at(featType)[idx];
+    return map_points_.at(feature_type)[idx];
 }
 
 void KeyFrame::update_connections()
@@ -662,49 +651,12 @@ void KeyFrame::erase_connection(const Keyframe& keyframe)
         update_best_covisibles();
 }
 
-vector<size_t> KeyFrame::get_features_in_area(const float &x, const float &y, const float &r, const FeatureType& featType) const
+vector<size_t> KeyFrame::get_features_in_area(const float x, const float y, const float r, const FeatureType& feature_type) const
 {
-    auto it1 = N.find(featType);
-    if (it1 == N.end() )
-        return vector<size_t> ();
+    if(N.find(feature_type) == N.end())
+        return {};
 
-    vector<size_t> vIndices;
-    vIndices.reserve(N.at(featType));
-
-    const int nMinCellX = max(0,(int)floor((x-min_x-r)*grid_element_width_inv));
-    if(nMinCellX>=grid_cols)
-        return vIndices;
-
-    const int nMaxCellX = min((int)grid_cols-1,(int)ceil((x-min_x+r)*grid_element_width_inv));
-    if(nMaxCellX<0)
-        return vIndices;
-
-    const int nMinCellY = max(0,(int)floor((y-min_y-r)*grid_element_height_inv));
-    if(nMinCellY>=grid_rows)
-        return vIndices;
-
-    const int nMaxCellY = min((int)grid_rows-1,(int)ceil((y-min_y+r)*grid_element_height_inv));
-    if(nMaxCellY<0)
-        return vIndices;
-
-    for(int ix = nMinCellX; ix<=nMaxCellX; ix++)
-    {
-        for(int iy = nMinCellY; iy<=nMaxCellY; iy++)
-        {
-            const vector<size_t>& vCell = grid_.at(featType)[ix][iy];
-            for(size_t j=0, jend=vCell.size(); j<jend; j++)
-            {
-                const cv::KeyPoint &kpUn = keypoints.at(featType)[vCell[j]];
-                const float distx = kpUn.pt.x-x;
-                const float disty = kpUn.pt.y-y;
-
-                if(fabs(distx)<r && fabs(disty)<r)
-                    vIndices.push_back(vCell[j]);
-            }
-        }
-    }
-
-    return vIndices;
+    return features_in_area(grid_.at(feature_type), keypoints.at(feature_type), *calibration, x, y, r);
 }
 
 bool KeyFrame::is_in_image(const float &x, const float &y) const
@@ -744,28 +696,28 @@ float KeyFrame::compute_scene_median_depth(const int q) const
     return vDepths[nth];
 }
 
-    float KeyFrame::get_keypoint_size(const KeypointIndex &keyPtIdx, const FeatureType& featType) const {
-        return keyPtsSize.at(featType)[keyPtIdx];
+    float KeyFrame::get_keypoint_size(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const {
+        return keyPtsSize.at(feature_type)[keypoint_index];
     }
 
-    float KeyFrame::get_keypoint_sigma2(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    float KeyFrame::get_keypoint_sigma2(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const
     {
-        return 0.5f * (keyPtsSigma2.at(featType)[keyPtIdx](0,0) + keyPtsSigma2.at(featType)[keyPtIdx](1,1));
+        return 0.5f * (keyPtsSigma2.at(feature_type)[keypoint_index](0,0) + keyPtsSigma2.at(feature_type)[keypoint_index](1,1));
     }
 
-    float KeyFrame::get_keypoint_information_1d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    float KeyFrame::get_keypoint_information_1d(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const
     {
-        return 0.5f * (keyPtsInf.at(featType)[keyPtIdx](0,0) + keyPtsInf.at(featType)[keyPtIdx](1,1));
+        return 0.5f * (keyPtsInf.at(feature_type)[keypoint_index](0,0) + keyPtsInf.at(feature_type)[keypoint_index](1,1));
     }
 
-    mat2f KeyFrame::get_keypoint_information_2d(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    mat2f KeyFrame::get_keypoint_information_2d(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const
     {
-        return keyPtsInf.at(featType)[keyPtIdx];
+        return keyPtsInf.at(feature_type)[keypoint_index];
     }
 
-    float KeyFrame::get_keypoint_sigma(const KeypointIndex &keyPtIdx, const FeatureType& featType) const
+    float KeyFrame::get_keypoint_sigma(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const
     {
-        return sqrtf(get_keypoint_sigma2(keyPtIdx, featType));
+        return sqrtf(get_keypoint_sigma2(keypoint_index, feature_type));
     }
 
     KeyFrame::PoseMatrices KeyFrame::get_pose_matrices() const

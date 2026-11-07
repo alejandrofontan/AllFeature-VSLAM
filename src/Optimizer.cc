@@ -53,7 +53,6 @@ void Optimizer::LoadParameters(const cv::FileStorage &fSettings)
 
     readIfPresent("Optimizer.Chi2Mono", params.chi2_2dof);
     readIfPresent("Optimizer.Chi2RGBD", params.chi2_3dof_rgbd);
-    readIfPresent("Optimizer.InvDepthInfo", params.invDepthInfo);
     readIfPresent("Optimizer.PoseOptIterations", params.numItPoseOpt);
     readIfPresent("Optimizer.EssGraphLambdaInit", params.userLambdaInit);
     readIfPresent("Optimizer.EssGraphMinFeat", params.minFeat);
@@ -69,13 +68,15 @@ void Optimizer::LoadParameters(const cv::FileStorage &fSettings)
 }
 
 // Per-observation information (1/variance) for the RGB-D inverse-depth residual, from
-// Frame/KeyFrame::sigma2_inv_depth (Frame::get_depth's quadratic depth-noise model) instead of the
-// single global params.invDepthInfo placeholder every observation used to share. Falls back to
-// that placeholder if sigma2 is non-positive -- shouldn't happen in practice, since Frame::get_depth
-// always sets sigma2_inv_depth alongside inv_depth, but keeps this safe if that invariant ever breaks.
+// Frame/KeyFrame::sigma2_inv_depth (Frame::get_depth's quadratic depth-noise model).
+//
+// sigma2_inv_depth is strictly positive wherever this is called: Frame::get_depth writes it in the
+// same branch as inv_depth, and all three call sites below build the edge only for inv_depth > 0.
+// No fallback, deliberately — a zero would be a broken invariant, and 1/0 killing the optimization
+// with a NaN is a better outcome than silently substituting a different weight.
 static double RGBDInvDepthInformation(float sigma2_inv_depth)
 {
-    return sigma2_inv_depth > 0.0f ? 1.0 / sigma2_inv_depth : Optimizer::params.invDepthInfo;
+    return 1.0 / sigma2_inv_depth;
 }
 
 // Builds and registers a binary (point + pose) g2o edge shared by the mono/RGBD
@@ -99,10 +100,10 @@ static EdgeT* CreateBAEdge(g2o::SparseOptimizer& optimizer, int pointId, int key
         rk->setDelta(huberDelta);
     }
 
-    e->fx = pKFi->fx;
-    e->fy = pKFi->fy;
-    e->cx = pKFi->cx;
-    e->cy = pKFi->cy;
+    e->fx = pKFi->calibration->fx;
+    e->fy = pKFi->calibration->fy;
+    e->cx = pKFi->calibration->cx;
+    e->cy = pKFi->calibration->cy;
 
     optimizer.addEdge(e);
     return e;
@@ -216,7 +217,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
     for(size_t i=0; i<vpMP.size(); i++)
     {
         Pt pMP = vpMP[i];
-        FeatureType featType = pMP->featureType;
+        FeatureType feature_type = pMP->featureType;
 
         if(pMP->is_bad())
             continue;
@@ -241,17 +242,17 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 
             nEdges++;
 
-            const cv::KeyPoint &kpUn = pKF->keypoints.at(featType)[obs.second->projIndex];
-            const float invDepth_i = pKF->inv_depth.at(featType)[obs.second->projIndex];
+            const cv::KeyPoint &kpUn = pKF->keypoints.at(feature_type)[obs.second->projIndex];
+            const float invDepth_i = pKF->inv_depth.at(feature_type)[obs.second->projIndex];
 
             if(invDepth_i > 0.0f)   // RGB-D sensor-depth observation
             {
                 Eigen::Matrix<double,3,1> obs3D;
                 obs3D << kpUn.pt.x, kpUn.pt.y, invDepth_i;
 
-                const float sigma2invDepth_i = pKF->sigma2_inv_depth.at(featType)[obs.second->projIndex];
+                const float sigma2invDepth_i = pKF->sigma2_inv_depth.at(feature_type)[obs.second->projIndex];
                 mat3f infMat = mat3f::Zero();
-                infMat.block<2,2>(0,0) = pKF->get_keypoint_information_2d(obs.second->projIndex, featType);
+                infMat.block<2,2>(0,0) = pKF->get_keypoint_information_2d(obs.second->projIndex, feature_type);
                 infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepth_i));
 
                 CreateBAEdge<g2o::EdgeRGBDSE3ProjectXYZ>(
@@ -264,7 +265,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 
                 CreateBAEdge<g2o::EdgeSE3ProjectXYZ>(
                     optimizer, id, pKF->keyId, obs2D,
-                    pKF->get_keypoint_information_2d(obs.second->projIndex, featType).cast<double>(), params.thHuber_2dof, pKF, bRobust);
+                    pKF->get_keypoint_information_2d(obs.second->projIndex, feature_type).cast<double>(), params.thHuber_2dof, pKF, bRobust);
             }
         }
 
@@ -349,10 +350,10 @@ static EdgeT* CreatePoseOnlyEdge(g2o::SparseOptimizer& optimizer, const MeasT& m
     e->setRobustKernel(rk);
     rk->setDelta(huberDelta);
 
-    e->fx = pFrame->fx;
-    e->fy = pFrame->fy;
-    e->cx = pFrame->cx;
-    e->cy = pFrame->cy;
+    e->fx = pFrame->calibration->fx;
+    e->fy = pFrame->calibration->fy;
+    e->cx = pFrame->calibration->cx;
+    e->cy = pFrame->calibration->cy;
     e->Xw[0] = Xw(0);
     e->Xw[1] = Xw(1);
     e->Xw[2] = Xw(2);
@@ -408,7 +409,7 @@ int Optimizer::pose_optimization(Frame *pFrame, const bool useDepthChannel)
 
     // Set Frame vertex
     g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
-    vSE3->setEstimate(Converter::toSE3Quat(pFrame->Tcw));
+    vSE3->setEstimate(Converter::toSE3Quat(pFrame->get_pose()));
     vSE3->setId(0);
     vSE3->setFixed(false);
     optimizer.addVertex(vSE3);
@@ -491,7 +492,7 @@ int Optimizer::pose_optimization(Frame *pFrame, const bool useDepthChannel)
     int passInliers[4] = {-1,-1,-1,-1};
     for(size_t it=0; it<4; it++)
     {
-        vSE3->setEstimate(Converter::toSE3Quat(pFrame->Tcw));
+        vSE3->setEstimate(Converter::toSE3Quat(pFrame->get_pose()));
         optimizer.initializeOptimization(0);
         optimizer.optimize(its[it]);
 
@@ -553,11 +554,11 @@ int Optimizer::pose_optimization(Frame *pFrame, const bool useDepthChannel)
                 }
             }
         }
-        // Initial (pFrame->Tcw is still the entry pose here) -> optimized pose delta:
+        // Initial (pFrame's pose is still the entry pose here) -> optimized pose delta:
         // large delta = the optimizer moved far (divergence / dragged); tiny delta with
         // uniform pixel errors = the entry pose itself was already inconsistent.
         const g2o::SE3Quat optPose = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0))->estimate();
-        const g2o::SE3Quat delta = optPose * Converter::toSE3Quat(pFrame->Tcw).inverse();
+        const g2o::SE3Quat delta = optPose * Converter::toSE3Quat(pFrame->get_pose()).inverse();
         const double dTrans = delta.translation().norm();
         const double dRotDeg = 2.0 * std::asin(std::min(1.0, delta.rotation().vec().norm())) * 180.0 / M_PI;
 
@@ -605,7 +606,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
     list<Pt> llocalPts;
     for(list<Keyframe>::iterator lit=lLocalKeyFrames.begin() , lend=lLocalKeyFrames.end(); lit!=lend; lit++)
     {
-        for (const auto& ft : (*lit)->featureTypes){
+        for (const auto& ft : (*lit)->feature_types){
             vector<Pt> vpMPs = (*lit)->get_map_point_matches(ft);
             for(vector<Pt>::iterator vit=vpMPs.begin(), vend=vpMPs.end(); vit!=vend; vit++)
             {
@@ -689,7 +690,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
     for(list<Pt>::iterator lit=llocalPts.begin(), lend=llocalPts.end(); lit!=lend; lit++)
     {
         Pt pMP = *lit;
-        const FeatureType featType = pMP->featureType;
+        const FeatureType feature_type = pMP->featureType;
 
         g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
         vPoint->setEstimate(pMP->get_world_pos().cast<double>());
@@ -707,17 +708,17 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
 
             if(!pKFi->is_bad())
             {
-                const cv::KeyPoint &kpUn = pKFi->keypoints.at(featType)[obs.second->projIndex];
-                const float invDepth_i = pKFi->inv_depth.at(featType)[obs.second->projIndex];
+                const cv::KeyPoint &kpUn = pKFi->keypoints.at(feature_type)[obs.second->projIndex];
+                const float invDepth_i = pKFi->inv_depth.at(feature_type)[obs.second->projIndex];
 
                 if(invDepth_i > 0.0f)   // RGB-D sensor-depth observation
                 {
                     Eigen::Matrix<double,3,1> obs3D;
                     obs3D << kpUn.pt.x, kpUn.pt.y, invDepth_i;
 
-                    const float sigma2invDepth_i = pKFi->sigma2_inv_depth.at(featType)[obs.second->projIndex];
+                    const float sigma2invDepth_i = pKFi->sigma2_inv_depth.at(feature_type)[obs.second->projIndex];
                     mat3f infMat = mat3f::Zero();
-                    infMat.block<2,2>(0,0) = pKFi->get_keypoint_information_2d(obs.second->projIndex, featType);
+                    infMat.block<2,2>(0,0) = pKFi->get_keypoint_information_2d(obs.second->projIndex, feature_type);
                     infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepth_i));
 
                     auto* e = CreateBAEdge<g2o::EdgeRGBDSE3ProjectXYZ>(
@@ -732,7 +733,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
 
                     auto* e = CreateBAEdge<g2o::EdgeSE3ProjectXYZ>(
                         optimizer, id, pKFi->keyId, obs2D,
-                        pKFi->get_keypoint_information_2d(obs.second->projIndex, featType).cast<double>(), params.thHuber_2dof, pKFi);
+                        pKFi->get_keypoint_information_2d(obs.second->projIndex, feature_type).cast<double>(), params.thHuber_2dof, pKFi);
 
                     obsMono.push_back({e, pKFi, pMP});
                 }
@@ -1081,8 +1082,8 @@ int Optimizer::OptimizeSim3(Keyframe pKF1, Keyframe pKF2, vector<Pt > &vpMatches
     optimizer.setAlgorithm(solver);
 
     // Calibration
-    const cv::Mat &K1 = pKF1->mK;
-    const cv::Mat &K2 = pKF2->mK;
+    const cv::Mat &K1 = pKF1->calibration->K;
+    const cv::Mat &K2 = pKF2->calibration->K;
 
     // Camera poses
     const mat3f R1w = pKF1->get_rotation();

@@ -122,10 +122,10 @@ int main(int argc, char **argv)
 
     AF_VSLAM::FrameDrawer::exp_folder = exp_folder;
 
-    std::vector<FeatureType> featureTypes{};
+    std::vector<FeatureType> feature_types{};
     for(const auto& feat : features) {
         auto featureType = get_feature_type(feat);
-        featureTypes.push_back(featureType);
+        feature_types.push_back(featureType);
         AF_CONFIG_FIELD("Feature added: ", feat);
     }
     segmentation::SegmentationSettings segmentationSettings{};
@@ -159,7 +159,7 @@ int main(int argc, char **argv)
     AF_VSLAM::System SLAM(calibration_yaml, settings_yaml,
                                   AF_VSLAM::System::MONOCULAR,
                                   verbose,
-                                  featureTypes,
+                                  feature_types,
                                   fixImageSize);
 
     SLAM.SetSequenceInfo(nImages, segmenter != nullptr);

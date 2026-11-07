@@ -26,3 +26,6 @@ feature_models/
 
 # MkDocs build output (pixi run docs-build)
 site/
+
+# captured pixi install/build logs
+install_allfeature-dev.txt

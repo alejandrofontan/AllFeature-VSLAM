@@ -36,12 +36,17 @@ void Tracking::load_camera_parameters(const std::string& calibration_yaml, const
         exit(-1);
     }
 
-    mK = (cv::Mat_<float>(3, 3) << cam["focal_length"][0].as<float>(), 0.0f, cam["principal_point"][0].as<float>(),
+    K = (cv::Mat_<float>(3, 3) << cam["focal_length"][0].as<float>(), 0.0f, cam["principal_point"][0].as<float>(),
             0.0f, cam["focal_length"][1].as<float>(), cam["principal_point"][1].as<float>(),
             0.0f, 0.0f, 1.0f);
 
     image_width_ = cam["image_dimension"][0].as<int>();
     image_height_ = cam["image_dimension"][1].as<int>();
+
+    // Optional: a property of the depth source, not of the lens. Absent for every dataset today,
+    // so the default reproduces the previous hardcoded value exactly (issue #3).
+    if(cam["depth_noise_coeff"])
+        depth_noise_coeff_ = cam["depth_noise_coeff"].as<float>();
 
     if(fix_image_size_){
         // Tracking.ImageWidth/Height set: exactly that size (per-axis scaling of K is valid for the pinhole model:
@@ -64,17 +69,17 @@ void Tracking::load_camera_parameters(const std::string& calibration_yaml, const
         image_width_ = new_width;
         image_height_ = new_height;
 
-        mK.at<float>(0,0) *= scale_width;
-        mK.at<float>(1,1) *= scale_height;
-        mK.at<float>(0,2) *= scale_width;
-        mK.at<float>(1,2) *= scale_height;
+        K.at<float>(0,0) *= scale_width;
+        K.at<float>(1,1) *= scale_height;
+        K.at<float>(0,2) *= scale_width;
+        K.at<float>(1,2) *= scale_height;
     }
 
     // Distortion coefficients (zeros when the calibration declares none)
-    mDistCoef = cv::Mat::zeros(4, 1, CV_32F);
+    distortion_coefficients = cv::Mat::zeros(4, 1, CV_32F);
     if (cam["distortion_type"] && cam["distortion_coefficients"]) {
         std::vector<float> dist_coeffs = cam["distortion_coefficients"].as<std::vector<float>>();
-        mDistCoef = cv::Mat(int(dist_coeffs.size()), 1, CV_32F, dist_coeffs.data()).clone();
+        distortion_coefficients = cv::Mat(int(dist_coeffs.size()), 1, CV_32F, dist_coeffs.data()).clone();
     }
 
     // Camera frequency (Hz)
@@ -91,12 +96,12 @@ void Tracking::load_camera_parameters(const std::string& calibration_yaml, const
     AF_CONFIG_FIELD("cam_model:          ", cam["cam_model"].as<std::string>());
     if (cam["distortion_type"] && cam["distortion_coefficients"])
         AF_CONFIG_FIELD("distortion_type:    ", cam["distortion_type"].as<std::string>());
-    AF_CONFIG_FIELD("fx:                 ", mK.at<float>(0,0));
-    AF_CONFIG_FIELD("fy:                 ", mK.at<float>(1,1));
-    AF_CONFIG_FIELD("cx:                 ", mK.at<float>(0,2));
-    AF_CONFIG_FIELD("cy:                 ", mK.at<float>(1,2));
+    AF_CONFIG_FIELD("fx:                 ", K.at<float>(0,0));
+    AF_CONFIG_FIELD("fy:                 ", K.at<float>(1,1));
+    AF_CONFIG_FIELD("cx:                 ", K.at<float>(0,2));
+    AF_CONFIG_FIELD("cy:                 ", K.at<float>(1,2));
     if (cam["distortion_type"] && cam["distortion_coefficients"])
-        AF_CONFIG_FIELD("distortion_coefficients: ", mDistCoef.t());
+        AF_CONFIG_FIELD("distortion_coefficients: ", distortion_coefficients.t());
     AF_CONFIG_FIELD("fps:                ", fps_);
     if(is_rgb_)
         AF_CONFIG_FIELD("color order:        ", "RGB (ignored if grayscale)");

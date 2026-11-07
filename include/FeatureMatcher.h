@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <opencv2/core/core.hpp>
+#include <opencv2/calib3d.hpp>
 
 #include "Frame.h"
 #include "KeyFrame.h"
@@ -43,7 +44,7 @@ public:
     std::vector<cv::DMatch> filter_matches_by_fundamental(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
         const int maxForRansac = 2000);
 
-    std::map<FeatureType, std::vector<cv::DMatch>> match_descriptors_parallel(const std::vector<FeatureType>& featureTypes,
+    std::map<FeatureType, std::vector<cv::DMatch>> match_descriptors_parallel(const std::vector<FeatureType>& feature_types,
         const std::map<FeatureType, cv::Mat> &desc1, const std::map<FeatureType, cv::Mat> &desc2,
         const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps1, const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps2);
 
@@ -52,7 +53,6 @@ public:
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
         const FeatureType& ft);
 
-    static std::vector<cv::DMatch> swap_match_direction(const std::vector<cv::DMatch>& in);
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -69,7 +69,10 @@ public:
     // Returns the number of new map point assignments made to the frame.
     // Used in: Tracking::track_local_map
     const float projection_match_radius_th = 20.0f;
-    int match_map_points_to_frame(Frame& Frame, const vector<Pt>& map_pts);
+    // `map_pts` are the candidates Tracking found visible and `projections` their projections
+    // into the frame, parallel arrays (Tracking::search_local_points).
+    int match_map_points_to_frame(Frame& Frame, const vector<Pt>& map_pts,
+                                  const vector<cv::Point2f>& projections);
 
     // Matches two keyframes across all feature types to find candidate pairs for triangulation.
     // Reuses cached matches if available; otherwise runs parallel descriptor matching + LMEDS filtering.

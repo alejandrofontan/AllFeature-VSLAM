@@ -81,10 +81,6 @@ Viewer.StreamStatus: 1            # ARStream entry points: 1 = report the SLAM s
 Optimizer.Chi2Mono: 5.991
 Optimizer.Chi2RGBD: 7.815
 
-# RGB-D depth-channel measurement information (1/variance) for the inverse-depth
-# residual -- a starting guess, not yet validated against real sequences (issue #3).
-Optimizer.InvDepthInfo: 20000.0
-
 # PoseOptimization()
 Optimizer.PoseOptIterations: 10
 
@@ -145,12 +141,9 @@ Tracking.ViewingCosLimit: 0.5         # frustum viewing-angle limit for local-po
 # novel and a keyframe is inserted even if tracking is fine; in between the tracking triggers below decide.
 Tracking.KeyframeMinInformation: 0.05 # redundancy band: information below this -> no keyframe (forced keyframes bypass)
 Tracking.LogKeyframeInformation: 0    # 1 = one diagnostic line per tracked frame (information, best explainer, triggers, decision)
-Tracking.RefMatchesRatio: 0.9         # weak tracking: inliers < ratio x reference-KF tracked points
-Tracking.MinInliersForKeyframe: 15    # floor below which a keyframe is not inserted
 Tracking.MinObservationsHigh: 3       # reference-KF match counting: min observations per point
 Tracking.MinObservationsLow: 2        #   relaxed bar while the map is young
 Tracking.YoungMapKeyframes: 2         #   map considered young at <= this many keyframes
-Tracking.MinRefOverlap: 0.7           # insert when frame/reference-KF overlap drops below this
 Tracking.EmergencyInlierDropRatio: 0.5 # emergency keyframe: inliers < ratio x recent median
 Tracking.InliersHistorySize: 30       # recent-inlier reference window (frames)
 Tracking.EmergencyKeyframeCooldown: 10 # min frames between emergency keyframes

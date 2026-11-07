@@ -45,7 +45,7 @@ public:
     Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer, std::shared_ptr<MapDrawer> mapDrawer,
            std::shared_ptr<Tracking> tracker,
            const string &strCalibrationPath, const string &strSettingPath,
-           const vector<FeatureType>& featureTypes);
+           const vector<FeatureType>& feature_types);
 
     // Main thread function. Draw points, keyframes, the current camera pose and the last processed
     // frame. Drawing is refreshed according to the camera fps. We use Pangolin.
@@ -111,7 +111,7 @@ private:
     bool mbStopRequested;
     std::mutex mMutexStop;
 
-    vector<FeatureType> featureTypes;
+    vector<FeatureType> feature_types;
 
 };
 

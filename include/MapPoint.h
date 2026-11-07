@@ -99,20 +99,11 @@ public:
 public:
     PtId ptId;
 
-    static long unsigned int next_id;
+    static inline PtId next_id{0};
     long int first_keyframe_id;
     int num_observations_;
 
-    // Variables used by the tracking. Default-initialized: they are scratch written by
-    // Frame::is_in_frustum, but get_overlap() reads track_proj_x/y for matched points
-    // that were never frustum-projected — without initializers that was an
-    // uninitialized-memory read, and the garbage (recycled heap contents, different
-    // every run) made the overlap-based keyframe decision nondeterministic (issue #16).
-    // -1 keeps never-projected points deterministically outside get_overlap's bounds check.
-    float track_proj_x{-1.0f};
-    float track_proj_y{-1.0f};
-    bool track_in_view{false};
-
+    // Variables used by the tracking
     FrameId last_frame_seen{0};
 
     // Variables used by local mapping
