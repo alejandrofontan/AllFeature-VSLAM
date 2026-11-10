@@ -84,10 +84,10 @@ PnPsolver::PnPsolver(const Frame &F, const vector<Pt> &vpMapPointMatches, const 
         {
             if(!pMP->is_bad())
             {
-                const cv::KeyPoint &kp = F.keypoints.at(feature_type)[i];
+                const cv::KeyPoint &kp = F.features.at(feature_type).keypoints[i];
 
                 mvP2D.push_back(kp.pt);
-                mvSigma2.push_back(F.get_keypoint_sigma2(KeypointIndex(i), feature_type));
+                mvSigma2.push_back(F.features.get_sigma2(KeypointIndex(i), feature_type));
 
                 vec3f Pos = pMP->get_world_pos();
                 mvP3Dw.push_back(cv::Point3f(Pos(0),Pos(1), Pos(2)));

@@ -10,6 +10,7 @@
 
 #include "Calibration.h"
 #include "Types.h"
+#include "Pose.h"
 #include "Image.h"
 #include "FeatureExtractor.h"
 #include "PlaceRecognition.h"
@@ -52,8 +53,12 @@ public:
 
     void set_pose(const mat4f& Tcw_);
 
-    [[nodiscard]] inline const mat4f& get_pose() const {
-        return Tcw;
+    [[nodiscard]] inline const mat4f& get_Tcw() const {
+        return pose_.Tcw;
+    }
+
+    [[nodiscard]] inline const Pose& get_pose() const {
+        return pose_;
     }
 
     // ========================================================================
@@ -66,16 +71,6 @@ public:
     void drop_outlier_points();
 
     [[nodiscard]] std::optional<cv::Point2f> project_if_visible(const Pt& pt, float viewing_cos_limit) const;
-
-    [[nodiscard]] float get_keypoint_sigma2(KeypointIndex keypoint_index, FeatureType feature_type) const
-    {
-        return 0.5f * (keyPtsSigma2.at(feature_type)[keypoint_index](0,0) + keyPtsSigma2.at(feature_type)[keypoint_index](1,1));
-    }
-
-    [[nodiscard]] mat2f get_keypoint_information_2d(KeypointIndex keypoint_index, FeatureType feature_type) const
-    {
-        return keyPtsInf.at(feature_type)[keypoint_index];
-    }
 
     // ========================================================================
     // Spatial index
@@ -98,28 +93,16 @@ public:
 
     std::shared_ptr<const Calibration> calibration;
 
-    std::map<FeatureType, int> N;
-
-    std::map<FeatureType, std::vector<cv::KeyPoint>> raw_keypoints;   // distorted
-    std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;       // undistorted
-    std::map<FeatureType, cv::Mat> descriptors;
-    std::map<FeatureType, std::vector<float>> inv_depth;
-    std::map<FeatureType, std::vector<float>> sigma2_inv_depth;
-    std::map<FeatureType, std::vector<cv::Vec3b>> keypoint_colors;
-
+    FeatureData features{};
+    std::map<FeatureType, std::vector<cv::KeyPoint>> raw_keypoints;
     std::map<FeatureType, std::vector<Pt>> pts;
     std::map<FeatureType, std::vector<bool>> outliers;
-
-    std::map<FeatureType, std::vector<mat2f>> keyPtsSigma2{};
-    std::map<FeatureType, std::vector<mat2f>> keyPtsInf{};
-    std::map<FeatureType, std::vector<float>> keyPtsSize{};
 
     static inline FrameId next_id{0};
     FrameId frame_id{0};
 
     Keyframe ref_keyframe;
 
-    float maxKeyPtSize{};
 
     using Grid = std::array<std::array<std::vector<std::size_t>, FRAME_GRID_ROWS>, FRAME_GRID_COLS>;
 
@@ -144,11 +127,7 @@ private:
     // Pose
     // ========================================================================
 
-    mat4f Tcw{mat4f::Zero()};
-    mat3f Rcw{mat3f::Identity()};
-    vec3f tcw{vec3f::Zero()};
-    mat3f Rwc{mat3f::Identity()};
-    vec3f twc{vec3f::Zero()};
+    Pose pose_;
 
     // ========================================================================
     // Spatial index
@@ -157,6 +136,15 @@ private:
     const Grid& grid_for(FeatureType feature_type) const;
     [[nodiscard]] cv::Point2i pos_in_grid(const cv::KeyPoint& kp) const;
 };
+
+struct Projection
+{
+    cv::Point2f uv;
+    float dist;
+};
+
+[[nodiscard]] std::optional<Projection> project_if_visible(const Pose& pose, const Calibration& cal,
+                                                           const Pt& pt, float viewing_cos_limit);
 
 [[nodiscard]] std::vector<std::size_t> features_in_area(const Frame::Grid& grid,
                                                         const std::vector<cv::KeyPoint>& keypoints,

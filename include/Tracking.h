@@ -354,7 +354,7 @@ protected:
 
     // Rolling inlier history (last params.inliers_history_size tracked frames) — reference for the
     // emergency-keyframe trigger in need_new_keyframe(). Comparing against recent frames
-    // instead of ref_keyframe_->tracked_map_points() avoids the self-inflating feedback loop
+    // instead of ref_keyframe_->count_tracked_map_points() avoids the self-inflating feedback loop
     // where every inserted keyframe grows the reference stat via post-hoc triangulation
     // (see CLAUDE.md, Stop-Induced Keyframe Runaway Investigation).
     std::deque<int> recent_inliers_history_;
@@ -388,7 +388,7 @@ protected:
 
     // relocalize(): P4P protocol size, chi2(0.95, 2 dof), RANSAC round scheduling
     static constexpr int RANSAC_MIN_SET{4};
-    static constexpr float RANSAC_TH2{5.991f};
+    static constexpr float RANSAC_TH2 = ChiSquared::dof2_95;
     static constexpr int RANSAC_ITERATIONS_PER_ROUND{5};
 
     // load_camera_parameters()

@@ -161,7 +161,7 @@ protected:
 
     // create_new_map_points(): 2-DoF chi-square 95% quantile (reprojection gate),
     // and the numerical zero for the homogeneous scale of a triangulated point
-    static constexpr float CHI2_2DOF{5.991f};
+    static constexpr float CHI2_2DOF = ChiSquared::dof2_95;
     static constexpr float HOMOGENEOUS_W_EPSILON{1e-12f};
 
     // One full mapping iteration for the keyframe at the head of the queue (see run())

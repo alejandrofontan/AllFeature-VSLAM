@@ -43,6 +43,54 @@ void Map::add_map_point(Pt pMP)
     mspMapPoints.insert(pMP);
 }
 
+Pt Map::make_map_point(const vec3f& world_pos, const Keyframe& ref_keyframe, KeypointIndex ref_index,
+                       FeatureType feature_type,
+                       const Keyframe& proj_keyframe, KeypointIndex proj_index)
+{
+    auto pt = make_shared<MapPoint>(world_pos, ref_keyframe, this_map(), feature_type,
+                                    ref_keyframe->features.at(feature_type).colors.at(ref_index));
+
+    std::vector<std::pair<Keyframe, KeypointIndex>> observations{{ref_keyframe, ref_index}};
+    if(proj_keyframe && proj_keyframe != ref_keyframe)   // twice: one observation, two slots written
+        observations.emplace_back(proj_keyframe, proj_index);
+
+    pt->add_observations(observations);
+
+    // Claim the slots one at a time; on a loss, release the ones already taken and let pt die
+    // unreferenced. It never reached this map, and erase_map_point_match clears a slot only if
+    // it still holds pt, so nothing another thread put there is disturbed.
+    std::vector<std::pair<Keyframe, KeypointIndex>> published;
+    published.reserve(observations.size());
+    for(const auto& [keyframe, index] : observations)
+    {
+        if(!keyframe->add_map_point(pt, index))
+        {
+            for(const auto& [taken_keyframe, taken_index] : published)
+                taken_keyframe->erase_map_point_match(pt, taken_index);
+            return nullptr;
+        }
+        published.emplace_back(keyframe, index);
+    }
+
+    add_map_point(pt);
+    return pt;
+}
+
+Pt Map::create_monocular_map_point(const vec3f& world_pos,
+                                   const Keyframe& ref_keyframe, KeypointIndex ref_index,
+                                   const Keyframe& proj_keyframe, KeypointIndex proj_index,
+                                   FeatureType feature_type)
+{
+    return make_map_point(world_pos, ref_keyframe, ref_index, feature_type, proj_keyframe, proj_index);
+}
+
+Pt Map::create_map_point(const vec3f& world_pos,
+                         const Keyframe& ref_keyframe, KeypointIndex ref_index,
+                         FeatureType feature_type)
+{
+    return make_map_point(world_pos, ref_keyframe, ref_index, feature_type, nullptr, 0);
+}
+
 void Map::EraseMapPoint(Pt pMP)
 {
     unique_lock<mutex> lock(mMutexMap);
@@ -135,45 +183,6 @@ void Map::clear()
         mvpReferenceMapPoints.clear();
         keyframe_origins_.clear();
     }
-}
-
-float Map::NormalizeMap()
-{
-    //unique_lock<mutex> lock(mMutexMap);
-    std::vector<float> depths;
-    depths.reserve(mspKeyFrames.size());
-    for(const auto& keyframe: mspKeyFrames)
-    {
-        float medianDepth = keyframe->compute_scene_median_depth(2);
-        depths.push_back(medianDepth);
-    }
-    float medianDepth = 0.0f;
-    if(!depths.empty())
-    {
-        std::sort(depths.begin(), depths.end());
-        medianDepth = depths[0.5f * (depths.size() - 1)];
-    }
-
-    for(const auto& keyframe: mspKeyFrames)
-    {
-        mat4f Tc2w = keyframe->get_pose();
-        Tc2w.block<3,1>(0,3) /= medianDepth;
-        keyframe->set_pose(Tc2w);
-
-    }
-
-    std::vector<Pt> mspMapPoints_ = get_all_map_points();
-    for(size_t iMP=0; iMP<mspMapPoints_.size(); iMP++)
-    {
-        Pt pMP = mspMapPoints_[iMP];
-        if(pMP)
-        {
-            pMP->set_world_pos(pMP->get_world_pos()/medianDepth);
-        }
-    }
-
-    std::cout << "Normalizing map with median depth = " << medianDepth << std::endl;
-    return medianDepth;
 }
 }
 //namespace ORB_SLAM

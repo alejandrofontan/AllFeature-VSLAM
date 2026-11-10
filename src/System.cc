@@ -56,6 +56,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     }
 
     Optimizer::LoadParameters(fsSettings);
+    KeyFrame::LoadParameters(fsSettings);
     Tracking::LoadParameters(fsSettings);
     LocalMapping::LoadParameters(fsSettings);
     LoopClosing::LoadParameters(fsSettings);
@@ -615,7 +616,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.
-    //cv::Mat Two = vpKFs[0]->get_pose_inverse();
+    //cv::Mat Two = vpKFs[0]->get_Twc();
 
     std::ofstream f(filename.c_str());
     f.imbue(std::locale::classic());
@@ -628,14 +629,17 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 
         Keyframe pKF = vpKFs[i];
 
-       // pKF->set_pose(pKF->get_pose()*Two);
+       // pKF->set_pose(pKF->get_Tcw()*Two);
 
         if(pKF->is_bad())
             continue;
 
-        mat3f R = pKF->get_rotation().transpose();
+        // One lock: Rwc is the cached transpose of Rcw and twc the camera centre, both from
+        // the same pose -- the two getters took pose_mutex_ separately
+        const Pose pose = pKF->get_pose();
+        const mat3f& R = pose.Rwc;
         Eigen::Quaternionf q(R);
-        vec3f t = pKF->get_camera_center();
+        const vec3f& t = pose.twc;
 
         long long ts_ns = static_cast<long long>(std::round(pKF->timestamp * 1e9));
         f << std::fixed << std::setprecision(9) << ts_ns << ','

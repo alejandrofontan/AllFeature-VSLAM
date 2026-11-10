@@ -117,6 +117,7 @@ set(SRCS_ALLFEATURE
         src/PnPsolver.cc
         src/Frame.cc
         src/Calibration.cc
+        src/Pose.cc
         src/Sim3Solver.cc
         src/Initializer.cc
         src/Viewer.cc

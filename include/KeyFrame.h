@@ -1,176 +1,162 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
+#pragma once
 
-#ifndef KEYFRAME_H
-#define KEYFRAME_H
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <vector>
 
-#include "MapPoint.h"
-#include "FeatureExtractor.h"
+#include <opencv2/core.hpp>
+
+#include "Types.h"
+#include "Pose.h"
 #include "Frame.h"
 #include "PlaceRecognition.h"
-#include "FeatureFactory.h"
-
-#include <mutex>
-#include <set>
 
 
 namespace AF_VSLAM
 {
-// Legacy ORB-SLAM2 headers use unqualified std types throughout; this using-directive
-// previously arrived transitively through the (now removed) DBoW2 vocabulary headers.
 using namespace std;
 
 class Map;
 class Frame;
 
 class KeyFrame;
-typedef shared_ptr<AF_VSLAM::KeyFrame> Keyframe;
-class MapPoint;
-typedef shared_ptr<AF_VSLAM::MapPoint> Pt;
+typedef std::shared_ptr<AF_VSLAM::KeyFrame> Keyframe;
 
-// Keyframe set ordered by keyId instead of the shared_ptr's pointer value: pointer
-// order differs between runs (allocator/ASLR), which made iteration order — and
-// every tie broken by it (spanning-tree reassignment, local-map expansion) —
-// nondeterministic (issue #16). Defined out-of-line below the class (needs keyId).
+class MapPoint;
+typedef std::shared_ptr<AF_VSLAM::MapPoint> Pt;
+
 struct KeyframeIdLess
 {
     bool operator()(const Keyframe& a, const Keyframe& b) const;
 };
 using KeyframeIdSet = std::set<Keyframe, KeyframeIdLess>;
 
+struct Connection
+{
+    Keyframe keyframe;
+    int weight{};
+};
+
+struct PtIdLess
+{
+    bool operator()(const Pt& a, const Pt& b) const;
+};
+
+
+[[nodiscard]] bool contains_map_point(const std::vector<Pt>& sorted_points, const Pt& pt);
+
 class KeyFrame : public std::enable_shared_from_this<KeyFrame>
 {
 public:
-    KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> place_recognition);
+
+    // ========================================================================
+    // Construction
+    // ========================================================================
+
+    KeyFrame(Frame& frame, std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognition> place_recognition);
+
     std::shared_ptr<KeyFrame> this_keyframe() {
         return shared_from_this();
     }
 
-    // Pose functions
-    void set_pose(const mat4f &Tcw_);
-    mat4f get_pose() const;
-    mat4f get_pose_inverse() const;
-    vec3f get_camera_center() const;
-    mat3f get_rotation() const;
-    vec3f get_translation() const;
-    // The pose and its blocks from ONE lock acquisition (a consistent snapshot, unlike
-    // successive get_* calls); structured-binding order: Tcw, Twc, Rcw, Rwc, tcw, twc
-    struct PoseMatrices { mat4f Tcw, Twc; mat3f Rcw, Rwc; vec3f tcw, twc; };
-    PoseMatrices get_pose_matrices() const;
+    // ========================================================================
+    // Pose
+    // ========================================================================
 
-    // Compute the global descriptor with the active VPR backend (MegaLoc image
-    // embedding — which then releases `image`); no-op when VPR is inactive.
+    void set_pose(const mat4f& Tcw_);
+
+    [[nodiscard]] Pose get_pose() const;
+
+    [[nodiscard]] mat4f get_Tcw() const;
+    [[nodiscard]] mat4f get_Twc() const;
+    [[nodiscard]] mat3f get_Rcw() const;
+    [[nodiscard]] vec3f get_tcw() const;
+    [[nodiscard]] vec3f get_twc() const;
+
+    // ========================================================================
+    // Per-keyframe queries
+    // ========================================================================
+
     void compute_global_descriptor();
 
-    // Similarity of the two keyframes' global descriptors through the VPR backend
-    // (MegaLoc: cosine). NaN when VPR is inactive. Hook for
-    // appearance-based keyframe culling.
-    float vpr_similarity(const Keyframe& other) const;
+    [[nodiscard]] std::optional<float> compute_scene_median_depth() const;
 
-    // Covisibility graph functions
-    void add_connection(const Keyframe& pKF, const int &weight);
-    void erase_connection(const Keyframe& pKF);
-    void update_connections();
-    void update_best_covisibles();
-    map<KeyframeId,Keyframe> get_connected_keyframes() const;
-    std::vector<Keyframe > get_covisible_keyframes() const;
-    std::vector<Keyframe> get_best_covisibility_keyframes(const int &N) const;
-    std::vector<Keyframe> get_covisibles_by_weight(const int &w) const;
-    int get_weight(const Keyframe& pKF) const;
+    // ========================================================================
+    // Spatial index
+    // ========================================================================
 
-    // Spanning tree functions
-    void add_child(const Keyframe& pKF);
-    void erase_child(const Keyframe& pKF);
-    void change_parent(const Keyframe& pKF);
-    KeyframeIdSet get_children() const;
-    Keyframe get_parent() const;
-    bool has_child(const Keyframe& pKF) const;
-
-    // Loop Edges
-    void add_loop_edge(const Keyframe& pKF);
-    KeyframeIdSet get_loop_edges() const;
-
-    // MapPoint observation functions
-    Pt create_monocular_map_point(const vec3f& worldPos,
-                             const KeypointIndex& refIndex,
-                             const Keyframe& projKeyframe, const KeypointIndex& projIndex,
-                             const FeatureType& featureType);
-    Pt create_map_point(const vec3f& worldPos,
-                      const KeypointIndex& refIndex,
-                      const FeatureType& featureType);
-
-    void add_map_point(const Pt& pt, const KeypointIndex& index);
-    void erase_map_point_match(const size_t &idx, const FeatureType& feature_type);
-    void erase_map_point_match(const Pt& pMP);
-    void replace_map_point_match(const size_t &idx, const Pt& pMP);
-    std::set<Pt> get_map_points(const FeatureType& feature_type) const;
-    std::vector<Pt> get_map_point_matches(const FeatureType& feat_type) const;
-    int tracked_map_points(const int &minObs) const;
-    Pt get_map_point(const size_t &idx, const FeatureType& feature_type) const;
-
-    // KeyPoint functions
     [[nodiscard]] std::vector<size_t> get_features_in_area(float x, float y, float r, const FeatureType& feature_type) const;
 
-    // Image
-    bool is_in_image(const float &x, const float &y) const;
+    // ========================================================================
+    // Map points
+    // ========================================================================
 
-    // Enable/Disable bad flag changes
-    void set_not_erase();
-    void set_erase();
+    [[nodiscard]] bool add_map_point(const Pt& pt, KeypointIndex index);
+    void erase_map_point_match(const Pt& pt, KeypointIndex index);
+    void erase_map_point_match(const Pt& pt);
+    bool replace_map_point_match(const Pt& pt, KeypointIndex index, const Pt& replacement);
+    [[nodiscard]] std::vector<Pt> get_good_map_points(FeatureType feature_type) const;
+    [[nodiscard]] std::vector<Pt> get_map_point_matches(FeatureType feature_type) const;
+    [[nodiscard]] Pt get_map_point(KeypointIndex index, FeatureType feature_type) const;
+    [[nodiscard]] int count_tracked_map_points(int min_observations) const;
 
-    // Set/check bad flag
+    // ========================================================================
+    // Covisibility graph
+    // ========================================================================
+
+    static inline int min_covisibility_weight{15};
+
+    static void LoadParameters(const cv::FileStorage &fSettings);
+
+    void update_connections();
+    void add_connection(const Keyframe& pKF, int weight);
+    void erase_connection(const Keyframe& pKF);
+    [[nodiscard]] std::vector<Keyframe> get_best_covisibility_keyframes(int N) const;
+    [[nodiscard]] std::vector<Keyframe> get_covisibles_by_weight(int w) const;
+    [[nodiscard]] int get_weight(const Keyframe& pKF) const;
+    [[nodiscard]] std::map<KeyframeId,Keyframe> get_connected_keyframes() const;
+    [[nodiscard]] std::vector<Keyframe> get_covisible_keyframes() const;
+    [[nodiscard]] std::vector<Connection> get_covisible_connections() const;
+
+    // ========================================================================
+    // Spanning tree and loop edges
+    // ========================================================================
+
+    void add_child(const Keyframe& keyframe);
+    void erase_child(const Keyframe& keyframe);
+    void set_parent(const Keyframe& keyframe);
+    void add_loop_edge(const Keyframe& keyframe);
+    [[nodiscard]] bool has_child(const Keyframe& keyframe) const;
+    [[nodiscard]] std::vector<Keyframe> get_children() const;
+    [[nodiscard]] Keyframe get_parent() const;
+    [[nodiscard]] KeyframeIdSet get_loop_edges() const;
+
+    // ========================================================================
+    // Lifecycle
+    // ========================================================================
+
+    void pin();
+    void unpin();
     void set_bad_flag();
-    bool is_bad() const;
-
-    // Compute Scene Depth (q=2 median). Used in monocular. -1 when the keyframe has no map points.
-    float compute_scene_median_depth(const int q) const;
-
-    static bool weight_greater( int a, int b){
-        return a>b;
-    }
-
+    [[nodiscard]] bool is_bad() const;
+    [[nodiscard]] bool is_origin() const { return keyId == 0; }
     static bool less_by_id(const Keyframe& pKF1, const Keyframe& pKF2){
         return pKF1->keyId < pKF2->keyId;
     }
 
-    [[nodiscard]] float get_keypoint_size(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const;
-    [[nodiscard]] float get_keypoint_sigma2(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const;
-    [[nodiscard]] float get_keypoint_information_1d(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const;
-    [[nodiscard]] mat2f get_keypoint_information_2d(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const;
-    [[nodiscard]] float get_keypoint_sigma(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const;
-
-    // The following variables are accesed from only 1 thread or never change (no mutex needed),
-    // except the two match caches (see cache_mutex_).
-public:
+    // ========================================================================
+    // Data
+    // ========================================================================
 
     std::vector<FeatureType> feature_types{};
-    // Match cache, keyed by the other (key)frame's frame_id, then by feature type, with per-type keypoint
-    // indices (queryIdx: this keyframe, trainIdx: the other one). Written by Tracking (match_keyframe_to_frame),
-    // LocalMapping (cache_neighbor_matches, match_keyframes) and LoopClosing (match_keyframes) and read by them:
-    // every access holds cache_mutex_, a leaf lock (take no other lock while holding it; two keyframes' caches
-    // together with std::scoped_lock). Never pruned: entries live as long as the keyframe.
     std::map<FrameId, std::map<FeatureType, std::vector<cv::DMatch>>> cache_matched_pairs_feat_type{};
     mutable std::mutex cache_mutex_;
 
     static inline KeyframeId next_id{0};
-    static std::mutex set_bad_mutex_;   // serialises set_bad_flag's spanning-tree update across threads (see there)
+    static std::mutex set_bad_mutex_; // serialises set_bad_flag's spanning-tree update across threads (see there)
     KeyframeId keyId;
     const long unsigned int frame_id;
 
@@ -184,89 +170,61 @@ public:
     long unsigned int ba_fixed_for_keyframe;
 
     // Variables used by loop closing
-    mat4f Tcw_gba{mat4f::Identity()};          // Eigen leaves matrices uninitialized: never read garbage poses
+    mat4f Tcw_gba{mat4f::Identity()}; // Eigen leaves matrices uninitialized: never read garbage poses
     mat4f Tcw_before_gba{mat4f::Identity()};
     long unsigned int ba_global_for_keyframe;
 
-    // The camera and everything derived from it (Calibration.h), shared with the Frame this
-    // keyframe was made from.
     std::shared_ptr<const Calibration> calibration;
 
-    // Number of KeyPoints
-    const std::map<FeatureType, int> N;
+    const FeatureData features;
 
-    // KeyPoints, stereo coordinate and descriptors (all associated by an index). Undistorted only:
-    // the distorted positions a Frame keeps in raw_keypoints are used while the frame is being
-    // built (depth and colour sampling) and by optical flow, none of which runs on a keyframe.
-    const std::map<FeatureType, std::vector<cv::KeyPoint>> keypoints;
-    const std::map<FeatureType, std::vector<float>> inv_depth; // inverse depth; 0 where no valid depth
-    const std::map<FeatureType, std::vector<float>> sigma2_inv_depth; // variance of inv_depth; 0 where no valid depth
-    const std::map<FeatureType, std::vector<cv::Vec3b>> keypoint_colors; // BGR under each keypoint (Frame::get_colors); map points created here inherit it
-    std::map<FeatureType, cv::Mat> descriptors;
-
-
-    // Image-embedding VPR (MegaLoc): the keyframe's image (OpenCV-native BGR, shared
-    // header from the Frame) and the frame's already-computed global descriptor (if
-    // Tracking embedded the frame for the keyframe-information decision) live only until
-    // compute_global_descriptor() has stored the descriptor in placecell
-    // (System::place_cell, keyed by frame_id) — the descriptor is preferred, the image is
-    // embedded only when no descriptor came with the frame; both are released afterwards.
-    // Read the stored descriptor via place_cell->descriptor(frame_id).
     cv::Mat image;
     Eigen::VectorXf global_descriptor;
 
-    // Scale
-    std::map<FeatureType, vector<mat2f>> keyPtsSigma2{};
-    std::map<FeatureType, vector<mat2f>> keyPtsInf{};
-    std::map<FeatureType, vector<float>> keyPtsSize{};
-    float maxKeyPtSize{};
-
-    // Image bounds, TRUNCATED TO int from the calibration's float bounds — which is what this
-    // has always done (they were narrowed on the way in from the Frame). Frame tests the same
-    // bounds as floats, so the two disagree by up to a pixel wherever the undistorted bounds
-    // are not whole; kept as-is here so this refactor moves no values. Worth reconciling.
-    const int min_x;
-    const int min_y;
-    const int max_x;
-    const int max_y;
-
-    // The following variables need to be accessed trough a mutex to be thread safe.
 protected:
 
-    // SE3 Pose and camera center
-    mat4f Tcw;
-    mat4f Twc;
-    vec3f twc;
+    // ========================================================================
+    // Pose
+    // ========================================================================
 
-    // MapPoints associated to keypoints
+    Pose pose_;
+
+    // ========================================================================
+    // Data
+    // ========================================================================
+
     std::map<FeatureType, std::vector<Pt>> map_points_;
 
-    // Visual place recognition backend (owns the keyframe database this keyframe is
-    // registered in; erased from it in set_bad_flag)
-    shared_ptr<PlaceRecognition> place_recognition_;
+    std::shared_ptr<PlaceRecognition> place_recognition_;
 
-    // Grid over the image to speed up feature matching
-    std::map<FeatureType, Frame::Grid> grid_;
+    const std::vector<Connection>& ordered_connections() const;
+    void rebuild_ordered_connections() const;
 
-    std::map<KeyframeId, Keyframe> connected_keyframes_;
-    std::map<KeyframeId,int> connected_keyframe_weights_;
-    std::vector<Keyframe> ordered_connected_keyframes_;
-    std::vector<int> ordered_weights_;
+    std::map<KeyframeId, Connection> connections_;
+    mutable std::vector<Connection> ordered_connections_;
+    mutable bool ordered_dirty_{true};
 
-    // Spanning Tree and Loop Edges
     bool first_connection_;
     Keyframe parent_;
     KeyframeIdSet children_;
     KeyframeIdSet loop_edges_;
 
-    // Bad flags
-    bool not_erase_;
-    bool to_be_erased_;
+    bool pinned_;          // held against culling; see pin()
+    bool cull_requested_;   // set_bad_flag was called while pinned, and is owed
     bool bad_;
 
-    shared_ptr<Map> map_;
+    std::shared_ptr<Map> map_;
 
-    // mutable: pure queries lock them and stay const
+    // ========================================================================
+    // Spatial index
+    // ========================================================================
+
+    std::map<FeatureType, Frame::Grid> grid_;
+
+    // ========================================================================
+    // Locks
+    // ========================================================================
+
     mutable std::mutex pose_mutex_;
     mutable std::mutex connections_mutex_;
     mutable std::mutex features_mutex_;
@@ -277,6 +235,5 @@ inline bool KeyframeIdLess::operator()(const Keyframe& a, const Keyframe& b) con
     return a->keyId < b->keyId;
 }
 
-} //namespace ORB_SLAM
 
-#endif // KEYFRAME_H
+}

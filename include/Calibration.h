@@ -15,6 +15,15 @@ struct Calibration
                 float depth_noise_coeff_);
 
 
+    // The image-bounds test, half-open [min, max): max_x is the image WIDTH in the
+    // undistorted case (see the constructor), so a coordinate of exactly max_x is outside a
+    // [0, w) pixel grid. One definition, used by project_if_visible and by the matcher --
+    // KeyFrame and Frame disagreed about the upper bound before (closed vs half-open).
+    [[nodiscard]] bool is_in_image(const float x, const float y) const
+    {
+        return x >= min_x && x < max_x && y >= min_y && y < max_y;
+    }
+
     [[nodiscard]] bool has_distortion() const;
     [[nodiscard]] std::vector<cv::Point2f> undistort(const std::vector<cv::Point2f>& points) const;
 

@@ -173,7 +173,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     if(state_ == TrackingState::OK)
         grab_image_times_[profiler.total_ms()]++;
 
-    return current_frame_.get_pose();
+    return current_frame_.get_Tcw();
 }
 
 void Tracking::track()
@@ -244,7 +244,7 @@ void Tracking::track()
         ++num_tracked_frames_;
         log_heartbeat();
 
-        map_drawer_->set_current_camera_pose(current_frame_.get_pose());
+        map_drawer_->set_current_camera_pose(current_frame_.get_Tcw());
 
         // Check if we need to insert a new keyframe
         if(need_new_keyframe())
@@ -296,9 +296,9 @@ void Tracking::track()
 
 void Tracking::store_relative_pose()
 {
-    const mat4f& Tcw = current_frame_.get_pose();
+    const mat4f& Tcw = current_frame_.get_Tcw();
     if(Tcw(3,3) == 1.0f)
-        last_frame_relative_pose_ = Tcw * current_frame_.ref_keyframe->get_pose_inverse();
+        last_frame_relative_pose_ = Tcw * current_frame_.ref_keyframe->get_Twc();
 }
 
 void Tracking::monocular_initialization()
@@ -315,7 +315,7 @@ void Tracking::attempt_monocular_initialization()
     const auto total_keypoints = [this](const Frame& frame) {
         size_t n = 0;
         for (const auto& ft : feature_types_)
-            n += frame.keypoints.at(ft).size();
+            n += frame.features.at(ft).keypoints.size();
         return n;
     };
 
@@ -353,14 +353,14 @@ void Tracking::attempt_monocular_initialization()
         size_t offset2 = 0;
         for (const auto& ft : feature_types_) {
             const size_t offset1 = init_matches_.size();
-            init_matches_.resize(offset1 + initial_frame_.keypoints.at(ft).size(), -1);
+            init_matches_.resize(offset1 + initial_frame_.features.at(ft).keypoints.size(), -1);
             auto& matches_ft = matches_per_feature_[ft];
-            matches_ft.assign(initial_frame_.keypoints.at(ft).size(), -1);
+            matches_ft.assign(initial_frame_.features.at(ft).keypoints.size(), -1);
             for (const auto& m : matched_pairs.at(ft)) {
                 matches_ft[m.first] = m.second;
                 init_matches_[offset1 + m.first] = m.second + offset2;
             }
-            offset2 += current_frame_.keypoints.at(ft).size();
+            offset2 += current_frame_.features.at(ft).keypoints.size();
         }
 
         // Check if there are enough correspondences (pooled over all feature types)
@@ -380,8 +380,8 @@ void Tracking::attempt_monocular_initialization()
             std::vector<float> disparities;
             disparities.reserve(num_matches);
             for (const auto& ft : feature_types_) {
-                const auto& keypoints1 = initial_frame_.keypoints.at(ft);
-                const auto& keypoints2 = current_frame_.keypoints.at(ft);
+                const auto& keypoints1 = initial_frame_.features.at(ft).keypoints;
+                const auto& keypoints2 = current_frame_.features.at(ft).keypoints;
                 for (const auto& m : matched_pairs.at(ft))
                     disparities.push_back(static_cast<float>(cv::norm(keypoints2[m.second].pt - keypoints1[m.first].pt)));
             }
@@ -418,9 +418,6 @@ void Tracking::create_initial_map()
     Keyframe keyframe_ini = std::make_shared<KeyFrame>(initial_frame_, map_, place_recognition_);
     Keyframe keyframe_cur = std::make_shared<KeyFrame>(current_frame_, map_, place_recognition_);
 
-    keyframe_ini->compute_global_descriptor();
-    keyframe_cur->compute_global_descriptor();
-
     map_->add_keyframe(keyframe_ini);
     map_->add_keyframe(keyframe_cur);
 
@@ -434,8 +431,11 @@ void Tracking::create_initial_map()
             if (init_matches_[flat_index] < 0)
                 continue;
 
-            Pt map_point = keyframe_cur->create_monocular_map_point(init_points3d_[flat_index], KeypointIndex(matches[i]),
-                                                                 keyframe_ini, KeypointIndex(i), ft);
+            Pt map_point = map_->create_monocular_map_point(init_points3d_[flat_index], keyframe_cur,
+                                                            KeypointIndex(matches[i]),
+                                                            keyframe_ini, KeypointIndex(i), ft);
+            if (!map_point)
+                continue;   // a slot was taken between the emptiness check and the write
             current_frame_.pts.at(ft)[matches[i]] = map_point;
             current_frame_.outliers.at(ft)[matches[i]] = false;
             num_triangulated++;
@@ -450,7 +450,7 @@ void Tracking::create_initial_map()
     // scale during the optimization itself.
     std::vector<float> depth_ratios;
     for (const auto& ft : feature_types_) {
-        const auto& inv_depth_kf = keyframe_ini->inv_depth.at(ft);
+        const auto& inv_depth_kf = keyframe_ini->features.at(ft).inv_depth;
         const std::vector<Pt> map_points = keyframe_ini->get_map_point_matches(ft);
         for (size_t i = 0; i < map_points.size(); i++)
         {
@@ -476,7 +476,7 @@ void Tracking::create_initial_map()
 
         // Rescale the baseline and the triangulated points to metric now, so that
         // metric depth back-projections below are scale-consistent with them
-        mat4f Tc2w = keyframe_cur->get_pose();
+        mat4f Tc2w = keyframe_cur->get_Tcw();
         Tc2w.block<3,1>(0,3) *= scale;
         keyframe_cur->set_pose(Tc2w);
         for (const auto& ft : feature_types_)
@@ -491,17 +491,17 @@ void Tracking::create_initial_map()
         // they are refined together with everything else.
         const float cx = calibration_->cx, cy = calibration_->cy;
         const float invfx = calibration_->invfx, invfy = calibration_->invfy;
-        const mat4f Twc_cur = keyframe_cur->get_pose_inverse();
+        const mat4f Twc_cur = keyframe_cur->get_Twc();
         const mat3f Rwc_cur = Twc_cur.block<3,3>(0,0);
         const vec3f twc_cur = Twc_cur.block<3,1>(0,3);
 
         flat_index = 0;
         for (const auto& ft : feature_types_) {
             const auto& matches = matches_per_feature_.at(ft);
-            const auto& inv_depth_ini = keyframe_ini->inv_depth.at(ft);
-            const auto& inv_depth_cur = keyframe_cur->inv_depth.at(ft);
-            const auto& keypoints_ini = keyframe_ini->keypoints.at(ft);
-            const auto& keypoints_cur = keyframe_cur->keypoints.at(ft);
+            const auto& inv_depth_ini = keyframe_ini->features.at(ft).inv_depth;
+            const auto& inv_depth_cur = keyframe_cur->features.at(ft).inv_depth;
+            const auto& keypoints_ini = keyframe_ini->features.at(ft).keypoints;
+            const auto& keypoints_cur = keyframe_cur->features.at(ft).keypoints;
             for (size_t i = 0; i < matches.size(); i++, flat_index++) {
                 if (matches[i] < 0 || init_matches_[flat_index] >= 0)
                     continue; // no match, or already triangulated
@@ -522,8 +522,10 @@ void Tracking::create_initial_map()
                 else
                     continue; // matched, but neither frame has depth here
 
-                Pt map_point = keyframe_cur->create_monocular_map_point(world_pos, KeypointIndex(j),
-                                                                        keyframe_ini, KeypointIndex(i), ft);
+                Pt map_point = map_->create_monocular_map_point(world_pos, keyframe_cur, KeypointIndex(j),
+                                                                keyframe_ini, KeypointIndex(i), ft);
+                if (!map_point)
+                    continue;   // a slot was taken between the emptiness check and the write
                 current_frame_.pts.at(ft)[j] = map_point;
                 current_frame_.outliers.at(ft)[j] = false;
                 num_depth_completed++;
@@ -536,12 +538,12 @@ void Tracking::create_initial_map()
 
     Optimizer::global_bundle_adjustment(map_, params.init_gba_iterations);
 
-    const float median_depth = keyframe_ini->compute_scene_median_depth(2);
-    const int tracked_map_points = keyframe_cur->tracked_map_points(1);
+    const std::optional<float> median_depth = keyframe_ini->compute_scene_median_depth();
+    const int tracked_map_points = keyframe_cur->count_tracked_map_points(1);
 
-    if (median_depth < 0 || tracked_map_points < params.init_min_tracked_points)
+    if (!median_depth || *median_depth < 0 || tracked_map_points < params.init_min_tracked_points)
     {
-        AF_WARN("create_initial_map: degenerate initialization (median_depth=" << median_depth
+        AF_WARN("create_initial_map: degenerate initialization (median_depth=" << median_depth.value_or(-1.0f)
                 << ", tracked map points=" << tracked_map_points << " < " << params.init_min_tracked_points
                 << ") — resetting...");
         reset_after_failed_initialization_ = true;   // run at the start of the next frame, outside the map lock
@@ -552,8 +554,8 @@ void Tracking::create_initial_map()
     // "median scene depth = 1" convention, from the BA-refined map as before
     if (!metric_scale)
     {
-        const float inv_median_depth = 1.0f / median_depth;
-        mat4f Tc2w = keyframe_cur->get_pose();
+        const float inv_median_depth = 1.0f / *median_depth;
+        mat4f Tc2w = keyframe_cur->get_Tcw();
         Tc2w.block<3,1>(0,3) *= inv_median_depth;
         keyframe_cur->set_pose(Tc2w);
         for (const auto& ft : feature_types_)
@@ -572,20 +574,22 @@ void Tracking::create_initial_map()
     {
         const float cx = calibration_->cx, cy = calibration_->cy;
         const float invfx = calibration_->invfx, invfy = calibration_->invfy;
-        const mat4f Twc_cur = keyframe_cur->get_pose_inverse();
+        const mat4f Twc_cur = keyframe_cur->get_Twc();
         const mat3f Rwc_cur = Twc_cur.block<3,3>(0,0);
         const vec3f twc_cur = Twc_cur.block<3,1>(0,3);
 
         for (const auto& ft : feature_types_) {
-            const auto& inv_depth_cur = keyframe_cur->inv_depth.at(ft);
-            const auto& keypoints_cur = keyframe_cur->keypoints.at(ft);
+            const auto& inv_depth_cur = keyframe_cur->features.at(ft).inv_depth;
+            const auto& keypoints_cur = keyframe_cur->features.at(ft).keypoints;
             for (size_t j = 0; j < inv_depth_cur.size(); j++) {
                 if (inv_depth_cur[j] <= 0.0f || keyframe_cur->get_map_point(j, ft))
                     continue;
                 const cv::KeyPoint& kp = keypoints_cur[j];
                 const vec3f xn{(kp.pt.x - cx) * invfx, (kp.pt.y - cy) * invfy, 1.0f};
-                Pt map_point = keyframe_cur->create_map_point(Rwc_cur * (xn / inv_depth_cur[j]) + twc_cur,
-                                                              KeypointIndex(j), ft);
+                Pt map_point = map_->create_map_point(Rwc_cur * (xn / inv_depth_cur[j]) + twc_cur,
+                                                      keyframe_cur, KeypointIndex(j), ft);
+                if (!map_point)
+                    continue;   // a slot was taken between the emptiness check and the write
                 current_frame_.pts.at(ft)[j] = map_point;
                 current_frame_.outliers.at(ft)[j] = false;
                 num_depth_only++;
@@ -601,7 +605,7 @@ void Tracking::create_initial_map()
     local_mapper_->insert_keyframe(keyframe_ini);
     local_mapper_->insert_keyframe(keyframe_cur);
 
-    current_frame_.set_pose(keyframe_cur->get_pose());
+    current_frame_.set_pose(keyframe_cur->get_Tcw());
 
     local_keyframes_.push_back(keyframe_cur);
     local_keyframes_.push_back(keyframe_ini);
@@ -612,7 +616,7 @@ void Tracking::create_initial_map()
     last_frame_ = Frame(current_frame_);
 
     map_->set_reference_map_points(local_points_);
-    map_drawer_->set_current_camera_pose(keyframe_cur->get_pose());
+    map_drawer_->set_current_camera_pose(keyframe_cur->get_Tcw());
     map_->keyframe_origins_.push_back(keyframe_ini);
 
     state_ = TrackingState::OK;
@@ -680,7 +684,7 @@ int Tracking::optimize_pose_from_last_frame(const int num_matches, const char* s
     // the depth-free rescue below.
     // Invariant: last_frame_relative_pose_ belongs to last_frame_ — every path here
     // had state_ == OK last frame, which stored it.
-    const mat4f seed_pose = last_frame_relative_pose_ * last_frame_.ref_keyframe->get_pose();
+    const mat4f seed_pose = last_frame_relative_pose_ * last_frame_.ref_keyframe->get_Tcw();
     current_frame_.set_pose(seed_pose);
     Optimizer::pose_optimization(&current_frame_);
     int num_map_inliers = current_frame_.count_inlier_map_points();
@@ -711,9 +715,9 @@ int Tracking::optimize_pose_from_last_frame(const int num_matches, const char* s
     // to the same keypoint slot. A flag left set would mark that fresh match an outlier before
     // it was ever evaluated — excluding it from the second pose optimization's edges, from
     // increase_found, and from count_inlier_map_points.
-    for (auto& [ft, num_keypoints] : current_frame_.N)
+    for (const auto& [ft, data] : current_frame_.features.per_type)
     {
-        for(int i = 0; i < num_keypoints; i++)
+        for(std::size_t i = 0; i < data.count(); i++)
         {
             const Pt& map_point = current_frame_.pts.at(ft)[i];
             if(map_point && current_frame_.outliers.at(ft)[i])
@@ -798,8 +802,8 @@ bool Tracking::track_with_optical_flow()
     // 4. Snap each track to the nearest detected keypoint of its feature type; a keypoint claimed twice keeps
     //    the closer track
     std::map<FeatureType, std::vector<float>> best_dist2;
-    for (const auto& [ft, n] : current_frame_.N)
-        best_dist2[ft].assign(n, std::numeric_limits<float>::max());
+    for (const auto& [ft, data] : current_frame_.features.per_type)
+        best_dist2[ft].assign(data.count(), std::numeric_limits<float>::max());
     const float radius = params.flow_association_radius;
     int num_matches = 0;
     for (size_t k = 0; k < kept.size(); k++)
@@ -811,7 +815,7 @@ bool Tracking::track_with_optical_flow()
         float best_d2 = radius * radius;
         for (const size_t idx : candidates)
         {
-            const cv::Point2f d = current_frame_.keypoints.at(track.ft)[idx].pt - u;
+            const cv::Point2f d = current_frame_.features.at(track.ft).keypoints[idx].pt - u;
             const float d2 = d.dot(d);
             if(d2 < best_d2)
             {
@@ -1055,14 +1059,14 @@ bool Tracking::need_new_keyframe()
         return false;
 
     // Tracked map points in the reference keyframe (observation bar relaxed while the map is young).
-    // Diagnostic only since the weak-tracking trigger went: tracked_map_points walks the keyframe's
+    // Diagnostic only since the weak-tracking trigger went: count_tracked_map_points walks the keyframe's
     // whole map-point set under its lock, so it is not computed when the line is off.
     int num_ref_matches = -1;
     if(params.log_keyframe_information)
     {
         const int min_observations = (num_keyframes_in_map <= static_cast<size_t>(params.young_map_keyframes))
                                      ? params.min_observations_low : params.min_observations_high;
-        num_ref_matches = ref_keyframe_->tracked_map_points(min_observations);
+        num_ref_matches = ref_keyframe_->count_tracked_map_points(min_observations);
     }
 
     // Median inlier count over the recent tracked frames (reference for the
@@ -1172,7 +1176,7 @@ bool Tracking::need_new_keyframe()
 
     // Local Mapping is busy. Emergency keyframe: reached only for an already-novel view
     // (the sole trigger left), and then only on a genuine drop against the
-    // *recent frames'* own inlier level (not ref_keyframe_->tracked_map_points(),
+    // *recent frames'* own inlier level (not ref_keyframe_->count_tracked_map_points(),
     // which inflates after every insertion as LocalMapping triangulates new points
     // into the keyframe, re-arming the trigger indefinitely), and with a refire
     // cooldown so a persistent low-inlier state can't chain insertions.
@@ -1313,7 +1317,7 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
     if(num_good < params.reloc_inliers_low)
         return false;
 
-    for(int j = 0; j < current_frame_.N.at(feature_type); j++)
+    for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
         if(current_frame_.outliers.at(feature_type)[j])
             current_frame_.pts.at(feature_type)[j] = nullptr;
 
@@ -1331,7 +1335,7 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
             if(num_good > params.reloc_inliers_medium && num_good < params.reloc_inliers_high)
             {
                 found.clear();
-                for(int j = 0; j < current_frame_.N.at(feature_type); j++)
+                for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
                     if(current_frame_.pts.at(feature_type)[j])
                         found.insert(current_frame_.pts.at(feature_type)[j]);
                 const int narrow_additional = matcher_->search_by_projection(current_frame_, candidate, found,
@@ -1339,7 +1343,7 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
                 if(num_good + narrow_additional >= params.reloc_inliers_high)
                 {
                     num_good = Optimizer::pose_optimization(&current_frame_);
-                    for(int j = 0; j < current_frame_.N.at(feature_type); j++)
+                    for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
                         if(current_frame_.outliers.at(feature_type)[j])
                             current_frame_.pts.at(feature_type)[j] = nullptr;
                 }

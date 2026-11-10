@@ -29,60 +29,48 @@ AF_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
     AF_CONFIG_FIELD("detectTh:           ", detectTh);
     AF_CONFIG_FIELD("maxNumFeatures:     ", maxNumFeatures);
     AF_CONFIG_END();
-
-    maxKeyPtSize0 = pow(scaleFactorOrb,float(nOctavesOrb - 1.0));
-    maxKeyPtSize = pow(scaleFactorOrb,float(nOctavesOrb - 1.0));
-    minKeyPtSize = 1.0f;
 }
 
-void AF_VSLAM::FeatureExtractor::operator()(const Image& img,
-                                             std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors,
-                                             std::vector<mat2f>& keyPtsSigma2, std::vector<mat2f>& keyPtsInf, std::vector<float>& keyPtsSize)
+void AF_VSLAM::FeatureExtractor::operator()(const Image& img, KeypointData& data)
 {
     setupImage(img);
-    detectAndCompute(img, keypoints, descriptors);
-    computeSize(keyPtsSize,keypoints);
-    computeSigma(keyPtsSigma2, keyPtsInf,keyPtsSize,keypoints,img,CovarianceMethod::SIZE);
+    detectAndCompute(img, data.keypoints, data.descriptors);
+    computeSize(data);
+    computeSigma(data);
 }
 
-void AF_VSLAM::FeatureExtractor::computeSize(std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints){
-    keyPtsSize.clear();
-    keyPtsSize.reserve(keypoints.size());
-    for(auto& keyPt: keypoints){
-        float keyPtSize = GetKeypointSize(keyPt);
-        float keyPtSize_norm{settings->maxKeyPtSize};
-        if(settings->maxKeyPtSize > settings->minKeyPtSize)
-            keyPtSize_norm =  1.0f +  (keyPtSize - settings->minKeyPtSize) * (settings->maxKeyPtSize0 - 1.0f)/(settings->maxKeyPtSize - settings->minKeyPtSize);
-
-        keyPtsSize.push_back(keyPtSize_norm);
-    }
+void AF_VSLAM::FeatureExtractor::computeSize(KeypointData& data){
+    const std::vector<cv::KeyPoint>& keypoints = data.keypoints;
+    // Stored as the extractor reports it. There used to be a rescaling here,
+    //   1 + (s - minKeyPtSize) * (maxKeyPtSize0 - 1) / (maxKeyPtSize - minKeyPtSize),
+    // but the constructor set maxKeyPtSize and maxKeyPtSize0 to the SAME expression and
+    // minKeyPtSize to 1, so the ratio was exactly 1.0f and the whole thing reduced to
+    // 1 + (s - 1) == s. Its sentinel defaults (0.0 and float max) show it was meant to
+    // normalize against the min and max size actually observed; that scan was never written.
+    data.size.clear();
+    data.size.reserve(keypoints.size());
+    for(const auto& keyPt : keypoints)
+        data.size.push_back(GetKeypointSize(keyPt));
 }
 
-void AF_VSLAM::FeatureExtractor::computeSigma(std::vector<mat2f>& keyPtsSigma2, std::vector<mat2f>& keyPtsInf,
-                                                      const std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints,
-                                                      const Image&, const CovarianceMethod& method){
+// Isotropic, from the keypoint size alone. This used to switch on a CovarianceMethod with a
+// second branch (NONE) that filled both with the identity; nothing ever selected it -- the one
+// caller passed SIZE as a literal -- so the enum, the method parameter and the unused image
+// argument are gone. An anisotropic method would come back as a separate function.
+void AF_VSLAM::FeatureExtractor::computeSigma(KeypointData& data){
+    std::vector<mat2f>& keyPtsSigma2 = data.sigma2;
+    std::vector<mat2f>& keyPtsInf = data.information;
+    const std::vector<float>& keyPtsSize = data.size;
     keyPtsSigma2.clear();
     keyPtsInf.clear();
-    keyPtsSigma2.reserve(keypoints.size());
-    keyPtsInf.reserve(keypoints.size());
-    switch (method) {
-        case NONE:{
-            for(size_t i = 0; i < keypoints.size(); i++){
-                keyPtsSigma2.emplace_back(mat2f::Identity());
-                keyPtsInf.emplace_back(mat2f::Identity());
-            }
-            return;
-        }
-        case SIZE:{
-            for(size_t iKeyPt = 0; iKeyPt < keypoints.size(); iKeyPt++){
-                float keypointSigma = keyPtsSize[iKeyPt];
-                float keypointSigma2 = keypointSigma * keypointSigma;
-                float keypointInf = 1.0f/(keypointSigma2);
-                keyPtsSigma2.emplace_back(keypointSigma2 * mat2f::Identity());
-                keyPtsInf.emplace_back(keypointInf * mat2f::Identity());
-            }
-            return;
-        }
+    keyPtsSigma2.reserve(keyPtsSize.size());
+    keyPtsInf.reserve(keyPtsSize.size());
+    for(size_t iKeyPt = 0; iKeyPt < keyPtsSize.size(); iKeyPt++){
+        float keypointSigma = keyPtsSize[iKeyPt];
+        float keypointSigma2 = keypointSigma * keypointSigma;
+        float keypointInf = 1.0f/(keypointSigma2);
+        keyPtsSigma2.emplace_back(keypointSigma2 * mat2f::Identity());
+        keyPtsInf.emplace_back(keypointInf * mat2f::Identity());
     }
 }
 

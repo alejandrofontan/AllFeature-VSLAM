@@ -36,8 +36,8 @@ class LoopClosing;
 struct OptimizerParameters
 {
     // Chi-square outlier thresholds (95% for 2-DoF reprojection / 3-DoF RGB-D residuals)
-    float chi2_2dof{5.991f};
-    float chi2_3dof_rgbd{7.815f};
+    float chi2_2dof = ChiSquared::dof2_95;
+    float chi2_3dof_rgbd = ChiSquared::dof3_95;
 
     // Huber deltas -- DERIVED from chi2_* by LoadParameters(), never set independently
     // (previously separate statics that could silently desync if chi2_* ever changed after startup)

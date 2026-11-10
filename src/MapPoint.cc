@@ -71,15 +71,32 @@ Keyframe MapPoint::get_reference_keyframe() const
 
 void MapPoint::add_observation(const Keyframe& projKeyframe, const KeypointIndex& projIndex)
 {
+    add_observations({{projKeyframe, projIndex}});
+}
+
+// One refresh for the whole batch. Adding observations one at a time re-runs
+// compute_distinctive_descriptors (O(M^2) in the observation count M) and
+// update_normal_and_depth after every single insert, and every pass but the last is
+// overwritten by the next -- so merging N observations cost sum(M^2) = O(N^3) descriptor
+// distances where O(N^2) does. Already-observed keyframes are skipped, and a batch that
+// inserts nothing refreshes nothing (what add_observation has always done).
+void MapPoint::add_observations(const std::vector<std::pair<Keyframe, KeypointIndex>>& new_observations)
+{
+    bool inserted = false;
     {
         unique_lock<mutex> lock(features_mutex_);
-        if(observations_.count(projKeyframe->keyId))
-            return;
+        for(const auto& [projKeyframe, projIndex] : new_observations)
+        {
+            if(observations_.count(projKeyframe->keyId))
+                continue;
 
-        observations_[projKeyframe->keyId] = make_shared<Observation>(projKeyframe, projIndex);
-        increase_observability(projKeyframe,projIndex);
+            observations_[projKeyframe->keyId] = make_shared<Observation>(projKeyframe, projIndex);
+            increase_observability(projKeyframe, projIndex);
+            inserted = true;
+        }
     }
-    compute_distinctive_descriptors()->update_normal_and_depth();
+    if(inserted)
+        compute_distinctive_descriptors()->update_normal_and_depth();
 }
 
 int MapPoint::num_observing_keyframes() const
@@ -91,14 +108,14 @@ int MapPoint::num_observing_keyframes() const
 // An observation with sensor depth (RGB-D, inv_depth > 0) counts twice in num_observations_: it
 // constrains the point's position, not only its bearing (ORB-SLAM2's stereo/RGB-D rule).
 void MapPoint::increase_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex){
-    if(projKeyframe->inv_depth.at(featureType)[projIndex] > 0.0f)
+    if(projKeyframe->features.at(featureType).inv_depth[projIndex] > 0.0f)
         num_observations_ += 2;
     else
         num_observations_++;
 }
 
 void MapPoint::decrease_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex){
-    if(projKeyframe->inv_depth.at(featureType)[projIndex] > 0.0f)
+    if(projKeyframe->features.at(featureType).inv_depth[projIndex] > 0.0f)
         num_observations_-=2;
     else
         num_observations_--;
@@ -143,6 +160,16 @@ map<KeyframeId, Obs> MapPoint::get_observations() const
     return observations_;
 }
 
+std::vector<std::pair<KeyframeId, Keyframe>> MapPoint::get_observers() const
+{
+    unique_lock<mutex> lock(features_mutex_);
+    std::vector<std::pair<KeyframeId, Keyframe>> observers;
+    observers.reserve(observations_.size());
+    for(const auto& [key_id, observation] : observations_)
+        observers.emplace_back(key_id, observation->projKeyframe);
+    return observers;
+}
+
 int MapPoint::number_of_observations() const
 {
     unique_lock<mutex> lock(features_mutex_);
@@ -162,7 +189,7 @@ void MapPoint::set_bad_flag()
     for(auto& obs: observations_tmp)
     {
         Keyframe keyframe = obs.second->projKeyframe;
-        keyframe->erase_map_point_match(obs.second->projIndex, featureType);
+        keyframe->erase_map_point_match(this_point(), obs.second->projIndex);
     }
 
     map_->EraseMapPoint(this_point());
@@ -194,6 +221,12 @@ void MapPoint::replace(const Pt& pMP)
         replaced_ = pMP;
     }
 
+    // Collected, not added one by one: observations_tmp is keyed by KeyframeId, so each
+    // keyframe is tested exactly once and no iteration can see an insert from an earlier
+    // one -- the branch decisions are identical, and the merge costs one refresh instead
+    // of one per observation plus a trailing descriptor pass.
+    std::vector<std::pair<Keyframe, KeypointIndex>> merged;
+    merged.reserve(observations_tmp.size());
     for(auto& obs: observations_tmp)
     {
         // Replace measurement in keyframe
@@ -201,17 +234,17 @@ void MapPoint::replace(const Pt& pMP)
 
         if(!pMP->is_in_keyframe(keyframe))
         {
-            keyframe->replace_map_point_match(obs.second->projIndex, pMP);
-            pMP->add_observation(keyframe,obs.second->projIndex);
+            if(keyframe->replace_map_point_match(this_point(), obs.second->projIndex, pMP))
+                merged.emplace_back(keyframe, obs.second->projIndex);
         }
         else
         {
-            keyframe->erase_map_point_match(obs.second->projIndex, featureType);
+            keyframe->erase_map_point_match(this_point(), obs.second->projIndex);
         }
     }
     pMP->increase_found(nfound);
     pMP->increase_visible(nvisible);
-    pMP->compute_distinctive_descriptors();
+    pMP->add_observations(merged);
 
     map_->EraseMapPoint(this_point());
 }
@@ -261,7 +294,7 @@ Pt MapPoint::compute_distinctive_descriptors()
     {
         Keyframe projKeyframe = obs.second->projKeyframe;
         if(!projKeyframe->is_bad())
-            descriptors.push_back(projKeyframe->descriptors.at(featureType).row(obs.second->projIndex));
+            descriptors.push_back(projKeyframe->features.at(featureType).descriptors.row(obs.second->projIndex));
     }
 
     if(descriptors.empty())
@@ -348,35 +381,41 @@ void MapPoint::update_normal_and_depth()
     if(observations_tmp.empty())
         return;
 
-    const auto ref_obs = observations_tmp.find(refKeyframe_->keyId);
-    if(ref_obs == observations_tmp.end())
+    // The reference keyframe must still observe the point: ref_distance_ below is measured
+    // from it. (Its keypoint index was also read here, for the pyramid scale the depth window
+    // used to depend on; the window is now a plain ratio and needs only the distance.)
+    if(observations_tmp.find(refKeyframe_->keyId) == observations_tmp.end())
         return;
-    const KeypointIndex keypoint_index = ref_obs->second->projIndex;
 
     vec3f normal{vec3f::Zero()};
     int n = 0;
     for(auto& obs: observations_tmp)
     {
         Keyframe projKeyframe = obs.second->projKeyframe;
-        vec3f twc_i = projKeyframe->get_camera_center();
+        vec3f twc_i = projKeyframe->get_twc();
         vec3f normal_i = XYZ_ - twc_i;
         normal = normal + normal_i / normal_i.norm();
         n++;
     }
 
-    vec3f PC = XYZ_ - refKeyframe_->get_camera_center();
+    vec3f PC = XYZ_ - refKeyframe_->get_twc();
     const float dist = PC.norm();
-    const float levelScaleFactor = refKeyframe_->get_keypoint_size(keypoint_index, featureType);
 
     {
         unique_lock<mutex> lock3(position_mutex_);
 
         ref_distance_ = dist;
         ref_size_  = reference_keypoint_size;
-        ref_sigma_ = refKeyframe_->get_keypoint_sigma(keypoint_index, featureType);
 
-        max_distance_ = dist * levelScaleFactor;
-        min_distance_ = max_distance_ / refKeyframe_->maxKeyPtSize ;
+        // A plain ratio around the reference distance, the same for every feature type.
+        // It used to be [dist*s / max_size, dist*s], where s was the keypoint's pyramid scale
+        // and max_size the detector's pyramid span -- ORB's model, in which a keypoint's octave
+        // says how much closer and further it can still be detected. Six of the eight extractors
+        // report s = 1 and inherited ORB's constants anyway, which pinned them to the finest
+        // octave: approach to 0.22*dist was allowed, receding past 1.2*dist was not. The test
+        // only ever needed to ask whether the current depth is close to the reference one.
+        max_distance_ = dist * depth_invariance_ratio;
+        min_distance_ = dist / depth_invariance_ratio;
 
         normal_ = normal / n;
     }
@@ -385,25 +424,19 @@ void MapPoint::update_normal_and_depth()
 float MapPoint::get_min_distance_invariance() const
 {
     unique_lock<mutex> lock(position_mutex_);
-    return 0.8f * min_distance_;
+    return min_distance_;
 }
 
 float MapPoint::get_max_distance_invariance() const
 {
     unique_lock<mutex> lock(position_mutex_);
-    return 1.2f * max_distance_;
+    return max_distance_;
 }
 
 float MapPoint::predict_size(const float &currentDist) const
 {
     unique_lock<mutex> lock(position_mutex_);
     return ref_size_ * ref_distance_ / currentDist;
-}
-
-float MapPoint::predict_sigma(const float &currentDist) const
-{
-    unique_lock<mutex> lock(position_mutex_);
-    return ref_sigma_ * ref_distance_ / currentDist;
 }
 
 } //namespace ORB_SLAM

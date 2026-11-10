@@ -86,7 +86,7 @@ void LoopClosing::run()
         {
             const auto t_start = std::chrono::steady_clock::now();
             correct_loop();
-            map_drawer_->AddLoopClosureKeyframe(current_keyframe_->get_pose_inverse());
+            map_drawer_->AddLoopClosureKeyframe(current_keyframe_->get_Twc());
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
             AF_INFO("[LoopClosing] loop closed: keyframes " << current_keyframe_->keyId << " <-> " << matched_keyframe_->keyId
                     << " in " << seconds << " s (correction + essential graph; the global BA runs in its own thread)");
@@ -137,16 +137,16 @@ bool LoopClosing::detect_loop()
         current_keyframe_ = new_keyframes_.front();
         new_keyframes_.pop_front();
         // Keyframe culling must not delete the keyframe while this thread works on it.
-        // set_erase lifts the guard (a culling deferred meanwhile is applied then); on
+        // unpin() lifts the guard (a culling deferred meanwhile is applied then); on
         // success compute_sim3/correct_loop keep it until the loop is closed or rejected.
-        current_keyframe_->set_not_erase();
+        current_keyframe_->pin();
     }
 
     // Culled while it waited in the queue: no loop detection for (and no place-recognition entry from) a keyframe
     // that is no longer in the map; a loop accepted on it would re-link it into the graph (update_connections)
     if(current_keyframe_->is_bad())
     {
-        current_keyframe_->set_erase();
+        current_keyframe_->unpin();
         return false;
     }
 
@@ -165,7 +165,7 @@ bool LoopClosing::detect_loop()
 
     if(loop_candidates_.empty())
     {
-        current_keyframe_->set_erase();
+        current_keyframe_->unpin();
         return false;
     }
     return true;
@@ -274,7 +274,7 @@ bool LoopClosing::compute_sim3()
     for(const Keyframe& keyframe : loop_candidates_)
     {
         // Keyframe culling must not delete a candidate while it is being verified
-        keyframe->set_not_erase();
+        keyframe->pin();
 
         Candidate candidate{keyframe, {}, nullptr};
         if(!keyframe->is_bad())
@@ -336,8 +336,10 @@ bool LoopClosing::compute_sim3()
                     matched = true;
                     matched_keyframe_ = candidate.keyframe;
                     // World -> current keyframe through the loop side: Scm * Smw
-                    const g2o::Sim3 g2o_Smw(candidate.keyframe->get_rotation().cast<double>(),
-                                            candidate.keyframe->get_translation().cast<double>(), 1.0);
+                    // One lock: R and t must come from the same pose (LocalMapping's BA is
+                    // still running here -- correct_loop has not stopped it yet)
+                    const Pose pose = candidate.keyframe->get_pose();
+                    const g2o::Sim3 g2o_Smw(pose.Rcw.cast<double>(), pose.tcw.cast<double>(), 1.0);
                     g2o_Scw_ = g2o_Scm * g2o_Smw;
                     Scw_ = Converter::to_matrix4f(g2o_Scw_);
                     loop_matched_points_ = std::move(inlier_matches);
@@ -402,9 +404,9 @@ void LoopClosing::release_loop_candidates(const bool loop_accepted)
 {
     for(const Keyframe& candidate : loop_candidates_)
         if(!loop_accepted || candidate != matched_keyframe_)
-            candidate->set_erase();
+            candidate->unpin();
     if(!loop_accepted)
-        current_keyframe_->set_erase();
+        current_keyframe_->unpin();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -440,14 +442,14 @@ void LoopClosing::correct_loop()
 
     KeyframePoses corrected_poses, uncorrected_poses;
     corrected_poses[current_keyframe_] = g2o_Scw_;
-    const mat4f Twc = current_keyframe_->get_pose_inverse();
+    const mat4f Twc = current_keyframe_->get_Twc();
 
     {
         std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
 
         for(const Keyframe& keyframe : connected_keyframes)
         {
-            const mat4f Tiw = keyframe->get_pose();
+            const mat4f Tiw = keyframe->get_Tcw();
             if(keyframe != current_keyframe_)
             {
                 // Corrected: relative pose to the current keyframe composed with Scw
@@ -503,8 +505,8 @@ void LoopClosing::correct_loop()
                 current_point->replace(loop_point);
             else
             {
-                current_keyframe_->add_map_point(loop_point, KeypointIndex(i));
-                loop_point->add_observation(current_keyframe_, KeypointIndex(i));
+                if(current_keyframe_->add_map_point(loop_point, KeypointIndex(i)))
+                    loop_point->add_observation(current_keyframe_, KeypointIndex(i));
             }
         }
     }
@@ -646,14 +648,14 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
         pending.pop_front();
         const bool has_result = keyframe->ba_global_for_keyframe == loop_keyframe_id;
 
-        const mat4f Twc = keyframe->get_pose_inverse();
+        const mat4f Twc = keyframe->get_Twc();
         for(const Keyframe& child : keyframe->get_children())
         {
             if(!child || !visited.insert(child->keyId).second)
                 continue;
             if(has_result && child->ba_global_for_keyframe != loop_keyframe_id)
             {
-                const mat4f Tchild_parent = child->get_pose() * Twc;
+                const mat4f Tchild_parent = child->get_Tcw() * Twc;
                 child->Tcw_gba = Tchild_parent * keyframe->Tcw_gba;
                 child->ba_global_for_keyframe = loop_keyframe_id;
             }
@@ -662,7 +664,7 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
 
         if(!has_result)
             continue;
-        keyframe->Tcw_before_gba = keyframe->get_pose();
+        keyframe->Tcw_before_gba = keyframe->get_Tcw();
         keyframe->set_pose(keyframe->Tcw_gba);
         corrected.insert(keyframe->keyId);
     }
@@ -688,7 +690,7 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
         // Un-project with the reference's pose before the BA, re-project with the corrected one
         const mat4f& Tcw = reference->Tcw_before_gba;
         const vec3f Xc = Tcw.block<3,3>(0,0) * point->get_world_pos() + Tcw.block<3,1>(0,3);
-        const mat4f Twc = reference->get_pose_inverse();
+        const mat4f Twc = reference->get_Twc();
         point->set_world_pos(Twc.block<3,3>(0,0) * Xc + Twc.block<3,1>(0,3));
     }
 

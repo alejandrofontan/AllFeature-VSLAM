@@ -145,11 +145,11 @@ private:
     const int parallaxIdx{50};
 
     // CheckHomography
-    const float chiSquare_th{5.991f};
+    const float chiSquare_th = ChiSquared::dof2_95;
 
     // CheckFundamental
     const float chiSquare_th_fund{3.841f};
-    const float chiSquare_thScore_fund{5.991f};
+    const float chiSquare_thScore_fund = ChiSquared::dof2_95;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

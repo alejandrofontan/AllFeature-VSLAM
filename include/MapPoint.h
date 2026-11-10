@@ -28,6 +28,8 @@
 
 #include<opencv2/core/core.hpp>
 #include<mutex>
+#include <utility>
+#include <vector>
 
 namespace AF_VSLAM
 {
@@ -58,8 +60,15 @@ public:
 
     std::map<KeyframeId,shared_ptr<Observation>> get_observations() const;
 
+    // The observing keyframes alone, as a flat snapshot. Covisibility counting
+    // (KeyFrame::update_connections) wants nothing but the observers, and copying
+    // observations_ costs a tree node AND a shared_ptr<Observation> increment per entry for an
+    // Observation it never reads -- once per map point, on every one of that function's seven
+    // call sites.
+    [[nodiscard]] std::vector<std::pair<KeyframeId, Keyframe>> get_observers() const;
+
     // Two observation counts. number_of_observations() is the WEIGHTED count the quality
-    // gates use (map-point culling, KeyFrame::tracked_map_points): an observation with
+    // gates use (map-point culling, KeyFrame::count_tracked_map_points): an observation with
     // sensor depth (RGB-D, inv_depth > 0) counts twice, see increase_observability.
     // num_observing_keyframes() is the plain number of keyframes observing the point
     // (erase_observation's discard rule, BA edge sizing).
@@ -69,6 +78,10 @@ public:
     void decrease_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
 
     void add_observation(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
+    // Several observations under one lock and ONE refresh of the cached descriptor and
+    // normal/depth. add_observation is the one-element case; prefer this whenever more than
+    // one observation is added in a row (see the cost note on the definition).
+    void add_observations(const std::vector<std::pair<Keyframe, KeypointIndex>>& new_observations);
     void erase_observation(const Keyframe& projKeyframe);
 
     int get_index_in_keyframe(const Keyframe& pKF) const;
@@ -94,7 +107,6 @@ public:
     float get_max_distance_invariance() const;
 
     float predict_size(const float &currentDist) const;
-    float predict_sigma(const float &currentDist) const;
 
 public:
     PtId ptId;
@@ -140,11 +152,10 @@ protected:
      // Best descriptor to fast matching
      cv::Mat descriptor_;
 
-     // Distance, keypoint size and sigma at the reference keyframe (update_normal_and_depth);
-     // predict_size/predict_sigma scale them to the current viewing distance
+     // Distance and keypoint size at the reference keyframe (update_normal_and_depth);
+     // predict_size scales them to the current viewing distance
      float ref_distance_;
      float ref_size_;
-     float ref_sigma_;
      float min_distance_;
      float max_distance_;
 
@@ -152,6 +163,12 @@ protected:
      // (kept deliberately, 2026-09-18: the size-independent projection-search radius is the
      // tuned behaviour; re-evaluate with an A/B run before changing it)
      static constexpr float reference_keypoint_size{1.5f};
+
+     // Half-width (as a ratio) of the depth window over which a point stays a search candidate:
+     // [ref_distance_ / r, ref_distance_ * r]. ref_distance_ is measured from the REFERENCE
+     // keyframe -- the creating one, re-pointed only when it stops observing -- so this is
+     // "how far the camera may move toward or away from where this point was born".
+     static constexpr float depth_invariance_ratio{1.2f};
 
      // Reference keyframe: the creating keyframe, re-pointed to another observer when it
      // stops observing the point (erase_observation). The single source for the point's

@@ -119,15 +119,6 @@ void PlaceRecognitionMegaLoc::clear()
     place_cell_->clear();
 }
 
-float PlaceRecognitionMegaLoc::score(const KeyFrame& a, const KeyFrame& b) const
-{
-    const Eigen::VectorXf* da = place_cell_->descriptor(a.frame_id);
-    const Eigen::VectorXf* db = place_cell_->descriptor(b.frame_id);
-    if(!da || !db)
-        return 0.0f;
-    return placecell::MegaLocEmbedder::cosine(*da, *db);
-}
-
 std::vector<Keyframe> PlaceRecognitionMegaLoc::retrieve(const Eigen::Ref<const Eigen::VectorXf>& query,
                                                         const std::set<KeyframeId>& excluded,
                                                         const float floor) const

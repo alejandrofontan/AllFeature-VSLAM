@@ -44,9 +44,11 @@ public:
     std::vector<cv::DMatch> filter_matches_by_fundamental(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
         const int maxForRansac = 2000);
 
-    std::map<FeatureType, std::vector<cv::DMatch>> match_descriptors_parallel(const std::vector<FeatureType>& feature_types,
-        const std::map<FeatureType, cv::Mat> &desc1, const std::map<FeatureType, cv::Mat> &desc2,
-        const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps1, const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps2);
+    // Takes the two FeatureData directly: splitting them into per-type descriptor and keypoint
+    // maps at the call site copied every keypoint vector on every call.
+    std::map<FeatureType, std::vector<cv::DMatch>> match_descriptors_parallel(
+        const std::vector<FeatureType>& feature_types,
+        const FeatureData& features1, const FeatureData& features2);
 
     std::vector<cv::DMatch> serialFeatureMatching(
         const cv::Mat& desc1, const cv::Mat& desc2,
@@ -99,7 +101,7 @@ public:
     // Replaces the weaker map point if one already exists, or adds a new observation.
     // Used in: LocalMapping::SearchInNeighbors
     const float cos_viewing_angle_th = 0.5f;
-    const float chi2_perc = 5.991f;
+    const float chi2_perc = ChiSquared::dof2_95;
     int fuse_map_points_to_keyframe(const Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type);
 
     /// Projects candidate map points into a keyframe using a Sim3 and validates projections

@@ -1,64 +1,152 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #include "KeyFrame.h"
+#include "afvslam_log.hpp"
 #include "Converter.h"
-#include<mutex>
+#include "Map.h"
+#include "MapPoint.h"
+#include "Observation.h"
+#include <mutex>
+#include <algorithm>
 #include <memory>
-#include <limits>
+#include <stdexcept>
+#include <string>
 
 namespace AF_VSLAM
 {
 
-static bool KeyframeComparison(const pair<int, Keyframe>& a, const pair<int, Keyframe>& b){
-    return (a.first != b.first) ? (a.first < b.first) : (a.second->keyId < b.second->keyId);
+bool PtIdLess::operator()(const Pt& a, const Pt& b) const
+{
+    return a->ptId < b->ptId;
 }
 
-KeyFrame::KeyFrame(Frame &F, shared_ptr<Map> pMap, shared_ptr<PlaceRecognition> place_recognition):
-    feature_types(F.feature_types), cache_matched_pairs_feat_type(F.cache_matched_pairs_feat_type),
-    frame_id(F.frame_id),  timestamp(F.timestamp),
+bool contains_map_point(const std::vector<Pt>& sorted_points, const Pt& pt)
+{
+    return std::binary_search(sorted_points.begin(), sorted_points.end(), pt, PtIdLess{});
+}
+
+namespace
+{
+
+std::string slot_context(KeyframeId key_id, FeatureType feature_type)
+{
+    return "KeyFrame " + std::to_string(key_id) + ", feature type "
+           + std::to_string(static_cast<int>(feature_type));
+}
+
+template<class MapPoints>
+auto& map_point_vector(MapPoints& map_points, FeatureType feature_type, KeyframeId key_id)
+{
+    const auto it = map_points.find(feature_type);
+    if(it == map_points.end())
+        throw std::out_of_range(slot_context(key_id, feature_type)
+                                + ": this keyframe has no such feature type");
+    return it->second;
+}
+
+template<class MapPoints>
+auto& map_point_slot(MapPoints& map_points, FeatureType feature_type, KeypointIndex index,
+                     KeyframeId key_id)
+{
+    auto& pts = map_point_vector(map_points, feature_type, key_id);
+    if(index < 0 || static_cast<std::size_t>(index) >= pts.size())
+        throw std::out_of_range(slot_context(key_id, feature_type) + ": keypoint index "
+                                + std::to_string(index) + " outside [0, "
+                                + std::to_string(pts.size()) + ")");
+    return pts[static_cast<std::size_t>(index)];
+}
+}
+
+void KeyFrame::LoadParameters(const cv::FileStorage &fSettings)
+{
+    const cv::FileNode node = fSettings["KeyFrame.MinCovisibilityWeight"];
+    if(!node.empty())
+        node >> min_covisibility_weight;
+}
+
+static bool stronger_first(const Connection& a, const Connection& b){
+    return (a.weight != b.weight) ? (a.weight > b.weight) : (a.keyframe->keyId > b.keyframe->keyId);
+}
+
+static std::vector<Keyframe> keyframes_of(const std::vector<Connection>& connections,
+                                          std::size_t count)
+{
+    std::vector<Keyframe> keyframes;
+    keyframes.reserve(count);
+    for(std::size_t i = 0; i < count; i++)
+        keyframes.push_back(connections[i].keyframe);
+    return keyframes;
+}
+
+// ============================================================================
+// Construction
+// ============================================================================
+
+KeyFrame::KeyFrame(Frame& frame, std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognition> place_recognition):
+    feature_types(frame.feature_types), cache_matched_pairs_feat_type(frame.cache_matched_pairs_feat_type),
+    frame_id(frame.frame_id), timestamp(frame.timestamp),
     fuse_target_for_keyframe(0), ba_local_for_keyframe(0), ba_fixed_for_keyframe(0), ba_global_for_keyframe(0),
-    calibration(F.calibration),
-    N(F.N), keypoints(F.keypoints),
-    inv_depth(F.inv_depth), sigma2_inv_depth(F.sigma2_inv_depth),
-    keypoint_colors(F.keypoint_colors), image(F.image), global_descriptor(F.global_descriptor),
-    keyPtsSigma2(F.keyPtsSigma2),keyPtsInf(F.keyPtsInf),keyPtsSize(F.keyPtsSize),
-    maxKeyPtSize(F.maxKeyPtSize),
-    min_x(F.calibration->min_x), min_y(F.calibration->min_y),
-    max_x(F.calibration->max_x), max_y(F.calibration->max_y),
-    map_points_(F.pts), place_recognition_(std::move(place_recognition)),
-    first_connection_(true), parent_(NULL), not_erase_(false),
-    to_be_erased_(false), bad_(false), map_(pMap), grid_((F.build_grids(), std::move(F.grid)))
+    calibration(frame.calibration),
+    features(frame.features),
+    image(frame.image), global_descriptor(frame.global_descriptor),
+    map_points_(frame.pts), place_recognition_(std::move(place_recognition)),
+    first_connection_(true), parent_(nullptr), pinned_(false),
+    cull_requested_(false), bad_(false), map_(std::move(map)),
+    grid_((frame.build_grids(), std::move(frame.grid)))
 {
     keyId = next_id++;
-    set_pose(F.get_pose());
-
-    // Every feature type gets its entry, an empty Mat when the frame has no keypoints of that type: LocalMapping,
-    // LoopClosing and the matchers read descriptors.at(ft) for every type (a missing key was std::out_of_range,
-    // inside OpenMP regions std::terminate); FeatureMatcher::match_descriptors returns no matches for an empty side
-    for(auto& [ft, N_] : N)
-    {
-        const auto it = F.descriptors.find(ft);
-        descriptors[ft] = (N_ > 0 && it != F.descriptors.end()) ? it->second.clone() : cv::Mat();
-    }
+    set_pose(frame.get_Tcw());
 }
+
+// ============================================================================
+// Pose
+// ============================================================================
+
+void KeyFrame::set_pose(const mat4f& Tcw_)
+{
+    std::unique_lock<std::mutex> lock(pose_mutex_);
+    if(!pose_.set(Tcw_))
+        AF_WARN("[KeyFrame " << keyId << "] set_pose ignored a non-finite pose (a diverged"
+                << " optimisation); keeping the previous one.");
+}
+
+Pose KeyFrame::get_pose() const
+{
+    std::unique_lock<std::mutex> lock(pose_mutex_);
+    return pose_;
+}
+
+mat4f KeyFrame::get_Tcw() const
+{
+    std::unique_lock<std::mutex> lock(pose_mutex_);
+    return pose_.Tcw;
+}
+
+mat4f KeyFrame::get_Twc() const
+{
+    std::unique_lock<std::mutex> lock(pose_mutex_);
+    return pose_.Twc;
+}
+
+mat3f KeyFrame::get_Rcw() const
+{
+    std::unique_lock<std::mutex> lock(pose_mutex_);
+    return pose_.Rcw;
+}
+
+vec3f KeyFrame::get_tcw() const
+{
+    std::unique_lock<std::mutex> lock(pose_mutex_);
+    return pose_.tcw;
+}
+
+vec3f KeyFrame::get_twc() const
+{
+    std::unique_lock<std::mutex> lock(pose_mutex_);
+    return pose_.twc;
+}
+
+// ============================================================================
+// Per-keyframe queries
+// ============================================================================
 
 void KeyFrame::compute_global_descriptor()
 {
@@ -66,439 +154,420 @@ void KeyFrame::compute_global_descriptor()
         place_recognition_->compute(*this);
 }
 
-float KeyFrame::vpr_similarity(const Keyframe& other) const
+std::optional<float> KeyFrame::compute_scene_median_depth() const
 {
-    if(!place_recognition_ || !place_recognition_->is_active() || !other)
-        return std::numeric_limits<float>::quiet_NaN();
-    return place_recognition_->score(*this, *other);
-}
-
-void KeyFrame::set_pose(const mat4f &Tcw_)
-{
-    unique_lock<mutex> lock(pose_mutex_);
-
-    Tcw = Tcw_;
-
-    mat3f Rcw = Tcw.block<3,3>(0,0);
-    vec3f tcw = Tcw.block<3,1>(0,3);
-    mat3f Rwc = Rcw.transpose();
-    twc = -Rwc * tcw;
-
-    Twc = mat4f::Identity();
-    Twc.block<3,3>(0,0) = Rwc;
-    Twc.block<3,1>(0,3) = twc;
-}
-
-mat4f KeyFrame::get_pose() const
-{
-    unique_lock<mutex> lock(pose_mutex_);
-    return Tcw;
-}
-
-mat4f KeyFrame::get_pose_inverse() const
-{
-    unique_lock<mutex> lock(pose_mutex_);
-    return Twc;
-}
-
-vec3f KeyFrame::get_camera_center() const
-{
-    unique_lock<mutex> lock(pose_mutex_);
-    return twc;
-}
-
-mat3f KeyFrame::get_rotation() const
-{
-    unique_lock<mutex> lock(pose_mutex_);
-    return Tcw.block<3,3>(0,0);
-}
-
-vec3f KeyFrame::get_translation() const
-{
-    unique_lock<mutex> lock(pose_mutex_);
-    return Tcw.block<3,1>(0,3);
-}
-
-void KeyFrame::add_connection(const Keyframe& keyframe, const int &weight)
-{
+    std::vector<Pt> points;
+    vec3f Rcw_row2;
+    float tcw_z{};
     {
-        unique_lock<mutex> lock(connections_mutex_);
-        if(!connected_keyframe_weights_.count(keyframe->keyId)){
-            connected_keyframe_weights_[keyframe->keyId] = weight;
-            connected_keyframes_[keyframe->keyId] = keyframe;
-        }
-        else if(connected_keyframe_weights_[keyframe->keyId] != weight)
-            connected_keyframe_weights_[keyframe->keyId] = weight;
-        else
-            return;
+        std::unique_lock<std::mutex> lock(features_mutex_);
+        std::unique_lock<std::mutex> lock2(pose_mutex_);
+        std::size_t total = 0;
+        for(const auto& [feature_type, pts] : map_points_)
+            total += pts.size();
+        points.reserve(total);
+        for(const auto& [feature_type, pts] : map_points_)
+            points.insert(points.end(), pts.begin(), pts.end());
+        Rcw_row2 = pose_.Rcw.row(2).transpose();
+        tcw_z = pose_.tcw(2);
     }
 
-    update_best_covisibles();
+    std::vector<float> depths;
+    depths.reserve(points.size());
+    for(const Pt& pt : points)
+        if(pt && !pt->is_bad())
+            depths.push_back(Rcw_row2.dot(pt->get_world_pos()) + tcw_z);
+
+    if(depths.empty())
+        return std::nullopt;
+
+    const size_t nth = (depths.size()-1)/2;
+    std::nth_element(depths.begin(), depths.begin() + nth, depths.end());
+
+    return depths[nth];
 }
 
-void KeyFrame::update_best_covisibles()
+// ============================================================================
+// Spatial index
+// ============================================================================
+
+std::vector<size_t> KeyFrame::get_features_in_area(const float x, const float y, const float r, const FeatureType& feature_type) const
 {
-    unique_lock<mutex> lock(connections_mutex_);
-    vector<pair<int,Keyframe> > vPairs;
-    vPairs.reserve(connected_keyframe_weights_.size());
+    if(!features.has(feature_type))
+        return {};
 
-    for(auto& keyframeWeight: connected_keyframe_weights_)
-        vPairs.push_back(make_pair(keyframeWeight.second,connected_keyframes_[keyframeWeight.first]));
-
-    sort(vPairs.begin(),vPairs.end(),KeyframeComparison);
-    list<Keyframe> keyframes;
-    list<int> weights;
-    for(size_t i = 0, iend = vPairs.size(); i < iend;i++)
-    {
-        keyframes.push_front(vPairs[i].second);
-        weights.push_front(vPairs[i].first);
-    }
-
-    ordered_connected_keyframes_ = vector<Keyframe>(keyframes.begin(),keyframes.end());
-    ordered_weights_ = vector<int>(weights.begin(), weights.end());
+    return features_in_area(grid_.at(feature_type), features.at(feature_type).keypoints, *calibration, x, y, r);
 }
 
-map<KeyframeId,Keyframe> KeyFrame::get_connected_keyframes() const
+// ============================================================================
+// Map points
+// ============================================================================
+
+bool KeyFrame::add_map_point(const Pt& pt, KeypointIndex index)
 {
-    unique_lock<mutex> lock(connections_mutex_);
-    map<KeyframeId,Keyframe> connectedKeyFrames_tmp;
-    for(auto connectedKeyFrame: connected_keyframes_)
-        connectedKeyFrames_tmp[connectedKeyFrame.first] = connectedKeyFrame.second;
-    return connectedKeyFrames_tmp;
+    if(!pt)
+        return false;
+
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    Pt& slot = map_point_slot(map_points_, pt->featureType, index, keyId);
+    if(slot)
+        return false;
+    slot = pt;
+    return true;
 }
 
-vector<Keyframe> KeyFrame::get_covisible_keyframes() const
+void KeyFrame::erase_map_point_match(const Pt& pt, KeypointIndex index)
 {
-    unique_lock<mutex> lock(connections_mutex_);
-    return ordered_connected_keyframes_;
+    replace_map_point_match(pt, index, nullptr);
 }
 
-vector<Keyframe> KeyFrame::get_best_covisibility_keyframes(const int &N) const
+void KeyFrame::erase_map_point_match(const Pt& pt)
 {
-    unique_lock<mutex> lock(connections_mutex_);
-    if((int)ordered_connected_keyframes_.size()<N)
-        return ordered_connected_keyframes_;
-    else
-        return vector<Keyframe>(ordered_connected_keyframes_.begin(),ordered_connected_keyframes_.begin()+N);
-
-}
-
-vector<Keyframe> KeyFrame::get_covisibles_by_weight(const int &w) const
-{
-    unique_lock<mutex> lock(connections_mutex_);
-
-    if(ordered_connected_keyframes_.empty())
-        return vector<Keyframe>();
-
-    const auto it = upper_bound(ordered_weights_.begin(),ordered_weights_.end(),w,KeyFrame::weight_greater);
-    if(it == ordered_weights_.end())
-        return vector<Keyframe>();
-    else
-    {
-        int n = it - ordered_weights_.begin();
-        return vector<Keyframe>(ordered_connected_keyframes_.begin(), ordered_connected_keyframes_.begin()+n);
-    }
-}
-
-int KeyFrame::get_weight(const Keyframe& keyframe) const
-{
-    unique_lock<mutex> lock(connections_mutex_);
-    const auto it = connected_keyframe_weights_.find(keyframe->keyId);
-    return it != connected_keyframe_weights_.end() ? it->second : 0;
-}
-
-Pt KeyFrame::create_monocular_map_point(const vec3f& worldPos,
-                            const KeypointIndex& refIndex,
-                            const Keyframe& projKeyframe, const KeypointIndex& projIndex,
-                            const FeatureType& featureType)
-{
-    auto pt = make_shared<MapPoint>(worldPos,this_keyframe(),map_, featureType,
-                                    keypoint_colors.at(featureType)[refIndex]);
-
-    add_map_point(pt,refIndex);
-    pt->add_observation(this_keyframe(), refIndex);
-
-    projKeyframe->add_map_point(pt,projIndex);
-    pt->add_observation(projKeyframe, projIndex);
-
-    map_->add_map_point(pt);
-    return pt;
-}
-
-Pt KeyFrame::create_map_point(const vec3f& worldPos, const KeypointIndex& refIndex, const FeatureType& featureType){
-        auto pt = make_shared<MapPoint>(worldPos,this_keyframe(),map_,featureType,
-                                        keypoint_colors.at(featureType)[refIndex]);
-
-        add_map_point(pt,refIndex);
-        pt->add_observation(this_keyframe(), refIndex);
-        map_->add_map_point(pt);
-        return pt;
-}
-
-void KeyFrame::add_map_point(const Pt& pt, const KeypointIndex& index)
-{
-    unique_lock<mutex> lock(features_mutex_);
-    map_points_[pt->featureType][index] = pt;
-}
-
-void KeyFrame::erase_map_point_match(const size_t &idx, const FeatureType& feature_type)
-{
-    unique_lock<mutex> lock(features_mutex_);
-    map_points_[feature_type][idx] = nullptr;
-}
-
-void KeyFrame::erase_map_point_match(const Pt& pMP)
-{
-    // The point's own lock is taken by get_index_in_keyframe, before ours (keyframe -> point
-    // is the lock order everywhere else in this class)
-    const int idx = pMP->get_index_in_keyframe(this_keyframe());
-    if(idx < 0)
+    if(!pt)
         return;
-    unique_lock<mutex> lock(features_mutex_);
-    map_points_[pMP->featureType][idx] = nullptr;
+
+    const KeypointIndex index = pt->get_index_in_keyframe(this_keyframe());
+    if(index < 0)
+        return;
+    erase_map_point_match(pt, index);
 }
 
-void KeyFrame::replace_map_point_match(const size_t &idx, const Pt& pMP)
+bool KeyFrame::replace_map_point_match(const Pt& pt, KeypointIndex index, const Pt& replacement)
 {
-    // Runs on the local-mapping thread (MapPoint::replace, fusion) while Tracking reads the
-    // same vectors: a torn shared_ptr write racing a copy corrupts the refcount
-    unique_lock<mutex> lock(features_mutex_);
-    map_points_[pMP->featureType][idx] = pMP;
+    if(!pt)
+        return false;
+
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    Pt& slot = map_point_slot(map_points_, pt->featureType, index, keyId);
+    if(slot != pt)
+        return false;
+    slot = replacement;
+    return true;
 }
 
-set<Pt> KeyFrame::get_map_points(const FeatureType& feature_type) const
+std::vector<Pt> KeyFrame::get_good_map_points(FeatureType feature_type) const
 {
-    unique_lock<mutex> lock(features_mutex_);
-    set<Pt> s;
-    for(size_t i=0, iend=map_points_.at(feature_type).size(); i<iend; i++)
+    std::vector<Pt> points;
     {
-        if(!map_points_.at(feature_type)[i])
-            continue;
-        Pt pMP = map_points_.at(feature_type)[i];
-        if(!pMP->is_bad())
-            s.insert(pMP);
+        std::unique_lock<std::mutex> lock(features_mutex_);
+        points = map_point_vector(map_points_, feature_type, keyId);
     }
-    return s;
+
+    points.erase(std::remove_if(points.begin(), points.end(),
+                                [](const Pt& pt){ return !pt || pt->is_bad(); }),
+                 points.end());
+    std::sort(points.begin(), points.end(), PtIdLess{});
+    points.erase(std::unique(points.begin(), points.end()), points.end());
+    return points;
 }
 
-int KeyFrame::tracked_map_points(const int &minObs) const
+std::vector<Pt> KeyFrame::get_map_point_matches(FeatureType feature_type) const
 {
-    unique_lock<mutex> lock(features_mutex_);
 
-    int nPoints=0;
-    const bool bCheckObs = minObs>0;
-    for(const auto& [ft, pts] : map_points_){
-        for(int i = 0; i < N.at(ft); i++)
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    return map_point_vector(map_points_, feature_type, keyId);
+}
+
+Pt KeyFrame::get_map_point(KeypointIndex index, FeatureType feature_type) const
+{
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    return map_point_slot(map_points_, feature_type, index, keyId);
+}
+
+int KeyFrame::count_tracked_map_points(int min_observations) const
+{
+    std::map<FeatureType, std::vector<Pt>> snapshot;
+    {
+        std::unique_lock<std::mutex> lock(features_mutex_);
+        snapshot = map_points_;
+    }
+
+    int num_points = 0;
+    for(const auto& [feature_type, pts] : snapshot)
+        for(const Pt& pt : pts)
         {
-            Pt pMP = pts[i];
-            if(pMP)
-            {
-                if(!pMP->is_bad())
-                {
-                    if(bCheckObs)
-                    {
-                        if(pts[i]->number_of_observations() >= minObs)
-                            nPoints++;
-                    }
-                    else
-                        nPoints++;
-                }
-            }
+            if(!pt || pt->is_bad())
+                continue;
+            if(min_observations > 0 && pt->number_of_observations() < min_observations)
+                continue;
+            num_points++;
         }
-    }
-    return nPoints;
+    return num_points;
 }
 
-vector<Pt> KeyFrame::get_map_point_matches(const FeatureType& feat_type) const
-{
-    unique_lock<mutex> lock(features_mutex_);
-    if (map_points_.count(feat_type) == 0)
-        return vector<Pt>();
-    return map_points_.at(feat_type);
-}
-
-Pt KeyFrame::get_map_point(const size_t &idx, const FeatureType& feature_type) const
-{
-    unique_lock<mutex> lock(features_mutex_);
-    return map_points_.at(feature_type)[idx];
-}
+// ============================================================================
+// Covisibility graph
+// ============================================================================
 
 void KeyFrame::update_connections()
 {
-    map<KeyframeId ,int> KFweightsCounter;
-    map<KeyframeId ,Keyframe> KFcounter;
-
-    std::map<FeatureType, vector<Pt>> pts;
+    std::map<FeatureType, std::vector<Pt>> map_points;
     {
-        unique_lock<mutex> lockMPs(features_mutex_);
-        pts = map_points_;
+        std::unique_lock<std::mutex> lock(features_mutex_);
+        map_points = map_points_;
     }
 
-    //For all map points in keyframe check in which other keyframes are they seen
-    //Increase counter for those keyframes
-    for (auto const& [ft, pts_] : pts) {
-        for(auto& pt: pts_)
+    std::map<KeyframeId, Connection> candidates;
+    for(const auto& [feature_type, points] : map_points)
+        for(const Pt& pt : points)
         {
-            if(!pt)
+            if(!pt || pt->is_bad())
                 continue;
 
-            if(pt->is_bad())
-                continue;
-
-            map<KeyframeId , Obs> observations = pt->get_observations();
-
-            for(auto& obs: observations)
+            for(const auto& [key_id, observer] : pt->get_observers())
             {
-                if(obs.first == keyId)
+                if(key_id == keyId)
                     continue;
-                KFweightsCounter[obs.first]++;
-                KFcounter[obs.first] = obs.second->projKeyframe;
+                Connection& candidate = candidates[key_id];
+                if(!candidate.keyframe)       // once per neighbour, not once per shared point
+                    candidate.keyframe = observer;
+                candidate.weight++;
             }
         }
-    }
 
-    // This should not happen
-    if(KFcounter.empty())
+    if(candidates.empty())
         return;
 
-    //If the counter is greater than threshold add connection
-    //In case no keyframe counter is over threshold add the one with maximum counter
-    int nmax = 0;
-    Keyframe keyframeMaxObs = nullptr;
-    int th = 15;
-
-    vector<pair<int,Keyframe> > vPairs;
-    vPairs.reserve(KFcounter.size());
-    for(auto& weightCount: KFweightsCounter)
+    std::vector<Connection> edges;
     {
-        if(weightCount.second > nmax)
-        {
-            nmax = weightCount.second;
-            keyframeMaxObs = KFcounter[weightCount.first];
-        }
-        if(weightCount.second >= th)
-        {
-            vPairs.push_back(make_pair(weightCount.second,KFcounter[weightCount.first]));
-            KFcounter[weightCount.first]->add_connection(this_keyframe(),weightCount.second);
-        }
+        std::unique_lock<std::mutex> lock(connections_mutex_);
+        connections_ = std::move(candidates);
+        ordered_dirty_ = true;
+        edges = ordered_connections();
     }
 
-    if(vPairs.empty())
-    {
-        vPairs.push_back(make_pair(nmax,keyframeMaxObs));
-        keyframeMaxObs->add_connection(this_keyframe(),nmax);
-    }
+    for(const Connection& edge : edges)
+        edge.keyframe->add_connection(this_keyframe(), edge.weight);
 
-    sort(vPairs.begin(),vPairs.end(),KeyframeComparison);
-    list<Keyframe> keyframes;
-    list<int> weights;
-    for(size_t i = 0; i < vPairs.size(); i++)
-    {
-        keyframes.push_front(vPairs[i].second);
-        weights.push_front(vPairs[i].first);
-    }
-
-    // First parent: the strongest covisible keyframe that is not being culled (chosen before taking our lock).
-    // A bad parent is never re-hung (set_bad_flag already ran), so this keyframe's subtree would hang off a
-    // keyframe with no vertex in the essential graph and no global-BA correction.
     Keyframe first_parent;
-    for(const Keyframe& candidate : keyframes)
-        if(candidate && !candidate->is_bad())
+    for(const Connection& edge : edges)
+        if(!edge.keyframe->is_bad())
         {
-            first_parent = candidate;
+            first_parent = edge.keyframe;
             break;
         }
 
     {
-        unique_lock<mutex> lockCon(connections_mutex_);
+        std::unique_lock<std::mutex> lock(connections_mutex_);
 
-        connected_keyframe_weights_ = KFweightsCounter;
-        connected_keyframes_ = KFcounter;
-        ordered_connected_keyframes_ = vector<Keyframe>(keyframes.begin(),keyframes.end());
-        ordered_weights_ = vector<int>(weights.begin(), weights.end());
-
-        if(first_connection_ && keyId!=0 && first_parent)
+        if(first_connection_ && !is_origin() && first_parent)
         {
             parent_ = first_parent;
             parent_->add_child(this_keyframe());
             first_connection_ = false;
         }
-
     }
 }
 
-void KeyFrame::add_child(const Keyframe& pKF)
+void KeyFrame::add_connection(const Keyframe& keyframe, int weight)
 {
-    unique_lock<mutex> lockCon(connections_mutex_);
-    children_.insert(pKF);
+    if(!keyframe)
+        return;
+
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+
+    if(bad_)
+        return;
+
+    const auto it = connections_.find(keyframe->keyId);
+    if(it != connections_.end() && it->second.weight == weight)
+        return;   // nothing changed, so nothing to re-sort
+
+    connections_[keyframe->keyId] = Connection{keyframe, weight};
+    ordered_dirty_ = true;
 }
 
-void KeyFrame::erase_child(const Keyframe& pKF)
+void KeyFrame::erase_connection(const Keyframe& keyframe)
 {
-    unique_lock<mutex> lockCon(connections_mutex_);
-    children_.erase(pKF);
+    if(!keyframe)
+        return;
+
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+
+    if(connections_.erase(keyframe->keyId) > 0)
+        ordered_dirty_ = true;
 }
 
-void KeyFrame::change_parent(const Keyframe& pKF)
+std::vector<Keyframe> KeyFrame::get_best_covisibility_keyframes(int N) const
 {
-    unique_lock<mutex> lockCon(connections_mutex_);
-    parent_ = pKF;
-    pKF->add_child(this_keyframe());
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+
+    const std::vector<Connection>& ordered = ordered_connections();
+    const std::size_t count = std::min(ordered.size(), static_cast<std::size_t>(std::max(N, 0)));
+    return keyframes_of(ordered, count);
 }
 
-KeyframeIdSet KeyFrame::get_children() const
+std::vector<Keyframe> KeyFrame::get_covisibles_by_weight(int w) const
 {
-    unique_lock<mutex> lockCon(connections_mutex_);
-    return children_;
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+
+    const std::vector<Connection>& ordered = ordered_connections();
+    const auto it = std::partition_point(ordered.begin(), ordered.end(),
+                                         [w](const Connection& c){ return c.weight >= w; });
+
+    return keyframes_of(ordered, static_cast<std::size_t>(it - ordered.begin()));
+}
+
+int KeyFrame::get_weight(const Keyframe& keyframe) const
+{
+
+    if(!keyframe)
+        return 0;
+
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+    const auto it = connections_.find(keyframe->keyId);
+    return it != connections_.end() ? it->second.weight : 0;
+}
+
+const std::vector<Connection>& KeyFrame::ordered_connections() const
+{
+    if(ordered_dirty_)
+    {
+        rebuild_ordered_connections();
+        ordered_dirty_ = false;
+    }
+    return ordered_connections_;
+}
+
+void KeyFrame::rebuild_ordered_connections() const
+{
+    ordered_connections_.clear();
+    ordered_connections_.reserve(connections_.size());
+
+    const Connection* strongest = nullptr;
+    for(const auto& [key_id, connection] : connections_)
+    {
+        if(connection.weight >= min_covisibility_weight)
+            ordered_connections_.push_back(connection);
+        if(!strongest || connection.weight > strongest->weight)
+            strongest = &connection;
+    }
+
+    if(ordered_connections_.empty() && strongest)
+        ordered_connections_.push_back(*strongest);
+
+    std::sort(ordered_connections_.begin(), ordered_connections_.end(), stronger_first);
+}
+
+std::map<KeyframeId,Keyframe> KeyFrame::get_connected_keyframes() const
+{
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+    std::map<KeyframeId,Keyframe> keyframes;
+    for(const auto& [id, connection] : connections_)
+        keyframes.emplace_hint(keyframes.end(), id, connection.keyframe);   // already ordered
+    return keyframes;
+}
+
+std::vector<Connection> KeyFrame::get_covisible_connections() const
+{
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+    return ordered_connections();
+}
+
+std::vector<Keyframe> KeyFrame::get_covisible_keyframes() const
+{
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+    const std::vector<Connection>& ordered = ordered_connections();
+    return keyframes_of(ordered, ordered.size());
+}
+
+// ============================================================================
+// Spanning tree and loop edges
+// ============================================================================
+
+void KeyFrame::add_child(const Keyframe& keyframe)
+{
+    if(!keyframe)
+        return;
+
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+
+    if(bad_)
+        return;
+
+    children_.insert(keyframe);
+}
+
+void KeyFrame::erase_child(const Keyframe& keyframe)
+{
+    if(!keyframe)
+        return;
+
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+    children_.erase(keyframe);
+}
+
+void KeyFrame::set_parent(const Keyframe& keyframe)
+{
+    if(!keyframe)
+        return;
+
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+    parent_ = keyframe;
+    keyframe->add_child(this_keyframe());
+}
+
+void KeyFrame::add_loop_edge(const Keyframe& keyframe)
+{
+    if(!keyframe)
+        return;
+
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+    pinned_ = true;   // see unpin(): a loop edge pins the keyframe permanently
+    loop_edges_.insert(keyframe);
+}
+
+bool KeyFrame::has_child(const Keyframe& keyframe) const
+{
+    if(!keyframe)
+        return false;
+
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+    return children_.count(keyframe) != 0;
+}
+
+std::vector<Keyframe> KeyFrame::get_children() const
+{
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+    return {children_.begin(), children_.end()};
 }
 
 Keyframe KeyFrame::get_parent() const
 {
-    unique_lock<mutex> lockCon(connections_mutex_);
+    std::unique_lock<std::mutex> lock(connections_mutex_);
     return parent_;
-}
-
-bool KeyFrame::has_child(const Keyframe& pKF) const
-{
-    unique_lock<mutex> lockCon(connections_mutex_);
-    return children_.count(pKF);
-}
-
-void KeyFrame::add_loop_edge(const Keyframe& pKF)
-{
-    unique_lock<mutex> lockCon(connections_mutex_);
-    not_erase_ = true;
-    loop_edges_.insert(pKF);
 }
 
 KeyframeIdSet KeyFrame::get_loop_edges() const
 {
-    unique_lock<mutex> lockCon(connections_mutex_);
+    std::unique_lock<std::mutex> lock(connections_mutex_);
     return loop_edges_;
 }
 
-void KeyFrame::set_not_erase()
+// ============================================================================
+// Lifecycle
+// ============================================================================
+
+void KeyFrame::pin()
 {
-    unique_lock<mutex> lock(connections_mutex_);
-    not_erase_ = true;
+    std::unique_lock<std::mutex> lock(connections_mutex_);
+    pinned_ = true;
 }
 
-void KeyFrame::set_erase()
+void KeyFrame::unpin()
 {
-    bool erase_now = false;
+    bool cull_now = false;
     {
-        unique_lock<mutex> lock(connections_mutex_);
+        std::unique_lock<std::mutex> lock(connections_mutex_);
+
         if(loop_edges_.empty())
-        {
-            not_erase_ = false;
-        }
-        erase_now = to_be_erased_;
+            pinned_ = false;
+
+        cull_now = cull_requested_ && !pinned_;
     }
 
-    if(erase_now)
-    {
+    if(cull_now)
         set_bad_flag();
-    }
 }
 
 std::mutex KeyFrame::set_bad_mutex_;
@@ -506,121 +575,120 @@ std::mutex KeyFrame::set_bad_mutex_;
 void KeyFrame::set_bad_flag()
 {
     {
-        unique_lock<mutex> lock(connections_mutex_);
-        if(keyId==0 || bad_)   // bad_ once set is final: culling twice must not re-run the erasures below
+        std::unique_lock<std::mutex> lock(connections_mutex_);
+        if(is_origin() || bad_)   // bad_ once set is final: culling twice must not re-run the erasures below
             return;
-        else if(not_erase_)
+        else if(pinned_)
         {
-            to_be_erased_ = true;
+            cull_requested_ = true;   // unpin() will come back to this
             return;
         }
     }
 
-    // One culling at a time, process-wide: the spanning-tree update below holds this keyframe's connections lock
-    // while it locks its children (is_bad, get_covisible_keyframes, change_parent) and its parent (erase_child).
-    // LocalMapping culls while LoopClosing runs a deferred cull (set_erase); two concurrent calls on a parent and
-    // its child took those locks in opposite orders (deadlock: both threads, then every is_bad() on either).
     std::lock_guard<std::mutex> serialise(set_bad_mutex_);
     {
-        unique_lock<mutex> lock(connections_mutex_);
+        std::unique_lock<std::mutex> lock(connections_mutex_);
         if(bad_)
             return;
     }
 
-    // Snapshots: other threads mutate both containers (update_connections, add_map_point)
-    // while the erase calls below run without our locks -- and those calls lock the other
-    // keyframes / the points, so they cannot run under ours
-    std::map<KeyframeId, Keyframe> connected;
+    std::map<KeyframeId, Connection> connected;
     std::map<FeatureType, std::vector<Pt>> map_points;
     {
-        unique_lock<mutex> lock(connections_mutex_);
-        connected = connected_keyframes_;
+        std::unique_lock<std::mutex> lock(connections_mutex_);
+        connected = connections_;
     }
     {
-        unique_lock<mutex> lock(features_mutex_);
+        std::unique_lock<std::mutex> lock(features_mutex_);
         map_points = map_points_;
     }
 
-    for(const auto& [id, keyframe] : connected)
-        keyframe->erase_connection(this_keyframe());
+    for(const auto& [id, connection] : connected)
+        connection.keyframe->erase_connection(this_keyframe());
 
     for(const auto& [ft, points] : map_points)
         for(const Pt& point : points)
             if(point)
                 point->erase_observation(this_keyframe());
 
+    KeyframeIdSet children;
+    Keyframe parent;
     {
-        unique_lock<mutex> lock(connections_mutex_);
-        unique_lock<mutex> lock1(features_mutex_);
+        std::unique_lock<std::mutex> lock(connections_mutex_);
+        children = children_;
+        parent = parent_;
+    }
 
-        // connected_keyframes_ used to be left behind (the weights map was cleared twice
-        // instead), pinning every neighbour of a culled keyframe
-        connected_keyframe_weights_.clear();
-        connected_keyframes_.clear();
-        ordered_connected_keyframes_.clear();
-        ordered_weights_.clear();
+    struct ChildLinks
+    {
+        Keyframe child;
+        std::vector<Connection> covisibles;
+    };
+    std::vector<ChildLinks> links;
+    links.reserve(children.size());
+    for(const Keyframe& child : children)
+        if(!child->is_bad())
+            links.push_back({child, child->get_covisible_connections()});
 
-        // Update Spanning Tree. A keyframe culled before its first update_connections has no
-        // parent (this fork culls far more aggressively than stock); its children then keep
-        // their parent pointer to this keyframe instead of being re-hung
-        KeyframeIdSet sParentCandidates;
-        if(parent_)
-            sParentCandidates.insert(parent_);
+    KeyframeIdSet parent_candidates;
+    if(parent)
+        parent_candidates.insert(parent);
 
-        // Assign at each iteration one children with a parent (the pair with highest covisibility weight)
-        // Include that children as new parent candidate for the rest
-        while(!children_.empty())
+    std::vector<std::pair<Keyframe, Keyframe>> rehung;   // child, its new parent
+    KeyframeIdSet rehung_children;
+    while(true)
+    {
+        int best_weight = -1;
+        Keyframe best_child;
+        Keyframe best_parent;
+
+        for(const ChildLinks& link : links)
         {
-            bool bContinue = false;
+            if(rehung_children.count(link.child))
+                continue;
 
-            int max = -1;
-            Keyframe pC;
-            Keyframe pP;
-
-            for(auto sit=children_.begin(), send=children_.end(); sit!=send; sit++)
+            for(const Connection& covisible : link.covisibles)
             {
-                Keyframe pKF = *sit;
-                if(pKF->is_bad())
+                if(!parent_candidates.count(covisible.keyframe))
                     continue;
-
-                // Check if a parent candidate is connected to the keyframe
-                vector<Keyframe> vpConnected = pKF->get_covisible_keyframes();
-                for(size_t i=0, iend=vpConnected.size(); i<iend; i++)
+                if(covisible.weight > best_weight)
                 {
-                    for(auto spcit=sParentCandidates.begin(), spcend=sParentCandidates.end(); spcit!=spcend; spcit++)
-                    {
-                        if(vpConnected[i]->keyId == (*spcit)->keyId)
-                        {
-                            int w = pKF->get_weight(vpConnected[i]);
-                            if(w>max)
-                            {
-                                pC = pKF;
-                                pP = vpConnected[i];
-                                max = w;
-                                bContinue = true;
-                            }
-                        }
-                    }
+                    best_weight = covisible.weight;
+                    best_child = link.child;
+                    best_parent = covisible.keyframe;
                 }
             }
-
-            if(bContinue)
-            {
-                pC->change_parent(pP);
-                sParentCandidates.insert(pC);
-                children_.erase(pC);
-            }
-            else
-                break;
         }
 
-        // If a children has no covisibility links with any parent candidate, assign to the original parent of this KF
-        if(parent_)
-        {
-            for(const Keyframe& child : children_)
-                child->change_parent(parent_);
-            parent_->erase_child(this_keyframe());
-        }
+        if(!best_child)
+            break;
+
+        rehung.emplace_back(best_child, best_parent);
+        rehung_children.insert(best_child);
+        parent_candidates.insert(best_child);
+    }
+
+    for(const auto& [child, new_parent] : rehung)
+        child->set_parent(new_parent);
+
+    if(parent)
+    {
+        for(const Keyframe& child : children)
+            if(!rehung_children.count(child))
+                child->set_parent(parent);
+        parent->erase_child(this_keyframe());
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(connections_mutex_);
+
+        connections_.clear();
+        ordered_connections_.clear();   // released now, not on the next read
+        ordered_dirty_ = false;
+
+        for(const Keyframe& child : rehung_children)
+            children_.erase(child);
+
         bad_ = true;
     }
 
@@ -630,100 +698,8 @@ void KeyFrame::set_bad_flag()
 
 bool KeyFrame::is_bad() const
 {
-    unique_lock<mutex> lock(connections_mutex_);
+    std::unique_lock<std::mutex> lock(connections_mutex_);
     return bad_;
 }
 
-void KeyFrame::erase_connection(const Keyframe& keyframe)
-{
-    bool bUpdate = false;
-    {
-        unique_lock<mutex> lock(connections_mutex_);
-        if(connected_keyframe_weights_.count(keyframe->keyId))
-        {
-            connected_keyframe_weights_.erase(keyframe->keyId);
-            connected_keyframes_.erase(keyframe->keyId);
-            bUpdate=true;
-        }
-    }
-
-    if(bUpdate)
-        update_best_covisibles();
 }
-
-vector<size_t> KeyFrame::get_features_in_area(const float x, const float y, const float r, const FeatureType& feature_type) const
-{
-    if(N.find(feature_type) == N.end())
-        return {};
-
-    return features_in_area(grid_.at(feature_type), keypoints.at(feature_type), *calibration, x, y, r);
-}
-
-bool KeyFrame::is_in_image(const float &x, const float &y) const
-{
-    return (x>=min_x && x<max_x && y>=min_y && y<max_y);
-}
-
-float KeyFrame::compute_scene_median_depth(const int q) const
-{
-    std::map<FeatureType, std::vector<Pt>> vpMapPoints;
-    mat4f Tcw_;
-    {
-        unique_lock<mutex> lock(features_mutex_);
-        unique_lock<mutex> lock2(pose_mutex_);
-        vpMapPoints = map_points_;
-        Tcw_ = Tcw;
-    }
-
-    // Read the snapshot, not the member (the loop used to re-read map_points_ unlocked)
-    vector<float> vDepths;
-    const vec3f Rcw2 = Tcw_.block<1,3>(2,0).transpose();
-    const float zcw = Tcw_(2,3);
-    for(const auto& [ft, points] : vpMapPoints)
-        for(const Pt& pMP : points)
-            if(pMP)
-                vDepths.push_back(Rcw2.dot(pMP->get_world_pos()) + zcw);
-    // No map points (a fresh or heavily culled keyframe): -1, which every caller treats as
-    // "skip" -- (size-1)/q would underflow and index out of bounds
-    if(vDepths.empty())
-        return -1.0f;
-
-    // nth_element places exactly the element sort() would put at this position — O(n) not
-    // O(n log n), and this runs once per covisible neighbor in CreateNewMapPoints.
-    const size_t nth = (vDepths.size()-1)/q;
-    nth_element(vDepths.begin(), vDepths.begin() + nth, vDepths.end());
-
-    return vDepths[nth];
-}
-
-    float KeyFrame::get_keypoint_size(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const {
-        return keyPtsSize.at(feature_type)[keypoint_index];
-    }
-
-    float KeyFrame::get_keypoint_sigma2(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const
-    {
-        return 0.5f * (keyPtsSigma2.at(feature_type)[keypoint_index](0,0) + keyPtsSigma2.at(feature_type)[keypoint_index](1,1));
-    }
-
-    float KeyFrame::get_keypoint_information_1d(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const
-    {
-        return 0.5f * (keyPtsInf.at(feature_type)[keypoint_index](0,0) + keyPtsInf.at(feature_type)[keypoint_index](1,1));
-    }
-
-    mat2f KeyFrame::get_keypoint_information_2d(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const
-    {
-        return keyPtsInf.at(feature_type)[keypoint_index];
-    }
-
-    float KeyFrame::get_keypoint_sigma(const KeypointIndex &keypoint_index, const FeatureType& feature_type) const
-    {
-        return sqrtf(get_keypoint_sigma2(keypoint_index, feature_type));
-    }
-
-    KeyFrame::PoseMatrices KeyFrame::get_pose_matrices() const
-    {
-        unique_lock<mutex> lock(pose_mutex_);
-        return PoseMatrices{Tcw, Twc, Tcw.block<3,3>(0,0), Twc.block<3,3>(0,0), Tcw.block<3,1>(0,3), twc};
-    }
-
-} //namespace ORB_SLAM

@@ -52,10 +52,15 @@ Sim3Solver::Sim3Solver(Keyframe pKF1, Keyframe pKF2, const vector<Pt> &vpMatched
     mvX3Dc1.reserve(mN1);
     mvX3Dc2.reserve(mN1);
 
-    mat3f Rcw1 = pKF1->get_rotation();
-    vec3f tcw1 = pKF1->get_translation();
-    mat3f Rcw2 = pKF2->get_rotation();
-    vec3f tcw2 = pKF2->get_translation();
+    // One lock each: LocalMapping's BA writes these poses while loop verification reads them
+    // (compute_sim3 runs before correct_loop stops it), and a set_pose between two getters
+    // hands back R from one pose and t from the next.
+    const Pose pose1 = pKF1->get_pose();
+    const Pose pose2 = pKF2->get_pose();
+    const mat3f& Rcw1 = pose1.Rcw;
+    const vec3f& tcw1 = pose1.tcw;
+    const mat3f& Rcw2 = pose2.Rcw;
+    const vec3f& tcw2 = pose2.tcw;
 
     mvAllIndices.reserve(mN1);
 
@@ -79,11 +84,11 @@ Sim3Solver::Sim3Solver(Keyframe pKF1, Keyframe pKF2, const vector<Pt> &vpMatched
             if(indexKF1<0 || indexKF2<0)
                 continue;
 
-            const float sigmaSquare1 = pKF1->get_keypoint_sigma2(indexKF1, featureType);
-            const float sigmaSquare2 = pKF2->get_keypoint_sigma2(indexKF2, featureType);
+            const float sigmaSquare1 = pKF1->features.get_sigma2(indexKF1, featureType);
+            const float sigmaSquare2 = pKF2->features.get_sigma2(indexKF2, featureType);
 
-            mvnMaxError1.push_back(9.210*sigmaSquare1);
-            mvnMaxError2.push_back(9.210*sigmaSquare2);
+            mvnMaxError1.push_back(ChiSquared::dof2_99*sigmaSquare1);
+            mvnMaxError2.push_back(ChiSquared::dof2_99*sigmaSquare2);
 
             mvpMapPoints1.push_back(pMP1);
             mvpMapPoints2.push_back(pMP2);

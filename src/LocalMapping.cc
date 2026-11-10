@@ -196,7 +196,7 @@ void LocalMapping::create_new_map_points()
     const std::vector<Keyframe> neighbors =
         current_keyframe_->get_best_covisibility_keyframes(params.create_new_map_points_keyframes);
 
-    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose_matrices();
+    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose();
     const float fx1 = current_keyframe_->calibration->fx, fy1 = current_keyframe_->calibration->fy;
     const float cx1 = current_keyframe_->calibration->cx, cy1 = current_keyframe_->calibration->cy;
     const float invfx1 = current_keyframe_->calibration->invfx, invfy1 = current_keyframe_->calibration->invfy;
@@ -208,7 +208,7 @@ void LocalMapping::create_new_map_points()
     // gates below), by two-view triangulation otherwise.
     for(const Keyframe& neighbor : neighbors)
     {
-        const auto [Tcw2, Twc2, Rcw2, Rwc2, tcw2, twc2] = neighbor->get_pose_matrices();
+        const auto [Tcw2, Twc2, Rcw2, Rwc2, tcw2, twc2] = neighbor->get_pose();
         const float fx2 = neighbor->calibration->fx, fy2 = neighbor->calibration->fy;
         const float cx2 = neighbor->calibration->cx, cy2 = neighbor->calibration->cy;
         const float invfx2 = neighbor->calibration->invfx, invfy2 = neighbor->calibration->invfy;
@@ -216,7 +216,13 @@ void LocalMapping::create_new_map_points()
         // Discard neighbors whose baseline is too short relative to their scene depth:
         // a near-zero-parallax pair only yields ill-conditioned triangulations
         const float baseline = (twc2 - twc1).norm();
-        if(baseline / neighbor->compute_scene_median_depth(2) < params.create_new_map_points_min_baseline_depth_ratio)
+        // No map points, or a scene sitting on the camera plane: nothing to measure the
+        // baseline against. The old form divided by the -1 sentinel and skipped because the
+        // result came out negative -- and divided by a legitimate 0 to get inf, which did NOT
+        // skip.
+        const std::optional<float> scene_depth = neighbor->compute_scene_median_depth();
+        if(!scene_depth || *scene_depth <= 0.0f
+           || baseline / *scene_depth < params.create_new_map_points_min_baseline_depth_ratio)
             continue;
 
         std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_indices;
@@ -225,10 +231,10 @@ void LocalMapping::create_new_map_points()
 
         for(const auto& [feature_type, pairs] : matched_indices)
         {
-            const auto& inv_depth1_ft = current_keyframe_->inv_depth.at(feature_type);
-            const auto& inv_depth2_ft = neighbor->inv_depth.at(feature_type);
-            const auto& keypoints1_ft = current_keyframe_->keypoints.at(feature_type);
-            const auto& keypoints2_ft = neighbor->keypoints.at(feature_type);
+            const auto& inv_depth1_ft = current_keyframe_->features.at(feature_type).inv_depth;
+            const auto& inv_depth2_ft = neighbor->features.at(feature_type).inv_depth;
+            const auto& keypoints1_ft = current_keyframe_->features.at(feature_type).keypoints;
+            const auto& keypoints2_ft = neighbor->features.at(feature_type).keypoints;
 
             for(const auto& [idx1, idx2] : pairs)
             {
@@ -301,7 +307,7 @@ void LocalMapping::create_new_map_points()
                 const float v1 = fy1 * (Rcw1.row(1).dot(x3D) + tcw1(1)) / z1 + cy1;
                 const float err_x1 = u1 - kp1.pt.x;
                 const float err_y1 = v1 - kp1.pt.y;
-                if(err_x1 * err_x1 + err_y1 * err_y1 > CHI2_2DOF * current_keyframe_->get_keypoint_sigma2(idx1, feature_type))
+                if(err_x1 * err_x1 + err_y1 * err_y1 > CHI2_2DOF * current_keyframe_->features.get_sigma2(idx1, feature_type))
                     continue;
 
                 // Reprojection gate in the neighbor
@@ -309,11 +315,13 @@ void LocalMapping::create_new_map_points()
                 const float v2 = fy2 * (Rcw2.row(1).dot(x3D) + tcw2(1)) / z2 + cy2;
                 const float err_x2 = u2 - kp2.pt.x;
                 const float err_y2 = v2 - kp2.pt.y;
-                if(err_x2 * err_x2 + err_y2 * err_y2 > CHI2_2DOF * neighbor->get_keypoint_sigma2(idx2, feature_type))
+                if(err_x2 * err_x2 + err_y2 * err_y2 > CHI2_2DOF * neighbor->features.get_sigma2(idx2, feature_type))
                     continue;
 
-                const Pt map_point = current_keyframe_->create_monocular_map_point(
-                    x3D, KeypointIndex(idx1), neighbor, KeypointIndex(idx2), feature_type);
+                const Pt map_point = map_->create_monocular_map_point(
+                    x3D, current_keyframe_, KeypointIndex(idx1), neighbor, KeypointIndex(idx2), feature_type);
+                if(!map_point)
+                    continue;   // a slot was taken between the emptiness check and the write
                 recent_map_points_.push_back(map_point);
             }
         }
@@ -357,8 +365,8 @@ void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors
             const Keyframe& neighbor = neighbors[k];
             const FeatureType feature_type = feature_types[f];
             matches[k][f] = matcher_->serialFeatureMatching(
-                current_keyframe_->descriptors.at(feature_type), neighbor->descriptors.at(feature_type),
-                current_keyframe_->keypoints.at(feature_type), neighbor->keypoints.at(feature_type),
+                current_keyframe_->features.at(feature_type).descriptors, neighbor->features.at(feature_type).descriptors,
+                current_keyframe_->features.at(feature_type).keypoints, neighbor->features.at(feature_type).keypoints,
                 feature_type);
         }
     }
@@ -395,14 +403,14 @@ void LocalMapping::create_depth_seeded_points()
     // neighbor -- a keypoint with a valid depth reading but no such match (textureless
     // region, repeated pattern, fast motion) is exactly where sensor depth helps most.
     // Same trust policy as the triangulation depth branches: any inv_depth > 0, no range gate.
-    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose_matrices();
+    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose();
     const float cx1 = current_keyframe_->calibration->cx, cy1 = current_keyframe_->calibration->cy;
     const float invfx1 = current_keyframe_->calibration->invfx, invfy1 = current_keyframe_->calibration->invfy;
 
     for(const FeatureType feature_type : current_keyframe_->feature_types)
     {
-        const auto& inv_depth = current_keyframe_->inv_depth.at(feature_type);
-        const auto& keypoints = current_keyframe_->keypoints.at(feature_type);
+        const auto& inv_depth = current_keyframe_->features.at(feature_type).inv_depth;
+        const auto& keypoints = current_keyframe_->features.at(feature_type).keypoints;
         for(size_t idx = 0; idx < inv_depth.size(); idx++)
         {
             if(inv_depth[idx] <= 0.0f)
@@ -412,8 +420,10 @@ void LocalMapping::create_depth_seeded_points()
 
             const cv::KeyPoint& kp = keypoints[idx];
             const vec3f xn{(kp.pt.x - cx1) * invfx1, (kp.pt.y - cy1) * invfy1, 1.0f};
-            const Pt map_point = current_keyframe_->create_map_point(Rwc1 * (xn / inv_depth[idx]) + twc1,
-                                                                     KeypointIndex(idx), feature_type);
+            const Pt map_point = map_->create_map_point(Rwc1 * (xn / inv_depth[idx]) + twc1,
+                                                        current_keyframe_, KeypointIndex(idx), feature_type);
+            if(!map_point)
+                continue;   // a slot was taken between the emptiness check and the write
             recent_map_points_.push_back(map_point);
         }
     }
@@ -533,7 +543,7 @@ void LocalMapping::cull_keyframes_heuristic()
     // By-value snapshot: get_covisible_keyframes copies under the keyframe's mutex
     const std::vector<Keyframe> local_keyframes = current_keyframe_->get_covisible_keyframes();
     for(const Keyframe& keyframe : local_keyframes){
-        if(keyframe->keyId == 0)
+        if(keyframe->is_origin())
             continue; // the first keyframe anchors the map and is never culled
 
         for(const FeatureType ft : keyframe->feature_types){
@@ -634,7 +644,7 @@ void LocalMapping::cull_keyframes_information()
         if(it == keyframe_by_frame_id.end())
             return false;
         it->second->set_bad_flag();
-        // Deferred by set_not_erase (loop closing holds it): leave it alive; placecell
+        // Deferred by pin() (loop closing holds it): leave it alive; placecell
         // never retries a refused candidate within the same call
         return it->second->is_bad();
     };

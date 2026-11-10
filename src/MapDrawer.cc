@@ -311,7 +311,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
         for(size_t i=0; i<vpKFs.size(); i++)
         {
             Keyframe pKF = vpKFs[i];
-            mat4f Twc_tmp = pKF->get_pose_inverse().transpose();
+            mat4f Twc_tmp = pKF->get_Twc().transpose();
             cv::Mat Twc = Converter::toCvMat(Twc_tmp);
 
             glPushMatrix();
@@ -361,14 +361,14 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
         {
             // Covisibility Graph
             const vector<Keyframe > vCovKFs = vpKFs[i]->get_covisibles_by_weight(100);
-            vec3f Ow = vpKFs[i]->get_camera_center();
+            vec3f Ow = vpKFs[i]->get_twc();
             if(!vCovKFs.empty())
             {
                 for(vector<Keyframe >::const_iterator vit=vCovKFs.begin(), vend=vCovKFs.end(); vit!=vend; vit++)
                 {
                     if((*vit)->keyId < vpKFs[i]->keyId)
                         continue;
-                    vec3f Ow2 = (*vit)->get_camera_center();
+                    vec3f Ow2 = (*vit)->get_twc();
                     glVertex3f(Ow(0),Ow(1),Ow(2));
                     glVertex3f(Ow2(0),Ow2(1),Ow2(2));
                 }
@@ -378,7 +378,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
             Keyframe pParent = vpKFs[i]->get_parent();
             if(pParent)
             {
-                vec3f Owp = pParent->get_camera_center();
+                vec3f Owp = pParent->get_twc();
                 glVertex3f(Ow(0),Ow(1),Ow(2));
                 glVertex3f(Owp(0),Owp(1),Owp(2));
             }
@@ -389,7 +389,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
             {
                 if((*sit)->keyId < vpKFs[i]->keyId)
                     continue;
-                vec3f Owl = (*sit)->get_camera_center();
+                vec3f Owl = (*sit)->get_twc();
                 glVertex3f(Ow(0),Ow(1),Ow(2));
                 glVertex3f(Owl(0),Owl(1),Owl(2));
             }
@@ -418,7 +418,7 @@ void MapDrawer::DrawTrajectory(const ViewerStyle& style)
         float rgb[3];
         vslamlab_colors::gradientVivid(float(i) / denom, rgb);
         glColor4f(rgb[0], rgb[1], rgb[2], 1.0f);
-        const vec3f Ow = vpKFs[i]->get_camera_center();
+        const vec3f Ow = vpKFs[i]->get_twc();
         glVertex3f(Ow(0), Ow(1), Ow(2));
     }
     glEnd();
@@ -452,7 +452,7 @@ void MapDrawer::DrawTrajectoryTopView(const ViewerStyle& style)
     std::vector<vec3f> centers;
     centers.reserve(vpKFs.size());
     for (const auto& kf : vpKFs)
-        centers.push_back(kf->get_camera_center());
+        centers.push_back(kf->get_twc());
 
     bool hasCam = false;
     vec3f twc = vec3f::Zero();
