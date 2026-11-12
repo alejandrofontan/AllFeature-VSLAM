@@ -1,4 +1,5 @@
 #include "Feature_orb32.h"
+#include "afvslam_log.hpp"
 
 #include <cstdint>
 #include <cstring>
@@ -367,42 +368,50 @@ float AF_VSLAM::Orb32::descriptor_distance(const cv::Mat &a, const cv::Mat &b) c
 }
 
 AF_VSLAM::FeatureExtractor_orb32::FeatureExtractor_orb32(std::shared_ptr<FeatureExtractorSettings> &settings_):
-        FeatureExtractor(settings_){
+        FeatureExtractor(settings_),
+        nOctaves(settings->required_int("FeatureExtractor.nOctaves")),
+        scaleFactor(settings->required_float("FeatureExtractor.scaleFactor")){
 
-    iniThFAST = settings->detectTh;
+    // ORB's own keys of settings/orb32_settings.yaml: the pyramid (levels, scale between them) and the FAST threshold
+    iniThFAST = static_cast<int>(settings->required_float("FeatureExtractor.detectTh"));
+    AF_CONFIG_BEGIN("ORB Extractor Settings");
+    AF_CONFIG_FIELD("nOctaves:           ", nOctaves);
+    AF_CONFIG_FIELD("scaleFactor:        ", scaleFactor);
+    AF_CONFIG_FIELD("detectTh:           ", iniThFAST);
+    AF_CONFIG_END();
 
-    mvScaleFactor.resize(settings->nOctaves);
-    mvLevelSigma2.resize(settings->nOctaves);
+    mvScaleFactor.resize(nOctaves);
+    mvLevelSigma2.resize(nOctaves);
     mvScaleFactor[0]=1.0f;
     mvLevelSigma2[0]=1.0f;
-    for(int i=1; i<settings->nOctaves; i++)
+    for(int i=1; i<nOctaves; i++)
     {
-        mvScaleFactor[i]=mvScaleFactor[i-1]*settings->scaleFactor;
+        mvScaleFactor[i]=mvScaleFactor[i-1]*scaleFactor;
         mvLevelSigma2[i]=mvScaleFactor[i]*mvScaleFactor[i];
     }
 
-    mvInvScaleFactor.resize(settings->nOctaves);
-    mvInvLevelSigma2.resize(settings->nOctaves);
-    for(int i=0; i<settings->nOctaves; i++)
+    mvInvScaleFactor.resize(nOctaves);
+    mvInvLevelSigma2.resize(nOctaves);
+    for(int i=0; i<nOctaves; i++)
     {
         mvInvScaleFactor[i]=1.0f/mvScaleFactor[i];
         mvInvLevelSigma2[i]=1.0f/mvLevelSigma2[i];
     }
 
-    mvImagePyramid.resize(settings->nOctaves);
+    mvImagePyramid.resize(nOctaves);
 
-    mnFeaturesPerLevel.resize(settings->nOctaves);
-    float factor = 1.0f / settings->scaleFactor;
-    float nDesiredFeaturesPerScale = settings->maxNumFeatures*(1 - factor)/(1 - (float)pow((double)factor, (double)settings->nOctaves));
+    mnFeaturesPerLevel.resize(nOctaves);
+    float factor = 1.0f / scaleFactor;
+    float nDesiredFeaturesPerScale = settings->maxNumFeatures*(1 - factor)/(1 - (float)pow((double)factor, (double)nOctaves));
 
     int sumFeatures = 0;
-    for( int level = 0; level < settings->nOctaves-1; level++ )
+    for( int level = 0; level < nOctaves-1; level++ )
     {
         mnFeaturesPerLevel[level] = cvRound(nDesiredFeaturesPerScale);
         sumFeatures += mnFeaturesPerLevel[level];
         nDesiredFeaturesPerScale *= factor;
     }
-    mnFeaturesPerLevel[settings->nOctaves-1] = std::max(settings->maxNumFeatures - sumFeatures, 0);
+    mnFeaturesPerLevel[nOctaves-1] = std::max(settings->maxNumFeatures - sumFeatures, 0);
 
     const int npoints = 512;
     const cv::Point* pattern0 = (const cv::Point*)bit_pattern_31_;
@@ -433,12 +442,12 @@ void AF_VSLAM::FeatureExtractor_orb32::detectAndCompute(const Image& img, std::v
     std::vector < std::vector<cv::KeyPoint> > allKeypoints;
     ComputeKeyPointsOctTree(allKeypoints);
     int nkeypoints = 0;
-    for (int level = 0; level < settings->nOctaves; ++level)
+    for (int level = 0; level < nOctaves; ++level)
         nkeypoints += (int)allKeypoints[level].size();
 
     _descriptors.create(nkeypoints, 32, CV_8U);
     int offset = 0;
-    for (int level = 0; level < settings->nOctaves; ++level)
+    for (int level = 0; level < nOctaves; ++level)
     {
         std::vector<cv::KeyPoint>& keypoints = allKeypoints[level];
         int nkeypointsLevel = (int)keypoints.size();
@@ -470,7 +479,7 @@ int AF_VSLAM::FeatureExtractor_orb32::GetKeypointOctave(const cv::KeyPoint& keyp
 }
 
 float AF_VSLAM::FeatureExtractor_orb32::GetKeypointSize(const cv::KeyPoint& keypoint) const{
-    return powf(settings->GetDetectorScaleFactor(), float(GetKeypointOctave(keypoint)));
+    return powf(scaleFactor, float(GetKeypointOctave(keypoint)));
 }
 
 float AF_VSLAM::DescriptorDistance_orb32(const cv::Mat &a, const cv::Mat &b){
@@ -495,7 +504,7 @@ void AF_VSLAM::FeatureExtractor_orb32::ComputePyramid(cv::Mat image)
 {
 
 
-    for (int level = 0; level < settings->nOctaves; ++level)
+    for (int level = 0; level < nOctaves; ++level)
     {
         float scale = mvInvScaleFactor[level];
         cv::Size sz(cvRound((float)image.cols*scale), cvRound((float)image.rows*scale));
@@ -522,11 +531,11 @@ void AF_VSLAM::FeatureExtractor_orb32::ComputePyramid(cv::Mat image)
 
 void AF_VSLAM::FeatureExtractor_orb32::ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints)
 {
-    allKeypoints.resize(settings->nOctaves);
+    allKeypoints.resize(nOctaves);
 
     const float W = 30;
 
-    for (int level = 0; level < settings->nOctaves; ++level)
+    for (int level = 0; level < nOctaves; ++level)
     {
         const int minBorderX = EDGE_THRESHOLD-3;
         const int minBorderY = minBorderX;
@@ -606,6 +615,6 @@ void AF_VSLAM::FeatureExtractor_orb32::ComputeKeyPointsOctTree(std::vector<std::
     }
 
     // compute orientations
-    for (int level = 0; level < settings->nOctaves; ++level)
+    for (int level = 0; level < nOctaves; ++level)
         computeOrientation(mvImagePyramid[level], allKeypoints[level], umax);
 }

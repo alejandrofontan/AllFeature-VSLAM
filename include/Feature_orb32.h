@@ -31,6 +31,8 @@ namespace AF_VSLAM {
         const int PATCH_SIZE = 31;
         const int HALF_PATCH_SIZE = 15;
         const int EDGE_THRESHOLD = 19;
+        const int nOctaves;        // pyramid levels (FeatureExtractor.nOctaves)
+        const float scaleFactor;   // scale between consecutive levels (FeatureExtractor.scaleFactor)
         std::vector<float> mvScaleFactor;
         std::vector<float> mvInvScaleFactor;
         std::vector<float> mvLevelSigma2;

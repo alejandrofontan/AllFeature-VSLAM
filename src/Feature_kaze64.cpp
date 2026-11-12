@@ -4,9 +4,6 @@ AF_VSLAM::FeatureExtractor_kaze64::FeatureExtractor_kaze64(std::shared_ptr<Featu
         FeatureExtractor(settings_){
 
         kaze = cv::KAZE::create();
-        // kaze->setNOctaves(settings->nOctaves/4);
-        // kaze->setNOctaveLayers(settings->nOctaves/2);
-        // kaze->setThreshold(settings->detectTh);
 }
 
 void AF_VSLAM::FeatureExtractor_kaze64::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){

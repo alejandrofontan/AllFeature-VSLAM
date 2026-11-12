@@ -3,8 +3,6 @@
 # akaze61 parameters
 
 # Feature Extractor
-FeatureExtractor.nOctaves: 8
-FeatureExtractor.scaleFactor: 1.1892 # 2^0.25
 FeatureExtractor.detectTh: 0.0005
 FeatureExtractor.maxNumFeatures: 1000
 

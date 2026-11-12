@@ -13,22 +13,53 @@ using namespace std;
 AF_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
         const FeatureType& featureType_,
         const std::string &settingsYamlFile):
-        featureType(featureType_){
+        settingsYamlFile(settingsYamlFile), featureType(featureType_){
 
-    YAML::Node settings = YAML::LoadFile(settingsYamlFile);
-
-    nOctaves = settings["FeatureExtractor.nOctaves"].as<int>();
-    scaleFactor = settings["FeatureExtractor.scaleFactor"].as<float>();
-    detectTh = settings["FeatureExtractor.detectTh"].as<float>();
-    maxNumFeatures = settings["FeatureExtractor.maxNumFeatures"].as<int>();
+    maxNumFeatures = required_int("FeatureExtractor.maxNumFeatures");
 
     AF_INFO("Loading Feature Extractor Settings from : " + settingsYamlFile);
     AF_CONFIG_BEGIN("Feature Extractor Settings");
-    AF_CONFIG_FIELD("nOctaves:           ", nOctaves);
-    AF_CONFIG_FIELD("scaleFactor:        ", scaleFactor);
-    AF_CONFIG_FIELD("detectTh:           ", detectTh);
     AF_CONFIG_FIELD("maxNumFeatures:     ", maxNumFeatures);
     AF_CONFIG_END();
+}
+
+namespace
+{
+// One key of a settings yaml as T. The file is loaded per call: this runs a handful of times at start-up, and it
+// keeps yaml-cpp out of FeatureExtractor.h, which most of the library includes.
+template <typename T>
+T required_key(const std::string& settings_yaml, const std::string& key)
+{
+    YAML::Node settings;
+    try
+    {
+        settings = YAML::LoadFile(settings_yaml);
+    }
+    catch (const std::exception& e)
+    {
+        throw std::runtime_error("cannot read " + settings_yaml + ": " + e.what());
+    }
+    if (!settings[key])
+        throw std::runtime_error(settings_yaml + ": missing key '" + key + "'");
+    try
+    {
+        return settings[key].as<T>();
+    }
+    catch (const std::exception&)
+    {
+        throw std::runtime_error(settings_yaml + ": key '" + key + "' is not a number");
+    }
+}
+} // namespace
+
+int AF_VSLAM::FeatureExtractorSettings::required_int(const std::string& key) const
+{
+    return required_key<int>(settingsYamlFile, key);
+}
+
+float AF_VSLAM::FeatureExtractorSettings::required_float(const std::string& key) const
+{
+    return required_key<float>(settingsYamlFile, key);
 }
 
 void AF_VSLAM::FeatureExtractor::operator()(const Image& img, KeypointData& data)

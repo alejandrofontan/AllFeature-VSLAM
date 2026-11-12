@@ -98,21 +98,25 @@ namespace AF_VSLAM {
         bool bNoMore;
     };
 
+    // What every extractor reads from its feature's settings yaml: the keypoint budget. Anything else is specific to
+    // one extractor, which reads it itself through required_int / required_float - so a key in a feature's yaml is a
+    // key that feature uses, and a parameter added to one extractor touches no other yaml. (nOctaves, scaleFactor
+    // and detectTh used to be read here for all eight features; only ORB uses the first two, ORB and AKAZE the third.)
     class FeatureExtractorSettings
     {
     public:
 
-        float scaleFactor;
-        int nOctaves;
-        float detectTh;
         int maxNumFeatures;
 
         FeatureExtractorSettings(const FeatureType& featureType__,
                                  const std::string &settingsYamlFile);
 
-        float GetDetectorScaleFactor() const {return scaleFactor;};
-        int GetDetectorNumOctaves()  {return nOctaves;};
-        float GetDetectorThreshold()  {return detectTh;};
+        // A key of the settings yaml this extractor cannot run without.
+        // @throws std::runtime_error naming the file and the key when it is missing or not a number.
+        [[nodiscard]] int required_int(const std::string& key) const;
+        [[nodiscard]] float required_float(const std::string& key) const;
+
+        std::string settingsYamlFile;
 
         VerbosityLevel verbosity{LOW};
 
@@ -133,8 +137,6 @@ namespace AF_VSLAM {
         std::vector<double> extractorTime{};
 
         void operator()(const Image& img, KeypointData& data);
-
-        int inline GetLevels(){return settings->nOctaves;}
 
     protected:
         void computeSize(KeypointData& data);

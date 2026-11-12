@@ -3,10 +3,7 @@
 # superpoint256 parameters
 
 # Feature Extractor
-FeatureExtractor.nOctaves: 8
-FeatureExtractor.scaleFactor: 2.0
-FeatureExtractor.detectTh: 0.0
-FeatureExtractor.maxNumFeatures: 1000
+FeatureExtractor.maxNumFeatures: 2048
 
 # Feature Matcher
 FeatureMatcher.TH_LOW: 0.82

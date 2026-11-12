@@ -3,7 +3,6 @@
 AF_VSLAM::FeatureExtractor_brisk48::FeatureExtractor_brisk48(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
 
-    //brisk_detector = new brisk::BriskFeatureDetector(int(settings->detectTh), settings->nOctaves / 2, true);
     brisk_detector = new brisk::BriskFeatureDetector(34, 4, true);
     brisk_extractor = new brisk::BriskDescriptorExtractor(true, true, brisk::BriskDescriptorExtractor::Version::briskV2);
 }
@@ -44,8 +43,9 @@ int AF_VSLAM::FeatureExtractor_brisk48::GetKeypointOctave(const cv::KeyPoint& ke
     return keypoint.octave;
 }
 
-float AF_VSLAM::FeatureExtractor_brisk48::GetKeypointSize(const cv::KeyPoint& keypoint) const{
-    return powf(settings->GetDetectorScaleFactor(), float(GetKeypointOctave(keypoint)));
+float AF_VSLAM::FeatureExtractor_brisk48::GetKeypointSize(const cv::KeyPoint&) const{
+    // detectAndCompute sets every keypoint's octave to 0, so the old scaleFactor^octave was always 1
+    return 1.0f;
 }
 
 float AF_VSLAM::DescriptorDistance_brisk48(const cv::Mat &a, const cv::Mat &b){

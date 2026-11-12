@@ -3,9 +3,6 @@
 # surf64 parameters
 
 # Feature Extractor
-FeatureExtractor.nOctaves: 8
-FeatureExtractor.scaleFactor: 1.2
-FeatureExtractor.detectTh: 100.0
 FeatureExtractor.maxNumFeatures: 1000
 
 # Feature Matcher

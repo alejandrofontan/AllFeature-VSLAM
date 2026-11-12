@@ -4,9 +4,8 @@ AF_VSLAM::FeatureExtractor_akaze61::FeatureExtractor_akaze61(std::shared_ptr<Fea
         FeatureExtractor(settings_){
 
     akazeOptions = AKAZEOptions();
-    //akazeOptions.omax = settings->GetDetectorNumOctaves() / 4;
-    //akazeOptions.nsublevels = settings->GetDetectorNumOctaves() / 2;
-    akazeOptions.dthreshold = float(settings->detectTh);
+    // AKAZE's own key of settings/akaze61_settings.yaml: the detector response threshold
+    akazeOptions.dthreshold = settings->required_float("FeatureExtractor.detectTh");
 }
 
 void AF_VSLAM::FeatureExtractor_akaze61::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
