@@ -466,7 +466,7 @@ mat4f System::Track(Image &im, const double &timestamp)
 bool System::MapChanged()
 {
     static int n=0;
-    int curn = mpMap->GetLastBigChangeIdx();
+    int curn = mpMap->get_last_big_change_index();
     if(n<curn)
     {
         n=curn;
@@ -507,6 +507,24 @@ void System::Shutdown()
 
     if(viewer && mptViewer)   // the Viewer ran in its own thread: make its context current here for the exit path
         pangolin::BindToContext(viewer->GetWindowTitle());
+
+    // Every thread has stopped, so these are stable. "alive" counts objects still owned by
+    // SOMETHING; "in map" counts those the map still holds. The difference is what outlived
+    // being erased from the map -- retention by another owner, not a leak (all ownership is
+    // shared_ptr). Keyframes are the expensive case: each retained one keeps its image, its
+    // descriptors and its grid.
+    {
+        const long points_in_map = static_cast<long>(mpMap->map_points_in_map());
+        const long keyframes_in_map = static_cast<long>(mpMap->keyframes_in_map());
+        AF_INFO("[lifetime] map points: " << points_in_map << " in map, "
+                << MapPoint::live_count.load() << " alive, "
+                << MapPoint::live_count.load() - points_in_map << " retained after erase"
+                << "  (" << MapPoint::next_id << " created)");
+        AF_INFO("[lifetime] keyframes:  " << keyframes_in_map << " in map, "
+                << KeyFrame::live_count.load() << " alive, "
+                << KeyFrame::live_count.load() - keyframes_in_map << " retained after erase"
+                << "  (" << KeyFrame::next_id << " created)");
+    }
 
     // Every placecell caller has stopped: the profile tables are complete (one per store;
     // with InformationKernel: megaloc the information store IS the retrieval store)
@@ -612,7 +630,7 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 {
     AF_INFO("Saving keyframe trajectory to " << filename << " ...");
 
-    vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
+    vector<Keyframe> vpKFs = mpMap->get_all_keyframes();
     sort(vpKFs.begin(),vpKFs.end(),KeyFrame::less_by_id);
 
     // Transform all keyframes so that the first keyframe is at the origin.
@@ -723,7 +741,7 @@ int System::GetTrackingState()
 }
 
 void System::SaveStatistics(const std::string &filename){
-    // auto keyframes = mpMap->GetAllKeyFrames();
+    // auto keyframes = mpMap->get_all_keyframes();
     // auto pts = mpMap->get_all_map_points();
 
     // size_t numKeyframes{0};

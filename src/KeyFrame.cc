@@ -94,6 +94,12 @@ KeyFrame::KeyFrame(Frame& frame, std::shared_ptr<Map> map, std::shared_ptr<Place
 {
     keyId = next_id++;
     set_pose(frame.get_Tcw());
+    ++live_count;
+}
+
+KeyFrame::~KeyFrame()
+{
+    --live_count;
 }
 
 // ============================================================================
@@ -692,7 +698,7 @@ void KeyFrame::set_bad_flag()
         bad_ = true;
     }
 
-    map_->EraseKeyFrame(this_keyframe());
+    map_->erase_keyframe(this_keyframe());
     place_recognition_->erase(this_keyframe());
 }
 

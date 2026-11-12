@@ -165,7 +165,7 @@ static void CollectBAOutliers(const vector<BAObservation<EdgeT>>& observations, 
 
 void Optimizer::global_bundle_adjustment(shared_ptr<Map> pMap, int nIterations, bool* pbStopFlag, const unsigned long nLoopKF, const bool bRobust)
 {
-    vector<Keyframe> vpKFs = pMap->GetAllKeyFrames();
+    vector<Keyframe> vpKFs = pMap->get_all_keyframes();
     vector<Pt> vpMP = pMap->get_all_map_points();
 
     // Deterministic vertex insertion order (issue #16): the Map stores keyframes and
@@ -828,10 +828,10 @@ void Optimizer::OptimizeEssentialGraph(shared_ptr<Map> pMap, Keyframe pLoopKF, K
     solver->setUserLambdaInit(params.userLambdaInit);
     optimizer.setAlgorithm(solver);
 
-    const vector<Keyframe> vpKFs = pMap->GetAllKeyFrames();
+    const vector<Keyframe> vpKFs = pMap->get_all_keyframes();
     const vector<Pt> vpMPs = pMap->get_all_map_points();
 
-    const unsigned int nMaxKFid = pMap->GetMaxKFid();
+    const unsigned int nMaxKFid = pMap->get_max_keyframe_id();
 
     vector<g2o::Sim3,Eigen::aligned_allocator<g2o::Sim3> > vScw(nMaxKFid+1);
     vector<g2o::Sim3,Eigen::aligned_allocator<g2o::Sim3> > vCorrectedSwc(nMaxKFid+1);

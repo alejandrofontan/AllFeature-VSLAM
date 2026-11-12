@@ -27,8 +27,15 @@ MapPoint::MapPoint(const vec3f& world_pos, Keyframe ref_keyframe, std::shared_pt
     normal_(vec3f::Zero()),
     num_visible_(1), num_found_(1), bad_(false), replaced_{}, map_(map)
 {
-    std::unique_lock<std::mutex> lock(map_->mMutexPointCreation);
+    ++live_count;
+
+    std::unique_lock<std::mutex> lock(map_->point_creation_mutex_);
     ptId = next_id++;
+}
+
+MapPoint::~MapPoint()
+{
+    --live_count;
 }
 
 void MapPoint::LoadParameters(const cv::FileStorage &fSettings)
@@ -372,7 +379,7 @@ void MapPoint::set_bad_flag()
         keyframe->erase_map_point_match(this_point(), obs.second->projIndex);
     }
 
-    map_->EraseMapPoint(this_point());
+    map_->erase_map_point(this_point());
 }
 
 bool MapPoint::is_bad() const
@@ -419,7 +426,7 @@ void MapPoint::replace(const Pt& replacement)
     replacement->increase_visible(num_visible);
     replacement->add_observations(merged);
 
-    map_->EraseMapPoint(this_point());
+    map_->erase_map_point(this_point());
 }
 
 Pt MapPoint::get_replaced() const

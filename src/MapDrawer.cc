@@ -304,7 +304,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
     const float h = w*0.75f;
     const float z = w*0.6f;
 
-    const vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
+    const vector<Keyframe> vpKFs = mpMap->get_all_keyframes();
 
     if(bDrawKF)
     {
@@ -401,7 +401,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
 
 void MapDrawer::DrawTrajectory(const ViewerStyle& style)
 {
-    vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
+    vector<Keyframe> vpKFs = mpMap->get_all_keyframes();
     vpKFs.erase(std::remove_if(vpKFs.begin(), vpKFs.end(),
                                [](const Keyframe& kf){ return kf->is_bad(); }),
                 vpKFs.end());
@@ -441,7 +441,7 @@ void MapDrawer::DrawTrajectory(const ViewerStyle& style)
 
 void MapDrawer::DrawTrajectoryTopView(const ViewerStyle& style)
 {
-    vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
+    vector<Keyframe> vpKFs = mpMap->get_all_keyframes();
     vpKFs.erase(std::remove_if(vpKFs.begin(), vpKFs.end(),
                                [](const Keyframe& kf){ return kf->is_bad(); }),
                 vpKFs.end());

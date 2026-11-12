@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -30,6 +31,8 @@ public:
 
     MapPoint(const vec3f& world_pos, Keyframe ref_keyframe, std::shared_ptr<Map> map,
              const FeatureType& featureType, const cv::Vec3b& color = cv::Vec3b(0, 0, 0));
+    ~MapPoint();
+
     std::shared_ptr<MapPoint> this_point() {
         return shared_from_this();
     }
@@ -107,6 +110,11 @@ public:
     // ========================================================================
 
     static inline PtId next_id{0};
+
+    // Points currently alive, anywhere. Everything here is shared_ptr-owned, so a gap between
+    // this and Map::map_points_in_map() is a point that was erased from the map but is still
+    // held by something else -- retention, never a leak. Reported by System::Shutdown.
+    static inline std::atomic<long> live_count{0};
 
     PtId ptId;
     KeyframeId first_keyframe_id;

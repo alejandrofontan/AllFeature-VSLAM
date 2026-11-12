@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -57,6 +58,7 @@ public:
     // ========================================================================
 
     KeyFrame(Frame& frame, std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognition> place_recognition);
+    ~KeyFrame();
 
     std::shared_ptr<KeyFrame> this_keyframe() {
         return shared_from_this();
@@ -156,6 +158,11 @@ public:
     mutable std::mutex cache_mutex_;
 
     static inline KeyframeId next_id{0};
+
+    // Keyframes currently alive, anywhere. A gap between this and Map::keyframes_in_map() is a
+    // culled keyframe still held by something else -- and each one retains its image, its
+    // descriptors and its grid (see set_bad_flag). Reported by System::Shutdown.
+    static inline std::atomic<long> live_count{0};
     static std::mutex set_bad_mutex_; // serialises set_bad_flag's spanning-tree update across threads (see there)
     KeyframeId keyId;
     const long unsigned int frame_id;

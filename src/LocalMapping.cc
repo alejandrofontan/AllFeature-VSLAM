@@ -600,7 +600,7 @@ void LocalMapping::cull_keyframes_information()
     // heuristic method) -- tell placecell so it becomes culling history there too.
     std::unordered_map<FrameId, Keyframe> keyframe_by_frame_id;
     std::vector<Keyframe> alive_keyframes;
-    for(const Keyframe& keyframe : map_->GetAllKeyFrames())
+    for(const Keyframe& keyframe : map_->get_all_keyframes())
     {
         keyframe_by_frame_id.emplace(keyframe->frame_id, keyframe);
         if(!keyframe->is_bad())
