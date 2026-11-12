@@ -9,10 +9,12 @@
  *
  * aliked128: ALIKED-n16 sub-pixel keypoints + 128-d descriptors on ONNX Runtime (onnx/AlikedOnnx.h), matched by
  * LightGlue-ALIKED (LIGHTGLUE_ALIKED -> onnx::shared_lightglue("aliked") in FeatureMatcher). The model file is
- * `<features_models_dir>/aliked_n16.onnx` (`pixi run download-feature-models`). The graph detects in threshold
- * mode; the host keeps its octree distribution to the keypoint budget, as before. With `features_static_shapes` the
- * fixed-size export `aliked_n16_<W>x<H>.onnx` for the frame size is loaded on the first frame instead (top-k mode,
- * Core ML; `export-features --only aliked --static WxH`).
+ * `<features_models_dir>/aliked_n16.onnx` (`pixi run download-feature-models`). The graph detects in top-k mode
+ * (its 2048 best keypoints whatever their score; a threshold-mode export, 'aliked_n16_threshold.onnx', exists for
+ * comparison); the host's octree distribution brings them down to the keypoint budget (maxNumFeatures), so the
+ * budget is what sets the number of keypoints now. With `features_static_shapes` the fixed-size export
+ * `aliked_n16_<W>x<H>.onnx` for the frame size is loaded on the first frame instead (Core ML;
+ * `export-features --only aliked --static WxH`).
  */
 
 #ifndef AF_VSLAM_FEATURE_ALIKED128_H

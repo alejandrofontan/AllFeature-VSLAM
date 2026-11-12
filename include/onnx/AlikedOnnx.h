@@ -9,11 +9,14 @@
  * AlikedOnnx: RGB image -> ALIKED-n16 keypoints (sub-pixel) + 128-d descriptors, on ONNX Runtime. The exported
  * graph (tools/export_features.py, AlikedExport) is the whole model: replicate-padding to a multiple of 32 and
  * the crop back, the trunk with its two deformable-convolution blocks (ONNX DeformConv, native on the CPU and
- * CUDA providers), the DKD detector head in threshold mode (NMS radius 2, score > 0.2, soft-argmax refinement)
- * and the SDDH descriptor head. The dynamic export returns keypoints [N,2] in pixels of the input frame,
- * descriptors [N,128] L2-normalised and scores [N], with N data-dependent (every maximum above the threshold); the
- * static exports for Core ML ('<stem>_<W>x<H>.onnx', sidecar `topk`) return exactly K by score and detect() keeps
- * the ones above the threshold - the same set whenever fewer than K pass. The host applies its own budget afterwards.
+ * CUDA providers), the DKD detector head (NMS radius 2, soft-argmax refinement) and the SDDH descriptor head.
+ * Keypoint selection is the export's choice, told by the sidecar:
+ *   top-k (sidecar `topk: K`, the default export since 2026-11-12, 'aliked_n16*.onnx'): keypoints [K,2] in pixels of
+ *     the input frame, descriptors [K,128] L2-normalised and scores [K] - the K best maxima whatever their score;
+ *     an entry carrying score -1 is not a keypoint (fewer than K maxima) and detect() drops it;
+ *   threshold (no `topk`, 'aliked_n16_threshold.onnx'): [N,...] with N data-dependent, every maximum scoring above
+ *     0.2; its static twins return K by score with -1 on the ones below the threshold, dropped the same way.
+ * The host applies its own budget afterwards.
  *
  * Input contract (sidecar '<model>.onnx.yaml'): RGB in [0,1]. The host's images are BGR (cv::imread), so this
  * class converts - the libtorch path handed ALIKED the BGR image as RGB; this class is the fix by construction.

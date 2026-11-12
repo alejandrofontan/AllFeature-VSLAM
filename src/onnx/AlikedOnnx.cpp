@@ -43,8 +43,10 @@ AlikedOnnx::AlikedOnnx(const std::string& onnx_path, const OrtSettings& settings
         throw std::runtime_error("AlikedOnnx: the sidecar's tensor names disagree with " + onnx_path + ":\n" +
                                  session_.describe_io());
     AF_INFO("AlikedOnnx: " << onnx_path << " (" << precision_ << " weights) on onnxruntime/" << session_.provider()
-                           << ", threshold " << detection_threshold_
-                           << (top_k_ > 0 ? " on the graph's top-" + std::to_string(top_k_) : std::string(" in the graph")));
+                           << (top_k_ > 0 && detection_threshold_ <= 0.0f
+                                   ? ", top-" + std::to_string(top_k_) + " keypoints, no score threshold"
+                                   : ", threshold " + std::to_string(detection_threshold_) +
+                                         (top_k_ > 0 ? " on the graph's top-" + std::to_string(top_k_) : std::string(" in the graph"))));
 }
 
 void AlikedOnnx::read_sidecar(const std::string& path)
@@ -117,9 +119,10 @@ void AlikedOnnx::detect(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoin
     if (dim != descriptor_dim_)
         throw std::runtime_error("AlikedOnnx: descriptors are " + std::to_string(dim) + "-d, sidecar says " +
                                  std::to_string(descriptor_dim_));
-    // Threshold mode: the graph already returned only the maxima above the threshold. Top-k mode (the static
-    // exports): the graph returns exactly K entries in NMS-score order and marks those failing upstream's rule
-    // (NMS score at the pixel > threshold) with score -1; drop them - the same set whenever fewer than K pass.
+    // Top-k mode (sidecar `topk`, the default export): the graph returns exactly K entries in NMS-score order and
+    // marks the ones to drop with score -1 - an entry that is not a maximum at all in the top-k export, one below
+    // the threshold in a static threshold-mode export. Threshold mode (no `topk`): the graph already returned only
+    // the maxima above the threshold.
     int n_keep = n;
     if (top_k_ > 0)
     {

@@ -65,7 +65,7 @@ class SuperPointOnnx
     std::string scores_name_;
     std::string descriptors_name_;
     std::string precision_{"fp32"};
-    float detection_threshold_{0.0005f};
+    float detection_threshold_{0.0f};   // 0: no threshold, the best max_keypoints NMS maxima
     int nms_radius_{4};
     int remove_borders_{4};
     int descriptor_dim_{256};
