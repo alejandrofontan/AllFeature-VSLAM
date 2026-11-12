@@ -1,119 +1,120 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
+#pragma once
 
-#ifndef MAPPOINT_H
-#define MAPPOINT_H
-
-#include "KeyFrame.h"
-#include "Frame.h"
-#include "Map.h"
-#include "Observation.h"
-
-#include<opencv2/core/core.hpp>
-#include<mutex>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
+
+#include <opencv2/core.hpp>
+
+#include "Types.h"
+#include "KeyFrame.h"
+#include "Observation.h"
 
 namespace AF_VSLAM
 {
 
-class KeyFrame;
 class Map;
-class Frame;
-class Observation;
 
 class MapPoint;
-typedef shared_ptr<AF_VSLAM::MapPoint> Pt;
-
+typedef std::shared_ptr<MapPoint> Pt;
 
 class MapPoint: public std::enable_shared_from_this<MapPoint>
 {
 public:
-    MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType,
-             const cv::Vec3b& color = cv::Vec3b(0, 0, 0));
+
+    // ========================================================================
+    // Construction
+    // ========================================================================
+
+    MapPoint(const vec3f& world_pos, Keyframe ref_keyframe, std::shared_ptr<Map> map,
+             const FeatureType& featureType, const cv::Vec3b& color = cv::Vec3b(0, 0, 0));
     std::shared_ptr<MapPoint> this_point() {
         return shared_from_this();
     }
 
-    void set_world_pos(const vec3f &XYZ_);
+    static void LoadParameters(const cv::FileStorage &fSettings);
+
+    // ========================================================================
+    // Position
+    // ========================================================================
+
+    void set_world_pos(const vec3f& world_pos);
     vec3f get_world_pos() const;
 
-    vec3f get_normal() const;
-    Keyframe get_reference_keyframe() const;
-
-    std::map<KeyframeId,shared_ptr<Observation>> get_observations() const;
-
-    // The observing keyframes alone, as a flat snapshot. Covisibility counting
-    // (KeyFrame::update_connections) wants nothing but the observers, and copying
-    // observations_ costs a tree node AND a shared_ptr<Observation> increment per entry for an
-    // Observation it never reads -- once per map point, on every one of that function's seven
-    // call sites.
-    [[nodiscard]] std::vector<std::pair<KeyframeId, Keyframe>> get_observers() const;
-
-    // Two observation counts. number_of_observations() is the WEIGHTED count the quality
-    // gates use (map-point culling, KeyFrame::count_tracked_map_points): an observation with
-    // sensor depth (RGB-D, inv_depth > 0) counts twice, see increase_observability.
-    // num_observing_keyframes() is the plain number of keyframes observing the point
-    // (erase_observation's discard rule, BA edge sizing).
-    int number_of_observations() const;
-    int num_observing_keyframes() const;
-    void increase_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
-    void decrease_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
+    // ========================================================================
+    // Observations
+    // ========================================================================
 
     void add_observation(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
-    // Several observations under one lock and ONE refresh of the cached descriptor and
-    // normal/depth. add_observation is the one-element case; prefer this whenever more than
-    // one observation is added in a row (see the cost note on the definition).
     void add_observations(const std::vector<std::pair<Keyframe, KeypointIndex>>& new_observations);
     void erase_observation(const Keyframe& projKeyframe);
 
-    int get_index_in_keyframe(const Keyframe& pKF) const;
+    std::map<KeyframeId,Obs> get_observations() const;
+
+    [[nodiscard]] std::vector<std::pair<KeyframeId, Keyframe>> get_observers() const;
+
+    Keyframe get_reference_keyframe() const;
+
+    int number_of_observations() const;
+    int num_observing_keyframes() const;
+
+    int get_index_in_keyframe(const Keyframe& keyframe) const;
     bool is_in_keyframe(const Keyframe& keyframe) const;
 
-    void set_bad_flag();
-    bool is_bad() const;
-
-    void replace(const Pt& pMP);
-    Pt get_replaced() const;
-
-    void increase_visible(int n=1);
-    void increase_found(int n=1);
-    float get_found_ratio() const;
+    // ========================================================================
+    // Descriptor
+    // ========================================================================
 
     Pt compute_distinctive_descriptors();
 
     cv::Mat get_descriptor() const;
 
+    // ========================================================================
+    // Normal, scale and depth
+    // ========================================================================
+
     void update_normal_and_depth();
+
+    vec3f get_normal() const;
 
     float get_min_distance_invariance() const;
     float get_max_distance_invariance() const;
 
     float predict_size(const float &currentDist) const;
 
-public:
-    PtId ptId;
+    // ========================================================================
+    // Tracking statistics
+    // ========================================================================
+
+    void increase_visible(int n=1);
+    void increase_found(int n=1);
+    float get_found_ratio() const;
+
+    // ========================================================================
+    // Lifecycle
+    // ========================================================================
+
+    void set_bad_flag();
+    bool is_bad() const;
+
+    void replace(const Pt& replacement);
+    Pt get_replaced() const;
+
+    // ========================================================================
+    // Data
+    // ========================================================================
 
     static inline PtId next_id{0};
-    long int first_keyframe_id;
-    int num_observations_;
+
+    PtId ptId;
+    KeyframeId first_keyframe_id;
+
+    FeatureType featureType;
+
+    // Image color (OpenCV-native BGR) of the reference keypoint at creation.
+    const cv::Vec3b color;
 
     // Variables used by the tracking
     FrameId last_frame_seen{0};
@@ -126,70 +127,85 @@ public:
     long unsigned int loop_point_for_keyframe;
     long unsigned int corrected_by_keyframe;
     long unsigned int corrected_reference;
-    vec3f position_gba;
+    vec3f position_gba{vec3f::Zero()};
     long unsigned int ba_global_for_keyframe;
-
-
-    static std::mutex global_mutex;
-    FeatureType featureType;
-
-    // Image color (OpenCV-native BGR) of the reference keypoint at creation. Fixed for the
-    // point's lifetime (never averaged or re-sampled), so it is read without a lock: viewer
-    // "Point Color: rgb" mode and the PLY export.
-    const cv::Vec3b color;
 
 protected:
 
-     // Position in absolute coordinates
-     vec3f position_;
+    // ========================================================================
+    // Position
+    // ========================================================================
 
-     // Keyframes observing the point and associated observation
-     std::map<KeyframeId,shared_ptr<Observation>> observations_;
+    // Position in absolute coordinates
+    vec3f position_;
 
-     // Mean viewing direction
-     vec3f normal_;
+    // ========================================================================
+    // Observations
+    // ========================================================================
 
-     // Best descriptor to fast matching
-     cv::Mat descriptor_;
+    static inline int depth_observation_weight{2};
+    static inline int min_observing_keyframes{2};
 
-     // Distance and keypoint size at the reference keyframe (update_normal_and_depth);
-     // predict_size scales them to the current viewing distance
-     float ref_distance_;
-     float ref_size_;
-     float min_distance_;
-     float max_distance_;
+    [[nodiscard]] int observation_weight(const Keyframe& projKeyframe, const KeypointIndex& projIndex) const;
 
-     // ref_size_ is a constant, not the reference keypoint's own size as in stock ORB-SLAM2
-     // (kept deliberately, 2026-09-18: the size-independent projection-search radius is the
-     // tuned behaviour; re-evaluate with an A/B run before changing it)
-     static constexpr float reference_keypoint_size{1.5f};
+    void increase_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
+    void decrease_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
 
-     // Half-width (as a ratio) of the depth window over which a point stays a search candidate:
-     // [ref_distance_ / r, ref_distance_ * r]. ref_distance_ is measured from the REFERENCE
-     // keyframe -- the creating one, re-pointed only when it stops observing -- so this is
-     // "how far the camera may move toward or away from where this point was born".
-     static constexpr float depth_invariance_ratio{1.2f};
+    std::map<KeyframeId,Obs> observations_;
 
-     // Reference keyframe: the creating keyframe, re-pointed to another observer when it
-     // stops observing the point (erase_observation). The single source for the point's
-     // scale/normal reference and for the loop-closing / GBA corrections.
-     Keyframe ref_keyframe_;
+    int num_observations_;
 
-     // Tracking counters
-     int num_visible_;
-     int num_found_;
+    Keyframe ref_keyframe_;
 
-     // Bad flag (we do not currently erase MapPoint from memory)
-     bool bad_;
-     Pt replaced_;
+    // ========================================================================
+    // Descriptor
+    // ========================================================================
 
-     shared_ptr<Map> map_;
+    // Best descriptor to fast matching
+    cv::Mat descriptor_;
 
-     // mutable: pure queries lock them and stay const
-     mutable std::mutex position_mutex_;
-     mutable std::mutex features_mutex_;
+    // ========================================================================
+    // Normal, scale and depth
+    // ========================================================================
+
+    // Mean viewing direction
+    vec3f normal_;
+
+    float ref_distance_{0.0f};
+    float ref_size_{0.0f};
+    float min_distance_{0.0f};
+    float max_distance_{0.0f};
+
+    static constexpr float reference_keypoint_size{1.5f};
+    static inline float depth_invariance_ratio{1.2f};
+
+    // ========================================================================
+    // Tracking statistics
+    // ========================================================================
+
+    // Tracking counters
+    int num_visible_;
+    int num_found_;
+
+    // ========================================================================
+    // Lifecycle
+    // ========================================================================
+
+    bool bad_;
+    Pt replaced_;
+
+    // ========================================================================
+    // Data
+    // ========================================================================
+
+    std::shared_ptr<Map> map_;
+
+    // ========================================================================
+    // Locks
+    // ========================================================================
+
+    mutable std::mutex position_mutex_;
+    mutable std::mutex features_mutex_;
 };
 
-} //namespace ORB_SLAM
-
-#endif // MAPPOINT_H
+}

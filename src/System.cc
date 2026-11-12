@@ -57,6 +57,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
 
     Optimizer::LoadParameters(fsSettings);
     KeyFrame::LoadParameters(fsSettings);
+    MapPoint::LoadParameters(fsSettings);
     Tracking::LoadParameters(fsSettings);
     LocalMapping::LoadParameters(fsSettings);
     LoopClosing::LoadParameters(fsSettings);

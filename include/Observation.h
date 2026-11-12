@@ -5,6 +5,8 @@
 #ifndef AF_VSLAM_OBSERVATION_H
 #define AF_VSLAM_OBSERVATION_H
 
+#include <memory>
+
 #include "KeyFrame.h"
 #include "FeatureFactory.h"
 
@@ -23,7 +25,7 @@ namespace AF_VSLAM {
         KeypointIndex projIndex{};
     };
 
-    typedef shared_ptr<Observation> Obs;
+    typedef std::shared_ptr<Observation> Obs;
 
 }
 #endif //AF_VSLAM_OBSERVATION_H

@@ -21,11 +21,12 @@
 #ifndef MAP_H
 #define MAP_H
 
+#include <mutex>
+#include <set>
+#include <vector>
+
 #include "MapPoint.h"
 #include "KeyFrame.h"
-#include <set>
-
-#include <mutex>
 
 
 
@@ -78,7 +79,7 @@ public:
 
     void clear();
 
-    vector<Keyframe> keyframe_origins_;
+    std::vector<Keyframe> keyframe_origins_;
 
     std::mutex map_update_mutex_;
 

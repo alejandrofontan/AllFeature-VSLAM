@@ -53,6 +53,56 @@ passed 2. ❌
 
 `get_covisibles_by_weight(w)`
 
+## MapPoint (include/MapPoint.h, src/MapPoint.cc)
+`get_max_distance_invariance` and `get_min_distance_invariance`:
+- `depth_invariance_ratio`
+
+`compute_distinctive_descriptors`: THINK ON THIS
+
+`increase_observability` / `decrease_observability`:
+- `depth_observation_weight` = `2` — `MapPoint.h`, ✅ `MapPoint.DepthObservationWeight`. What one
+  observation adds to `num_observations_`: this value if that keyframe measured sensor depth at
+  the keypoint (`inv_depth > 0`, i.e. RGB-D), 1 otherwise. ORB-SLAM2's stereo/RGB-D rule — a
+  bearing-only observation fixes a ray, one with depth fixes a point — inherited with its value
+  and no derivation behind it. Both callers go through one `observation_weight()` helper, so the
+  add and the erase cannot disagree and leave the count permanently wrong.
+
+  The weighted count is what the **quality gates** read: map-point culling
+  (`LocalMapping.cc:182`), keyframe-culling redundancy (`:561`),
+  `KeyFrame::count_tracked_map_points` (`KeyFrame.cc:291`) and which of two points survives a
+  fuse (`FeatureMatcher.cpp:541`). So **the same threshold means something different on RGB-D
+  than on mono**: a gate of "≥3" needs three keyframes on mono but only two on RGB-D.
+
+`erase_observation`:
+- `min_observing_keyframes` = `2` — `MapPoint.h`, ✅ `MapPoint.MinObservingKeyframes`. The point is
+  discarded once this many keyframes or fewer still observe it. Two is the triangulation minimum,
+  so a point at the threshold has no redundancy left: lose one more observer and it cannot be
+  re-triangulated. Counted as **keyframes**, deliberately not as the depth-weighted total above —
+  so "how well observed is this point" has two answers depending on which rule is asking.
+
+`update_normal_and_depth`:
+- `reference_keypoint_size` = `1.5` — `MapPoint.h:180` ❌ `static constexpr`. Assigned to
+  `ref_size_` and read nowhere else.
+- `ref_distance_` — distance to the **reference** keyframe. Not what sets the depth window
+  (that uses the local `dist` directly); read only by `predict_size`.
+- `ref_size_` — a member that only ever holds `reference_keypoint_size`.
+
+`predict_size(d) = ref_size_ · ref_distance_ / d` — multiplies the search radius at
+`FeatureMatcher.cpp:760` (Sim3 fuse, **loop closing**) and `:848` (**relocalization**). Never runs
+on the tracking or local-mapping path. `project_if_visible` has already clamped `d` to
+`[ref_distance_/1.2, ref_distance_·1.2]`, so the result is pinned to `[1.25, 1.8]` — 1.5 ± 20%.
+With `radiusScale` = `1.15` that is a near-constant ~1.7× on the radius, while the local-mapping
+fuse at `:487` passes its radius **raw**. One policy, two conventions, no comment either way.
+
+**Deleting the chain** removes all three members above plus `predict_size`, the `predictedSize`
+and `dist3D` locals at both call sites, `Projection::dist` (those locals are its only readers) and
+therefore the `Projection` struct itself, and `radiusScale` — if both sites stop multiplying by it.
+Three files. The decision it hangs on is what the two sites use instead: `radius_th` raw (~1.7×
+narrower windows), or `radius_th` raw **with the config defaults multiplied by 1.725**
+(`fuse_radius`, `reloc_search_radius_coarse`/`_narrow`), which keeps today's searched window and
+makes the radius literally the number in the config. The latter preserves the mean, not the
+wobble. **Not byte-identical either way**, and it lands on loop closing and relocalization.
+
 # Frame / KeyFrame — outstanding items (2026-11-07)
 
 From the 18-lens pass, in order of importance. 14 items were fixed; these were not.

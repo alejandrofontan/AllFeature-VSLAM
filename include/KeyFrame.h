@@ -112,11 +112,11 @@ public:
     static void LoadParameters(const cv::FileStorage &fSettings);
 
     void update_connections();
-    void add_connection(const Keyframe& pKF, int weight);
-    void erase_connection(const Keyframe& pKF);
+    void add_connection(const Keyframe& keyframe, int weight);
+    void erase_connection(const Keyframe& keyframe);
     [[nodiscard]] std::vector<Keyframe> get_best_covisibility_keyframes(int N) const;
     [[nodiscard]] std::vector<Keyframe> get_covisibles_by_weight(int w) const;
-    [[nodiscard]] int get_weight(const Keyframe& pKF) const;
+    [[nodiscard]] int get_weight(const Keyframe& keyframe) const;
     [[nodiscard]] std::map<KeyframeId,Keyframe> get_connected_keyframes() const;
     [[nodiscard]] std::vector<Keyframe> get_covisible_keyframes() const;
     [[nodiscard]] std::vector<Connection> get_covisible_connections() const;
@@ -143,8 +143,8 @@ public:
     void set_bad_flag();
     [[nodiscard]] bool is_bad() const;
     [[nodiscard]] bool is_origin() const { return keyId == 0; }
-    static bool less_by_id(const Keyframe& pKF1, const Keyframe& pKF2){
-        return pKF1->keyId < pKF2->keyId;
+    static bool less_by_id(const Keyframe& a, const Keyframe& b){
+        return a->keyId < b->keyId;
     }
 
     // ========================================================================

@@ -1,96 +1,87 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #include "MapPoint.h"
 #include "FeatureMatcher.h"
+#include "Map.h"
 
-#include<mutex>
+#include <algorithm>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <utility>
+#include <vector>
 
 namespace AF_VSLAM
 {
 
-mutex MapPoint::global_mutex;
+// ============================================================================
+// Construction
+// ============================================================================
 
-MapPoint::MapPoint(const vec3f &XYZ_, Keyframe pRefKF, shared_ptr<Map> pMap, const FeatureType& featureType,
-                   const cv::Vec3b& color):
-    first_keyframe_id(pRefKF->keyId), num_observations_(0),
-    last_frame_seen(0), ba_local_for_keyframe(0), fuse_candidate_for_keyframe(0), loop_point_for_keyframe(0), corrected_by_keyframe(0),
-    corrected_reference(0), ba_global_for_keyframe(0), featureType(featureType), color(color), min_distance_(0), max_distance_(0),
-    ref_keyframe_(pRefKF), num_visible_(1), num_found_(1), bad_(false), replaced_(static_cast<Pt>(NULL)), map_(pMap)
+MapPoint::MapPoint(const vec3f& world_pos, Keyframe ref_keyframe, std::shared_ptr<Map> map,
+                   const FeatureType& featureType, const cv::Vec3b& color):
+    first_keyframe_id(ref_keyframe->keyId), featureType(featureType), color(color),
+    ba_local_for_keyframe(0), fuse_candidate_for_keyframe(0), loop_point_for_keyframe(0),
+    corrected_by_keyframe(0), corrected_reference(0), ba_global_for_keyframe(0),
+    position_(world_pos),
+    num_observations_(0), ref_keyframe_(ref_keyframe),
+    normal_(vec3f::Zero()),
+    num_visible_(1), num_found_(1), bad_(false), replaced_{}, map_(map)
 {
-
-    position_ = XYZ_;
-    normal_ = vec3f::Zero();
-
-    // MapPoints can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
-    unique_lock<mutex> lock(map_->mMutexPointCreation);
+    std::unique_lock<std::mutex> lock(map_->mMutexPointCreation);
     ptId = next_id++;
 }
 
-void MapPoint::set_world_pos(const vec3f &XYZ_)
+void MapPoint::LoadParameters(const cv::FileStorage &fSettings)
 {
-    unique_lock<mutex> lock2(global_mutex);
-    unique_lock<mutex> lock(position_mutex_);
-    position_ = XYZ_;
+    const cv::FileNode ratio = fSettings["MapPoint.DepthInvarianceRatio"];
+    if(!ratio.empty())
+        ratio >> depth_invariance_ratio;
+
+    const cv::FileNode weight = fSettings["MapPoint.DepthObservationWeight"];
+    if(!weight.empty())
+        weight >> depth_observation_weight;
+
+    const cv::FileNode min_keyframes = fSettings["MapPoint.MinObservingKeyframes"];
+    if(!min_keyframes.empty())
+        min_keyframes >> min_observing_keyframes;
+}
+
+// ============================================================================
+// Position
+// ============================================================================
+
+void MapPoint::set_world_pos(const vec3f& world_pos)
+{
+    std::unique_lock<std::mutex> lock(position_mutex_);
+    position_ = world_pos;
 }
 
 vec3f MapPoint::get_world_pos() const
 {
-    unique_lock<mutex> lock(position_mutex_);
+    std::unique_lock<std::mutex> lock(position_mutex_);
     return position_;
 }
 
-vec3f MapPoint::get_normal() const
-{
-    unique_lock<mutex> lock(position_mutex_);
-    return normal_;
-}
-
-Keyframe MapPoint::get_reference_keyframe() const
-{
-    unique_lock<mutex> lock(features_mutex_);
-    return ref_keyframe_;
-}
+// ============================================================================
+// Observations
+// ============================================================================
 
 void MapPoint::add_observation(const Keyframe& projKeyframe, const KeypointIndex& projIndex)
 {
     add_observations({{projKeyframe, projIndex}});
 }
 
-// One refresh for the whole batch. Adding observations one at a time re-runs
-// compute_distinctive_descriptors (O(M^2) in the observation count M) and
-// update_normal_and_depth after every single insert, and every pass but the last is
-// overwritten by the next -- so merging N observations cost sum(M^2) = O(N^3) descriptor
-// distances where O(N^2) does. Already-observed keyframes are skipped, and a batch that
-// inserts nothing refreshes nothing (what add_observation has always done).
 void MapPoint::add_observations(const std::vector<std::pair<Keyframe, KeypointIndex>>& new_observations)
 {
     bool inserted = false;
     {
-        unique_lock<mutex> lock(features_mutex_);
+        std::unique_lock<std::mutex> lock(features_mutex_);
         for(const auto& [projKeyframe, projIndex] : new_observations)
         {
             if(observations_.count(projKeyframe->keyId))
                 continue;
 
-            observations_[projKeyframe->keyId] = make_shared<Observation>(projKeyframe, projIndex);
+            observations_[projKeyframe->keyId] = std::make_shared<Observation>(projKeyframe, projIndex);
             increase_observability(projKeyframe, projIndex);
             inserted = true;
         }
@@ -99,52 +90,22 @@ void MapPoint::add_observations(const std::vector<std::pair<Keyframe, KeypointIn
         compute_distinctive_descriptors()->update_normal_and_depth();
 }
 
-int MapPoint::num_observing_keyframes() const
-{
-    unique_lock<mutex> lock(features_mutex_);
-    return int(observations_.size());
-}
-
-// An observation with sensor depth (RGB-D, inv_depth > 0) counts twice in num_observations_: it
-// constrains the point's position, not only its bearing (ORB-SLAM2's stereo/RGB-D rule).
-void MapPoint::increase_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex){
-    if(projKeyframe->features.at(featureType).inv_depth[projIndex] > 0.0f)
-        num_observations_ += 2;
-    else
-        num_observations_++;
-}
-
-void MapPoint::decrease_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex){
-    if(projKeyframe->features.at(featureType).inv_depth[projIndex] > 0.0f)
-        num_observations_-=2;
-    else
-        num_observations_--;
-}
 void MapPoint::erase_observation(const Keyframe& projKeyframe)
 {
     bool removePoint = false;
     {
-        unique_lock<mutex> lock(features_mutex_);
+        std::unique_lock<std::mutex> lock(features_mutex_);
         if(observations_.count(projKeyframe->keyId))
         {
             KeypointIndex projIndex = observations_[projKeyframe->keyId]->projIndex;
-            decrease_observability(projKeyframe,projIndex);
+            decrease_observability(projKeyframe, projIndex);
 
             observations_.erase(projKeyframe->keyId);
 
-            // Re-point the reference keyframe only if any observation remains: erasing the
-            // last observation (routine for single-observation depth-seeded points when their
-            // keyframe is culled) used to dereference observations_.begin() on an EMPTY map —
-            // copying a shared_ptr out of garbage memory, i.e. a refcount increment through a
-            // wild pointer. That was the source of non-deterministic heap corruption and the
-            // GPF segfaults inside erase_observation itself. When empty, ref_keyframe_ is left as-is:
-            // the point is discarded via set_bad_flag below (size 0 <= 2) and never used again.
             if(ref_keyframe_->keyId == projKeyframe->keyId && !observations_.empty())
                 ref_keyframe_ = observations_.begin()->second->projKeyframe;
 
-            // If only 2 observations_ or less, discard point (features_mutex_ is held: read the
-            // size directly, num_observing_keyframes() would re-lock)
-            removePoint = (observations_.size() <= 2);
+            removePoint = (static_cast<int>(observations_.size()) <= min_observing_keyframes);
         }
     }
 
@@ -154,15 +115,32 @@ void MapPoint::erase_observation(const Keyframe& projKeyframe)
         compute_distinctive_descriptors()->update_normal_and_depth();
 }
 
-map<KeyframeId, Obs> MapPoint::get_observations() const
+int MapPoint::observation_weight(const Keyframe& projKeyframe, const KeypointIndex& projIndex) const
 {
-    unique_lock<mutex> lock(features_mutex_);
+    return projKeyframe->features.at(featureType).inv_depth[projIndex] > 0.0f
+               ? depth_observation_weight
+               : 1;
+}
+
+void MapPoint::increase_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex)
+{
+    num_observations_ += observation_weight(projKeyframe, projIndex);
+}
+
+void MapPoint::decrease_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex)
+{
+    num_observations_ -= observation_weight(projKeyframe, projIndex);
+}
+
+std::map<KeyframeId, Obs> MapPoint::get_observations() const
+{
+    std::unique_lock<std::mutex> lock(features_mutex_);
     return observations_;
 }
 
 std::vector<std::pair<KeyframeId, Keyframe>> MapPoint::get_observers() const
 {
-    unique_lock<mutex> lock(features_mutex_);
+    std::unique_lock<std::mutex> lock(features_mutex_);
     std::vector<std::pair<KeyframeId, Keyframe>> observers;
     observers.reserve(observations_.size());
     for(const auto& [key_id, observation] : observations_)
@@ -170,127 +148,58 @@ std::vector<std::pair<KeyframeId, Keyframe>> MapPoint::get_observers() const
     return observers;
 }
 
+Keyframe MapPoint::get_reference_keyframe() const
+{
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    return ref_keyframe_;
+}
+
 int MapPoint::number_of_observations() const
 {
-    unique_lock<mutex> lock(features_mutex_);
+    std::unique_lock<std::mutex> lock(features_mutex_);
     return num_observations_;
 }
 
-void MapPoint::set_bad_flag()
+int MapPoint::num_observing_keyframes() const
 {
-    map<KeyframeId,Obs> observations_tmp;
-    {
-        unique_lock<mutex> lock1(features_mutex_);
-        unique_lock<mutex> lock2(position_mutex_);
-        bad_ = true;
-        observations_tmp = observations_;
-        observations_.clear();
-    }
-    for(auto& obs: observations_tmp)
-    {
-        Keyframe keyframe = obs.second->projKeyframe;
-        keyframe->erase_map_point_match(this_point(), obs.second->projIndex);
-    }
-
-    map_->EraseMapPoint(this_point());
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    return int(observations_.size());
 }
 
-Pt MapPoint::get_replaced() const
+int MapPoint::get_index_in_keyframe(const Keyframe& keyframe) const
 {
-    unique_lock<mutex> lock1(features_mutex_);
-    unique_lock<mutex> lock2(position_mutex_);
-    return replaced_;
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    const auto it = observations_.find(keyframe->keyId);
+    return it != observations_.end() ? static_cast<int>(it->second->projIndex) : -1;
 }
 
-void MapPoint::replace(const Pt& pMP)
+bool MapPoint::is_in_keyframe(const Keyframe& keyframe) const
 {
-    if(pMP->ptId == this->ptId)
-        return;
-
-    int nvisible, nfound;
-
-    map<KeyframeId,Obs> observations_tmp;
-    {
-        unique_lock<mutex> lock1(features_mutex_);
-        unique_lock<mutex> lock2(position_mutex_);
-        observations_tmp = observations_;
-        observations_.clear();
-        bad_ = true;
-        nvisible = num_visible_;
-        nfound = num_found_;
-        replaced_ = pMP;
-    }
-
-    // Collected, not added one by one: observations_tmp is keyed by KeyframeId, so each
-    // keyframe is tested exactly once and no iteration can see an insert from an earlier
-    // one -- the branch decisions are identical, and the merge costs one refresh instead
-    // of one per observation plus a trailing descriptor pass.
-    std::vector<std::pair<Keyframe, KeypointIndex>> merged;
-    merged.reserve(observations_tmp.size());
-    for(auto& obs: observations_tmp)
-    {
-        // Replace measurement in keyframe
-        Keyframe keyframe = obs.second->projKeyframe;
-
-        if(!pMP->is_in_keyframe(keyframe))
-        {
-            if(keyframe->replace_map_point_match(this_point(), obs.second->projIndex, pMP))
-                merged.emplace_back(keyframe, obs.second->projIndex);
-        }
-        else
-        {
-            keyframe->erase_map_point_match(this_point(), obs.second->projIndex);
-        }
-    }
-    pMP->increase_found(nfound);
-    pMP->increase_visible(nvisible);
-    pMP->add_observations(merged);
-
-    map_->EraseMapPoint(this_point());
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    return (observations_.count(keyframe->keyId));
 }
 
-bool MapPoint::is_bad() const
-{
-    unique_lock<mutex> lock(features_mutex_);
-    unique_lock<mutex> lock2(position_mutex_);
-    return bad_;
-}
-
-void MapPoint::increase_visible(int n)
-{
-    unique_lock<mutex> lock(features_mutex_);
-    num_visible_+=n;
-}
-
-void MapPoint::increase_found(int n)
-{
-    unique_lock<mutex> lock(features_mutex_);
-    num_found_+=n;
-}
-
-float MapPoint::get_found_ratio() const
-{
-    unique_lock<mutex> lock(features_mutex_);
-    return static_cast<float>(num_found_)/num_visible_;
-}
+// ============================================================================
+// Descriptor
+// ============================================================================
 
 Pt MapPoint::compute_distinctive_descriptors()
 {
-    // Retrieve all observed descriptors
-    map<KeyframeId, Obs> observations_tmp;
+    std::map<KeyframeId, Obs> observations;
     {
-        unique_lock<mutex> lock1(features_mutex_);
+        std::unique_lock<std::mutex> lock(features_mutex_);
         if(bad_)
             return this_point();
+
+        observations = observations_;
     }
 
-    observations_tmp = get_observations();
-    if(observations_tmp.empty())
+    if(observations.empty())
         return this_point();
 
-    vector<cv::Mat> descriptors;
-    descriptors.reserve(observations_tmp.size());
-    for(auto& obs: observations_tmp)
+    std::vector<cv::Mat> descriptors;
+    descriptors.reserve(observations.size());
+    for(auto& obs: observations)
     {
         Keyframe projKeyframe = obs.second->projKeyframe;
         if(!projKeyframe->is_bad())
@@ -301,142 +210,222 @@ Pt MapPoint::compute_distinctive_descriptors()
         return this_point();
 
     // Compute distances between them
-    const size_t N = descriptors.size();
+    const size_t num_descriptors = descriptors.size();
 
-    std::vector<std::vector<Descriptor_Distance_Type>> Distances(N, std::vector<Descriptor_Distance_Type>(N));
-    for(size_t i = 0;i < N; i++)
+    std::vector<std::vector<Descriptor_Distance_Type>> distances(
+        num_descriptors, std::vector<Descriptor_Distance_Type>(num_descriptors));
+    for(size_t i = 0; i < num_descriptors; i++)
     {
-        Distances[i][i] = Descriptor_Distance_Type(0.0);
-        for(size_t j = i + 1;j < N; j++)
+        distances[i][i] = Descriptor_Distance_Type(0.0);
+        for(size_t j = i + 1; j < num_descriptors; j++)
         {
-            Descriptor_Distance_Type distij = FeatureMatcher::descriptor_distance(descriptors[i], descriptors[j], featureType);
-            Distances[i][j] = distij;
-            Distances[j][i] = distij;
+            Descriptor_Distance_Type distance_ij =
+                FeatureMatcher::descriptor_distance(descriptors[i], descriptors[j], featureType);
+            distances[i][j] = distance_ij;
+            distances[j][i] = distance_ij;
         }
     }
 
     // Take the descriptor with least median distance to the rest
-    Descriptor_Distance_Type BestMedian = std::numeric_limits<Descriptor_Distance_Type>::max();
-    int BestIdx{0};
-    for(size_t i = 0;i < N; i++)
+    Descriptor_Distance_Type best_median = std::numeric_limits<Descriptor_Distance_Type>::max();
+    size_t best_index{0};
+    for(size_t i = 0; i < num_descriptors; i++)
     {
-        vector<Descriptor_Distance_Type> vDists(Distances[i]);
-        sort(vDists.begin(),vDists.end());
-        Descriptor_Distance_Type median = vDists[0.5*(N-1)];
+        std::vector<Descriptor_Distance_Type> distances_to_others(distances[i]);
+        std::sort(distances_to_others.begin(), distances_to_others.end());
+        Descriptor_Distance_Type median = distances_to_others[(num_descriptors - 1) / 2];
 
-        if(median < BestMedian)
+        if(median < best_median)
         {
-            BestMedian = median;
-            BestIdx = i;
+            best_median = median;
+            best_index = i;
         }
     }
 
     {
-        unique_lock<mutex> lock(features_mutex_);
-        descriptor_ = descriptors[BestIdx].clone();
+        std::unique_lock<std::mutex> lock(features_mutex_);
+        descriptor_ = descriptors[best_index].clone();
     }
     return this_point();
 }
 
 cv::Mat MapPoint::get_descriptor() const
 {
-    unique_lock<mutex> lock(features_mutex_);
-    // Shared header, not a clone: descriptor_ is only ever REBOUND under this mutex
-    // (ctor fills it once; compute_distinctive_descriptors assigns a fresh clone), never
-    // written in place — so an outstanding shared view stays valid and immutable.
+    std::unique_lock<std::mutex> lock(features_mutex_);
     return descriptor_;
 }
 
-int MapPoint::get_index_in_keyframe(const Keyframe& keyframe) const
-{
-    unique_lock<mutex> lock(features_mutex_);
-    const auto it = observations_.find(keyframe->keyId);
-    return it != observations_.end() ? static_cast<int>(it->second->projIndex) : -1;
-}
-
-bool MapPoint::is_in_keyframe(const Keyframe& keyframe) const
-{
-    unique_lock<mutex> lock(features_mutex_);
-    return (observations_.count(keyframe->keyId));
-}
+// ============================================================================
+// Normal, scale and depth
+// ============================================================================
 
 void MapPoint::update_normal_and_depth()
 {
-    // One snapshot of observations_ AND the reference keyframe: erase_observation re-points
-    // ref_keyframe_ concurrently, and indexing an older snapshot with the live reference used to
-    // default-construct a null observation (operator[]) and dereference it
-    map<KeyframeId , Obs> observations_tmp;
-    Keyframe refKeyframe_;
-    vec3f XYZ_;
+    std::map<KeyframeId, Obs> observations;
+    Keyframe ref_keyframe;
+    vec3f world_pos;
     {
-        unique_lock<mutex> lock1(features_mutex_);
-        unique_lock<mutex> lock2(position_mutex_);
+        std::unique_lock<std::mutex> lock1(features_mutex_);
+        std::unique_lock<std::mutex> lock2(position_mutex_);
         if(bad_)
             return;
 
-        observations_tmp = observations_;
-        refKeyframe_ = ref_keyframe_;
-        XYZ_ = position_;
+        observations = observations_;
+        ref_keyframe = ref_keyframe_;
+        world_pos = position_;
     }
-    if(observations_tmp.empty())
+    if(observations.empty())
         return;
 
-    // The reference keyframe must still observe the point: ref_distance_ below is measured
-    // from it. (Its keypoint index was also read here, for the pyramid scale the depth window
-    // used to depend on; the window is now a plain ratio and needs only the distance.)
-    if(observations_tmp.find(refKeyframe_->keyId) == observations_tmp.end())
+    if(observations.find(ref_keyframe->keyId) == observations.end())
         return;
 
     vec3f normal{vec3f::Zero()};
-    int n = 0;
-    for(auto& obs: observations_tmp)
+    int num_observers = 0;
+    for(auto& obs: observations)
     {
         Keyframe projKeyframe = obs.second->projKeyframe;
-        vec3f twc_i = projKeyframe->get_twc();
-        vec3f normal_i = XYZ_ - twc_i;
-        normal = normal + normal_i / normal_i.norm();
-        n++;
+        vec3f camera_centre = projKeyframe->get_twc();
+        vec3f viewing_direction = world_pos - camera_centre;
+        normal = normal + viewing_direction / viewing_direction.norm();
+        num_observers++;
     }
 
-    vec3f PC = XYZ_ - refKeyframe_->get_twc();
-    const float dist = PC.norm();
+    vec3f ref_to_point = world_pos - ref_keyframe->get_twc();
+    const float dist = ref_to_point.norm();
 
     {
-        unique_lock<mutex> lock3(position_mutex_);
+        std::unique_lock<std::mutex> lock3(position_mutex_);
 
         ref_distance_ = dist;
         ref_size_  = reference_keypoint_size;
 
-        // A plain ratio around the reference distance, the same for every feature type.
-        // It used to be [dist*s / max_size, dist*s], where s was the keypoint's pyramid scale
-        // and max_size the detector's pyramid span -- ORB's model, in which a keypoint's octave
-        // says how much closer and further it can still be detected. Six of the eight extractors
-        // report s = 1 and inherited ORB's constants anyway, which pinned them to the finest
-        // octave: approach to 0.22*dist was allowed, receding past 1.2*dist was not. The test
-        // only ever needed to ask whether the current depth is close to the reference one.
         max_distance_ = dist * depth_invariance_ratio;
         min_distance_ = dist / depth_invariance_ratio;
 
-        normal_ = normal / n;
+        normal_ = normal / num_observers;
     }
+}
+
+vec3f MapPoint::get_normal() const
+{
+    std::unique_lock<std::mutex> lock(position_mutex_);
+    return normal_;
 }
 
 float MapPoint::get_min_distance_invariance() const
 {
-    unique_lock<mutex> lock(position_mutex_);
+    std::unique_lock<std::mutex> lock(position_mutex_);
     return min_distance_;
 }
 
 float MapPoint::get_max_distance_invariance() const
 {
-    unique_lock<mutex> lock(position_mutex_);
+    std::unique_lock<std::mutex> lock(position_mutex_);
     return max_distance_;
 }
 
 float MapPoint::predict_size(const float &currentDist) const
 {
-    unique_lock<mutex> lock(position_mutex_);
+    std::unique_lock<std::mutex> lock(position_mutex_);
     return ref_size_ * ref_distance_ / currentDist;
 }
 
-} //namespace ORB_SLAM
+// ============================================================================
+// Tracking statistics
+// ============================================================================
+
+void MapPoint::increase_visible(int n)
+{
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    num_visible_ += n;
+}
+
+void MapPoint::increase_found(int n)
+{
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    num_found_ += n;
+}
+
+float MapPoint::get_found_ratio() const
+{
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    return static_cast<float>(num_found_)/num_visible_;
+}
+
+// ============================================================================
+// Lifecycle
+// ============================================================================
+
+void MapPoint::set_bad_flag()
+{
+    std::map<KeyframeId, Obs> observations;
+    {
+        std::unique_lock<std::mutex> lock(features_mutex_);
+        bad_ = true;
+        observations = observations_;
+        observations_.clear();
+    }
+    for(auto& obs: observations)
+    {
+        Keyframe keyframe = obs.second->projKeyframe;
+        keyframe->erase_map_point_match(this_point(), obs.second->projIndex);
+    }
+
+    map_->EraseMapPoint(this_point());
+}
+
+bool MapPoint::is_bad() const
+{
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    return bad_;
+}
+
+void MapPoint::replace(const Pt& replacement)
+{
+    if(replacement->ptId == this->ptId)
+        return;
+
+    int num_visible, num_found;
+
+    std::map<KeyframeId, Obs> observations;
+    {
+        std::unique_lock<std::mutex> lock(features_mutex_);
+        observations = observations_;
+        observations_.clear();
+        bad_ = true;
+        num_visible = num_visible_;
+        num_found = num_found_;
+        replaced_ = replacement;
+    }
+
+    std::vector<std::pair<Keyframe, KeypointIndex>> merged;
+    merged.reserve(observations.size());
+    for(auto& obs: observations)
+    {
+        Keyframe keyframe = obs.second->projKeyframe;
+
+        if(!replacement->is_in_keyframe(keyframe))
+        {
+            if(keyframe->replace_map_point_match(this_point(), obs.second->projIndex, replacement))
+                merged.emplace_back(keyframe, obs.second->projIndex);
+        }
+        else
+        {
+            keyframe->erase_map_point_match(this_point(), obs.second->projIndex);
+        }
+    }
+    replacement->increase_found(num_found);
+    replacement->increase_visible(num_visible);
+    replacement->add_observations(merged);
+
+    map_->EraseMapPoint(this_point());
+}
+
+Pt MapPoint::get_replaced() const
+{
+    std::unique_lock<std::mutex> lock(features_mutex_);
+    return replaced_;
+}
+
+}

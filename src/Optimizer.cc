@@ -425,8 +425,13 @@ int Optimizer::pose_optimization(Frame *pFrame, const bool useDepthChannel)
         vnIndexEdgeRGBD[ft].reserve(data.count());
     }
 
-    {
-    unique_lock<mutex> lock(MapPoint::global_mutex);
+    // No lock here. MapPoint::global_mutex used to freeze every position in the map for the
+    // duration of this build, but four of the five problem builders (BundleAdjustment,
+    // LocalBundleAdjustment, OptimizeEssentialGraph, OptimizeSim3) never took it, and the
+    // optimize() calls below run unlocked anyway -- so it froze a short window nested inside a
+    // long unprotected one, at the price of serialising the tracking thread against every
+    // set_world_pos in the system. Each position is still read atomically under position_mutex_;
+    // what is given up is only that they come from one instant, which no constraint here needs.
     for (auto& [ft, pts] : pFrame->pts) {
         const int N_ft = static_cast<int>(pFrame->features.at(ft).count());
         const auto& keypointsFt = pFrame->features.at(ft).keypoints;
@@ -476,7 +481,6 @@ int Optimizer::pose_optimization(Frame *pFrame, const bool useDepthChannel)
                 idxMonoFt.push_back(i);
             }
         }
-    }
     }
 
     if(nInitialCorrespondences<3)
@@ -626,11 +630,8 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
     list<Keyframe> lFixedCameras;
     for(list<Pt>::iterator lit=llocalPts.begin(), lend=llocalPts.end(); lit!=lend; lit++)
     {
-        map<KeyframeId , Obs> observations = (*lit)->get_observations();
-        for(auto& obs :observations)
+        for(const auto& [key_id, pKFi] : (*lit)->get_observers())
         {
-            Keyframe pKFi = obs.second->projKeyframe;
-
             if(pKFi->ba_local_for_keyframe!=pKF->keyId && pKFi->ba_fixed_for_keyframe != pKF->keyId)
             {
                 pKFi->ba_fixed_for_keyframe=pKF->keyId;

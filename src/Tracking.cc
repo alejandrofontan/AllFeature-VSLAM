@@ -908,11 +908,11 @@ void Tracking::update_local_keyframes()
                 pt = nullptr;
                 continue;
             }
-            // By-value snapshot: get_observations copies under the point's mutex
-            const std::map<KeyframeId, Obs> observations = pt->get_observations();
-            for (const auto& [key_id, obs] : observations) {
+            // By-value snapshot: get_observers copies the observing keyframes under the point's
+            // mutex. The Observation itself is not needed -- only who observes.
+            for (const auto& [key_id, observer] : pt->get_observers()) {
                 shared_points_per_keyframe[key_id]++;
-                keyframe_by_id[key_id] = obs->projKeyframe;
+                keyframe_by_id[key_id] = observer;
             }
         }
     }
@@ -1400,6 +1400,7 @@ void Tracking::reset()
 
     KeyFrame::next_id = 0;
     Frame::next_id = 0;
+    MapPoint::next_id = 0;
     state_ = TrackingState::NO_IMAGES_YET;
     initializer_ = nullptr;
 

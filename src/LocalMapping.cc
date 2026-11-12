@@ -561,11 +561,11 @@ void LocalMapping::cull_keyframes_heuristic()
                 if(pt->number_of_observations() <= params.keyframe_culling_min_observations)
                     continue;
 
-                // By-value snapshot: get_observations copies under the point's mutex
-                const std::map<KeyframeId, Obs> observations = pt->get_observations();
+                // By-value snapshot: get_observers copies the observing keyframes under the
+                // point's mutex. The Observation itself is not needed -- only who observes.
                 int num_other_observers = 0;
-                for(const auto& [key_id, obs] : observations){
-                    if(key_id == keyframe->keyId || obs->projKeyframe->is_bad())
+                for(const auto& [key_id, observer] : pt->get_observers()){
+                    if(key_id == keyframe->keyId || observer->is_bad())
                         continue;
                     if(++num_other_observers >= params.keyframe_culling_min_observations)
                         break;
