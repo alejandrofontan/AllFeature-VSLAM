@@ -325,6 +325,10 @@ target_link_libraries(test_bfmatcher_parity ${ALLFEATURE_ALLOCATOR} ${PROJECT_NA
 add_executable(test_feature_parity src/test_feature_parity.cpp)
 target_link_libraries(test_feature_parity ${ALLFEATURE_ALLOCATOR} ${PROJECT_NAME} ${YAML_CPP_LIBRARIES})
 
+# Feature lab (tools/feature_lab): debug / fine-tune / train tooling for keypoint extraction and feature matching.
+# Its executables link ${PROJECT_NAME} like the harnesses above — not installed.
+add_subdirectory(${PROJECT_SOURCE_DIR}/tools/feature_lab ${CMAKE_BINARY_DIR}/feature_lab)
+
 # Install targets and headers
 install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mono_stream vslamlab_allfeature_rgbd
         RUNTIME DESTINATION bin
