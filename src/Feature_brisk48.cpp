@@ -1,13 +1,13 @@
 #include "Feature_brisk48.h"
 
-AF_VSLAM::FeatureExtractor_brisk48::FeatureExtractor_brisk48(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::Brisk48Extractor::Brisk48Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
 
     brisk_detector = new brisk::BriskFeatureDetector(34, 4, true);
     brisk_extractor = new brisk::BriskDescriptorExtractor(true, true, brisk::BriskDescriptorExtractor::Version::briskV2);
 }
 
-void AF_VSLAM::FeatureExtractor_brisk48::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
+void AF_VSLAM::Brisk48Extractor::detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
 
     // BRISK feature detection and description
     std::vector<cv::KeyPoint> keypoints_;
@@ -23,31 +23,23 @@ void AF_VSLAM::FeatureExtractor_brisk48::detectAndCompute(const Image& img, std:
     }
 
     // Discard keypoints outside the mask (if one was loaded for this frame)
-    FilterKeypointsByMask(keypoints_, descriptors_, img.mask);
+    filter_keypoints_by_mask(keypoints_, descriptors_, img.mask);
 
     // Retain only if not too many keypoints
-    if (keypoints_.size() < settings->OVERSIZE_KEYPOINT_FACTOR * settings->maxNumFeatures){
+    if (keypoints_.size() < settings->oversize_keypoint_factor * settings->max_num_features){
         keypoints = keypoints_;
         descriptors = descriptors_;
         return;
     }
 
     // Retain best keypoints using octree distribution
-    keypoints =  DistributeOctTree(keypoints_, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1, settings->maxNumFeatures, 0);
+    keypoints =  distribute_oct_tree(keypoints_, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1, settings->max_num_features);
     descriptors.create((int)keypoints.size(), descriptors_.cols, descriptors_.type());
     for (int i = 0; i < (int)keypoints.size(); ++i)
         descriptors_.row(keypoints[i].class_id).copyTo(descriptors.row(i));
 }
 
-int AF_VSLAM::FeatureExtractor_brisk48::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
-    return keypoint.octave;
-}
-
-float AF_VSLAM::FeatureExtractor_brisk48::GetKeypointSize(const cv::KeyPoint&) const{
-    // detectAndCompute sets every keypoint's octave to 0, so the old scaleFactor^octave was always 1
+float AF_VSLAM::Brisk48Extractor::get_keypoint_size(const cv::KeyPoint&) const{
+    // detect_and_compute sets every keypoint's octave to 0, so the old scaleFactor^octave was always 1
     return 1.0f;
-}
-
-float AF_VSLAM::DescriptorDistance_brisk48(const cv::Mat &a, const cv::Mat &b){
-    return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_HAMMING);
 }

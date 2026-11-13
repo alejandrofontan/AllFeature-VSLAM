@@ -67,7 +67,7 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
                                            : info.substr(p, info.find('\n', p) - p)));
     }
     for(const auto& feat_type : feature_types) {
-        if (const char* variant = lightglue_variant(get_feature(feat_type).getMatcherType())) {
+        if (const char* variant = lightglue_variant(get_feature(feat_type).get_matcher_type())) {
             // Every session now (dynamic + each padded export): a missing file fails here, and no session is created
             // on the tracking thread later (seconds on Core ML even from its cache)
             const std::vector<int> lengths = onnx::preload_lightglue(variant);
@@ -1010,7 +1010,7 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
         const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& featType_){
 
         const AF_VSLAM::Feature& ft = get_feature(featType_);
-        const MatcherType matcherType = ft.getMatcherType();
+        const MatcherType matcherType = ft.get_matcher_type();
 
         std::vector<cv::DMatch> matches;
         switch(matcherType) {
@@ -1039,7 +1039,7 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
         const FeatureType& featType_){
 
         const AF_VSLAM::Feature& ft = get_feature(featType_);
-        const MatcherType matcherType = ft.getMatcherType();
+        const MatcherType matcherType = ft.get_matcher_type();
 
         std::vector<cv::DMatch> matches;
         // A side without keypoints (a type a frame did not detect: its descriptors are an empty Mat) has nothing to

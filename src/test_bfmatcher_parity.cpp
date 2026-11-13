@@ -130,7 +130,7 @@ int main()
         parityHamming(rng, 500, 700, cols);
         parityHamming(rng, 2000, 5400, cols);
     }
-    for (const int cols : {64, 128, 256})   // surf64/kaze64, sift/aliked128, superpoint256
+    for (const int cols : {64, 128, 256})   // kaze64, sift/aliked128, superpoint256
     {
         parityL2(rng, 1, 1, cols);
         parityL2(rng, 37, 53, cols);

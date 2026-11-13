@@ -31,7 +31,6 @@ enum FeatureType {
     FEAT_ALIKED128 = 6,
     FEAT_SIFT128 = 5,
     FEAT_KAZE64 = 4,
-    FEAT_SURF64 = 3,
     FEAT_BRISK48 = 2,
     FEAT_AKAZE61 = 1,
     FEAT_ORB32 = 0,

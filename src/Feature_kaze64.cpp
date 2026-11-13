@@ -1,12 +1,12 @@
 #include "Feature_kaze64.h"
 
-AF_VSLAM::FeatureExtractor_kaze64::FeatureExtractor_kaze64(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::Kaze64Extractor::Kaze64Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
 
         kaze = cv::KAZE::create();
 }
 
-void AF_VSLAM::FeatureExtractor_kaze64::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
+void AF_VSLAM::Kaze64Extractor::detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
 
     // KAZE feature detection and description
     std::vector<cv::KeyPoint> keypoints_;
@@ -20,30 +20,22 @@ void AF_VSLAM::FeatureExtractor_kaze64::detectAndCompute(const Image& img, std::
     }
 
     // Discard keypoints outside the mask (if one was loaded for this frame)
-    FilterKeypointsByMask(keypoints_, descriptors_, img.mask);
+    filter_keypoints_by_mask(keypoints_, descriptors_, img.mask);
 
     // Retain only if not too many keypoints
-    if (keypoints_.size() < settings->OVERSIZE_KEYPOINT_FACTOR * settings->maxNumFeatures){
+    if (keypoints_.size() < settings->oversize_keypoint_factor * settings->max_num_features){
         keypoints = keypoints_;
         descriptors = descriptors_;
         return;
     }
 
     // Retain best keypoints using octree distribution
-    keypoints =  DistributeOctTree(keypoints_, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1, settings->maxNumFeatures, 0);
+    keypoints =  distribute_oct_tree(keypoints_, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1, settings->max_num_features);
     descriptors.create((int)keypoints.size(), descriptors_.cols, descriptors_.type());
     for (int i = 0; i < (int)keypoints.size(); ++i)
         descriptors_.row(keypoints[i].class_id).copyTo(descriptors.row(i));
 }
 
-int AF_VSLAM::FeatureExtractor_kaze64::GetKeypointOctave(const cv::KeyPoint&) const{
-    return 0;
-}
-
-float AF_VSLAM::FeatureExtractor_kaze64::GetKeypointSize(const cv::KeyPoint&) const{
+float AF_VSLAM::Kaze64Extractor::get_keypoint_size(const cv::KeyPoint&) const{
     return 1.0f;
-}
-
-float AF_VSLAM::DescriptorDistance_kaze64(const cv::Mat &a, const cv::Mat &b){
-    return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2);
 }

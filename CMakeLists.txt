@@ -126,9 +126,7 @@ set(SRCS_ALLFEATURE
         src/KeyframeInformation.cc
         src/PlaceCellSettings.cc
         src/Image.cpp
-        src/Feature.cpp
         src/Feature_orb32.cpp
-        src/Feature_surf64.cpp
         src/Feature_kaze64.cpp
 )
 if(brisk_FOUND)

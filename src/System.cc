@@ -255,7 +255,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     std::map<FeatureType, string> feature_settings_yaml_file;
     for (const auto& featureType : feature_types){
         const AF_VSLAM::Feature& ft = get_feature(featureType);
-        feature_settings_yaml_file[featureType] = ft.getSettingsYamlFile();
+        feature_settings_yaml_file[featureType] = ft.get_settings_yaml_file();
     }
 
     // Initialize matching thresholds

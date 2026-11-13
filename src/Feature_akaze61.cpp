@@ -1,14 +1,14 @@
 #include "Feature_akaze61.h"
 
-AF_VSLAM::FeatureExtractor_akaze61::FeatureExtractor_akaze61(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::Akaze61Extractor::Akaze61Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
 
-    akazeOptions = AKAZEOptions();
+    akaze_options = AKAZEOptions();
     // AKAZE's own key of settings/akaze61_settings.yaml: the detector response threshold
-    akazeOptions.dthreshold = settings->required_float("FeatureExtractor.detectTh");
+    akaze_options.dthreshold = settings->required_float("FeatureExtractor.detectTh");
 }
 
-void AF_VSLAM::FeatureExtractor_akaze61::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
+void AF_VSLAM::Akaze61Extractor::detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
 
     // AKAZE feature detection and description
     std::vector<cv::KeyPoint> keypoints_;
@@ -23,42 +23,34 @@ void AF_VSLAM::FeatureExtractor_akaze61::detectAndCompute(const Image& img, std:
     }
 
     // Discard keypoints outside the mask (if one was loaded for this frame)
-    FilterKeypointsByMask(keypoints_, descriptors_, img.mask);
+    filter_keypoints_by_mask(keypoints_, descriptors_, img.mask);
 
     // Retain only if not too many keypoints
-    if (keypoints_.size() < settings->OVERSIZE_KEYPOINT_FACTOR * settings->maxNumFeatures){
+    if (keypoints_.size() < settings->oversize_keypoint_factor * settings->max_num_features){
         keypoints = keypoints_;
         descriptors = descriptors_;
         return;
     }
 
     // Retain best keypoints using octree distribution
-    keypoints =  DistributeOctTree(keypoints_, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1, settings->maxNumFeatures, 0);
+    keypoints =  distribute_oct_tree(keypoints_, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1, settings->max_num_features);
 
     descriptors.create((int)keypoints.size(), descriptors_.cols, descriptors_.type());
     for (int i = 0; i < (int)keypoints.size(); ++i)
         descriptors_.row(keypoints[i].class_id).copyTo(descriptors.row(i));
 }
 
-void AF_VSLAM::FeatureExtractor_akaze61::setupImage(const Image& img){
+void AF_VSLAM::Akaze61Extractor::setup_image(const Image& img){
     cv::Mat img_32;
     img.grayImg.convertTo(img_32, CV_32F, 1.0/255.0,0);
-    akazeOptions.img_width = img_32.cols;
-    akazeOptions.img_height = img_32.rows;
+    akaze_options.img_width = img_32.cols;
+    akaze_options.img_height = img_32.rows;
 
     evolution.reset();
-    evolution = std::make_shared<libAKAZE::AKAZE>(akazeOptions);
+    evolution = std::make_shared<libAKAZE::AKAZE>(akaze_options);
     evolution->Create_Nonlinear_Scale_Space(img_32);
 }
 
-int AF_VSLAM::FeatureExtractor_akaze61::GetKeypointOctave(const cv::KeyPoint&) const{
-    return 0;
-}
-
-float AF_VSLAM::FeatureExtractor_akaze61::GetKeypointSize(const cv::KeyPoint&) const{
+float AF_VSLAM::Akaze61Extractor::get_keypoint_size(const cv::KeyPoint&) const{
     return 1.0f;
-}
-
-float AF_VSLAM::DescriptorDistance_akaze61(const cv::Mat &a, const cv::Mat &b){
-    return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_HAMMING);
 }

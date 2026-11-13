@@ -285,7 +285,7 @@ protected:
     // nominal-area rescale when fix_image_size_ is set.
     void load_camera_parameters(const std::string& calibration_yaml, const std::string& settings_yaml);
     // Build a feature extractor from the per-feature settings yaml, with its
-    // maxNumFeatures scaled by scale_num_features (initialization uses a denser set).
+    // max_num_features scaled by scale_num_features (initialization uses a denser set).
     static std::shared_ptr<FeatureExtractor> get_feature_extractor(int scale_num_features,
                                                                    const std::string& feature_settings_yaml,
                                                                    FeatureType feature_type);

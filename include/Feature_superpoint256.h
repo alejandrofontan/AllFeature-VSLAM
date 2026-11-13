@@ -15,8 +15,7 @@
  * first frame instead (Core ML compiles only bounded shapes; `export-features --only superpoint --static WxH`).
  */
 
-#ifndef AF_VSLAM_FEATURE_superpoint256_H
-#define AF_VSLAM_FEATURE_superpoint256_H
+#pragma once
 
 #include <memory>
 
@@ -24,57 +23,57 @@
 #include "FeatureExtractor.h"
 #include "onnx/SuperPointOnnx.h"
 
-namespace AF_VSLAM {
+namespace AF_VSLAM
+{
 
-    class FeatureExtractor_superpoint256;
+class Superpoint256Extractor;
 
-    class Superpoint256 : public Feature {
-    public:
-        const std::string& getFeatureName()    const override { return s_featureName; }
-        FeatureType  getType()           const override { return FEAT_SUPERPOINT256; }
-        MatcherType getMatcherType()     const override { return LIGHTGLUE_SUPERPOINT; }
-        const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
-        const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
-        float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override{ return (Descriptor_Distance_Type) cv::norm(a, b, cv::NORM_L2); };
-        std::shared_ptr<FeatureExtractor> createExtractor(
-            std::shared_ptr<FeatureExtractorSettings> settings) const override;
+class Superpoint256 : public Feature
+{
+public:
+    const std::string& get_feature_name() const override { return s_feature_name; }
+    FeatureType get_type() const override { return FEAT_SUPERPOINT256; }
+    MatcherType get_matcher_type() const override { return LIGHTGLUE_SUPERPOINT; }
+    const Eigen::Matrix<float,3,1>& get_color() const override { return s_color; }
+    const std::string& get_settings_yaml_file() const override { return s_settings_yaml_file; }
+    float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override{ return (Descriptor_Distance_Type) cv::norm(a, b, cv::NORM_L2); }
+    std::shared_ptr<FeatureExtractor> create_extractor(
+        std::shared_ptr<FeatureExtractorSettings> settings) const override;
 
-        /// The model file inside features_models_dir (fp32 export of tools/export_features.py)
-        inline static const std::string kModelFile = "superpoint_v1.onnx";
+    /// The model file inside features_models_dir (fp32 export of tools/export_features.py)
+    inline static const std::string s_model_file = "superpoint_v1.onnx";
 
-    private:
-        inline static const std::string s_featureName    = "superpoint256";
-        inline static const std::string s_settingsYamlFile = "settings/superpoint256_settings.yaml";
-        inline static const Eigen::Matrix<float,3,1> s_color = {122, 0, 255};
-    };
+private:
+    inline static const std::string s_feature_name = "superpoint256";
+    inline static const std::string s_settings_yaml_file = "settings/superpoint256_settings.yaml";
+    inline static const Eigen::Matrix<float,3,1> s_color = {122, 0, 255};
+};
 
-    class FeatureExtractor_superpoint256 : public FeatureExtractor {
-    public:
-        explicit FeatureExtractor_superpoint256(std::shared_ptr<FeatureExtractorSettings> &settings_);
-        ~FeatureExtractor_superpoint256() override = default;
+class Superpoint256Extractor : public FeatureExtractor
+{
+public:
+    explicit Superpoint256Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_);
+    ~Superpoint256Extractor() override = default;
 
-        void detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override;
+    void detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override;
 
-        [[nodiscard]] int GetKeypointOctave(const cv::KeyPoint &keypoint) const override;
-        [[nodiscard]] float GetKeypointSize(const cv::KeyPoint &keypoint) const override;
+    [[nodiscard]] float get_keypoint_size(const cv::KeyPoint &keypoint) const override;
 
-    private:
-        /// Create the session on `path` and warm it up on a blank width x height frame.
-        void load(const std::string& path, int width, int height);
-        /// The session for a width x height frame: the one loaded, or (static shapes) the export for that size.
-        onnx::SuperPointOnnx& extractor_for(int width, int height);
+private:
+    /// Create the session on `path` and warm it up on a blank width x height frame.
+    void load(const std::string& path, int width, int height);
+    /// The session for a width x height frame: the one loaded, or (static shapes) the export for that size.
+    onnx::SuperPointOnnx& extractor_for(int width, int height);
 
-        std::unique_ptr<onnx::SuperPointOnnx> extractor_;
-        int loaded_width_{0}, loaded_height_{0};   // the static export's size (static shapes only)
-    };
+    std::unique_ptr<onnx::SuperPointOnnx> extractor_;
+    int loaded_width_{0}, loaded_height_{0};   // the static export's size (static shapes only)
+};
 
-    inline std::shared_ptr<FeatureExtractor> Superpoint256::createExtractor(
-        std::shared_ptr<FeatureExtractorSettings> settings) const {
-        return std::make_shared<FeatureExtractor_superpoint256>(settings);
-    }
+inline std::shared_ptr<FeatureExtractor> Superpoint256::create_extractor(
+    std::shared_ptr<FeatureExtractorSettings> settings) const {
+    return std::make_shared<Superpoint256Extractor>(settings);
+}
 
-    float DescriptorDistance_superpoint256(const cv::Mat &a, const cv::Mat &b);
 
 }
 
-#endif //AF_VSLAM_FEATURE_superpoint256_H

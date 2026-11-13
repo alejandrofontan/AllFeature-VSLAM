@@ -12,12 +12,12 @@
 // nothing outside this translation unit uses them; leaving them in the header meant every other
 // .cpp file that included it got its own unused copy, triggering -Wunused-function/-Wunused-variable
 // everywhere except here.
-static void computeOrbDescriptor(const cv::KeyPoint& kpt,
+static void compute_orb_descriptor(const cv::KeyPoint& kpt,
                                  const cv::Mat& img, const cv::Point* pattern,
                                  uchar* desc)
 {
-    const float factorPI = (float)(CV_PI/180.f);
-    float angle = (float)kpt.angle*factorPI;
+    const float factor_pi = (float)(CV_PI/180.f);
+    float angle = (float)kpt.angle*factor_pi;
     float a = (float)cos(angle), b = (float)sin(angle);
 
     const uchar* center = &img.at<uchar>(cvRound(kpt.pt.y), cvRound(kpt.pt.x));
@@ -55,13 +55,13 @@ static void computeOrbDescriptor(const cv::KeyPoint& kpt,
 }
 
 
-static void computeDescriptors(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors,
+static void compute_descriptors(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors,
                                const std::vector<cv::Point>& pattern)
 {
     descriptors = cv::Mat::zeros((int)keypoints.size(), 32, CV_8UC1);
 
     for (size_t i = 0; i < keypoints.size(); i++)
-        computeOrbDescriptor(keypoints[i], image, &pattern[0], descriptors.ptr((int)i));
+        compute_orb_descriptor(keypoints[i], image, &pattern[0], descriptors.ptr((int)i));
 }
 
 static float IC_Angle(const cv::Mat& image, cv::Point2f pt,  const std::vector<int> & u_max)
@@ -75,7 +75,7 @@ static float IC_Angle(const cv::Mat& image, cv::Point2f pt,  const std::vector<i
     for (int u = -HALF_PATCH_SIZE; u <= HALF_PATCH_SIZE; ++u)
         m_10 += u * center[u];
 
-    // Go line by line in the circuI853lar patch
+    // Go line by line in the circular patch
     int step = (int)image.step1();
     for (int v = 1; v <= HALF_PATCH_SIZE; ++v)
     {
@@ -94,12 +94,12 @@ static float IC_Angle(const cv::Mat& image, cv::Point2f pt,  const std::vector<i
     return cv::fastAtan2((float)m_01, (float)m_10);
 }
 
-static void computeOrientation(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoints, const std::vector<int>& umax)
+static void compute_orientation(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoints, const std::vector<int>& u_max)
 {
     for (std::vector<cv::KeyPoint>::iterator keypoint = keypoints.begin(),
-         keypointEnd = keypoints.end(); keypoint != keypointEnd; ++keypoint)
+         keypoint_end = keypoints.end(); keypoint != keypoint_end; ++keypoint)
     {
-        keypoint->angle = IC_Angle(image, keypoint->pt, umax);
+        keypoint->angle = IC_Angle(image, keypoint->pt, u_max);
     }
 }
 
@@ -367,51 +367,49 @@ float AF_VSLAM::Orb32::descriptor_distance(const cv::Mat &a, const cv::Mat &b) c
     return AF_VSLAM::DescriptorDistance_orb32(a, b);
 }
 
-AF_VSLAM::FeatureExtractor_orb32::FeatureExtractor_orb32(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::Orb32Extractor::Orb32Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_),
-        nOctaves(settings->required_int("FeatureExtractor.nOctaves")),
-        scaleFactor(settings->required_float("FeatureExtractor.scaleFactor")){
+        num_octaves(settings->required_int("FeatureExtractor.nOctaves")),
+        scale_factor(settings->required_float("FeatureExtractor.scaleFactor")){
 
     // ORB's own keys of settings/orb32_settings.yaml: the pyramid (levels, scale between them) and the FAST threshold
-    iniThFAST = static_cast<int>(settings->required_float("FeatureExtractor.detectTh"));
+    initial_fast_threshold = static_cast<int>(settings->required_float("FeatureExtractor.detectTh"));
     AF_CONFIG_BEGIN("ORB Extractor Settings");
-    AF_CONFIG_FIELD("nOctaves:           ", nOctaves);
-    AF_CONFIG_FIELD("scaleFactor:        ", scaleFactor);
-    AF_CONFIG_FIELD("detectTh:           ", iniThFAST);
+    AF_CONFIG_FIELD("nOctaves:           ", num_octaves);
+    AF_CONFIG_FIELD("scaleFactor:        ", scale_factor);
+    AF_CONFIG_FIELD("detectTh:           ", initial_fast_threshold);
     AF_CONFIG_END();
 
-    mvScaleFactor.resize(nOctaves);
-    mvLevelSigma2.resize(nOctaves);
-    mvScaleFactor[0]=1.0f;
-    mvLevelSigma2[0]=1.0f;
-    for(int i=1; i<nOctaves; i++)
+    // Only the scale factors themselves survive: they rescale the detector's borders
+    // (compute_keypoints_oct_tree) and the pyramid levels (compute_pyramid). Upstream
+    // ORB-SLAM2 also kept per-level sigma2 / inv_sigma2 arrays here and had the optimizer
+    // index them by kp.octave; this fork instead derives a per-KEYPOINT sigma in
+    // FeatureExtractor::compute_sigma, from get_keypoint_size() -- which for orb32 returns
+    // scale_factor^octave, so the numbers are identical. Those two arrays were still being
+    // filled and never read; see compute_sigma for the one remaining source of truth.
+    scale_factors.resize(num_octaves);
+    scale_factors[0]=1.0f;
+    for(int i=1; i<num_octaves; i++)
+        scale_factors[i]=scale_factors[i-1]*scale_factor;
+
+    inv_scale_factors.resize(num_octaves);
+    for(int i=0; i<num_octaves; i++)
+        inv_scale_factors[i]=1.0f/scale_factors[i];
+
+    image_pyramid.resize(num_octaves);
+
+    features_per_level.resize(num_octaves);
+    float factor = 1.0f / scale_factor;
+    float desired_features_per_scale = settings->max_num_features*(1 - factor)/(1 - (float)pow((double)factor, (double)num_octaves));
+
+    int sum_features = 0;
+    for( int level = 0; level < num_octaves-1; level++ )
     {
-        mvScaleFactor[i]=mvScaleFactor[i-1]*scaleFactor;
-        mvLevelSigma2[i]=mvScaleFactor[i]*mvScaleFactor[i];
+        features_per_level[level] = cvRound(desired_features_per_scale);
+        sum_features += features_per_level[level];
+        desired_features_per_scale *= factor;
     }
-
-    mvInvScaleFactor.resize(nOctaves);
-    mvInvLevelSigma2.resize(nOctaves);
-    for(int i=0; i<nOctaves; i++)
-    {
-        mvInvScaleFactor[i]=1.0f/mvScaleFactor[i];
-        mvInvLevelSigma2[i]=1.0f/mvLevelSigma2[i];
-    }
-
-    mvImagePyramid.resize(nOctaves);
-
-    mnFeaturesPerLevel.resize(nOctaves);
-    float factor = 1.0f / scaleFactor;
-    float nDesiredFeaturesPerScale = settings->maxNumFeatures*(1 - factor)/(1 - (float)pow((double)factor, (double)nOctaves));
-
-    int sumFeatures = 0;
-    for( int level = 0; level < nOctaves-1; level++ )
-    {
-        mnFeaturesPerLevel[level] = cvRound(nDesiredFeaturesPerScale);
-        sumFeatures += mnFeaturesPerLevel[level];
-        nDesiredFeaturesPerScale *= factor;
-    }
-    mnFeaturesPerLevel[nOctaves-1] = std::max(settings->maxNumFeatures - sumFeatures, 0);
+    features_per_level[num_octaves-1] = std::max(settings->max_num_features - sum_features, 0);
 
     const int npoints = 512;
     const cv::Point* pattern0 = (const cv::Point*)bit_pattern_31_;
@@ -419,67 +417,67 @@ AF_VSLAM::FeatureExtractor_orb32::FeatureExtractor_orb32(std::shared_ptr<Feature
 
     //This is for orientation
     // pre-compute the end of a row in a circular patch
-    umax.resize(HALF_PATCH_SIZE + 1);
+    u_max.resize(HALF_PATCH_SIZE + 1);
 
     int v, v0, vmax = cvFloor(HALF_PATCH_SIZE * sqrt(2.f) / 2 + 1);
     int vmin = cvCeil(HALF_PATCH_SIZE * sqrt(2.f) / 2);
     const double hp2 = HALF_PATCH_SIZE*HALF_PATCH_SIZE;
     for (v = 0; v <= vmax; ++v)
-        umax[v] = cvRound(sqrt(hp2 - v * v));
+        u_max[v] = cvRound(sqrt(hp2 - v * v));
 
     // Make sure we are symmetric
     for (v = HALF_PATCH_SIZE, v0 = 0; v >= vmin; --v)
     {
-        while (umax[v0] == umax[v0 + 1])
+        while (u_max[v0] == u_max[v0 + 1])
             ++v0;
-        umax[v] = v0;
+        u_max[v] = v0;
         ++v0;
     }
 }
 
-void AF_VSLAM::FeatureExtractor_orb32::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& _keypoints, cv::Mat& _descriptors){
-    ComputePyramid(img.grayImg);
-    std::vector < std::vector<cv::KeyPoint> > allKeypoints;
-    ComputeKeyPointsOctTree(allKeypoints);
+void AF_VSLAM::Orb32Extractor::detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& _keypoints, cv::Mat& _descriptors){
+    compute_pyramid(img.grayImg);
+    std::vector < std::vector<cv::KeyPoint> > all_keypoints;
+    compute_keypoints_oct_tree(all_keypoints);
     int nkeypoints = 0;
-    for (int level = 0; level < nOctaves; ++level)
-        nkeypoints += (int)allKeypoints[level].size();
+    for (int level = 0; level < num_octaves; ++level)
+        nkeypoints += (int)all_keypoints[level].size();
 
     _descriptors.create(nkeypoints, 32, CV_8U);
     int offset = 0;
-    for (int level = 0; level < nOctaves; ++level)
+    for (int level = 0; level < num_octaves; ++level)
     {
-        std::vector<cv::KeyPoint>& keypoints = allKeypoints[level];
-        int nkeypointsLevel = (int)keypoints.size();
+        std::vector<cv::KeyPoint>& keypoints = all_keypoints[level];
+        int num_keypoints_level = (int)keypoints.size();
 
-        if(nkeypointsLevel==0)
+        if(num_keypoints_level==0)
             continue;
 
-        cv::Mat workingMat = mvImagePyramid[level].clone();
-        GaussianBlur(workingMat, workingMat, cv::Size(7, 7), 2, 2, cv::BORDER_REFLECT_101);
-        cv::Mat desc = _descriptors.rowRange(offset, offset + nkeypointsLevel);
-        computeDescriptors(workingMat, keypoints, desc, pattern);
-        offset += nkeypointsLevel;
+        cv::Mat working_mat = image_pyramid[level].clone();
+        GaussianBlur(working_mat, working_mat, cv::Size(7, 7), 2, 2, cv::BORDER_REFLECT_101);
+        cv::Mat desc = _descriptors.rowRange(offset, offset + num_keypoints_level);
+        compute_descriptors(working_mat, keypoints, desc, pattern);
+        offset += num_keypoints_level;
         if (level != 0)
         {
-            float scale = mvScaleFactor[level];
+            float scale = scale_factors[level];
             for (std::vector<cv::KeyPoint>::iterator keypoint = keypoints.begin(),
-                 keypointEnd = keypoints.end(); keypoint != keypointEnd; ++keypoint)
+                 keypoint_end = keypoints.end(); keypoint != keypoint_end; ++keypoint)
                 keypoint->pt *= scale;
         }
         _keypoints.insert(_keypoints.end(), keypoints.begin(), keypoints.end());
     }
 
     // Discard keypoints outside the mask (if one was loaded for this frame)
-    FilterKeypointsByMask(_keypoints, _descriptors, img.mask);
+    filter_keypoints_by_mask(_keypoints, _descriptors, img.mask);
 }
 
-int AF_VSLAM::FeatureExtractor_orb32::GetKeypointOctave(const cv::KeyPoint& keypoint) const{
+int AF_VSLAM::Orb32Extractor::get_keypoint_octave(const cv::KeyPoint& keypoint) const{
     return keypoint.octave;
 }
 
-float AF_VSLAM::FeatureExtractor_orb32::GetKeypointSize(const cv::KeyPoint& keypoint) const{
-    return powf(scaleFactor, float(GetKeypointOctave(keypoint)));
+float AF_VSLAM::Orb32Extractor::get_keypoint_size(const cv::KeyPoint& keypoint) const{
+    return powf(scale_factor, float(get_keypoint_octave(keypoint)));
 }
 
 float AF_VSLAM::DescriptorDistance_orb32(const cv::Mat &a, const cv::Mat &b){
@@ -500,24 +498,24 @@ float AF_VSLAM::DescriptorDistance_orb32(const cv::Mat &a, const cv::Mat &b){
     return Descriptor_Distance_Type(dist);
 }
 
-void AF_VSLAM::FeatureExtractor_orb32::ComputePyramid(cv::Mat image)
+void AF_VSLAM::Orb32Extractor::compute_pyramid(cv::Mat image)
 {
 
 
-    for (int level = 0; level < nOctaves; ++level)
+    for (int level = 0; level < num_octaves; ++level)
     {
-        float scale = mvInvScaleFactor[level];
+        float scale = inv_scale_factors[level];
         cv::Size sz(cvRound((float)image.cols*scale), cvRound((float)image.rows*scale));
-        cv::Size wholeSize(sz.width + EDGE_THRESHOLD*2, sz.height + EDGE_THRESHOLD*2);
-        cv::Mat temp(wholeSize, image.type()), masktemp;
-        mvImagePyramid[level] = temp(cv::Rect(EDGE_THRESHOLD, EDGE_THRESHOLD, sz.width, sz.height));
+        cv::Size whole_size(sz.width + EDGE_THRESHOLD*2, sz.height + EDGE_THRESHOLD*2);
+        cv::Mat temp(whole_size, image.type()), masktemp;
+        image_pyramid[level] = temp(cv::Rect(EDGE_THRESHOLD, EDGE_THRESHOLD, sz.width, sz.height));
 
         // Compute the resized image
         if( level != 0 )
         {
-            cv::resize(mvImagePyramid[level-1], mvImagePyramid[level], sz, 0, 0, cv::INTER_LINEAR);
+            cv::resize(image_pyramid[level-1], image_pyramid[level], sz, 0, 0, cv::INTER_LINEAR);
 
-            cv::copyMakeBorder(mvImagePyramid[level], temp, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD,
+            cv::copyMakeBorder(image_pyramid[level], temp, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD,
                            cv::BORDER_REFLECT_101+cv::BORDER_ISOLATED);
         }
         else
@@ -529,92 +527,92 @@ void AF_VSLAM::FeatureExtractor_orb32::ComputePyramid(cv::Mat image)
 
 }
 
-void AF_VSLAM::FeatureExtractor_orb32::ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints)
+void AF_VSLAM::Orb32Extractor::compute_keypoints_oct_tree(std::vector<std::vector<cv::KeyPoint> >& all_keypoints)
 {
-    allKeypoints.resize(nOctaves);
+    all_keypoints.resize(num_octaves);
 
     const float W = 30;
 
-    for (int level = 0; level < nOctaves; ++level)
+    for (int level = 0; level < num_octaves; ++level)
     {
-        const int minBorderX = EDGE_THRESHOLD-3;
-        const int minBorderY = minBorderX;
-        const int maxBorderX = mvImagePyramid[level].cols-EDGE_THRESHOLD+3;
-        const int maxBorderY = mvImagePyramid[level].rows-EDGE_THRESHOLD+3;
+        const int min_border_x = EDGE_THRESHOLD-3;
+        const int min_border_y = min_border_x;
+        const int max_border_x = image_pyramid[level].cols-EDGE_THRESHOLD+3;
+        const int max_border_y = image_pyramid[level].rows-EDGE_THRESHOLD+3;
 
-        std::vector<cv::KeyPoint> vToDistributeKeys;
-        vToDistributeKeys.reserve(settings->maxNumFeatures*10);
+        std::vector<cv::KeyPoint> keys_to_distribute;
+        keys_to_distribute.reserve(settings->max_num_features*10);
 
-        const float width = (maxBorderX-minBorderX);
-        const float height = (maxBorderY-minBorderY);
+        const float width = (max_border_x-min_border_x);
+        const float height = (max_border_y-min_border_y);
 
-        const int nCols = width/W;
-        const int nRows = height/W;
-        const int wCell = ceil(width/nCols);
-        const int hCell = ceil(height/nRows);
+        const int num_cols = width/W;
+        const int num_rows = height/W;
+        const int cell_width = ceil(width/num_cols);
+        const int cell_height = ceil(height/num_rows);
 
-        for(int i=0; i<nRows; i++)
+        for(int i=0; i<num_rows; i++)
         {
-            const float iniY =minBorderY+i*hCell;
-            float maxY = iniY+hCell+6;
+            const float ini_y =min_border_y+i*cell_height;
+            float max_y = ini_y+cell_height+6;
 
-            if(iniY>=maxBorderY-3)
+            if(ini_y>=max_border_y-3)
                 continue;
-            if(maxY>maxBorderY)
-                maxY = maxBorderY;
+            if(max_y>max_border_y)
+                max_y = max_border_y;
 
-            for(int j=0; j<nCols; j++)
+            for(int j=0; j<num_cols; j++)
             {
-                const float iniX =minBorderX+j*wCell;
-                float maxX = iniX+wCell+6;
-                if(iniX>=maxBorderX-6)
+                const float ini_x =min_border_x+j*cell_width;
+                float max_x = ini_x+cell_width+6;
+                if(ini_x>=max_border_x-6)
                     continue;
-                if(maxX>maxBorderX)
-                    maxX = maxBorderX;
+                if(max_x>max_border_x)
+                    max_x = max_border_x;
 
-                std::vector<cv::KeyPoint> vKeysCell;
-                FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
-                     vKeysCell, iniThFAST,true);
+                std::vector<cv::KeyPoint> cell_keys;
+                FAST(image_pyramid[level].rowRange(ini_y,max_y).colRange(ini_x,max_x),
+                     cell_keys, initial_fast_threshold,true);
 
-                if(vKeysCell.empty())
+                if(cell_keys.empty())
                 {
-                    FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
-                         vKeysCell, minThFAST,true);
+                    FAST(image_pyramid[level].rowRange(ini_y,max_y).colRange(ini_x,max_x),
+                         cell_keys, min_fast_threshold,true);
                 }
 
-                if(!vKeysCell.empty())
+                if(!cell_keys.empty())
                 {
-                    for(std::vector<cv::KeyPoint>::iterator vit=vKeysCell.begin(); vit!=vKeysCell.end();vit++)
+                    for(std::vector<cv::KeyPoint>::iterator vit=cell_keys.begin(); vit!=cell_keys.end();vit++)
                     {
-                        (*vit).pt.x+=j*wCell;
-                        (*vit).pt.y+=i*hCell;
-                        vToDistributeKeys.push_back(*vit);
+                        (*vit).pt.x+=j*cell_width;
+                        (*vit).pt.y+=i*cell_height;
+                        keys_to_distribute.push_back(*vit);
                     }
                 }
 
             }
         }
 
-        std::vector<cv::KeyPoint> & keypoints = allKeypoints[level];
-        keypoints.reserve(settings->maxNumFeatures);
+        std::vector<cv::KeyPoint> & keypoints = all_keypoints[level];
+        keypoints.reserve(settings->max_num_features);
 
-        keypoints = DistributeOctTree(vToDistributeKeys, minBorderX, maxBorderX,
-                                      minBorderY, maxBorderY,mnFeaturesPerLevel[level], level);
+        keypoints = distribute_oct_tree(keys_to_distribute, min_border_x, max_border_x,
+                                      min_border_y, max_border_y, features_per_level[level]);
 
-        const int scaledPatchSize = PATCH_SIZE*mvScaleFactor[level];
+        const int scaled_patch_size = PATCH_SIZE*scale_factors[level];
 
         // Add border to coordinates and scale information
         const int nkps = keypoints.size();
         for(int i=0; i<nkps ; i++)
         {
-            keypoints[i].pt.x+=minBorderX;
-            keypoints[i].pt.y+=minBorderY;
+            keypoints[i].pt.x+=min_border_x;
+            keypoints[i].pt.y+=min_border_y;
             keypoints[i].octave=level;
-            keypoints[i].size = scaledPatchSize;
+            keypoints[i].size = scaled_patch_size;
         }
     }
 
     // compute orientations
-    for (int level = 0; level < nOctaves; ++level)
-        computeOrientation(mvImagePyramid[level], allKeypoints[level], umax);
+    for (int level = 0; level < num_octaves; ++level)
+        compute_orientation(image_pyramid[level], all_keypoints[level], u_max);
 }

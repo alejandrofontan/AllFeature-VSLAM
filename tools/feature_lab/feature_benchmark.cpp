@@ -88,7 +88,7 @@
  *   --features       one or more feature names, as in the settings yaml's `features:` (orb32, sift128, ...)
  *   --variant        one more run, of <feature> with something changed, reported under <label> (its csv is
  *                    <label>.csv); repeatable, and it runs on the same pairs as everything else. Changes:
- *                      max_keypoints=<n>  the keypoint budget, overriding the settings yaml's maxNumFeatures
+ *                      max_keypoints=<n>  the keypoint budget, overriding the settings yaml's max_num_features
  *                      model=<file>       another model file for the extractor (aliked128 only); a bare file
  *                                         name is looked up in feature_models/
  *                      threshold=<x>      superpoint256 only: the detection threshold of the C++ tail (the sidecar's
@@ -306,7 +306,7 @@ Arguments parse_arguments(const std::vector<std::string>& args)
 /// know, so the name is checked here first and reported instead.
 FeatureType to_feature_type(const std::string& name)
 {
-    static const std::vector<std::string> known{"orb32", "akaze61", "brisk48", "surf64", "kaze64",
+    static const std::vector<std::string> known{"orb32", "akaze61", "brisk48", "kaze64",
                                                 "sift128", "aliked128", "superpoint256"};
     for (const std::string& candidate : known)
         if (candidate == name)
@@ -353,7 +353,7 @@ std::vector<ImageEntry> load_images(const std::string& rgb_csv, const std::strin
     return images;
 }
 
-/// ALIKED on a model file of the caller's choice. The same steps as FeatureExtractor_aliked128::detectAndCompute -
+/// ALIKED on a model file of the caller's choice. The same steps as Aliked128Extractor::detect_and_compute -
 /// the graph, the mask, the octree distribution down to the budget when the graph returns more than it - on another
 /// file: the SLAM's extractor loads the fixed name aliked_n16.onnx.
 class AlikedFileExtractor : public AF_VSLAM::FeatureExtractor
@@ -365,31 +365,30 @@ class AlikedFileExtractor : public AF_VSLAM::FeatureExtractor
     }
 
   protected:
-    void detectAndCompute(const AF_VSLAM::Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override
+    void detect_and_compute(const AF_VSLAM::Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override
     {
         std::vector<cv::KeyPoint> all;
         cv::Mat all_descriptors;
         aliked_.detect(img.img, all, all_descriptors);
-        FilterKeypointsByMask(all, all_descriptors, img.mask);
-        if (static_cast<float>(all.size()) < settings->OVERSIZE_KEYPOINT_FACTOR * static_cast<float>(settings->maxNumFeatures))
+        filter_keypoints_by_mask(all, all_descriptors, img.mask);
+        if (static_cast<float>(all.size()) < settings->oversize_keypoint_factor * static_cast<float>(settings->max_num_features))
         {
             keypoints = all;
             descriptors = all_descriptors;
             return;
         }
-        keypoints = DistributeOctTree(all, 0, img.grayImg.cols - 1, 0, img.grayImg.rows - 1, settings->maxNumFeatures, 0);
+        keypoints = distribute_oct_tree(all, 0, img.grayImg.cols - 1, 0, img.grayImg.rows - 1, settings->max_num_features);
         descriptors.create(static_cast<int>(keypoints.size()), all_descriptors.cols, all_descriptors.type());
         for (int i = 0; i < static_cast<int>(keypoints.size()); ++i)
             all_descriptors.row(keypoints[i].class_id).copyTo(descriptors.row(i));
     }
-    [[nodiscard]] int GetKeypointOctave(const cv::KeyPoint&) const override { return 0; }
-    [[nodiscard]] float GetKeypointSize(const cv::KeyPoint&) const override { return 1.0f; }
+    [[nodiscard]] float get_keypoint_size(const cv::KeyPoint&) const override { return 1.0f; }
 
   private:
     AF_VSLAM::onnx::AlikedOnnx aliked_;
 };
 
-/// SuperPoint with a sidecar of the caller's choice. The same steps as FeatureExtractor_superpoint256::detectAndCompute
+/// SuperPoint with a sidecar of the caller's choice. The same steps as Superpoint256Extractor::detect_and_compute
 /// (the dense graph, the C++ tail with the keypoint budget, the mask); the sidecar is where the tail's detection
 /// threshold and NMS radius live, and the SLAM's extractor always reads the model's own.
 class SuperPointSidecarExtractor : public AF_VSLAM::FeatureExtractor
@@ -402,13 +401,12 @@ class SuperPointSidecarExtractor : public AF_VSLAM::FeatureExtractor
     }
 
   protected:
-    void detectAndCompute(const AF_VSLAM::Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override
+    void detect_and_compute(const AF_VSLAM::Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override
     {
-        superpoint_.detect(img.grayImg, settings->maxNumFeatures, keypoints, descriptors);
-        FilterKeypointsByMask(keypoints, descriptors, img.mask);
+        superpoint_.detect(img.grayImg, settings->max_num_features, keypoints, descriptors);
+        filter_keypoints_by_mask(keypoints, descriptors, img.mask);
     }
-    [[nodiscard]] int GetKeypointOctave(const cv::KeyPoint&) const override { return 0; }
-    [[nodiscard]] float GetKeypointSize(const cv::KeyPoint&) const override { return 1.0f; }
+    [[nodiscard]] float get_keypoint_size(const cv::KeyPoint&) const override { return 1.0f; }
 
   private:
     AF_VSLAM::onnx::SuperPointOnnx superpoint_;
@@ -449,23 +447,23 @@ std::shared_ptr<AF_VSLAM::FeatureExtractor> build_extractor(const FeatureType fe
                                                             const std::string& output_dir)
 {
     const AF_VSLAM::Feature& feature = get_feature(feature_type);
-    const std::string& settings_yaml = feature.getSettingsYamlFile();
+    const std::string& settings_yaml = feature.get_settings_yaml_file();
     if (!std::filesystem::exists(settings_yaml))
         throw std::runtime_error(settings_yaml + " not found: run from the repository root");
     auto settings = std::make_shared<AF_VSLAM::FeatureExtractorSettings>(feature_type, settings_yaml);
     if (spec.max_keypoints > 0)
-        settings->maxNumFeatures = spec.max_keypoints;
+        settings->max_num_features = spec.max_keypoints;
     if (spec.threshold >= 0.0f || spec.nms_radius >= 0)
     {
         if (feature_type != FEAT_SUPERPOINT256 || !spec.model.empty())
             throw std::runtime_error("--variant " + spec.label + ": threshold= / nms_radius= are supported for superpoint256 "
                                      "only, on its own model file");
-        const std::string onnx_path = AF_VSLAM::onnx::feature_model_path(AF_VSLAM::Superpoint256::kModelFile);
+        const std::string onnx_path = AF_VSLAM::onnx::feature_model_path(AF_VSLAM::Superpoint256::s_model_file);
         return std::make_shared<SuperPointSidecarExtractor>(settings, onnx_path,
                                                             write_superpoint_sidecar(onnx_path, spec, output_dir));
     }
     if (spec.model.empty())
-        return feature.createExtractor(settings);
+        return feature.create_extractor(settings);
     if (feature_type != FEAT_ALIKED128)
         throw std::runtime_error("--variant " + spec.label + ": model= is supported for aliked128 only");
     const std::string path = spec.model.find('/') == std::string::npos ? AF_VSLAM::onnx::feature_model_path(spec.model)
@@ -480,9 +478,9 @@ std::shared_ptr<AF_VSLAM::FeatureMatcher> build_matcher(const FeatureType featur
                                                         const int image_height)
 {
     const AF_VSLAM::Feature& feature = get_feature(feature_type);
-    AF_VSLAM::FeatureMatcher::setDescriptorDistanceThresholds(feature.getSettingsYamlFile(), feature_type);
+    AF_VSLAM::FeatureMatcher::setDescriptorDistanceThresholds(feature.get_settings_yaml_file(), feature_type);
     return std::make_shared<AF_VSLAM::FeatureMatcher>(image_width, image_height, std::vector<FeatureType>{feature_type},
-                                                      "feature_benchmark/" + feature.getFeatureName());
+                                                      "feature_benchmark/" + feature.get_feature_name());
 }
 
 using Clock = std::chrono::steady_clock;
@@ -652,7 +650,7 @@ int main(int argc, char** argv)
         for (size_t f = 0; f < specs.size(); ++f)
         {
             const AF_VSLAM::Feature& feature = get_feature(feature_types[f]);   // ends the process if compiled out
-            std::printf("    %-22s settings %s", specs[f].label.c_str(), feature.getSettingsYamlFile().c_str());
+            std::printf("    %-22s settings %s", specs[f].label.c_str(), feature.get_settings_yaml_file().c_str());
             if (!specs[f].model.empty())
                 std::printf(", model %s", specs[f].model.c_str());
             if (specs[f].max_keypoints > 0)

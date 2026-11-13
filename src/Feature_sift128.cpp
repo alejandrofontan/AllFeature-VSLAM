@@ -12,29 +12,21 @@
 
 #include "afvslam_log.hpp"
 
-AF_VSLAM::FeatureExtractor_sift128::FeatureExtractor_sift128(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::Sift128Extractor::Sift128Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
     // cv::SIFT with the LightGlue repository's SIFT configuration (nOctaveLayers 4, contrast 0.0066667, edge 10,
     // sigma 1.6 - the same values settings/sift128_settings.yaml has carried); the budget is cv::SIFT's nfeatures
-    sift_ = std::make_unique<SiftCpu>(settings->maxNumFeatures);
-    AF_INFO("SIFT128 ready: cv::SIFT (CPU) + RootSIFT, budget " << settings->maxNumFeatures << " keypoints");
+    sift_ = std::make_unique<SiftCpu>(settings->max_num_features);
+    AF_INFO("SIFT128 ready: cv::SIFT (CPU) + RootSIFT, budget " << settings->max_num_features << " keypoints");
 }
 
-void AF_VSLAM::FeatureExtractor_sift128::detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
+void AF_VSLAM::Sift128Extractor::detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
     sift_->detect(img.grayImg, keypoints, descriptors);
     // Discard keypoints outside the mask (if one was loaded for this frame). Scale (size) and orientation (angle)
     // stay on the keypoints: LightGlue-SIFT takes them as inputs.
-    FilterKeypointsByMask(keypoints, descriptors, img.mask);
+    filter_keypoints_by_mask(keypoints, descriptors, img.mask);
 }
 
-int AF_VSLAM::FeatureExtractor_sift128::GetKeypointOctave(const cv::KeyPoint&) const{
-    return 0;
-}
-
-float AF_VSLAM::FeatureExtractor_sift128::GetKeypointSize(const cv::KeyPoint&) const{
+float AF_VSLAM::Sift128Extractor::get_keypoint_size(const cv::KeyPoint&) const{
     return 1.0f;
-}
-
-float AF_VSLAM::DescriptorDistance_sift128(const cv::Mat &a, const cv::Mat &b){
-    return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2);
 }

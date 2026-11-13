@@ -23,14 +23,14 @@ void AF_VSLAM::printError(const std::string& function, const std::string& messag
 
 std::string AF_VSLAM::feature_name(const FeatureType& featureType){
     const AF_VSLAM::Feature& ft = get_feature(featureType);
-    return ft.getFeatureName();
+    return ft.get_feature_name();
 }
 
 cv::Scalar AF_VSLAM::getFeatureColor(const FeatureType& featureType, const int& format, const bool& normalize){
 
     Eigen::Matrix<float,3,1> color{0,0,0};
     const AF_VSLAM::Feature& ft = get_feature(featureType);
-    color = ft.getColor();
+    color = ft.get_color();
 
     if (normalize){
         color /= 255.0f;

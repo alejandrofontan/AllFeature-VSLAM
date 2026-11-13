@@ -2,24 +2,34 @@
 #include "Utils.h"
 #include "afvslam_log.hpp"
 
-#include <opencv2/core/core.hpp>
+#include <algorithm>
 #include <vector>
+
+#include <opencv2/core/core.hpp>
 
 #include <yaml-cpp/yaml.h>
 
 using namespace cv;
 using namespace std;
 
+namespace
+{
+// Smallest sigma compute_sigma will invert. A tenth of a pixel: far below any real keypoint
+// localisation accuracy, so it never clips a genuine measurement, and far above the point
+// where 1/sigma^2 stops being representable.
+constexpr float min_keypoint_sigma{0.1f};
+}
+
 AF_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
-        const FeatureType& featureType_,
-        const std::string &settingsYamlFile):
-        settingsYamlFile(settingsYamlFile), featureType(featureType_){
+        const FeatureType& feature_type,
+        const std::string &settings_yaml_file):
+        settings_yaml_file(settings_yaml_file), feature_type(feature_type){
 
-    maxNumFeatures = required_int("FeatureExtractor.maxNumFeatures");
+    max_num_features = required_int("FeatureExtractor.maxNumFeatures");
 
-    AF_INFO("Loading Feature Extractor Settings from : " + settingsYamlFile);
+    AF_INFO("Loading Feature Extractor Settings from : " + settings_yaml_file);
     AF_CONFIG_BEGIN("Feature Extractor Settings");
-    AF_CONFIG_FIELD("maxNumFeatures:     ", maxNumFeatures);
+    AF_CONFIG_FIELD("maxNumFeatures:     ", max_num_features);
     AF_CONFIG_END();
 }
 
@@ -54,54 +64,43 @@ T required_key(const std::string& settings_yaml, const std::string& key)
 
 int AF_VSLAM::FeatureExtractorSettings::required_int(const std::string& key) const
 {
-    return required_key<int>(settingsYamlFile, key);
+    return required_key<int>(settings_yaml_file, key);
 }
 
 float AF_VSLAM::FeatureExtractorSettings::required_float(const std::string& key) const
 {
-    return required_key<float>(settingsYamlFile, key);
+    return required_key<float>(settings_yaml_file, key);
 }
 
 void AF_VSLAM::FeatureExtractor::operator()(const Image& img, KeypointData& data)
 {
-    setupImage(img);
-    detectAndCompute(img, data.keypoints, data.descriptors);
-    computeSize(data);
-    computeSigma(data);
+    setup_image(img);
+    detect_and_compute(img, data.keypoints, data.descriptors);
+    compute_size(data);
+    compute_sigma(data);
 }
 
-void AF_VSLAM::FeatureExtractor::computeSize(KeypointData& data){
+void AF_VSLAM::FeatureExtractor::compute_size(KeypointData& data){
     const std::vector<cv::KeyPoint>& keypoints = data.keypoints;
-    // Stored as the extractor reports it. There used to be a rescaling here,
-    //   1 + (s - minKeyPtSize) * (maxKeyPtSize0 - 1) / (maxKeyPtSize - minKeyPtSize),
-    // but the constructor set maxKeyPtSize and maxKeyPtSize0 to the SAME expression and
-    // minKeyPtSize to 1, so the ratio was exactly 1.0f and the whole thing reduced to
-    // 1 + (s - 1) == s. Its sentinel defaults (0.0 and float max) show it was meant to
-    // normalize against the min and max size actually observed; that scan was never written.
     data.size.clear();
     data.size.reserve(keypoints.size());
-    for(const auto& keyPt : keypoints)
-        data.size.push_back(GetKeypointSize(keyPt));
+    for(const auto& keypoint : keypoints)
+        data.size.push_back(get_keypoint_size(keypoint));
 }
 
-// Isotropic, from the keypoint size alone. This used to switch on a CovarianceMethod with a
-// second branch (NONE) that filled both with the identity; nothing ever selected it -- the one
-// caller passed SIZE as a literal -- so the enum, the method parameter and the unused image
-// argument are gone. An anisotropic method would come back as a separate function.
-void AF_VSLAM::FeatureExtractor::computeSigma(KeypointData& data){
-    std::vector<mat2f>& keyPtsSigma2 = data.sigma2;
-    std::vector<mat2f>& keyPtsInf = data.information;
-    const std::vector<float>& keyPtsSize = data.size;
-    keyPtsSigma2.clear();
-    keyPtsInf.clear();
-    keyPtsSigma2.reserve(keyPtsSize.size());
-    keyPtsInf.reserve(keyPtsSize.size());
-    for(size_t iKeyPt = 0; iKeyPt < keyPtsSize.size(); iKeyPt++){
-        float keypointSigma = keyPtsSize[iKeyPt];
-        float keypointSigma2 = keypointSigma * keypointSigma;
-        float keypointInf = 1.0f/(keypointSigma2);
-        keyPtsSigma2.emplace_back(keypointSigma2 * mat2f::Identity());
-        keyPtsInf.emplace_back(keypointInf * mat2f::Identity());
+void AF_VSLAM::FeatureExtractor::compute_sigma(KeypointData& data){
+    std::vector<mat2f>& sigma2 = data.sigma2;
+    std::vector<mat2f>& information = data.information;
+    const std::vector<float>& sizes = data.size;
+    sigma2.clear();
+    information.clear();
+    sigma2.reserve(sizes.size());
+    information.reserve(sizes.size());
+    for(size_t i = 0; i < sizes.size(); i++){
+        const float sigma = std::max(sizes[i], min_keypoint_sigma);
+        const float sigma_squared = sigma * sigma;
+        sigma2.emplace_back(sigma_squared * mat2f::Identity());
+        information.emplace_back((1.0f / sigma_squared) * mat2f::Identity());
     }
 }
 
@@ -113,318 +112,337 @@ void AF_VSLAM::FeatureExtractor::computeSigma(KeypointData& data){
 static bool node_comparison(const std::pair<int, AF_VSLAM::ExtractorNode*>& a,
                             const std::pair<int, AF_VSLAM::ExtractorNode*>& b)
 {
-    return (a.first != b.first) ? (a.first < b.first) : (a.second->UL.x < b.second->UL.x);
+    return (a.first != b.first) ? (a.first < b.first) : (a.second->upper_left.x < b.second->upper_left.x);
 }
 
-std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::DistributeOctTree(std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
-                                       const int &maxX, const int &minY, const int &maxY, const int &N, const int &)
+std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::vector<cv::KeyPoint>& keys_to_distribute, const int &min_x,
+                                       const int &max_x, const int &min_y, const int &max_y, const int &max_keypoints)
 {
-    // Compute how many initial nodes
-    const int nIni = round(static_cast<float>(maxX-minX)/(maxY-minY));
+    // One root node per square tile across the region, so the tree starts roughly isotropic.
+    //
+    // Both clamps are load-bearing. round() returns 0 for any aspect ratio below 0.5 -- a
+    // portrait or tall-crop region -- which gives an infinite node_width, an empty
+    // initial_nodes, and a node_index of -1 from the clamp below; a zero region height divides
+    // by zero before that. orb32 never reaches either: it hands in a landscape strip inset by
+    // the ORB border. The extractors that pass the raw image bounds would, on a portrait frame.
+    const int region_width = max_x - min_x;
+    const int region_height = std::max(1, max_y - min_y);
+    const int num_initial = std::max(1, static_cast<int>(
+        std::round(static_cast<float>(region_width) / static_cast<float>(region_height))));
 
-    const float hX = static_cast<float>(maxX-minX)/nIni;
+    const float node_width = static_cast<float>(region_width) / static_cast<float>(num_initial);
 
-    std::list<ExtractorNode> lNodes;
+    std::list<ExtractorNode> nodes;
 
-    std::vector<ExtractorNode*> vpIniNodes;
-    vpIniNodes.resize(nIni);
+    std::vector<ExtractorNode*> initial_nodes;
+    initial_nodes.resize(num_initial);
 
-    for(int i=0; i<nIni; i++)
+    for(int i=0; i<num_initial; i++)
     {
-        ExtractorNode ni;
-        ni.UL = cv::Point2i(hX*static_cast<float>(i),0);
-        ni.UR = cv::Point2i(hX*static_cast<float>(i+1),0);
-        ni.BL = cv::Point2i(ni.UL.x,maxY-minY);
-        ni.BR = cv::Point2i(ni.UR.x,maxY-minY);
-        ni.vKeys.reserve(vToDistributeKeys.size());
+        ExtractorNode node;
+        node.upper_left = cv::Point2i(node_width*static_cast<float>(i),0);
+        node.upper_right = cv::Point2i(node_width*static_cast<float>(i+1),0);
+        node.bottom_left = cv::Point2i(node.upper_left.x,max_y-min_y);
+        node.bottom_right = cv::Point2i(node.upper_right.x,max_y-min_y);
+        node.keys.reserve(keys_to_distribute.size());
 
-        lNodes.push_back(ni);
-        vpIniNodes[i] = &lNodes.back();
+        nodes.push_back(node);
+        initial_nodes[i] = &nodes.back();
     }
 
-    //Associate points to childs
-    for(size_t i=0;i<vToDistributeKeys.size();i++)
+    // Associate points to childs. class_id carries the keypoint's index in keys_to_distribute
+    // through to the caller, which uses it to pick the matching descriptor rows for the
+    // survivors -- see the four classical extractors.
+    for(size_t i=0;i<keys_to_distribute.size();i++)
     {
-        cv::KeyPoint &kp = vToDistributeKeys[i];
-        kp.class_id = i;
-        //std::cout << kp.response << " ";
-        vpIniNodes[kp.pt.x/hX]->vKeys.push_back(kp);
+        cv::KeyPoint &keypoint = keys_to_distribute[i];
+        keypoint.class_id = i;
+
+        // Clamped, because pt.x == max_x lands one past the last node: node_width is
+        // (max_x-min_x)/num_initial, so that keypoint divides to exactly num_initial. On a
+        // 640x480 frame num_initial is 1 and node_width 639, so a keypoint in the last column
+        // indexed initial_nodes[1] of a one-element vector -- a garbage ExtractorNode* that was
+        // then written through. orb32 never hit it (it passes a border-inset rectangle); the
+        // callers that pass the raw 0..cols-1 image bounds could.
+        const int node_index = std::clamp(static_cast<int>(keypoint.pt.x / node_width),
+                                          0, num_initial - 1);
+        initial_nodes[node_index]->keys.push_back(keypoint);
     }
 
-    std::list<ExtractorNode>::iterator lit = lNodes.begin();
+    std::list<ExtractorNode>::iterator node_it = nodes.begin();
 
-    while(lit!=lNodes.end())
+    while(node_it!=nodes.end())
     {
-        if(lit->vKeys.size()==1)
+        if(node_it->keys.size()==1)
         {
-            lit->bNoMore=true;
-            lit++;
+            node_it->no_more=true;
+            node_it++;
         }
-        else if(lit->vKeys.empty())
-            lit = lNodes.erase(lit);
+        else if(node_it->keys.empty())
+            node_it = nodes.erase(node_it);
         else
-            lit++;
+            node_it++;
     }
 
-    bool bFinish = false;
+    bool finished = false;
 
     int iteration = 0;
 
-    std::vector<std::pair<int,ExtractorNode*> > vSizeAndPointerToNode;
-    vSizeAndPointerToNode.reserve(lNodes.size()*4);
+    std::vector<std::pair<int,ExtractorNode*> > expandable;
+    expandable.reserve(nodes.size()*4);
 
-    while(!bFinish)
+    while(!finished)
     {
         iteration++;
 
-        int prevSize = lNodes.size();
+        int previous_size = nodes.size();
 
-        lit = lNodes.begin();
+        node_it = nodes.begin();
 
-        int nToExpand = 0;
+        int num_to_expand = 0;
 
-        vSizeAndPointerToNode.clear();
+        expandable.clear();
 
-        while(lit!=lNodes.end())
+        while(node_it!=nodes.end())
         {
-            if(lit->bNoMore)
+            if(node_it->no_more)
             {
                 // If node only contains one point do not subdivide and continue
-                lit++;
+                node_it++;
                 continue;
             }
             else
             {
                 // If more than one point, subdivide
-                ExtractorNode n1,n2,n3,n4;
-                lit->DivideNode(n1,n2,n3,n4);
+                ExtractorNode top_left,top_right,lower_left,lower_right;
+                node_it->divide_node(top_left,top_right,lower_left,lower_right);
 
                 // Add childs if they contain points
-                if(n1.vKeys.size()>0)
+                if(top_left.keys.size()>0)
                 {
-                    lNodes.push_front(n1);
-                    if(n1.vKeys.size()>1)
+                    nodes.push_front(top_left);
+                    if(top_left.keys.size()>1)
                     {
-                        nToExpand++;
-                        vSizeAndPointerToNode.push_back(std::make_pair(n1.vKeys.size(),&lNodes.front()));
-                        lNodes.front().lit = lNodes.begin();
+                        num_to_expand++;
+                        expandable.push_back(std::make_pair(top_left.keys.size(),&nodes.front()));
+                        nodes.front().self_in_list = nodes.begin();
                     }
                 }
-                if(n2.vKeys.size()>0)
+                if(top_right.keys.size()>0)
                 {
-                    lNodes.push_front(n2);
-                    if(n2.vKeys.size()>1)
+                    nodes.push_front(top_right);
+                    if(top_right.keys.size()>1)
                     {
-                        nToExpand++;
-                        vSizeAndPointerToNode.push_back(std::make_pair(n2.vKeys.size(),&lNodes.front()));
-                        lNodes.front().lit = lNodes.begin();
+                        num_to_expand++;
+                        expandable.push_back(std::make_pair(top_right.keys.size(),&nodes.front()));
+                        nodes.front().self_in_list = nodes.begin();
                     }
                 }
-                if(n3.vKeys.size()>0)
+                if(lower_left.keys.size()>0)
                 {
-                    lNodes.push_front(n3);
-                    if(n3.vKeys.size()>1)
+                    nodes.push_front(lower_left);
+                    if(lower_left.keys.size()>1)
                     {
-                        nToExpand++;
-                        vSizeAndPointerToNode.push_back(std::make_pair(n3.vKeys.size(),&lNodes.front()));
-                        lNodes.front().lit = lNodes.begin();
+                        num_to_expand++;
+                        expandable.push_back(std::make_pair(lower_left.keys.size(),&nodes.front()));
+                        nodes.front().self_in_list = nodes.begin();
                     }
                 }
-                if(n4.vKeys.size()>0)
+                if(lower_right.keys.size()>0)
                 {
-                    lNodes.push_front(n4);
-                    if(n4.vKeys.size()>1)
+                    nodes.push_front(lower_right);
+                    if(lower_right.keys.size()>1)
                     {
-                        nToExpand++;
-                        vSizeAndPointerToNode.push_back(std::make_pair(n4.vKeys.size(),&lNodes.front()));
-                        lNodes.front().lit = lNodes.begin();
+                        num_to_expand++;
+                        expandable.push_back(std::make_pair(lower_right.keys.size(),&nodes.front()));
+                        nodes.front().self_in_list = nodes.begin();
                     }
                 }
 
-                lit=lNodes.erase(lit);
+                node_it=nodes.erase(node_it);
                 continue;
             }
         }
 
         // Finish if there are more nodes than required features
         // or all nodes contain just one point
-        if((int)lNodes.size()>=N || (int)lNodes.size()==prevSize)
+        if((int)nodes.size()>=max_keypoints || (int)nodes.size()==previous_size)
         {
-            bFinish = true;
+            finished = true;
         }
-        else if(((int)lNodes.size()+nToExpand*3)>N)
+        else if(((int)nodes.size()+num_to_expand*3)>max_keypoints)
         {
 
-            while(!bFinish)
+            while(!finished)
             {
 
-                prevSize = lNodes.size();
+                previous_size = nodes.size();
 
-                std::vector<std::pair<int,ExtractorNode*> > vPrevSizeAndPointerToNode = vSizeAndPointerToNode;
-                vSizeAndPointerToNode.clear();
+                std::vector<std::pair<int,ExtractorNode*> > previous_expandable = expandable;
+                expandable.clear();
 
-                sort(vPrevSizeAndPointerToNode.begin(),vPrevSizeAndPointerToNode.end(), node_comparison);
-                for(int j=vPrevSizeAndPointerToNode.size()-1;j>=0;j--)
+                sort(previous_expandable.begin(),previous_expandable.end(), node_comparison);
+                for(int j=previous_expandable.size()-1;j>=0;j--)
                 {
-                    ExtractorNode n1,n2,n3,n4;
-                    vPrevSizeAndPointerToNode[j].second->DivideNode(n1,n2,n3,n4);
+                    ExtractorNode top_left,top_right,lower_left,lower_right;
+                    previous_expandable[j].second->divide_node(top_left,top_right,lower_left,lower_right);
 
                     // Add childs if they contain points
-                    if(n1.vKeys.size()>0)
+                    if(top_left.keys.size()>0)
                     {
-                        lNodes.push_front(n1);
-                        if(n1.vKeys.size()>1)
+                        nodes.push_front(top_left);
+                        if(top_left.keys.size()>1)
                         {
-                            vSizeAndPointerToNode.push_back(std::make_pair(n1.vKeys.size(),&lNodes.front()));
-                            lNodes.front().lit = lNodes.begin();
+                            expandable.push_back(std::make_pair(top_left.keys.size(),&nodes.front()));
+                            nodes.front().self_in_list = nodes.begin();
                         }
                     }
-                    if(n2.vKeys.size()>0)
+                    if(top_right.keys.size()>0)
                     {
-                        lNodes.push_front(n2);
-                        if(n2.vKeys.size()>1)
+                        nodes.push_front(top_right);
+                        if(top_right.keys.size()>1)
                         {
-                            vSizeAndPointerToNode.push_back(std::make_pair(n2.vKeys.size(),&lNodes.front()));
-                            lNodes.front().lit = lNodes.begin();
+                            expandable.push_back(std::make_pair(top_right.keys.size(),&nodes.front()));
+                            nodes.front().self_in_list = nodes.begin();
                         }
                     }
-                    if(n3.vKeys.size()>0)
+                    if(lower_left.keys.size()>0)
                     {
-                        lNodes.push_front(n3);
-                        if(n3.vKeys.size()>1)
+                        nodes.push_front(lower_left);
+                        if(lower_left.keys.size()>1)
                         {
-                            vSizeAndPointerToNode.push_back(std::make_pair(n3.vKeys.size(),&lNodes.front()));
-                            lNodes.front().lit = lNodes.begin();
+                            expandable.push_back(std::make_pair(lower_left.keys.size(),&nodes.front()));
+                            nodes.front().self_in_list = nodes.begin();
                         }
                     }
-                    if(n4.vKeys.size()>0)
+                    if(lower_right.keys.size()>0)
                     {
-                        lNodes.push_front(n4);
-                        if(n4.vKeys.size()>1)
+                        nodes.push_front(lower_right);
+                        if(lower_right.keys.size()>1)
                         {
-                            vSizeAndPointerToNode.push_back(std::make_pair(n4.vKeys.size(),&lNodes.front()));
-                            lNodes.front().lit = lNodes.begin();
+                            expandable.push_back(std::make_pair(lower_right.keys.size(),&nodes.front()));
+                            nodes.front().self_in_list = nodes.begin();
                         }
                     }
 
-                    lNodes.erase(vPrevSizeAndPointerToNode[j].second->lit);
+                    nodes.erase(previous_expandable[j].second->self_in_list);
 
-                    if((int)lNodes.size()>=N)
+                    if((int)nodes.size()>=max_keypoints)
                         break;
                 }
 
-                if((int)lNodes.size()>=N || (int)lNodes.size()==prevSize)
-                    bFinish = true;
+                if((int)nodes.size()>=max_keypoints || (int)nodes.size()==previous_size)
+                    finished = true;
 
             }
         }
     }
 
     // Retain the best point in each node
-    std::vector<cv::KeyPoint> vResultKeys;
-    vResultKeys.reserve(settings->maxNumFeatures);
-    for(std::list<ExtractorNode>::iterator lit=lNodes.begin(); lit!=lNodes.end(); lit++)
+    std::vector<cv::KeyPoint> result;
+    result.reserve(settings->max_num_features);
+    for(std::list<ExtractorNode>::iterator node_it=nodes.begin(); node_it!=nodes.end(); node_it++)
     {
-        std::vector<cv::KeyPoint> &vNodeKeys = lit->vKeys;
-        cv::KeyPoint* pKP = &vNodeKeys[0];
-        float maxResponse = pKP->response;
+        std::vector<cv::KeyPoint> &node_keys = node_it->keys;
+        cv::KeyPoint* best = &node_keys[0];
+        float best_response = best->response;
 
-        for(size_t k=1;k<vNodeKeys.size();k++)
+        for(size_t k=1;k<node_keys.size();k++)
         {
-            if(vNodeKeys[k].response>maxResponse)
+            if(node_keys[k].response>best_response)
             {
-                pKP = &vNodeKeys[k];
-                maxResponse = vNodeKeys[k].response;
+                best = &node_keys[k];
+                best_response = node_keys[k].response;
             }
         }
 
-        vResultKeys.push_back(*pKP);
+        result.push_back(*best);
     }
 
-    return vResultKeys;
+    return result;
 }
 
-void AF_VSLAM::FeatureExtractor::FilterKeypointsByMask(std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors, const cv::Mat& mask) const
+void AF_VSLAM::FeatureExtractor::filter_keypoints_by_mask(std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors, const cv::Mat& mask) const
 {
     if (mask.empty()) return; // no mask loaded for this frame/dataset -> keep everything
 
     std::vector<cv::KeyPoint> kept;
-    std::vector<int> keptRows;
+    std::vector<int> kept_rows;
     kept.reserve(keypoints.size());
-    keptRows.reserve(keypoints.size());
+    kept_rows.reserve(keypoints.size());
     for (size_t i = 0; i < keypoints.size(); ++i) {
         int x = cvRound(keypoints[i].pt.x), y = cvRound(keypoints[i].pt.y);
         if (x < 0 || y < 0 || x >= mask.cols || y >= mask.rows) continue;
         if (mask.at<uchar>(y, x) == 1) {
-            cv::KeyPoint kp = keypoints[i];
-            kp.class_id = static_cast<int>(kept.size()); // reindex to match the compacted descriptors row order
-            kept.push_back(kp);
-            keptRows.push_back((int)i);
+            cv::KeyPoint keypoint = keypoints[i];
+            keypoint.class_id = static_cast<int>(kept.size()); // reindex to match the compacted descriptors row order
+            kept.push_back(keypoint);
+            kept_rows.push_back((int)i);
         }
     }
 
-    cv::Mat keptDesc(static_cast<int>(keptRows.size()), descriptors.cols, descriptors.type());
-    for (size_t i = 0; i < keptRows.size(); ++i)
-        descriptors.row(keptRows[i]).copyTo(keptDesc.row(static_cast<int>(i)));
+    cv::Mat kept_descriptors(static_cast<int>(kept_rows.size()), descriptors.cols, descriptors.type());
+    for (size_t i = 0; i < kept_rows.size(); ++i)
+        descriptors.row(kept_rows[i]).copyTo(kept_descriptors.row(static_cast<int>(i)));
 
     keypoints.swap(kept);
-    descriptors = keptDesc;
+    descriptors = kept_descriptors;
 }
 
-void AF_VSLAM::ExtractorNode::DivideNode(ExtractorNode &n1, ExtractorNode &n2, ExtractorNode &n3, ExtractorNode &n4)
+void AF_VSLAM::ExtractorNode::divide_node(ExtractorNode &top_left, ExtractorNode &top_right, ExtractorNode &lower_left, ExtractorNode &lower_right)
 {
-    const int halfX = ceil(static_cast<float>(UR.x-UL.x)/2);
-    const int halfY = ceil(static_cast<float>(BR.y-UL.y)/2);
+    const int half_x = ceil(static_cast<float>(upper_right.x-upper_left.x)/2);
+    const int half_y = ceil(static_cast<float>(bottom_right.y-upper_left.y)/2);
 
     //Define boundaries of childs
-    n1.UL = UL;
-    n1.UR = cv::Point2i(UL.x+halfX,UL.y);
-    n1.BL = cv::Point2i(UL.x,UL.y+halfY);
-    n1.BR = cv::Point2i(UL.x+halfX,UL.y+halfY);
-    n1.vKeys.reserve(vKeys.size());
+    top_left.upper_left = upper_left;
+    top_left.upper_right = cv::Point2i(upper_left.x+half_x,upper_left.y);
+    top_left.bottom_left = cv::Point2i(upper_left.x,upper_left.y+half_y);
+    top_left.bottom_right = cv::Point2i(upper_left.x+half_x,upper_left.y+half_y);
+    top_left.keys.reserve(keys.size());
 
-    n2.UL = n1.UR;
-    n2.UR = UR;
-    n2.BL = n1.BR;
-    n2.BR = cv::Point2i(UR.x,UL.y+halfY);
-    n2.vKeys.reserve(vKeys.size());
+    top_right.upper_left = top_left.upper_right;
+    top_right.upper_right = upper_right;
+    top_right.bottom_left = top_left.bottom_right;
+    top_right.bottom_right = cv::Point2i(upper_right.x,upper_left.y+half_y);
+    top_right.keys.reserve(keys.size());
 
-    n3.UL = n1.BL;
-    n3.UR = n1.BR;
-    n3.BL = BL;
-    n3.BR = cv::Point2i(n1.BR.x,BL.y);
-    n3.vKeys.reserve(vKeys.size());
+    lower_left.upper_left = top_left.bottom_left;
+    lower_left.upper_right = top_left.bottom_right;
+    lower_left.bottom_left = bottom_left;
+    lower_left.bottom_right = cv::Point2i(top_left.bottom_right.x,bottom_left.y);
+    lower_left.keys.reserve(keys.size());
 
-    n4.UL = n3.UR;
-    n4.UR = n2.BR;
-    n4.BL = n3.BR;
-    n4.BR = BR;
-    n4.vKeys.reserve(vKeys.size());
+    lower_right.upper_left = lower_left.upper_right;
+    lower_right.upper_right = top_right.bottom_right;
+    lower_right.bottom_left = lower_left.bottom_right;
+    lower_right.bottom_right = bottom_right;
+    lower_right.keys.reserve(keys.size());
 
     //Associate points to childs
-    for(size_t i=0;i<vKeys.size();i++)
+    for(size_t i=0;i<keys.size();i++)
     {
-        const cv::KeyPoint &kp = vKeys[i];
-        if(kp.pt.x<n1.UR.x)
+        const cv::KeyPoint &keypoint = keys[i];
+        if(keypoint.pt.x<top_left.upper_right.x)
         {
-            if(kp.pt.y<n1.BR.y)
-                n1.vKeys.push_back(kp);
+            if(keypoint.pt.y<top_left.bottom_right.y)
+                top_left.keys.push_back(keypoint);
             else
-                n3.vKeys.push_back(kp);
+                lower_left.keys.push_back(keypoint);
         }
-        else if(kp.pt.y<n1.BR.y)
-            n2.vKeys.push_back(kp);
+        else if(keypoint.pt.y<top_left.bottom_right.y)
+            top_right.keys.push_back(keypoint);
         else
-            n4.vKeys.push_back(kp);
+            lower_right.keys.push_back(keypoint);
     }
 
-    if(n1.vKeys.size()==1)
-        n1.bNoMore = true;
-    if(n2.vKeys.size()==1)
-        n2.bNoMore = true;
-    if(n3.vKeys.size()==1)
-        n3.bNoMore = true;
-    if(n4.vKeys.size()==1)
-        n4.bNoMore = true;
+    if(top_left.keys.size()==1)
+        top_left.no_more = true;
+    if(top_right.keys.size()==1)
+        top_right.no_more = true;
+    if(lower_left.keys.size()==1)
+        lower_left.no_more = true;
+    if(lower_right.keys.size()==1)
+        lower_right.no_more = true;
 
 }

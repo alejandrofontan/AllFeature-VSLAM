@@ -14,8 +14,7 @@
  * as before; the scale lives in cv::KeyPoint::size and the orientation in ::angle for the matcher.
  */
 
-#ifndef AF_VSLAM_FEATURE_SIFT128_H
-#define AF_VSLAM_FEATURE_SIFT128_H
+#pragma once
 
 #include <memory>
 
@@ -23,48 +22,48 @@
 #include "FeatureExtractor.h"
 #include "SiftCpu.h"
 
-namespace AF_VSLAM {
+namespace AF_VSLAM
+{
 
-    class FeatureExtractor_sift128;
+class Sift128Extractor;
 
-    class Sift128 : public Feature {
-    public:
-        const std::string& getFeatureName()    const override { return s_featureName; }
-        FeatureType  getType()           const override { return FEAT_SIFT128; }
-        MatcherType getMatcherType()     const override { return LIGHTGLUE_SIFT; }
-        const Eigen::Matrix<float,3,1>& getColor() const override { return s_color; }
-        const std::string& getSettingsYamlFile() const override { return s_settingsYamlFile; }
-        float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override { return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2); };
-        std::shared_ptr<FeatureExtractor> createExtractor(
-            std::shared_ptr<FeatureExtractorSettings> settings) const override;
+class Sift128 : public Feature
+{
+public:
+    const std::string& get_feature_name() const override { return s_feature_name; }
+    FeatureType get_type() const override { return FEAT_SIFT128; }
+    MatcherType get_matcher_type() const override { return LIGHTGLUE_SIFT; }
+    const Eigen::Matrix<float,3,1>& get_color() const override { return s_color; }
+    const std::string& get_settings_yaml_file() const override { return s_settings_yaml_file; }
+    float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override { return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2); }
+    std::shared_ptr<FeatureExtractor> create_extractor(
+        std::shared_ptr<FeatureExtractorSettings> settings) const override;
 
-    private:
-        inline static const std::string s_featureName    = "sift128";
-        inline static const std::string s_settingsYamlFile = "settings/sift128_settings.yaml";
-        inline static const Eigen::Matrix<float,3,1> s_color = {255, 0, 0};
-    };
+private:
+    inline static const std::string s_feature_name = "sift128";
+    inline static const std::string s_settings_yaml_file = "settings/sift128_settings.yaml";
+    inline static const Eigen::Matrix<float,3,1> s_color = {255, 0, 0};
+};
 
-    class FeatureExtractor_sift128 : public FeatureExtractor {
-    public:
-        explicit FeatureExtractor_sift128(std::shared_ptr<FeatureExtractorSettings> &settings_);
-        ~FeatureExtractor_sift128() override = default;
+class Sift128Extractor : public FeatureExtractor
+{
+public:
+    explicit Sift128Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_);
+    ~Sift128Extractor() override = default;
 
-        void detectAndCompute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override;
+    void detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override;
 
-        [[nodiscard]] int GetKeypointOctave(const cv::KeyPoint &keypoint) const override;
-        [[nodiscard]] float GetKeypointSize(const cv::KeyPoint &keypoint) const override;
+    [[nodiscard]] float get_keypoint_size(const cv::KeyPoint &keypoint) const override;
 
-    private:
-        std::unique_ptr<SiftCpu> sift_;
-    };
+private:
+    std::unique_ptr<SiftCpu> sift_;
+};
 
-    inline std::shared_ptr<FeatureExtractor> Sift128::createExtractor(
-        std::shared_ptr<FeatureExtractorSettings> settings) const {
-        return std::make_shared<FeatureExtractor_sift128>(settings);
-    }
+inline std::shared_ptr<FeatureExtractor> Sift128::create_extractor(
+    std::shared_ptr<FeatureExtractorSettings> settings) const {
+    return std::make_shared<Sift128Extractor>(settings);
+}
 
-    float DescriptorDistance_sift128(const cv::Mat &a, const cv::Mat &b);
 
 }
 
-#endif //AF_VSLAM_FEATURE_SIFT128_H
