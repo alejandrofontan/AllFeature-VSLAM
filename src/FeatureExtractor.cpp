@@ -340,6 +340,44 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
     return result;
 }
 
+void AF_VSLAM::FeatureExtractor::flatten_keypoint_scale(std::vector<cv::KeyPoint>& keypoints)
+{
+    for(cv::KeyPoint& keypoint : keypoints)
+    {
+        keypoint.size = 1.0f;
+        keypoint.octave = 0;
+    }
+}
+
+void AF_VSLAM::FeatureExtractor::select_keypoints(const Image& img,
+                                                  std::vector<cv::KeyPoint>& detected,
+                                                  cv::Mat& detected_descriptors,
+                                                  std::vector<cv::KeyPoint>& keypoints,
+                                                  cv::Mat& descriptors)
+{
+    // Discard keypoints outside the mask (if one was loaded for this frame). This runs BEFORE
+    // the spreading below, so that the class_id indices distribute_oct_tree hands back address
+    // the already-compacted descriptor rows.
+    filter_keypoints_by_mask(detected, detected_descriptors, img.mask);
+
+    // Near enough to the budget: keep the detector's own selection untouched.
+    if(detected.size() < settings->oversize_keypoint_factor * settings->max_num_features)
+    {
+        keypoints = detected;
+        descriptors = detected_descriptors;
+        return;
+    }
+
+    // Too many: spread them over the frame and keep the best per quadtree node. Each survivor's
+    // class_id is its index in `detected`, which is how its descriptor row is found again.
+    keypoints = distribute_oct_tree(detected, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1,
+                                    settings->max_num_features);
+
+    descriptors.create((int)keypoints.size(), detected_descriptors.cols, detected_descriptors.type());
+    for(int i = 0; i < (int)keypoints.size(); ++i)
+        detected_descriptors.row(keypoints[i].class_id).copyTo(descriptors.row(i));
+}
+
 void AF_VSLAM::FeatureExtractor::filter_keypoints_by_mask(std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors, const cv::Mat& mask) const
 {
     if (mask.empty()) return; // no mask loaded for this frame/dataset -> keep everything
@@ -351,12 +389,25 @@ void AF_VSLAM::FeatureExtractor::filter_keypoints_by_mask(std::vector<cv::KeyPoi
     for (size_t i = 0; i < keypoints.size(); ++i) {
         int x = cvRound(keypoints[i].pt.x), y = cvRound(keypoints[i].pt.y);
         if (x < 0 || y < 0 || x >= mask.cols || y >= mask.rows) continue;
-        if (mask.at<uchar>(y, x) == 1) {
+        // != 0, not == 1: the mask is documented as 0/1 and its only producer today is
+        // Segmenter::inferMask, but a 0/255 mask -- the other obvious convention, and what
+        // imread of a saved mask gives -- would otherwise discard every keypoint in the frame
+        // and look like a detector failure.
+        if (mask.at<uchar>(y, x) != 0) {
             cv::KeyPoint keypoint = keypoints[i];
             keypoint.class_id = static_cast<int>(kept.size()); // reindex to match the compacted descriptors row order
             kept.push_back(keypoint);
             kept_rows.push_back((int)i);
         }
+    }
+
+    // Nothing was dropped: the descriptor rows already line up, so skip rebuilding the matrix.
+    // The reindexed class_ids still have to be written back -- the detectors disagree on what
+    // they leave there (-1 from the OpenCV ones, the detection index from the learned ones),
+    // and the compacted indices are what distribute_oct_tree and the row gather expect.
+    if (kept.size() == keypoints.size()) {
+        keypoints.swap(kept);
+        return;
     }
 
     cv::Mat kept_descriptors(static_cast<int>(kept_rows.size()), descriptors.cols, descriptors.type());

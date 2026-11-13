@@ -923,6 +923,15 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
     return rotHist;
 }
 
+    // Bin a match by the rotation between its two keypoints, so filterMatchesWithOrientation can
+    // keep only the three most populated bins -- matches whose orientation change disagrees with
+    // the frame's consensus are outliers.
+    //
+    // Inert for aliked128 and superpoint256: AlikedOnnx and SuperPointOnnx build every keypoint
+    // with angle 0 (both detectors are orientation-free), so every match lands in bin 0 and the
+    // filter keeps all of them. Harmless -- one full bin is still "the top bins" -- but it means
+    // those two features get no orientation check at all, not a lenient one. orb32, brisk48,
+    // kaze64, akaze61 and sift128 all carry a real angle from their detector.
     void FeatureMatcher::updateRotationHistogram(vector<vector<int>>& rotHist,
                                                      const KeypointIndex& idx,
                                                      const cv::KeyPoint& keyPt, const cv::KeyPoint& refKeyPt,

@@ -53,21 +53,9 @@ void AF_VSLAM::Aliked128Extractor::detect_and_compute(const Image& img, std::vec
     cv::Mat descriptors_;
     extractor_for(img.img.cols, img.img.rows).detect(img.img, keypoints_, descriptors_);
 
-    // Discard keypoints outside the mask (if one was loaded for this frame)
-    filter_keypoints_by_mask(keypoints_, descriptors_, img.mask);
-
-    // Retain only if not too many keypoints
-    if (keypoints_.size() < settings->oversize_keypoint_factor * settings->max_num_features){
-        keypoints = keypoints_;
-        descriptors = descriptors_;
-        return;
-    }
-
-    // Retain best keypoints using octree distribution
-    keypoints = distribute_oct_tree(keypoints_, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1, settings->max_num_features);
-    descriptors.create((int)keypoints.size(), descriptors_.cols, descriptors_.type());
-    for (int i = 0; i < (int)keypoints.size(); ++i)
-        descriptors_.row(keypoints[i].class_id).copyTo(descriptors.row(i));
+    // No flatten_keypoint_scale here: AlikedOnnx already builds every keypoint at size 1,
+    // angle 0, octave 0 -- ALIKED is single-scale, so there is no scale to discard.
+    select_keypoints(img, keypoints_, descriptors_, keypoints, descriptors);
 }
 
 float AF_VSLAM::Aliked128Extractor::get_keypoint_size(const cv::KeyPoint&) const{

@@ -437,6 +437,11 @@ AF_VSLAM::Orb32Extractor::Orb32Extractor(std::shared_ptr<FeatureExtractorSetting
 }
 
 void AF_VSLAM::Orb32Extractor::detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& _keypoints, cv::Mat& _descriptors){
+    // This one appends its levels rather than assigning, so it owes the caller a clear. Every
+    // other extractor assigns over whatever it was handed; orb32 did not, and was correct only
+    // because Frame::extract_features happens to pass a freshly constructed KeypointData.
+    _keypoints.clear();
+
     compute_pyramid(img.grayImg);
     std::vector < std::vector<cv::KeyPoint> > all_keypoints;
     compute_keypoints_oct_tree(all_keypoints);
