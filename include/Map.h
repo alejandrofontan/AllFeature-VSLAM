@@ -36,8 +36,8 @@ public:
                         const Keyframe& ref_keyframe, KeypointIndex ref_index,
                         FeatureType feature_type);
 
-    void add_map_point(Pt pt);
-    void erase_map_point(Pt pt);
+    void add_map_point(const Pt& pt);
+    void erase_map_point(const Pt& pt);
 
     std::vector<Pt> get_all_map_points();
 
@@ -47,8 +47,8 @@ public:
     // Keyframes
     // ========================================================================
 
-    void add_keyframe(Keyframe keyframe);
-    void erase_keyframe(Keyframe keyframe);
+    void add_keyframe(const Keyframe& keyframe);
+    void erase_keyframe(const Keyframe& keyframe);
 
     std::vector<Keyframe> get_all_keyframes();
 

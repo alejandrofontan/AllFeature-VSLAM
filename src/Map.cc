@@ -87,13 +87,13 @@ Pt Map::make_map_point(const vec3f& world_pos, const Keyframe& ref_keyframe, Key
     return pt;
 }
 
-void Map::add_map_point(Pt pt)
+void Map::add_map_point(const Pt& pt)
 {
     unique_lock<mutex> lock(map_mutex_);
     map_points_.insert(pt);
 }
 
-void Map::erase_map_point(Pt pt)
+void Map::erase_map_point(const Pt& pt)
 {
     unique_lock<mutex> lock(map_mutex_);
     map_points_.erase(pt);
@@ -118,7 +118,7 @@ size_t Map::map_points_in_map()
 // Keyframes
 // ============================================================================
 
-void Map::add_keyframe(Keyframe keyframe)
+void Map::add_keyframe(const Keyframe& keyframe)
 {
     unique_lock<mutex> lock(map_mutex_);
     keyframes_.insert(keyframe);
@@ -126,7 +126,7 @@ void Map::add_keyframe(Keyframe keyframe)
         max_keyframe_id_ = keyframe->keyId;
 }
 
-void Map::erase_keyframe(Keyframe keyframe)
+void Map::erase_keyframe(const Keyframe& keyframe)
 {
     unique_lock<mutex> lock(map_mutex_);
     keyframes_.erase(keyframe);

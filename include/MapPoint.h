@@ -17,9 +17,6 @@ namespace AF_VSLAM
 
 class Map;
 
-// One keyframe's sighting of a map point: which keyframe saw it, and which of that keyframe's
-// keypoints it was seen as. Held by value in MapPoint::observations_ -- an Observation is created
-// by its map point, never handed out by reference, and dies with it, so there is nothing to share.
 struct Observation
 {
     Keyframe keyframe{};
