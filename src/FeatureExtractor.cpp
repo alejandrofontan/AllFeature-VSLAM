@@ -115,6 +115,48 @@ static bool node_comparison(const std::pair<int, AF_VSLAM::ExtractorNode*>& a,
     return (a.first != b.first) ? (a.first < b.first) : (a.second->upper_left.x < b.second->upper_left.x);
 }
 
+// Move one freshly divided child into the node list and, if it still holds more than one
+// keypoint, register it as a candidate for the next round of splitting.
+//
+// Returns whether the child was registered, so the first of the two expansion loops below can
+// count how many nodes the next round would split. That count was the only difference between
+// the two copies of this block. Everything else has to stay exactly as it is: push_front order
+// decides the final node order and so which keypoint survives each node, the address is only
+// valid after the push, and self_in_list is set only for expandable children because it is how
+// the second loop erases a parent it reached through a pointer rather than an iterator.
+static bool push_child(const AF_VSLAM::ExtractorNode& child,
+                       std::list<AF_VSLAM::ExtractorNode>& nodes,
+                       std::vector<std::pair<int, AF_VSLAM::ExtractorNode*> >& expandable)
+{
+    if(child.keys.empty())
+        return false;
+
+    nodes.push_front(child);
+    if(child.keys.size() <= 1)
+        return false;
+
+    expandable.push_back(std::make_pair(static_cast<int>(child.keys.size()), &nodes.front()));
+    nodes.front().self_in_list = nodes.begin();
+    return true;
+}
+
+// Spread keypoints evenly over the region by recursive quadtree splitting, then keep the
+// highest-response keypoint in each surviving node. Returns the survivors, with class_id set to
+// each one's index in keys_to_distribute so the caller can pick the matching descriptor rows.
+//
+// max_keypoints is a TARGET, not a hard cap, and the result can exceed it by up to three. The
+// splitting works in rounds, and a round that splits one node replaces it with up to four, so
+// crossing the target mid-round overshoots by that round's remainder. Two things keep the
+// overshoot small: a full round only runs when the predicted result (nodes + 3 per expandable
+// node) still fits, and the round that would not fit is replayed one parent at a time, stopping
+// as soon as the count reaches the target. The one case that can overshoot further is a target
+// smaller than four, where the very first round has nothing to predict from.
+//
+// This is deliberate, not a defect to fix. Every caller already tolerates it: the four
+// classical extractors size their descriptor matrix from the returned count, and they only
+// call this at all once the detector has produced more than oversize_keypoint_factor (1.05x)
+// of the budget, so a handful over the target is well inside what they accept. Capping here
+// would change which keypoints survive, and so every downstream trajectory.
 std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::vector<cv::KeyPoint>& keys_to_distribute, const int &min_x,
                                        const int &max_x, const int &min_y, const int &max_y, const int &max_keypoints)
 {
@@ -144,7 +186,9 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
         node.upper_right = cv::Point2i(node_width*static_cast<float>(i+1),0);
         node.bottom_left = cv::Point2i(node.upper_left.x,max_y-min_y);
         node.bottom_right = cv::Point2i(node.upper_right.x,max_y-min_y);
-        node.keys.reserve(keys_to_distribute.size());
+        // The expected share, not the whole set: every root node used to reserve room for every
+        // keypoint in the image, so the reservation cost scaled with num_initial squared.
+        node.keys.reserve(keys_to_distribute.size() / num_initial + 1);
 
         nodes.push_back(node);
         initial_nodes[i] = &nodes.back();
@@ -186,15 +230,14 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
 
     bool finished = false;
 
-    int iteration = 0;
-
+    // Both queues live out here so their capacity survives every round: the inner loop swaps
+    // between them rather than copying, so after the first round neither allocates again.
     std::vector<std::pair<int,ExtractorNode*> > expandable;
+    std::vector<std::pair<int,ExtractorNode*> > previous_expandable;
     expandable.reserve(nodes.size()*4);
 
     while(!finished)
     {
-        iteration++;
-
         int previous_size = nodes.size();
 
         node_it = nodes.begin();
@@ -218,46 +261,10 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
                 node_it->divide_node(top_left,top_right,lower_left,lower_right);
 
                 // Add childs if they contain points
-                if(top_left.keys.size()>0)
-                {
-                    nodes.push_front(top_left);
-                    if(top_left.keys.size()>1)
-                    {
-                        num_to_expand++;
-                        expandable.push_back(std::make_pair(top_left.keys.size(),&nodes.front()));
-                        nodes.front().self_in_list = nodes.begin();
-                    }
-                }
-                if(top_right.keys.size()>0)
-                {
-                    nodes.push_front(top_right);
-                    if(top_right.keys.size()>1)
-                    {
-                        num_to_expand++;
-                        expandable.push_back(std::make_pair(top_right.keys.size(),&nodes.front()));
-                        nodes.front().self_in_list = nodes.begin();
-                    }
-                }
-                if(lower_left.keys.size()>0)
-                {
-                    nodes.push_front(lower_left);
-                    if(lower_left.keys.size()>1)
-                    {
-                        num_to_expand++;
-                        expandable.push_back(std::make_pair(lower_left.keys.size(),&nodes.front()));
-                        nodes.front().self_in_list = nodes.begin();
-                    }
-                }
-                if(lower_right.keys.size()>0)
-                {
-                    nodes.push_front(lower_right);
-                    if(lower_right.keys.size()>1)
-                    {
-                        num_to_expand++;
-                        expandable.push_back(std::make_pair(lower_right.keys.size(),&nodes.front()));
-                        nodes.front().self_in_list = nodes.begin();
-                    }
-                }
+                num_to_expand += push_child(top_left, nodes, expandable);
+                num_to_expand += push_child(top_right, nodes, expandable);
+                num_to_expand += push_child(lower_left, nodes, expandable);
+                num_to_expand += push_child(lower_right, nodes, expandable);
 
                 node_it=nodes.erase(node_it);
                 continue;
@@ -278,7 +285,7 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
 
                 previous_size = nodes.size();
 
-                std::vector<std::pair<int,ExtractorNode*> > previous_expandable = expandable;
+                previous_expandable.swap(expandable);
                 expandable.clear();
 
                 sort(previous_expandable.begin(),previous_expandable.end(), node_comparison);
@@ -287,43 +294,13 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
                     ExtractorNode top_left,top_right,lower_left,lower_right;
                     previous_expandable[j].second->divide_node(top_left,top_right,lower_left,lower_right);
 
-                    // Add childs if they contain points
-                    if(top_left.keys.size()>0)
-                    {
-                        nodes.push_front(top_left);
-                        if(top_left.keys.size()>1)
-                        {
-                            expandable.push_back(std::make_pair(top_left.keys.size(),&nodes.front()));
-                            nodes.front().self_in_list = nodes.begin();
-                        }
-                    }
-                    if(top_right.keys.size()>0)
-                    {
-                        nodes.push_front(top_right);
-                        if(top_right.keys.size()>1)
-                        {
-                            expandable.push_back(std::make_pair(top_right.keys.size(),&nodes.front()));
-                            nodes.front().self_in_list = nodes.begin();
-                        }
-                    }
-                    if(lower_left.keys.size()>0)
-                    {
-                        nodes.push_front(lower_left);
-                        if(lower_left.keys.size()>1)
-                        {
-                            expandable.push_back(std::make_pair(lower_left.keys.size(),&nodes.front()));
-                            nodes.front().self_in_list = nodes.begin();
-                        }
-                    }
-                    if(lower_right.keys.size()>0)
-                    {
-                        nodes.push_front(lower_right);
-                        if(lower_right.keys.size()>1)
-                        {
-                            expandable.push_back(std::make_pair(lower_right.keys.size(),&nodes.front()));
-                            nodes.front().self_in_list = nodes.begin();
-                        }
-                    }
+                    // Add childs if they contain points. The expansion count the first loop
+                    // keeps is not needed here: this loop re-checks nodes.size() against the
+                    // budget after every parent instead of predicting it a round ahead.
+                    push_child(top_left, nodes, expandable);
+                    push_child(top_right, nodes, expandable);
+                    push_child(lower_left, nodes, expandable);
+                    push_child(lower_right, nodes, expandable);
 
                     nodes.erase(previous_expandable[j].second->self_in_list);
 
@@ -338,9 +315,11 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
         }
     }
 
-    // Retain the best point in each node
+    // Retain the best point in each node. One survivor per node, so the count is already known
+    // exactly -- it used to reserve settings->max_num_features, the whole-image budget, which
+    // for orb32 is the sum over every pyramid level of what this one call can return.
     std::vector<cv::KeyPoint> result;
-    result.reserve(settings->max_num_features);
+    result.reserve(nodes.size());
     for(std::list<ExtractorNode>::iterator node_it=nodes.begin(); node_it!=nodes.end(); node_it++)
     {
         std::vector<cv::KeyPoint> &node_keys = node_it->keys;
@@ -399,27 +378,26 @@ void AF_VSLAM::ExtractorNode::divide_node(ExtractorNode &top_left, ExtractorNode
     top_left.upper_right = cv::Point2i(upper_left.x+half_x,upper_left.y);
     top_left.bottom_left = cv::Point2i(upper_left.x,upper_left.y+half_y);
     top_left.bottom_right = cv::Point2i(upper_left.x+half_x,upper_left.y+half_y);
-    top_left.keys.reserve(keys.size());
 
     top_right.upper_left = top_left.upper_right;
     top_right.upper_right = upper_right;
     top_right.bottom_left = top_left.bottom_right;
     top_right.bottom_right = cv::Point2i(upper_right.x,upper_left.y+half_y);
-    top_right.keys.reserve(keys.size());
 
     lower_left.upper_left = top_left.bottom_left;
     lower_left.upper_right = top_left.bottom_right;
     lower_left.bottom_left = bottom_left;
     lower_left.bottom_right = cv::Point2i(top_left.bottom_right.x,bottom_left.y);
-    lower_left.keys.reserve(keys.size());
 
     lower_right.upper_left = lower_left.upper_right;
     lower_right.upper_right = top_right.bottom_right;
     lower_right.bottom_left = lower_left.bottom_right;
     lower_right.bottom_right = bottom_right;
-    lower_right.keys.reserve(keys.size());
 
-    //Associate points to childs
+    // Associate points to childs. No reserve: each child used to reserve room for the parent's
+    // whole key set, four times over, so a split allocated 4x what it could possibly need --
+    // and allocated for children that end up empty, which deep in the tree is most of them.
+    // push_back's geometric growth is cheaper here, since nodes shrink fast as the tree splits.
     for(size_t i=0;i<keys.size();i++)
     {
         const cv::KeyPoint &keypoint = keys[i];

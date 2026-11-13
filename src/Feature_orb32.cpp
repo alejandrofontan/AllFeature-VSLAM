@@ -594,8 +594,6 @@ void AF_VSLAM::Orb32Extractor::compute_keypoints_oct_tree(std::vector<std::vecto
         }
 
         std::vector<cv::KeyPoint> & keypoints = all_keypoints[level];
-        keypoints.reserve(settings->max_num_features);
-
         keypoints = distribute_oct_tree(keys_to_distribute, min_border_x, max_border_x,
                                       min_border_y, max_border_y, features_per_level[level]);
 
