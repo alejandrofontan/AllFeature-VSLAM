@@ -3,7 +3,6 @@
 #include "Converter.h"
 #include "Map.h"
 #include "MapPoint.h"
-#include "Observation.h"
 #include <mutex>
 #include <algorithm>
 #include <memory>

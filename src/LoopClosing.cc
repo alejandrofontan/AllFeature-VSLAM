@@ -519,7 +519,6 @@ void LoopClosing::correct_loop()
     std::map<KeyframeId, LoopConnections> loop_connections = loop_connections_after_fusion(connected_keyframes);
     Optimizer::OptimizeEssentialGraph(map_, matched_keyframe_, current_keyframe_, uncorrected_poses, corrected_poses,
                                       loop_connections, fix_scale_);
-    map_->inform_new_big_change();
 
     // Loop edge (also pins both keyframes: never culled)
     matched_keyframe_->add_loop_edge(current_keyframe_);
@@ -694,7 +693,6 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
         point->set_world_pos(Twc.block<3,3>(0,0) * Xc + Twc.block<3,1>(0,3));
     }
 
-    map_->inform_new_big_change();
     local_mapper_->release();
 
     AF_INFO("[LoopClosing] map updated");

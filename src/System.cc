@@ -463,19 +463,6 @@ mat4f System::Track(Image &im, const double &timestamp)
     return Tcw;
 }
 
-bool System::MapChanged()
-{
-    static int n=0;
-    int curn = mpMap->get_last_big_change_index();
-    if(n<curn)
-    {
-        n=curn;
-        return true;
-    }
-    else
-        return false;
-}
-
 void System::reset()
 {
     unique_lock<mutex> lock(mMutexReset);

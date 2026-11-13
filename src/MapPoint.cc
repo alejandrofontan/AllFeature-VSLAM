@@ -73,9 +73,9 @@ vec3f MapPoint::get_world_pos() const
 // Observations
 // ============================================================================
 
-void MapPoint::add_observation(const Keyframe& projKeyframe, const KeypointIndex& projIndex)
+void MapPoint::add_observation(const Keyframe& keyframe, const KeypointIndex& index)
 {
-    add_observations({{projKeyframe, projIndex}});
+    add_observations({{keyframe, index}});
 }
 
 void MapPoint::add_observations(const std::vector<std::pair<Keyframe, KeypointIndex>>& new_observations)
@@ -83,13 +83,13 @@ void MapPoint::add_observations(const std::vector<std::pair<Keyframe, KeypointIn
     bool inserted = false;
     {
         std::unique_lock<std::mutex> lock(features_mutex_);
-        for(const auto& [projKeyframe, projIndex] : new_observations)
+        for(const auto& [keyframe, index] : new_observations)
         {
-            if(observations_.count(projKeyframe->keyId))
+            if(observations_.count(keyframe->keyId))
                 continue;
 
-            observations_[projKeyframe->keyId] = std::make_shared<Observation>(projKeyframe, projIndex);
-            increase_observability(projKeyframe, projIndex);
+            observations_[keyframe->keyId] = Observation{keyframe, index};
+            increase_observability(keyframe, index);
             inserted = true;
         }
     }
@@ -97,20 +97,20 @@ void MapPoint::add_observations(const std::vector<std::pair<Keyframe, KeypointIn
         compute_distinctive_descriptors()->update_normal_and_depth();
 }
 
-void MapPoint::erase_observation(const Keyframe& projKeyframe)
+void MapPoint::erase_observation(const Keyframe& keyframe)
 {
     bool removePoint = false;
     {
         std::unique_lock<std::mutex> lock(features_mutex_);
-        if(observations_.count(projKeyframe->keyId))
+        if(observations_.count(keyframe->keyId))
         {
-            KeypointIndex projIndex = observations_[projKeyframe->keyId]->projIndex;
-            decrease_observability(projKeyframe, projIndex);
+            KeypointIndex index = observations_[keyframe->keyId].index;
+            decrease_observability(keyframe, index);
 
-            observations_.erase(projKeyframe->keyId);
+            observations_.erase(keyframe->keyId);
 
-            if(ref_keyframe_->keyId == projKeyframe->keyId && !observations_.empty())
-                ref_keyframe_ = observations_.begin()->second->projKeyframe;
+            if(ref_keyframe_->keyId == keyframe->keyId && !observations_.empty())
+                ref_keyframe_ = observations_.begin()->second.keyframe;
 
             removePoint = (static_cast<int>(observations_.size()) <= min_observing_keyframes);
         }
@@ -122,24 +122,24 @@ void MapPoint::erase_observation(const Keyframe& projKeyframe)
         compute_distinctive_descriptors()->update_normal_and_depth();
 }
 
-int MapPoint::observation_weight(const Keyframe& projKeyframe, const KeypointIndex& projIndex) const
+int MapPoint::observation_weight(const Keyframe& keyframe, const KeypointIndex& index) const
 {
-    return projKeyframe->features.at(featureType).inv_depth[projIndex] > 0.0f
+    return keyframe->features.at(featureType).inv_depth[index] > 0.0f
                ? depth_observation_weight
                : 1;
 }
 
-void MapPoint::increase_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex)
+void MapPoint::increase_observability(const Keyframe& keyframe, const KeypointIndex& index)
 {
-    num_observations_ += observation_weight(projKeyframe, projIndex);
+    num_observations_ += observation_weight(keyframe, index);
 }
 
-void MapPoint::decrease_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex)
+void MapPoint::decrease_observability(const Keyframe& keyframe, const KeypointIndex& index)
 {
-    num_observations_ -= observation_weight(projKeyframe, projIndex);
+    num_observations_ -= observation_weight(keyframe, index);
 }
 
-std::map<KeyframeId, Obs> MapPoint::get_observations() const
+std::map<KeyframeId, Observation> MapPoint::get_observations() const
 {
     std::unique_lock<std::mutex> lock(features_mutex_);
     return observations_;
@@ -151,7 +151,7 @@ std::vector<std::pair<KeyframeId, Keyframe>> MapPoint::get_observers() const
     std::vector<std::pair<KeyframeId, Keyframe>> observers;
     observers.reserve(observations_.size());
     for(const auto& [key_id, observation] : observations_)
-        observers.emplace_back(key_id, observation->projKeyframe);
+        observers.emplace_back(key_id, observation.keyframe);
     return observers;
 }
 
@@ -177,7 +177,7 @@ int MapPoint::get_index_in_keyframe(const Keyframe& keyframe) const
 {
     std::unique_lock<std::mutex> lock(features_mutex_);
     const auto it = observations_.find(keyframe->keyId);
-    return it != observations_.end() ? static_cast<int>(it->second->projIndex) : -1;
+    return it != observations_.end() ? static_cast<int>(it->second.index) : -1;
 }
 
 bool MapPoint::is_in_keyframe(const Keyframe& keyframe) const
@@ -192,7 +192,7 @@ bool MapPoint::is_in_keyframe(const Keyframe& keyframe) const
 
 Pt MapPoint::compute_distinctive_descriptors()
 {
-    std::map<KeyframeId, Obs> observations;
+    std::map<KeyframeId, Observation> observations;
     {
         std::unique_lock<std::mutex> lock(features_mutex_);
         if(bad_)
@@ -208,9 +208,9 @@ Pt MapPoint::compute_distinctive_descriptors()
     descriptors.reserve(observations.size());
     for(auto& obs: observations)
     {
-        Keyframe projKeyframe = obs.second->projKeyframe;
-        if(!projKeyframe->is_bad())
-            descriptors.push_back(projKeyframe->features.at(featureType).descriptors.row(obs.second->projIndex));
+        Keyframe keyframe = obs.second.keyframe;
+        if(!keyframe->is_bad())
+            descriptors.push_back(keyframe->features.at(featureType).descriptors.row(obs.second.index));
     }
 
     if(descriptors.empty())
@@ -268,7 +268,7 @@ cv::Mat MapPoint::get_descriptor() const
 
 void MapPoint::update_normal_and_depth()
 {
-    std::map<KeyframeId, Obs> observations;
+    std::map<KeyframeId, Observation> observations;
     Keyframe ref_keyframe;
     vec3f world_pos;
     {
@@ -291,8 +291,8 @@ void MapPoint::update_normal_and_depth()
     int num_observers = 0;
     for(auto& obs: observations)
     {
-        Keyframe projKeyframe = obs.second->projKeyframe;
-        vec3f camera_centre = projKeyframe->get_twc();
+        Keyframe keyframe = obs.second.keyframe;
+        vec3f camera_centre = keyframe->get_twc();
         vec3f viewing_direction = world_pos - camera_centre;
         normal = normal + viewing_direction / viewing_direction.norm();
         num_observers++;
@@ -366,7 +366,7 @@ float MapPoint::get_found_ratio() const
 
 void MapPoint::set_bad_flag()
 {
-    std::map<KeyframeId, Obs> observations;
+    std::map<KeyframeId, Observation> observations;
     {
         std::unique_lock<std::mutex> lock(features_mutex_);
         bad_ = true;
@@ -375,8 +375,8 @@ void MapPoint::set_bad_flag()
     }
     for(auto& obs: observations)
     {
-        Keyframe keyframe = obs.second->projKeyframe;
-        keyframe->erase_map_point_match(this_point(), obs.second->projIndex);
+        Keyframe keyframe = obs.second.keyframe;
+        keyframe->erase_map_point_match(this_point(), obs.second.index);
     }
 
     map_->erase_map_point(this_point());
@@ -395,7 +395,7 @@ void MapPoint::replace(const Pt& replacement)
 
     int num_visible, num_found;
 
-    std::map<KeyframeId, Obs> observations;
+    std::map<KeyframeId, Observation> observations;
     {
         std::unique_lock<std::mutex> lock(features_mutex_);
         observations = observations_;
@@ -410,16 +410,16 @@ void MapPoint::replace(const Pt& replacement)
     merged.reserve(observations.size());
     for(auto& obs: observations)
     {
-        Keyframe keyframe = obs.second->projKeyframe;
+        Keyframe keyframe = obs.second.keyframe;
 
         if(!replacement->is_in_keyframe(keyframe))
         {
-            if(keyframe->replace_map_point_match(this_point(), obs.second->projIndex, replacement))
-                merged.emplace_back(keyframe, obs.second->projIndex);
+            if(keyframe->replace_map_point_match(this_point(), obs.second.index, replacement))
+                merged.emplace_back(keyframe, obs.second.index);
         }
         else
         {
-            keyframe->erase_map_point_match(this_point(), obs.second->projIndex);
+            keyframe->erase_map_point_match(this_point(), obs.second.index);
         }
     }
     replacement->increase_found(num_found);

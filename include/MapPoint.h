@@ -11,12 +11,20 @@
 
 #include "Types.h"
 #include "KeyFrame.h"
-#include "Observation.h"
 
 namespace AF_VSLAM
 {
 
 class Map;
+
+// One keyframe's sighting of a map point: which keyframe saw it, and which of that keyframe's
+// keypoints it was seen as. Held by value in MapPoint::observations_ -- an Observation is created
+// by its map point, never handed out by reference, and dies with it, so there is nothing to share.
+struct Observation
+{
+    Keyframe keyframe{};
+    KeypointIndex index{};
+};
 
 class MapPoint;
 typedef std::shared_ptr<MapPoint> Pt;
@@ -50,11 +58,11 @@ public:
     // Observations
     // ========================================================================
 
-    void add_observation(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
+    void add_observation(const Keyframe& keyframe, const KeypointIndex& index);
     void add_observations(const std::vector<std::pair<Keyframe, KeypointIndex>>& new_observations);
-    void erase_observation(const Keyframe& projKeyframe);
+    void erase_observation(const Keyframe& keyframe);
 
-    std::map<KeyframeId,Obs> get_observations() const;
+    std::map<KeyframeId, Observation> get_observations() const;
 
     [[nodiscard]] std::vector<std::pair<KeyframeId, Keyframe>> get_observers() const;
 
@@ -154,12 +162,12 @@ protected:
     static inline int depth_observation_weight{2};
     static inline int min_observing_keyframes{2};
 
-    [[nodiscard]] int observation_weight(const Keyframe& projKeyframe, const KeypointIndex& projIndex) const;
+    [[nodiscard]] int observation_weight(const Keyframe& keyframe, const KeypointIndex& index) const;
 
-    void increase_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
-    void decrease_observability(const Keyframe& projKeyframe, const KeypointIndex& projIndex);
+    void increase_observability(const Keyframe& keyframe, const KeypointIndex& index);
+    void decrease_observability(const Keyframe& keyframe, const KeypointIndex& index);
 
-    std::map<KeyframeId,Obs> observations_;
+    std::map<KeyframeId, Observation> observations_;
 
     int num_observations_;
 

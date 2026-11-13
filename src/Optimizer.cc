@@ -112,7 +112,7 @@ static EdgeT* CreateBAEdge(g2o::SparseOptimizer& optimizer, int pointId, int key
 // One BA edge plus the (keyframe, map point) pair it connects -- lets LocalBundleAdjustment
 // track edges/keyframes/points as a single vector per edge type instead of three parallel ones.
 // Named BAObservation (not Observation) to avoid colliding with AF_VSLAM::Observation
-// (include/Observation.h), the unrelated projKeyframe/projIndex pairing used elsewhere.
+// (include/MapPoint.h), which is a map point's record of one keyframe that saw it.
 template<typename EdgeT>
 struct BAObservation
 {
@@ -229,30 +229,30 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
         vPoint->setMarginalized(true);
         optimizer.addVertex(vPoint);
 
-       const map<KeyframeId ,Obs> observations = pMP->get_observations();
+       const map<KeyframeId, Observation> observations = pMP->get_observations();
 
         int nEdges = 0;
         //SET EDGES
         for(auto& obs: observations)
         {
 
-            Keyframe pKF = obs.second->projKeyframe;
+            Keyframe pKF = obs.second.keyframe;
             if(pKF->is_bad() || pKF->keyId > maxKFid)
                 continue;
 
             nEdges++;
 
-            const cv::KeyPoint &kpUn = pKF->features.at(feature_type).keypoints[obs.second->projIndex];
-            const float invDepth_i = pKF->features.at(feature_type).inv_depth[obs.second->projIndex];
+            const cv::KeyPoint &kpUn = pKF->features.at(feature_type).keypoints[obs.second.index];
+            const float invDepth_i = pKF->features.at(feature_type).inv_depth[obs.second.index];
 
             if(invDepth_i > 0.0f)   // RGB-D sensor-depth observation
             {
                 Eigen::Matrix<double,3,1> obs3D;
                 obs3D << kpUn.pt.x, kpUn.pt.y, invDepth_i;
 
-                const float sigma2invDepth_i = pKF->features.at(feature_type).sigma2_inv_depth[obs.second->projIndex];
+                const float sigma2invDepth_i = pKF->features.at(feature_type).sigma2_inv_depth[obs.second.index];
                 mat3f infMat = mat3f::Zero();
-                infMat.block<2,2>(0,0) = pKF->features.get_information_2d(obs.second->projIndex, feature_type);
+                infMat.block<2,2>(0,0) = pKF->features.get_information_2d(obs.second.index, feature_type);
                 infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepth_i));
 
                 CreateBAEdge<g2o::EdgeRGBDSE3ProjectXYZ>(
@@ -265,7 +265,7 @@ void Optimizer::BundleAdjustment(const vector<Keyframe > &vpKFs, const vector<Pt
 
                 CreateBAEdge<g2o::EdgeSE3ProjectXYZ>(
                     optimizer, id, pKF->keyId, obs2D,
-                    pKF->features.get_information_2d(obs.second->projIndex, feature_type).cast<double>(), params.thHuber_2dof, pKF, bRobust);
+                    pKF->features.get_information_2d(obs.second.index, feature_type).cast<double>(), params.thHuber_2dof, pKF, bRobust);
             }
         }
 
@@ -700,26 +700,26 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
         vPoint->setMarginalized(true);
         optimizer.addVertex(vPoint);
 
-        map<KeyframeId , Obs> observations = pMP->get_observations();
+        map<KeyframeId, Observation> observations = pMP->get_observations();
 
         //Set edges
         for(auto& obs: observations)
         {
-            Keyframe pKFi = obs.second->projKeyframe;
+            Keyframe pKFi = obs.second.keyframe;
 
             if(!pKFi->is_bad())
             {
-                const cv::KeyPoint &kpUn = pKFi->features.at(feature_type).keypoints[obs.second->projIndex];
-                const float invDepth_i = pKFi->features.at(feature_type).inv_depth[obs.second->projIndex];
+                const cv::KeyPoint &kpUn = pKFi->features.at(feature_type).keypoints[obs.second.index];
+                const float invDepth_i = pKFi->features.at(feature_type).inv_depth[obs.second.index];
 
                 if(invDepth_i > 0.0f)   // RGB-D sensor-depth observation
                 {
                     Eigen::Matrix<double,3,1> obs3D;
                     obs3D << kpUn.pt.x, kpUn.pt.y, invDepth_i;
 
-                    const float sigma2invDepth_i = pKFi->features.at(feature_type).sigma2_inv_depth[obs.second->projIndex];
+                    const float sigma2invDepth_i = pKFi->features.at(feature_type).sigma2_inv_depth[obs.second.index];
                     mat3f infMat = mat3f::Zero();
-                    infMat.block<2,2>(0,0) = pKFi->features.get_information_2d(obs.second->projIndex, feature_type);
+                    infMat.block<2,2>(0,0) = pKFi->features.get_information_2d(obs.second.index, feature_type);
                     infMat(2,2) = static_cast<float>(RGBDInvDepthInformation(sigma2invDepth_i));
 
                     auto* e = CreateBAEdge<g2o::EdgeRGBDSE3ProjectXYZ>(
@@ -734,7 +734,7 @@ void Optimizer::LocalBundleAdjustment(Keyframe pKF, shared_ptr<Map> pMap)
 
                     auto* e = CreateBAEdge<g2o::EdgeSE3ProjectXYZ>(
                         optimizer, id, pKFi->keyId, obs2D,
-                        pKFi->features.get_information_2d(obs.second->projIndex, feature_type).cast<double>(), params.thHuber_2dof, pKFi);
+                        pKFi->features.get_information_2d(obs.second.index, feature_type).cast<double>(), params.thHuber_2dof, pKFi);
 
                     obsMono.push_back({e, pKFi, pMP});
                 }

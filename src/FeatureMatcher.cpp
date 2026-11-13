@@ -13,6 +13,7 @@
 
 #include "afvslam_log.hpp"
 #include "BruteForceMatcher.h"
+#include "FeatureFactory.h"
 #include "FeatureMatcher.h"
 #include "onnx/FeatureModels.h"
 

@@ -121,7 +121,6 @@ set(SRCS_ALLFEATURE
         src/Sim3Solver.cc
         src/Initializer.cc
         src/Viewer.cc
-        src/Observation.cpp
         src/FeatureExtractor.cpp
         src/Utils.cpp
         src/KeyframeInformation.cc

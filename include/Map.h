@@ -57,20 +57,6 @@ public:
     long unsigned int get_max_keyframe_id();
 
     // ========================================================================
-    // Reference map points
-    // ========================================================================
-
-    void set_reference_map_points(const std::vector<Pt> &points);
-    std::vector<Pt> get_reference_map_points();
-
-    // ========================================================================
-    // Change tracking
-    // ========================================================================
-
-    void inform_new_big_change();
-    int get_last_big_change_index();
-
-    // ========================================================================
     // Lifecycle
     // ========================================================================
 
@@ -114,19 +100,6 @@ protected:
     // get_max_keyframe_id()+1 and indexes them by keyId, so a value that shrank after a cull would
     // index past the end. Only clear() resets it, and only because every keyId restarts with it.
     long unsigned int max_keyframe_id_;
-
-    // ========================================================================
-    // Reference map points
-    // ========================================================================
-
-    std::vector<Pt> reference_map_points_;
-
-    // ========================================================================
-    // Change tracking
-    // ========================================================================
-
-    // Index related to a big change in the map (loop closure, global BA)
-    int big_change_index_;
 
     // ========================================================================
     // Locks

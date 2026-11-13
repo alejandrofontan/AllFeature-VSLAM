@@ -87,10 +87,6 @@ public:
     // Returns the camera pose (empty if tracking fails).
     mat4f Track(Image &im, const double &timestamp);
 
-    // Returns true if there have been a big map change (loop closure, global BA)
-    // since last call to this function
-    bool MapChanged();
-
     // Reset the system (clear map)
     void reset();
 

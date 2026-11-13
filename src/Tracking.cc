@@ -615,7 +615,6 @@ void Tracking::create_initial_map()
 
     last_frame_ = Frame(current_frame_);
 
-    map_->set_reference_map_points(local_points_);
     map_drawer_->set_current_camera_pose(keyframe_cur->get_Tcw());
     map_->keyframe_origins_.push_back(keyframe_ini);
 
@@ -887,9 +886,6 @@ bool Tracking::track_local_map()
 
 void Tracking::update_local_map()
 {
-    // Publish the current local points to the map for visualization
-    map_->set_reference_map_points(local_points_);
-
     update_local_keyframes();
     update_local_points();
 }

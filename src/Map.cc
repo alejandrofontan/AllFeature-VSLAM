@@ -16,7 +16,7 @@ namespace AF_VSLAM
 // ============================================================================
 
 Map::Map():
-    max_keyframe_id_(0), big_change_index_(0)
+    max_keyframe_id_(0)
 {
 }
 
@@ -156,38 +156,6 @@ long unsigned int Map::get_max_keyframe_id()
 }
 
 // ============================================================================
-// Reference map points
-// ============================================================================
-
-void Map::set_reference_map_points(const vector<Pt > &points)
-{
-    unique_lock<mutex> lock(map_mutex_);
-    reference_map_points_ = points;
-}
-
-vector<Pt> Map::get_reference_map_points()
-{
-    unique_lock<mutex> lock(map_mutex_);
-    return reference_map_points_;
-}
-
-// ============================================================================
-// Change tracking
-// ============================================================================
-
-void Map::inform_new_big_change()
-{
-    unique_lock<mutex> lock(map_mutex_);
-    big_change_index_++;
-}
-
-int Map::get_last_big_change_index()
-{
-    unique_lock<mutex> lock(map_mutex_);
-    return big_change_index_;
-}
-
-// ============================================================================
 // Lifecycle
 // ============================================================================
 
@@ -195,13 +163,11 @@ void Map::clear()
 {
     decltype(map_points_) released_points;
     decltype(keyframes_) released_keyframes;
-    decltype(reference_map_points_) released_reference_points;
     decltype(keyframe_origins_) released_origins;
     {
         unique_lock<mutex> lock(map_mutex_);
         released_points.swap(map_points_);
         released_keyframes.swap(keyframes_);
-        released_reference_points.swap(reference_map_points_);
         released_origins.swap(keyframe_origins_);
         max_keyframe_id_ = 0;
     }
