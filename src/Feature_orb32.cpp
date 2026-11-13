@@ -397,6 +397,7 @@ AF_VSLAM::Orb32Extractor::Orb32Extractor(std::shared_ptr<FeatureExtractorSetting
         inv_scale_factors[i]=1.0f/scale_factors[i];
 
     image_pyramid.resize(num_octaves);
+    pyramid_buffers.resize(num_octaves);
 
     features_per_level.resize(num_octaves);
     float factor = 1.0f / scale_factor;
@@ -507,7 +508,14 @@ void AF_VSLAM::Orb32Extractor::compute_pyramid(cv::Mat image)
         float scale = inv_scale_factors[level];
         cv::Size sz(cvRound((float)image.cols*scale), cvRound((float)image.rows*scale));
         cv::Size whole_size(sz.width + EDGE_THRESHOLD*2, sz.height + EDGE_THRESHOLD*2);
-        cv::Mat temp(whole_size, image.type()), masktemp;
+
+        // create() is a no-op when the buffer already has this size and type, so a run of
+        // same-sized frames allocates the pyramid once and then reuses it. This used to be a
+        // local cv::Mat, so every level of every frame allocated a fresh bordered image and
+        // freed the previous one. image_pyramid[level] is the inner view of that buffer and
+        // keeps it alive, which is why the buffer has to outlive this function.
+        cv::Mat& temp = pyramid_buffers[level];
+        temp.create(whole_size, image.type());
         image_pyramid[level] = temp(cv::Rect(EDGE_THRESHOLD, EDGE_THRESHOLD, sz.width, sz.height));
 
         // Compute the resized image

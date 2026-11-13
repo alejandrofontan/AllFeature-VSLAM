@@ -74,7 +74,6 @@ float AF_VSLAM::FeatureExtractorSettings::required_float(const std::string& key)
 
 void AF_VSLAM::FeatureExtractor::operator()(const Image& img, KeypointData& data)
 {
-    setup_image(img);
     detect_and_compute(img, data.keypoints, data.descriptors);
     compute_size(data);
     compute_sigma(data);

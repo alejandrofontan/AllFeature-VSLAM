@@ -30,16 +30,22 @@ class Akaze61Extractor : public FeatureExtractor
 {
 public:
 
-    std::shared_ptr<libAKAZE::AKAZE> evolution{};
-    AKAZEOptions akaze_options{};
-
-    Akaze61Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_);
+    explicit Akaze61Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_);
 
     void detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override;
 
-    void setup_image(const Image& img) override;
-
     [[nodiscard]] float get_keypoint_size(const cv::KeyPoint &keypoint) const override;
+
+private:
+    /// The evolution for a width x height frame, rebuilt only when that size changes. The AKAZE
+    /// constructor allocates the whole scale-space pyramid from the dimensions in akaze_options_,
+    /// while Create_Nonlinear_Scale_Space refills every buffer per frame without re-checking the
+    /// size it was allocated for -- so the object is reusable across frames, but only of one size.
+    libAKAZE::AKAZE& evolution_for(int width, int height);
+
+    std::shared_ptr<libAKAZE::AKAZE> evolution_{};
+    AKAZEOptions akaze_options_{};
+    int loaded_width_{0}, loaded_height_{0};   // the size evolution_ was allocated for
 };
 
 inline std::shared_ptr<FeatureExtractor> Akaze61::create_extractor(

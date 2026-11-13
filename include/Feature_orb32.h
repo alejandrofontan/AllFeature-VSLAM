@@ -38,6 +38,10 @@ public:
     std::vector<float> scale_factors;
     std::vector<float> inv_scale_factors;
     std::vector<cv::Mat> image_pyramid;
+    // Backing store for image_pyramid: each level's bordered buffer, of which image_pyramid
+    // holds the inner (border-free) view. Kept between frames so a pyramid of an unchanged
+    // frame size costs no allocation; see compute_pyramid.
+    std::vector<cv::Mat> pyramid_buffers;
     int initial_fast_threshold{20};
     int min_fast_threshold{7};
     std::vector<int> features_per_level;

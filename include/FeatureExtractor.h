@@ -72,8 +72,6 @@ protected:
     void compute_size(KeypointData& data);
     void compute_sigma(KeypointData& data);
 
-    virtual void setup_image(const Image&){}
-
     [[nodiscard]] virtual float get_keypoint_size(const cv::KeyPoint& keypoint) const = 0;
 
     virtual void detect_and_compute(const Image&, std::vector<cv::KeyPoint>&, cv::Mat&){}
