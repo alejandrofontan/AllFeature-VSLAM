@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
 
     std::vector<FeatureType> feature_types{};
     for (const auto& feat : features) {
-        feature_types.push_back(get_feature_type(feat));  // an unknown name terminates the process (FeatureFactory.h)
+        feature_types.push_back(get_feature_type(feat));  // an unknown name throws std::runtime_error (FeatureFactory.h)
         AF_CONFIG_FIELD("Feature added: ", feat);
     }
     segmentation::SegmentationSettings segmentationSettings{};

@@ -1,11 +1,12 @@
 #include "FeatureExtractor.h"
-#include "Utils.h"
 #include "afvslam_log.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <list>
+#include <string>
+#include <utility>
 #include <vector>
-
-#include <opencv2/core/core.hpp>
 
 #include <yaml-cpp/yaml.h>
 
@@ -14,9 +15,6 @@ using namespace std;
 
 namespace
 {
-// Smallest sigma compute_sigma will invert. A tenth of a pixel: far below any real keypoint
-// localisation accuracy, so it never clips a genuine measurement, and far above the point
-// where 1/sigma^2 stops being representable.
 constexpr float min_keypoint_sigma{0.1f};
 }
 
@@ -35,8 +33,6 @@ AF_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
 
 namespace
 {
-// One key of a settings yaml as T. The file is loaded per call: this runs a handful of times at start-up, and it
-// keeps yaml-cpp out of FeatureExtractor.h, which most of the library includes.
 template <typename T>
 T required_key(const std::string& settings_yaml, const std::string& key)
 {
@@ -103,26 +99,12 @@ void AF_VSLAM::FeatureExtractor::compute_sigma(KeypointData& data){
     }
 }
 
-// Deterministic ordering for the node-expansion queue: the default pair
-// comparison broke size ties by ExtractorNode POINTER value, which differs
-// between runs (allocator/ASLR) and made the selected keypoints run-dependent
-// (issue #16; same fix as ORB_SLAM2_Deterministic). Size first (the loop pops
-// largest-first from the back), node x-coordinate on ties.
 static bool node_comparison(const std::pair<int, AF_VSLAM::ExtractorNode*>& a,
                             const std::pair<int, AF_VSLAM::ExtractorNode*>& b)
 {
     return (a.first != b.first) ? (a.first < b.first) : (a.second->upper_left.x < b.second->upper_left.x);
 }
 
-// Move one freshly divided child into the node list and, if it still holds more than one
-// keypoint, register it as a candidate for the next round of splitting.
-//
-// Returns whether the child was registered, so the first of the two expansion loops below can
-// count how many nodes the next round would split. That count was the only difference between
-// the two copies of this block. Everything else has to stay exactly as it is: push_front order
-// decides the final node order and so which keypoint survives each node, the address is only
-// valid after the push, and self_in_list is set only for expandable children because it is how
-// the second loop erases a parent it reached through a pointer rather than an iterator.
 static bool push_child(const AF_VSLAM::ExtractorNode& child,
                        std::list<AF_VSLAM::ExtractorNode>& nodes,
                        std::vector<std::pair<int, AF_VSLAM::ExtractorNode*> >& expandable)
@@ -139,33 +121,9 @@ static bool push_child(const AF_VSLAM::ExtractorNode& child,
     return true;
 }
 
-// Spread keypoints evenly over the region by recursive quadtree splitting, then keep the
-// highest-response keypoint in each surviving node. Returns the survivors, with class_id set to
-// each one's index in keys_to_distribute so the caller can pick the matching descriptor rows.
-//
-// max_keypoints is a TARGET, not a hard cap, and the result can exceed it by up to three. The
-// splitting works in rounds, and a round that splits one node replaces it with up to four, so
-// crossing the target mid-round overshoots by that round's remainder. Two things keep the
-// overshoot small: a full round only runs when the predicted result (nodes + 3 per expandable
-// node) still fits, and the round that would not fit is replayed one parent at a time, stopping
-// as soon as the count reaches the target. The one case that can overshoot further is a target
-// smaller than four, where the very first round has nothing to predict from.
-//
-// This is deliberate, not a defect to fix. Every caller already tolerates it: the four
-// classical extractors size their descriptor matrix from the returned count, and they only
-// call this at all once the detector has produced more than oversize_keypoint_factor (1.05x)
-// of the budget, so a handful over the target is well inside what they accept. Capping here
-// would change which keypoints survive, and so every downstream trajectory.
 std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::vector<cv::KeyPoint>& keys_to_distribute, const int &min_x,
                                        const int &max_x, const int &min_y, const int &max_y, const int &max_keypoints)
 {
-    // One root node per square tile across the region, so the tree starts roughly isotropic.
-    //
-    // Both clamps are load-bearing. round() returns 0 for any aspect ratio below 0.5 -- a
-    // portrait or tall-crop region -- which gives an infinite node_width, an empty
-    // initial_nodes, and a node_index of -1 from the clamp below; a zero region height divides
-    // by zero before that. orb32 never reaches either: it hands in a landscape strip inset by
-    // the ORB border. The extractors that pass the raw image bounds would, on a portrait frame.
     const int region_width = max_x - min_x;
     const int region_height = std::max(1, max_y - min_y);
     const int num_initial = std::max(1, static_cast<int>(
@@ -185,28 +143,16 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
         node.upper_right = cv::Point2i(node_width*static_cast<float>(i+1),0);
         node.bottom_left = cv::Point2i(node.upper_left.x,max_y-min_y);
         node.bottom_right = cv::Point2i(node.upper_right.x,max_y-min_y);
-        // The expected share, not the whole set: every root node used to reserve room for every
-        // keypoint in the image, so the reservation cost scaled with num_initial squared.
         node.keys.reserve(keys_to_distribute.size() / num_initial + 1);
 
         nodes.push_back(node);
         initial_nodes[i] = &nodes.back();
     }
 
-    // Associate points to childs. class_id carries the keypoint's index in keys_to_distribute
-    // through to the caller, which uses it to pick the matching descriptor rows for the
-    // survivors -- see the four classical extractors.
     for(size_t i=0;i<keys_to_distribute.size();i++)
     {
         cv::KeyPoint &keypoint = keys_to_distribute[i];
         keypoint.class_id = i;
-
-        // Clamped, because pt.x == max_x lands one past the last node: node_width is
-        // (max_x-min_x)/num_initial, so that keypoint divides to exactly num_initial. On a
-        // 640x480 frame num_initial is 1 and node_width 639, so a keypoint in the last column
-        // indexed initial_nodes[1] of a one-element vector -- a garbage ExtractorNode* that was
-        // then written through. orb32 never hit it (it passes a border-inset rectangle); the
-        // callers that pass the raw 0..cols-1 image bounds could.
         const int node_index = std::clamp(static_cast<int>(keypoint.pt.x / node_width),
                                           0, num_initial - 1);
         initial_nodes[node_index]->keys.push_back(keypoint);
@@ -229,8 +175,6 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
 
     bool finished = false;
 
-    // Both queues live out here so their capacity survives every round: the inner loop swaps
-    // between them rather than copying, so after the first round neither allocates again.
     std::vector<std::pair<int,ExtractorNode*> > expandable;
     std::vector<std::pair<int,ExtractorNode*> > previous_expandable;
     expandable.reserve(nodes.size()*4);
@@ -293,9 +237,6 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
                     ExtractorNode top_left,top_right,lower_left,lower_right;
                     previous_expandable[j].second->divide_node(top_left,top_right,lower_left,lower_right);
 
-                    // Add childs if they contain points. The expansion count the first loop
-                    // keeps is not needed here: this loop re-checks nodes.size() against the
-                    // budget after every parent instead of predicting it a round ahead.
                     push_child(top_left, nodes, expandable);
                     push_child(top_right, nodes, expandable);
                     push_child(lower_left, nodes, expandable);
@@ -314,9 +255,6 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
         }
     }
 
-    // Retain the best point in each node. One survivor per node, so the count is already known
-    // exactly -- it used to reserve settings->max_num_features, the whole-image budget, which
-    // for orb32 is the sum over every pyramid level of what this one call can return.
     std::vector<cv::KeyPoint> result;
     result.reserve(nodes.size());
     for(std::list<ExtractorNode>::iterator node_it=nodes.begin(); node_it!=nodes.end(); node_it++)
@@ -355,12 +293,9 @@ void AF_VSLAM::FeatureExtractor::select_keypoints(const Image& img,
                                                   std::vector<cv::KeyPoint>& keypoints,
                                                   cv::Mat& descriptors)
 {
-    // Discard keypoints outside the mask (if one was loaded for this frame). This runs BEFORE
-    // the spreading below, so that the class_id indices distribute_oct_tree hands back address
-    // the already-compacted descriptor rows.
+
     filter_keypoints_by_mask(detected, detected_descriptors, img.mask);
 
-    // Near enough to the budget: keep the detector's own selection untouched.
     if(detected.size() < settings->oversize_keypoint_factor * settings->max_num_features)
     {
         keypoints = detected;
@@ -368,8 +303,6 @@ void AF_VSLAM::FeatureExtractor::select_keypoints(const Image& img,
         return;
     }
 
-    // Too many: spread them over the frame and keep the best per quadtree node. Each survivor's
-    // class_id is its index in `detected`, which is how its descriptor row is found again.
     keypoints = distribute_oct_tree(detected, 0, img.grayImg.cols-1, 0, img.grayImg.rows-1,
                                     settings->max_num_features);
 
@@ -389,10 +322,7 @@ void AF_VSLAM::FeatureExtractor::filter_keypoints_by_mask(std::vector<cv::KeyPoi
     for (size_t i = 0; i < keypoints.size(); ++i) {
         int x = cvRound(keypoints[i].pt.x), y = cvRound(keypoints[i].pt.y);
         if (x < 0 || y < 0 || x >= mask.cols || y >= mask.rows) continue;
-        // != 0, not == 1: the mask is documented as 0/1 and its only producer today is
-        // Segmenter::inferMask, but a 0/255 mask -- the other obvious convention, and what
-        // imread of a saved mask gives -- would otherwise discard every keypoint in the frame
-        // and look like a detector failure.
+
         if (mask.at<uchar>(y, x) != 0) {
             cv::KeyPoint keypoint = keypoints[i];
             keypoint.class_id = static_cast<int>(kept.size()); // reindex to match the compacted descriptors row order
@@ -401,10 +331,6 @@ void AF_VSLAM::FeatureExtractor::filter_keypoints_by_mask(std::vector<cv::KeyPoi
         }
     }
 
-    // Nothing was dropped: the descriptor rows already line up, so skip rebuilding the matrix.
-    // The reindexed class_ids still have to be written back -- the detectors disagree on what
-    // they leave there (-1 from the OpenCV ones, the detection index from the learned ones),
-    // and the compacted indices are what distribute_oct_tree and the row gather expect.
     if (kept.size() == keypoints.size()) {
         keypoints.swap(kept);
         return;
@@ -444,10 +370,6 @@ void AF_VSLAM::ExtractorNode::divide_node(ExtractorNode &top_left, ExtractorNode
     lower_right.bottom_left = lower_left.bottom_right;
     lower_right.bottom_right = bottom_right;
 
-    // Associate points to childs. No reserve: each child used to reserve room for the parent's
-    // whole key set, four times over, so a split allocated 4x what it could possibly need --
-    // and allocated for children that end up empty, which deep in the tree is most of them.
-    // push_back's geometric growth is cheaper here, since nodes shrink fast as the tree splits.
     for(size_t i=0;i<keys.size();i++)
     {
         const cv::KeyPoint &keypoint = keys[i];

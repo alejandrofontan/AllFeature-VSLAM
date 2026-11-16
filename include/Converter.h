@@ -29,7 +29,6 @@
 #include "g2o/types/types_seven_dof_expmap.h"
 
 #include "Types.h"
-#include "Definitions.h"
 
 namespace AF_VSLAM
 {

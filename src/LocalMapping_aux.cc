@@ -16,6 +16,7 @@
 #include <sstream>
 #include <thread>
 
+#include "Profiling_aux.h"   // PROFILING_EXHAUSTIVE, which log_profile() below is gated on
 #include "Utils.h"
 #include "afvslam_log.hpp"
 

@@ -1,7 +1,11 @@
 #pragma once
 
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
+
 #include "afvslam_log.hpp"
 #include "Feature_orb32.h"
 #include "Feature_kaze64.h"
@@ -66,30 +70,44 @@ switch (feature_type) {
         return aliked128;
     case FEAT_SUPERPOINT256:
         return superpoint256;
-    default:{
-        std::cout <<"get_feature"<< std::endl;
-        std::terminate();
-    }
+    default:
+        // Not reachable from a settings yaml -- get_feature_type below rejects unknown names,
+        // so every value arriving here came from the enum. It fires when a FeatureType is added
+        // to Types.h without a case above.
+        throw std::runtime_error("get_feature: no Feature for FeatureType value "
+                                 + std::to_string(static_cast<int>(feature_type))
+                                 + "; a value was added to the enum without a case in the factory");
 }
 }
 
-inline FeatureType get_feature_type(const std::string& str) {
-if (str == "orb32") {
-    return FEAT_ORB32;
-} else if (str == "akaze61") {
-    return FEAT_AKAZE61;
-} else if (str == "brisk48") {
-    return FEAT_BRISK48;
-} else if (str == "kaze64") {
-    return FEAT_KAZE64;
-} else if (str == "sift128") {
-    return FEAT_SIFT128;
-} else if (str == "aliked128") {
-    return FEAT_ALIKED128;
-} else if (str == "superpoint256") {
-    return FEAT_SUPERPOINT256;
-} else {
-    std::terminate();
+// The names accepted in `features:` of the settings yaml, paired with their enum value. One
+// table rather than an if-chain, so the names a bad entry is checked against and the names
+// listed back to the user cannot drift apart.
+inline const std::vector<std::pair<std::string, FeatureType>>& feature_name_table() {
+static const std::vector<std::pair<std::string, FeatureType>> table{
+    {"orb32",         FEAT_ORB32},
+    {"akaze61",       FEAT_AKAZE61},
+    {"brisk48",       FEAT_BRISK48},
+    {"kaze64",        FEAT_KAZE64},
+    {"sift128",       FEAT_SIFT128},
+    {"aliked128",     FEAT_ALIKED128},
+    {"superpoint256", FEAT_SUPERPOINT256},
+};
+return table;
 }
+
+// The FeatureType of a settings-yaml feature name.
+// @throws std::runtime_error naming the unknown feature and listing the known ones.
+inline FeatureType get_feature_type(const std::string& str) {
+for (const auto& [name, feature_type] : feature_name_table())
+    if (name == str)
+        return feature_type;
+
+std::string known;
+for (const auto& [name, feature_type] : feature_name_table())
+    known += (known.empty() ? "" : ", ") + name;
+
+throw std::runtime_error("unknown feature '" + str + "' in `features:`; known features are "
+                         + known);
 }
 
