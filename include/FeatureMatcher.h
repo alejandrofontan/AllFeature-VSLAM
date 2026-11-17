@@ -53,12 +53,6 @@ public:
         const std::vector<FeatureType>& feature_types,
         const FeatureData& features1, const FeatureData& features2);
 
-    std::vector<cv::DMatch> serialFeatureMatching(
-        const cv::Mat& desc1, const cv::Mat& desc2,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-        const FeatureType& ft);
-
-
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -85,24 +79,21 @@ public:
     void match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
                                    const std::vector<cv::Point2f>& projections);
 
-    // The matched keypoint pairs (index in keyframe1, index in keyframe2) of two keyframes, per feature type.
-    // Returns the pairs cached for (keyframe1, keyframe2) if there are any; otherwise matches the descriptors of
-    // every feature type, runs the geometric filter on them jointly, and caches the result in both keyframes.
-    // What the cache holds is not always filtered: see LocalMapping::cache_neighbor_matches.
-    // Used in: the two wrappers below, and LoopClosing::search_loop_map_points (for the cache write only).
-    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
+    // Makes sure the matches between `keyframe` and each of `others` are in the keyframes' match cache: pairs
+    // already cached are skipped; the rest are matched (all pairs and feature types in parallel), filtered
+    // geometrically per pair, jointly over the feature types, and stored in both keyframes. The only writer of
+    // the cache for keyframe pairs; tracking writes it for a frame against its reference keyframe, filtered too.
+    // Used in: LocalMapping::create_new_map_points, LoopClosing::compute_sim3, LoopClosing::search_loop_map_points.
+    // The pairs are read back with get_keyframe_matches.
+    void cache_keyframe_matches(const Keyframe& keyframe, const std::vector<Keyframe>& others,
         const std::vector<FeatureType>& feat_types);
 
-    // match_keyframes, keeping the pairs where neither keypoint has a map point yet: candidates to triangulate.
-    // Used in: LocalMapping::create_new_map_points
-    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
-        const std::vector<FeatureType>& feat_types);
-
-    // match_keyframes, keeping the pairs where both keypoints have a map point that is not bad: 3D-3D
-    // correspondences for the Sim3 solver.
-    // Used in: LoopClosing::compute_sim3
-    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> match_keyframes_for_compute_sim3(const Keyframe& keyframe1, const Keyframe& keyframe2,
-        const std::vector<FeatureType>& feat_types);
+    // The matched keypoint pairs (index in keyframe1, index in keyframe2) that keyframe1's match cache holds for
+    // keyframe2, per feature type. A read only: it never matches. A pair of keyframes that was not cached first
+    // (cache_keyframe_matches) gives no pairs.
+    // Used in: LocalMapping::create_new_map_points, LoopClosing::compute_sim3
+    static std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> get_keyframe_matches(
+        const Keyframe& keyframe1, const Keyframe& keyframe2);
 
     // Matches keypoints between two frames across all feature types for monocular initialization.
     // Runs parallel descriptor matching, filters outliers jointly with the geometric filter
@@ -159,6 +150,13 @@ public:
     static float radiusScale;
 
 protected:
+
+    // filter_matches_geometric on the matches of several feature types at once: one model is fitted to all of
+    // them, since every type sees the same two views. `matches_by_type` holds per-type keypoint indices into
+    // features1 (queryIdx) and features2 (trainIdx); so does the result, which keeps the surviving matches.
+    static std::map<FeatureType, std::vector<cv::DMatch>> filter_matches_geometric_jointly(
+        const std::map<FeatureType, std::vector<cv::DMatch>>& matches_by_type,
+        const FeatureData& features1, const FeatureData& features2);
 
     string name{};
     // Returns a reused thread-local buffer, cleared per call — do not hold across calls.

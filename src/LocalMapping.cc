@@ -203,7 +203,8 @@ void LocalMapping::create_new_map_points()
     const float cx1 = current_keyframe_->calibration->cx, cy1 = current_keyframe_->calibration->cy;
     const float invfx1 = current_keyframe_->calibration->invfx, invfy1 = current_keyframe_->calibration->invfy;
 
-    cache_neighbor_matches(neighbors);
+    // Match the new keyframe against all its neighbors at once; the loop below reads the pairs back
+    matcher_->cache_keyframe_matches(current_keyframe_, neighbors, current_keyframe_->feature_types);
 
     // For each neighbor with enough baseline, place each matched keypoint pair in 3D:
     // from sensor depth when either view has it (cross-validated by the reprojection
@@ -228,8 +229,7 @@ void LocalMapping::create_new_map_points()
             continue;
 
         const std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_indices =
-            matcher_->match_keyframes_for_triangulation(current_keyframe_, neighbor,
-                                                        current_keyframe_->feature_types);
+            FeatureMatcher::get_keyframe_matches(current_keyframe_, neighbor);
 
         for(const auto& [feature_type, pairs] : matched_indices)
         {
@@ -240,6 +240,10 @@ void LocalMapping::create_new_map_points()
 
             for(const auto& [idx1, idx2] : pairs)
             {
+                // Only a pair where neither keypoint has a map point yet is a candidate to triangulate
+                if(current_keyframe_->get_map_point(idx1, feature_type) || neighbor->get_map_point(idx2, feature_type))
+                    continue;
+
                 const cv::KeyPoint& kp1 = keypoints1_ft[idx1];
                 const cv::KeyPoint& kp2 = keypoints2_ft[idx2];
 
@@ -332,70 +336,6 @@ void LocalMapping::create_new_map_points()
     create_depth_seeded_points();
 
     timer.record(create_new_map_points_times_);
-}
-
-void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors)
-{
-    // Brute-force descriptor matching of the new keyframe against every neighbor it has no
-    // cached matches with yet, all (neighbor, feature type) pairs in parallel. Results are
-    // stored symmetrically in both keyframes' caches, per feature type.
-    const auto& feature_types = current_keyframe_->feature_types;
-    const int num_neighbors = int(neighbors.size());
-    const int num_feature_types = int(feature_types.size());
-
-    std::vector<char> cached(num_neighbors, 0);
-    {
-        // The caches are shared with Tracking and LoopClosing (KeyFrame::cache_mutex_)
-        std::lock_guard<std::mutex> lock(current_keyframe_->cache_mutex_);
-        for(int k = 0; k < num_neighbors; k++)
-        {
-            const auto it = current_keyframe_->cache_matched_pairs_feat_type.find(neighbors[k]->frame_id);
-            cached[k] = it != current_keyframe_->cache_matched_pairs_feat_type.end() && !it->second.empty();
-        }
-    }
-
-    std::vector<std::vector<std::vector<cv::DMatch>>> matches(
-        num_neighbors, std::vector<std::vector<cv::DMatch>>(num_feature_types));
-
-    #pragma omp parallel for collapse(2) schedule(dynamic)
-    for(int k = 0; k < num_neighbors; k++)
-    {
-        for(int f = 0; f < num_feature_types; f++)
-        {
-            if(cached[k])
-                continue;
-            const Keyframe& neighbor = neighbors[k];
-            const FeatureType feature_type = feature_types[f];
-            matches[k][f] = matcher_->serialFeatureMatching(
-                current_keyframe_->features.at(feature_type).descriptors, neighbor->features.at(feature_type).descriptors,
-                current_keyframe_->features.at(feature_type).keypoints, neighbor->features.at(feature_type).keypoints,
-                feature_type);
-        }
-    }
-
-    // Store (serial): per-feature-type caches in both directions
-    for(int k = 0; k < num_neighbors; k++)
-    {
-        if(cached[k])
-            continue;
-        const Keyframe& neighbor = neighbors[k];
-        if(neighbor == current_keyframe_)
-            continue;
-        std::scoped_lock lock(current_keyframe_->cache_mutex_, neighbor->cache_mutex_);
-
-        auto& forward_by_type = current_keyframe_->cache_matched_pairs_feat_type[neighbor->frame_id];
-        auto& backward_by_type = neighbor->cache_matched_pairs_feat_type[current_keyframe_->frame_id];
-
-        for(int f = 0; f < num_feature_types; f++)
-        {
-            const FeatureType feature_type = feature_types[f];
-            for(const cv::DMatch& match : matches[k][f])
-            {
-                forward_by_type[feature_type].push_back(match);
-                backward_by_type[feature_type].push_back(cv::DMatch(match.trainIdx, match.queryIdx, match.distance));
-            }
-        }
-    }
 }
 
 void LocalMapping::create_depth_seeded_points()

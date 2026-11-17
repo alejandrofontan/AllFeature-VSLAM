@@ -169,9 +169,7 @@ protected:
     void process_new_keyframe();
     void cull_map_points();
     void create_new_map_points();
-    // create_new_map_points() helpers: brute-force match the new keyframe against its
-    // neighbors (cached, OMP-parallel), and back-project unmatched keypoints with depth
-    void cache_neighbor_matches(const std::vector<Keyframe>& neighbors);
+    // create_new_map_points() helper: back-project unmatched keypoints with depth
     void create_depth_seeded_points();
     void search_in_neighbors();
     // Optimizer::LocalBundleAdjustment on the current keyframe (skipped on a too-small map)

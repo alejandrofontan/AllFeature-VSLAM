@@ -272,26 +272,52 @@ bool LoopClosing::compute_sim3()
     candidates.reserve(loop_candidates_.size());
     int num_alive = 0;
 
-    const size_t num_current_keypoints = current_keyframe_->get_map_point_matches(verification_feature_).size();
+    // Keyframe culling must not delete a candidate while it is being verified. Pinned first, so
+    // the candidates matched below are the ones the loop after it sees as not bad.
+    std::vector<Keyframe> live_candidates;
+    live_candidates.reserve(loop_candidates_.size());
     for(const Keyframe& keyframe : loop_candidates_)
     {
-        // Keyframe culling must not delete a candidate while it is being verified
         keyframe->pin();
+        if(!keyframe->is_bad())
+            live_candidates.push_back(keyframe);
+    }
 
+    // Match the current keyframe against all live candidates at once; the loop below reads the
+    // pairs back
+    matcher_->cache_keyframe_matches(current_keyframe_, live_candidates, feature_types_);
+
+    // By-value snapshots: get_map_point_matches copies under the keyframe's mutex
+    const std::vector<Pt> current_points = current_keyframe_->get_map_point_matches(verification_feature_);
+    const size_t num_current_keypoints = current_points.size();
+    for(const Keyframe& keyframe : loop_candidates_)
+    {
         Candidate candidate{keyframe, {}, nullptr};
         if(!keyframe->is_bad())
         {
-            std::map<FeatureType, std::vector<std::pair<size_t,size_t>>> matched_pairs =
-                matcher_->match_keyframes_for_compute_sim3(current_keyframe_, keyframe, feature_types_);
-            const std::vector<std::pair<size_t,size_t>>& pairs = matched_pairs[verification_feature_];
+            const std::map<FeatureType, std::vector<std::pair<size_t,size_t>>> matched_pairs =
+                FeatureMatcher::get_keyframe_matches(current_keyframe_, keyframe);
+            const auto pairs_it = matched_pairs.find(verification_feature_);
 
-            // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
+            // The 3D-3D correspondences for the Sim3 solver: the matched pairs where both
+            // keypoints have a map point and neither point is bad
             const std::vector<Pt> candidate_points = keyframe->get_map_point_matches(verification_feature_);
             candidate.matches.assign(num_current_keypoints, nullptr);
-            for(const auto& [current_index, candidate_index] : pairs)
-                candidate.matches[current_index] = candidate_points[candidate_index];
+            int num_correspondences = 0;
+            if(pairs_it != matched_pairs.end())
+            {
+                for(const auto& [current_index, candidate_index] : pairs_it->second)
+                {
+                    const Pt& current_point = current_points[current_index];
+                    const Pt& candidate_point = candidate_points[candidate_index];
+                    if(!current_point || !candidate_point || current_point->is_bad() || candidate_point->is_bad())
+                        continue;
+                    candidate.matches[current_index] = candidate_point;
+                    num_correspondences++;
+                }
+            }
 
-            if(static_cast<int>(pairs.size()) >= params.sim3_min_matches)
+            if(num_correspondences >= params.sim3_min_matches)
             {
                 candidate.solver = std::make_unique<Sim3Solver>(current_keyframe_, keyframe, candidate.matches,
                                                                 verification_feature_, fix_scale_);
@@ -372,14 +398,14 @@ bool LoopClosing::search_loop_map_points()
     std::vector<Keyframe> loop_keyframes = matched_keyframe_->get_covisible_keyframes();
     loop_keyframes.push_back(matched_keyframe_);
 
+    // search_by_projection_for_compute_sim3 below reads the current keyframe's match cache for
+    // each of these keyframes.
+    matcher_->cache_keyframe_matches(current_keyframe_, loop_keyframes, feature_types_);
+
     loop_map_points_.clear();
     std::map<PtId, Keyframe> point_keyframe;   // the loop keyframe each point was collected from
     for(const Keyframe& keyframe : loop_keyframes)
     {
-        // Side effect only: fills the current keyframe's match cache for this keyframe,
-        // which search_by_projection_for_compute_sim3 reads (the pairs themselves are not needed)
-        matcher_->match_keyframes(current_keyframe_, keyframe, feature_types_);
-
         for(const Pt& point : keyframe->get_map_point_matches(verification_feature_))
         {
             if(!point || point->is_bad() || point->loop_point_for_keyframe == current_keyframe_->keyId)
