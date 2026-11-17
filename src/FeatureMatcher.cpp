@@ -164,27 +164,12 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
     return matches_count;
 }
 
-// Gives a map point to the frame keypoints that have none yet, from the candidates the caller
-// found visible. Per feature type: the unmatched keypoints are matched against the candidates by
-// descriptor alone (cross-checked brute force, over the whole image), and a match is accepted if
-// the squared offset between the keypoint and the candidate's projection is below
-// projection_match_scale_sigma2 times the keypoint's own position variance.
-//
-// `projections[i]` is where `map_pts[i]` projects in this frame. Accepted matches are written to
-// frame.pts. Reports, per feature type: points.candidates, keypoints.unmatched, matches.raw and
-// matches.accepted.
 // Used in: Tracking::search_local_points
 void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
                                                const std::vector<cv::Point2f>& projections)
 {
     AF_REPORT_SCOPE();
 
-    // The candidates grouped by feature type: their index in map_pts and their descriptor. One
-    // get_descriptor() per point -- it takes the point's lock -- and the cv::Mat header it
-    // returns keeps that buffer alive until the rows are copied below. A point whose descriptor
-    // is still empty is skipped: it would otherwise leave an uninitialised row in the matrix
-    // (create does not zero, and copyTo from an empty Mat writes nothing), and that row would be
-    // matched.
     struct Candidates
     {
         std::vector<size_t> indices;
@@ -246,13 +231,6 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
         const std::vector<cv::DMatch> matches = match_descriptors_only(keypoint_descriptors, point_descriptors, ft);
         AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
 
-        // Accept a match only if the map point projects near the matched keypoint: the squared
-        // Mahalanobis distance d^T * information * d must be below projection_match_scale_sigma2.
-        // For an isotropic keypoint of variance s^2 that is |d|^2 < scale * s^2. A direct
-        // distance test, not a get_features_in_area query: the keypoint is already known, so
-        // there is nothing to search for. (That query also made grid membership an implicit
-        // acceptance criterion -- a keypoint pos_in_grid rejected lost its match even when the
-        // distance was fine.)
         const std::vector<cv::KeyPoint>& keypoints = data.keypoints;
         [[maybe_unused]] int num_accepted = 0;
         for (const cv::DMatch& match : matches) {
@@ -273,20 +251,25 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
     }
 }
 
-// Matches two keyframes across all feature types to find candidate pairs for triangulation.
-// Reuses cached matches from a prior tracking step if available; otherwise runs parallel
-// descriptor matching followed by the geometric filter (filter_matches_geometric).
-// Outputs only pairs where neither keyframe has an existing 3D map point for those keypoints.
-// Used in: LocalMapping::CreateNewMapPoints
-map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                const std::vector<FeatureType>& feat_types){
+// The matched keypoint pairs (index in keyframe1, index in keyframe2) of two keyframes, per
+// feature type. Returns the pairs cached for (keyframe1, keyframe2) if there are any; otherwise
+// matches the descriptors of every feature type in parallel, runs the geometric filter on them
+// jointly (filter_matches_geometric), and caches the result in both keyframes.
+//
+// The cache is also written by tracking (match_keyframe_to_frame, filtered) and by
+// LocalMapping::cache_neighbor_matches (raw descriptor matches, NOT filtered), so a cache hit
+// is not always a filtered result.
+// Used in: the two wrappers below, and LoopClosing::search_loop_map_points (for the cache write)
+std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
+    const std::vector<FeatureType>& feat_types)
+{
 
     if (keyframe1 == keyframe2)   // nothing to match (and the two-keyframe cache lock below needs two mutexes)
         return {};
 
     // Reuse cached matches if keyframe1 already has matches stored for keyframe2 (a copy: the cache is shared
     // between threads, KeyFrame::cache_mutex_)
-    map<FeatureType, vector<cv::DMatch>> cached_by_type;
+    std::map<FeatureType, std::vector<cv::DMatch>> cached_by_type;
     {
         std::lock_guard<std::mutex> lock(keyframe1->cache_mutex_);
         const auto cache_it = keyframe1->cache_matched_pairs_feat_type.find(keyframe2->frame_id);
@@ -296,12 +279,12 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
     const bool cached = !cached_by_type.empty();
 
     // No cache — run parallel descriptor matching across all feature types
-    map<FeatureType, vector<cv::DMatch>> matches_by_type;
+    std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type;
     if (!cached) {
         matches_by_type = match_descriptors_parallel(feat_types, keyframe1->features, keyframe2->features);
     }
 
-    map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs;
+    std::map<FeatureType, std::vector<std::pair<size_t,size_t>>> matched_pairs;
 
     // The cache already stores per-type keypoint indices, so a hit needs no stacking and no decoding
     if (cached) {
@@ -314,10 +297,10 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
     // Stack all feature types into one index space (each type's indices offset by the keypoint counts of
     // the earlier ones) so the fundamental matrix is estimated from every feature jointly, and keep the
     // tables that decode a stacked index back to its feature type and per-type index.
-    vector<cv::KeyPoint> kps1, kps2;
-    vector<size_t> kps1_indexes, kps2_indexes;
-    vector<cv::DMatch> all_matches;
-    vector<FeatureType> used_feature_types;
+    std::vector<cv::KeyPoint> kps1, kps2;
+    std::vector<size_t> kps1_indexes, kps2_indexes;
+    std::vector<cv::DMatch> all_matches;
+    std::vector<FeatureType> used_feature_types;
     for (const auto& ft : feat_types) {
 
         // Ensure both frames contain the requested feature type
@@ -353,14 +336,13 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
         used_feature_types.insert(used_feature_types.end(), v1.size(), ft);
     }
 
-    // Filter outliers jointly across all feature types
-    if (all_matches.size() < min_match_keyframes)
-        return matched_pairs; // Not enough matches to reliably estimate fundamental matrix
+    // Filter outliers jointly across all feature types. With too few matches to fit a model the
+    // filter returns them unfiltered, like for every other caller.
 
-    const vector<cv::DMatch> filtered_matches = filter_matches_geometric(all_matches, kps1, kps2);
+    const std::vector<cv::DMatch> filtered_matches = filter_matches_geometric(all_matches, kps1, kps2);
 
     // Decode the stacked indices back to per-type ones, both for the caller and for the cache
-    std::map<FeatureType, vector<cv::DMatch>> forward_by_type, backward_by_type;
+    std::map<FeatureType, std::vector<cv::DMatch>> forward_by_type, backward_by_type;
     for (const auto& m : filtered_matches) {
         const size_t query_idx = kps1_indexes[m.queryIdx];
         const size_t train_idx = kps2_indexes[m.trainIdx];
@@ -379,37 +361,38 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
     return matched_pairs;
 }
 
-void FeatureMatcher::match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                std::map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
-                                const std::vector<FeatureType>& feat_types){
-
-
-    std::map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs_ = match_keyframes(keyframe1, keyframe2, feat_types);
-
-    // Only triangulate points that don't already have a 3D MapPoint
-    for (const auto& [ft, matches] : matched_pairs_) {
-        for (const auto& m : matches) {
-            if (!keyframe1->get_map_point(m.first, ft) && !keyframe2->get_map_point(m.second, ft))
-                matched_pairs[ft].emplace_back(m.first, m.second);
+// match_keyframes, keeping the pairs where neither keypoint has a map point yet: the candidates
+// to triangulate.
+// Used in: LocalMapping::create_new_map_points
+std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
+    const std::vector<FeatureType>& feat_types)
+{
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_pairs;
+    for (const auto& [ft, pairs] : match_keyframes(keyframe1, keyframe2, feat_types)) {
+        for (const auto& [index1, index2] : pairs) {
+            if (!keyframe1->get_map_point(index1, ft) && !keyframe2->get_map_point(index2, ft))
+                matched_pairs[ft].emplace_back(index1, index2);
         }
     }
+    return matched_pairs;
 }
 
-void FeatureMatcher::match_keyframes_for_compute_sim3(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                std::map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
-                                const std::vector<FeatureType>& feat_types){
-
-    std::map<FeatureType, vector<pair<size_t,size_t>>> matched_pairs_ = match_keyframes(keyframe1, keyframe2, feat_types);
-
-    // Only match valid points
-    for (const auto& [ft, matches] : matched_pairs_) {
-        for (const auto& m : matches) {
-            auto pMP1 = keyframe1->get_map_point(m.first, ft);
-            auto pMP2 = keyframe2->get_map_point(m.second, ft);
-            if (pMP1 && pMP2 && (!pMP1->is_bad() || !pMP2->is_bad()))
-                matched_pairs[ft].emplace_back(m.first, m.second);
+// match_keyframes, keeping the pairs where both keypoints have a map point and neither is bad:
+// 3D-3D correspondences for the Sim3 solver.
+// Used in: LoopClosing::compute_sim3
+std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::match_keyframes_for_compute_sim3(const Keyframe& keyframe1, const Keyframe& keyframe2,
+    const std::vector<FeatureType>& feat_types)
+{
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_pairs;
+    for (const auto& [ft, pairs] : match_keyframes(keyframe1, keyframe2, feat_types)) {
+        for (const auto& [index1, index2] : pairs) {
+            const Pt point1 = keyframe1->get_map_point(index1, ft);
+            const Pt point2 = keyframe2->get_map_point(index2, ft);
+            if (point1 && point2 && !point1->is_bad() && !point2->is_bad())
+                matched_pairs[ft].emplace_back(index1, index2);
         }
     }
+    return matched_pairs;
 }
 
 // Projects each map point into the keyframe and attempts to fuse it with an existing keypoint.

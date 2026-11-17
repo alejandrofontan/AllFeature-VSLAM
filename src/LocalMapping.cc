@@ -227,9 +227,9 @@ void LocalMapping::create_new_map_points()
            || baseline / *scene_depth < params.create_new_map_points_min_baseline_depth_ratio)
             continue;
 
-        std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_indices;
-        matcher_->match_keyframes_for_triangulation(current_keyframe_, neighbor, matched_indices,
-                                                    current_keyframe_->feature_types);
+        const std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_indices =
+            matcher_->match_keyframes_for_triangulation(current_keyframe_, neighbor,
+                                                        current_keyframe_->feature_types);
 
         for(const auto& [feature_type, pairs] : matched_indices)
         {

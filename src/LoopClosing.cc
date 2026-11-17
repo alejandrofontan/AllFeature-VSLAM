@@ -281,8 +281,8 @@ bool LoopClosing::compute_sim3()
         Candidate candidate{keyframe, {}, nullptr};
         if(!keyframe->is_bad())
         {
-            std::map<FeatureType, std::vector<std::pair<size_t,size_t>>> matched_pairs;
-            matcher_->match_keyframes_for_compute_sim3(current_keyframe_, keyframe, matched_pairs, feature_types_);
+            std::map<FeatureType, std::vector<std::pair<size_t,size_t>>> matched_pairs =
+                matcher_->match_keyframes_for_compute_sim3(current_keyframe_, keyframe, feature_types_);
             const std::vector<std::pair<size_t,size_t>>& pairs = matched_pairs[verification_feature_];
 
             // By-value snapshot: get_map_point_matches copies under the keyframe's mutex

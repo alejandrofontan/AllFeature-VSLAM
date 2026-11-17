@@ -85,18 +85,24 @@ public:
     void match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
                                    const std::vector<cv::Point2f>& projections);
 
-    // Matches two keyframes across all feature types to find candidate pairs for triangulation.
-    // Reuses cached matches if available; otherwise runs parallel descriptor matching + the geometric filter.
-    // Used in: LocalMapping::CreateNewMapPoints
-    const size_t min_match_keyframes = 10;
-    map<FeatureType, vector<pair<size_t,size_t>>> match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                const vector<FeatureType>& feat_types);
-    void match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
-                                const vector<FeatureType>& feat_types);
-    void match_keyframes_for_compute_sim3(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
-                                const vector<FeatureType>& feat_types);
+    // The matched keypoint pairs (index in keyframe1, index in keyframe2) of two keyframes, per feature type.
+    // Returns the pairs cached for (keyframe1, keyframe2) if there are any; otherwise matches the descriptors of
+    // every feature type, runs the geometric filter on them jointly, and caches the result in both keyframes.
+    // What the cache holds is not always filtered: see LocalMapping::cache_neighbor_matches.
+    // Used in: the two wrappers below, and LoopClosing::search_loop_map_points (for the cache write only).
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
+        const std::vector<FeatureType>& feat_types);
+
+    // match_keyframes, keeping the pairs where neither keypoint has a map point yet: candidates to triangulate.
+    // Used in: LocalMapping::create_new_map_points
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
+        const std::vector<FeatureType>& feat_types);
+
+    // match_keyframes, keeping the pairs where both keypoints have a map point that is not bad: 3D-3D
+    // correspondences for the Sim3 solver.
+    // Used in: LoopClosing::compute_sim3
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> match_keyframes_for_compute_sim3(const Keyframe& keyframe1, const Keyframe& keyframe2,
+        const std::vector<FeatureType>& feat_types);
 
     // Matches keypoints between two frames across all feature types for monocular initialization.
     // Runs parallel descriptor matching, filters outliers jointly with the geometric filter
