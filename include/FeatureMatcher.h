@@ -58,8 +58,8 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     // Matches features from a keyframe to a frame across all requested feature types.
-    // Runs brute-force NN matching, filters outliers with MAGSAC, and associates
-    // inlier matches to map points. Mutates both keyframe and frame (match cache).
+    // Matches descriptors per type, filters outliers jointly with PoseLib LO-RANSAC, and associates
+    // inlier matches to map points. Writes the frame's match cache; the keyframe is not modified.
     // Returns the number of valid map point matches per feature type.
     std::map<FeatureType, int> match_keyframe_to_frame(const Keyframe& keyframe, Frame& frame,
         std::map<FeatureType, std::vector<Pt>>& map_pts_matches,

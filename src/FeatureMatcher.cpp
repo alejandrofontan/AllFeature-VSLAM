@@ -94,19 +94,27 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
 //   3. Each inlier match is resolved to a map point via the keyframe's map point
 //      associations. Only valid, non-bad map points are written to map_pts_matches.
 //
-// The matched keypoint pairs are also cached in both the keyframe and the frame
-// for downstream use (e.g. visualization, loop closing).
+// Every inlier pair, with or without a map point, is also cached on the frame. The keyframe is
+// not modified; the KeyFrame constructor copies the frame's cache if the frame is promoted, and
+// Local Mapping reuses it for triangulation.
 //
 // Returns the number of valid map point matches per feature type.
 // Used in: Tracking::track_reference_keyframe, Tracking::relocalize
 std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyframe& keyframe, Frame& frame,
     std::map<FeatureType, std::vector<Pt>>& map_pts_matches, const std::vector<FeatureType>& feat_types)
 {
-    vector<cv::KeyPoint> kps1, kps2;
-    vector<int> kps1_indexes, kps2_indexes;
+    struct MatchOrigin
+    {
+        FeatureType feat_type;
+        int keyframe_idx;
+        int frame_idx;
+    };
     vector<cv::DMatch> all_matches;
-    vector<FeatureType> used_feature_types;
+    vector<MatchOrigin> origins;
+    vector<cv::KeyPoint> keyframe_kps, frame_kps;
     map<FeatureType, vector<Pt>> map_pts_kf;
+
+    map_pts_matches.clear();
 
     AF_REPORT_SCOPE();
     AF_REPORT("keyframe.frame_id", "", keyframe->frame_id);
@@ -127,31 +135,21 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
             v1, v2, ft);
         AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
 
-        const size_t size_kpts1 = kps1.size();
-        const size_t size_kpts2 = kps2.size();
-        for (auto& m : matches) {
-            m.queryIdx += size_kpts1;
-            m.trainIdx += size_kpts2;
+        for (cv::DMatch& m : matches) {
+            const int slot = static_cast<int>(origins.size());
+            origins.push_back(MatchOrigin{ft, m.queryIdx, m.trainIdx});
+            keyframe_kps.push_back(v1[m.queryIdx]);
+            frame_kps.push_back(v2[m.trainIdx]);
+
+            m.queryIdx = slot;
+            m.trainIdx = slot;
+            all_matches.push_back(m);
         }
-
-        all_matches.insert(all_matches.end(), matches.begin(), matches.end());
-        kps1.insert(kps1.end(), v1.begin(), v1.end());
-        kps2.insert(kps2.end(), v2.begin(), v2.end());
-
-        const size_t base1 = kps1_indexes.size();
-        kps1_indexes.resize(base1 + v1.size());
-        std::iota(kps1_indexes.begin() + base1, kps1_indexes.end(), 0);
-
-        const size_t base2 = kps2_indexes.size();
-        kps2_indexes.resize(base2 + v2.size());
-        std::iota(kps2_indexes.begin() + base2, kps2_indexes.end(), 0);
-
-        used_feature_types.insert(used_feature_types.end(), v1.size(), ft);
 
         map_pts_matches[ft] = vector<Pt>(frame.features.at(ft).count(), nullptr);
     }
 
-    auto robust_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
+    auto robust_matches = filter_matches_by_fundamental(all_matches, keyframe_kps, frame_kps);
 
     std::map<FeatureType, std::vector<cv::DMatch>> frame_side;
 
@@ -159,9 +157,10 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
     for (const auto& ft : feat_types)
         matches_count[ft] = 0;
     for (const auto& m : robust_matches) {
-        const int query_idx = kps1_indexes[m.queryIdx];
-        const int train_idx = kps2_indexes[m.trainIdx];
-        const FeatureType feat_type = used_feature_types[m.queryIdx];
+        const MatchOrigin& origin = origins[m.queryIdx];
+        const int query_idx = origin.keyframe_idx;
+        const int train_idx = origin.frame_idx;
+        const FeatureType feat_type = origin.feat_type;
 
         frame_side[feat_type].push_back(cv::DMatch(train_idx, query_idx, m.distance));
 
@@ -171,9 +170,9 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
         map_pts_matches[feat_type][train_idx] = pt;
         matches_count[feat_type]++;
     }
-    for (const auto& ft : feat_types) {
-        const auto it = frame_side.find(ft);
-        AF_REPORT("matches.filtered", get_feature_name(ft), it == frame_side.end() ? 0 : it->second.size());
+    for ([[maybe_unused]] const auto& ft : feat_types) {
+        AF_REPORT("matches.filtered", get_feature_name(ft),
+                  frame_side.count(ft) ? frame_side.at(ft).size() : 0);
         AF_REPORT("matches.with_point", get_feature_name(ft), matches_count.at(ft));
     }
 

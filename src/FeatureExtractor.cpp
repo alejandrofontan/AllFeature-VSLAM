@@ -10,9 +10,6 @@
 
 #include <yaml-cpp/yaml.h>
 
-using namespace cv;
-using namespace std;
-
 namespace
 {
 constexpr float min_keypoint_sigma{0.1f};
