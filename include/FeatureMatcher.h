@@ -82,6 +82,14 @@ public:
     void match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
                                    const std::vector<cv::Point2f>& projections);
 
+    // The same search on a keyframe's keypoints of one feature type, writing into a vector the caller owns:
+    // `matched_points` has one slot per keypoint of `feat_type`; a keypoint is free when its slot is empty, and an
+    // accepted match fills it. The keyframe is not modified.
+    // Used in: LoopClosing::search_loop_map_points
+    void match_map_points_to_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_pts,
+                                      const std::vector<cv::Point2f>& projections,
+                                      FeatureType feat_type, std::vector<Pt>& matched_points);
+
     // Makes sure the matches between `keyframe` and each of `others` are in `keyframe`'s match cache: pairs
     // already cached are skipped; the rest are matched (all pairs and feature types in parallel), filtered
     // geometrically per pair, jointly over the feature types, and stored in `keyframe` only. The only writer of
@@ -118,14 +126,6 @@ public:
     const float cos_viewing_angle_th = 0.5f;
     const float chi2_perc = ChiSquared::dof2_95;
     int fuse_map_points_to_keyframe(const Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type);
-
-    /// Projects candidate map points into a keyframe using a Sim3 and validates projections
-    /// against cached matches. Writes accepted matches into @p pts_matched.
-    /// @return Number of new map point assignments. Used in: LoopClosing::search_loop_map_points
-    const float radiusTh_factor = 12.0f;
-    int search_by_projection_for_compute_sim3(const Keyframe& keyframe, const mat4f& Scw,
-        const vector<Pt>& pts, vector<Pt>& pts_matched,
-        const map<PtId, Keyframe>& pt_to_keyframe_id);
 
     int fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f& Scw,
         const std::vector<Pt> &map_pts, const float& radius_th, vector<Pt> &replace_pts, const FeatureType& feat_type);

@@ -279,6 +279,9 @@ bool LoopClosing::compute_sim3()
     candidates.reserve(loop_candidates_.size());
     int num_alive = 0;
 
+    AF_REPORT_SCOPE();
+    AF_REPORT("loop.candidates", "", loop_candidates_.size());
+
     // Keyframe culling must not delete a candidate while it is being verified. Pinned first, so
     // the candidates matched below are the ones the loop after it sees as not bad.
     std::vector<Keyframe> live_candidates;
@@ -324,6 +327,9 @@ bool LoopClosing::compute_sim3()
                 }
             }
 
+            // Per candidate: the keyframe, and its 3D-3D correspondences against sim3_min_matches
+            AF_REPORT("loop.candidate_frame_id", "", keyframe->frame_id);
+            AF_REPORT("loop.correspondences", "", num_correspondences);
             if(num_correspondences >= params.sim3_min_matches)
             {
                 candidate.solver = std::make_unique<Sim3Solver>(current_keyframe_, keyframe, candidate.matches,
@@ -335,6 +341,8 @@ bool LoopClosing::compute_sim3()
         }
         candidates.push_back(std::move(candidate));
     }
+
+    AF_REPORT("loop.candidates_armed", "", num_alive);   // enough correspondences for a Sim3 solver
 
     // Alternate RANSAC rounds over the surviving candidates until one Sim3 passes the
     // optimization or every candidate has exhausted its iteration budget
@@ -366,6 +374,10 @@ bool LoopClosing::compute_sim3()
                 const int num_optimized_inliers = Optimizer::OptimizeSim3(current_keyframe_, candidate.keyframe, inlier_matches,
                                                                           g2o_Scm, sim3_optimization_chi2, fix_scale_,
                                                                           verification_feature_);
+                // Per Sim3 hypothesis: RANSAC inliers, and inliers of the optimized Sim3
+                // against sim3_min_inliers
+                AF_REPORT("loop.sim3_ransac_inliers", "", num_inliers);
+                AF_REPORT("loop.sim3_optimized_inliers", "", num_optimized_inliers);
                 if(num_optimized_inliers >= params.sim3_min_inliers)
                 {
                     matched = true;
@@ -391,6 +403,7 @@ bool LoopClosing::compute_sim3()
         }
     }
 
+    AF_REPORT("loop.sim3_found", "", matched);
     if(!matched)
         release_loop_candidates(false);
     return matched;
@@ -402,15 +415,16 @@ bool LoopClosing::compute_sim3()
 // either way (matched keyframe excepted on acceptance).
 bool LoopClosing::search_loop_map_points()
 {
+    AF_REPORT_SCOPE();
+
     std::vector<Keyframe> loop_keyframes = matched_keyframe_->get_covisible_keyframes();
     loop_keyframes.push_back(matched_keyframe_);
-
-    // search_by_projection_for_compute_sim3 below reads the current keyframe's match cache for
-    // each of these keyframes.
-    matcher_->match_keyframe_to_keyframes(current_keyframe_, loop_keyframes, feature_types_);
+    AF_REPORT("loop.keyframes", "", loop_keyframes.size());
+    AF_REPORT("loop.matched_before_search", "",
+              std::count_if(loop_matched_points_.begin(), loop_matched_points_.end(),
+                            [](const Pt& point) { return point != nullptr; }));
 
     loop_map_points_.clear();
-    std::map<PtId, Keyframe> point_keyframe;   // the loop keyframe each point was collected from
     for(const Keyframe& keyframe : loop_keyframes)
     {
         for(const Pt& point : keyframe->get_map_point_matches(verification_feature_))
@@ -419,15 +433,48 @@ bool LoopClosing::search_loop_map_points()
                 continue;
             loop_map_points_.push_back(point);
             point->loop_point_for_keyframe = current_keyframe_->keyId;   // collected once per loop
-            point_keyframe[point->ptId] = keyframe;
         }
     }
 
-    matcher_->search_by_projection_for_compute_sim3(current_keyframe_, Scw_, loop_map_points_, loop_matched_points_, point_keyframe);
+    // The loop points not attached yet, and where each lands in the current keyframe through
+    // the loop Sim3 (Scw_ = [sR | t]: the scale cancels in the projection)
+    const std::unordered_set<Pt> already_matched(loop_matched_points_.begin(), loop_matched_points_.end());
+    const Calibration& calibration = *current_keyframe_->calibration;
+    const mat3f sRcw = Scw_.block<3,3>(0,0);
+    const vec3f tcw = Scw_.block<3,1>(0,3);
+    std::vector<Pt> candidates;
+    std::vector<cv::Point2f> projections;
+    candidates.reserve(loop_map_points_.size());
+    projections.reserve(loop_map_points_.size());
+    for(const Pt& point : loop_map_points_)
+    {
+        if(point->is_bad() || already_matched.count(point))
+            continue;
+        const vec3f in_camera = sRcw * point->get_world_pos() + tcw;
+        if(in_camera(2) <= 0.0f)
+            continue;
+        const float u = calibration.fx * in_camera(0) / in_camera(2) + calibration.cx;
+        const float v = calibration.fy * in_camera(1) / in_camera(2) + calibration.cy;
+        if(!calibration.is_in_image(u, v))
+            continue;
+        candidates.push_back(point);
+        projections.emplace_back(u, v);
+    }
+
+    // Attach them with the pose-guided search tracking uses for the local map: a point takes the
+    // free keypoint near its projection that is its best descriptor match, if that keypoint
+    // prefers it too
+    matcher_->match_map_points_to_keyframe(current_keyframe_, candidates, projections, verification_feature_,
+                                           loop_matched_points_);
 
     const long num_matches = std::count_if(loop_matched_points_.begin(), loop_matched_points_.end(),
                                            [](const Pt& point) { return point != nullptr; });
     const bool accepted = num_matches >= params.loop_min_matches;
+    // Loop-side points offered, points attached to the current keyframe (against
+    // loop_min_matches), and the verdict
+    AF_REPORT("loop.points_collected", "", loop_map_points_.size());
+    AF_REPORT("loop.points_matched", "", num_matches);
+    AF_REPORT("loop.accepted", "", accepted);
     release_loop_candidates(accepted);
     return accepted;
 }

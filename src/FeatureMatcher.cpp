@@ -3,10 +3,10 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <sstream>
-#include <unordered_set>
 #include <vector>
 
 #include "afvslam_log.hpp"
@@ -148,8 +148,20 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
     return matches_count;
 }
 
-// Gives a map point to the frame keypoints that have none yet, from candidate map points and
-// where each projects in the frame (`projections[i]` belongs to `map_pts[i]`).
+namespace
+{
+// What the pose-guided search found for one feature type; the callers report it.
+struct GateMatchCounts
+{
+    size_t candidates{0};          // candidate map points of this type
+    size_t free_keypoints{0};      // keypoints with no map point yet
+    size_t with_keypoint{0};       // candidates with at least one free keypoint in their gate
+    size_t accepted{0};            // pairs where each side is the other's best descriptor match
+};
+
+// The pose-guided search shared by match_map_points_to_frame and
+// match_map_points_to_keyframe: gives a map point to the free keypoints of `features`, from
+// candidate map points and where each projects (`projections[i]` belongs to `map_pts[i]`).
 //
 // Per feature type, a candidate and a free keypoint can be paired only if the keypoint lies
 // inside the gate around the candidate's projection: the squared offset, in units of the
@@ -160,14 +172,20 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
 // in the image -- and it needs no descriptor-distance threshold: mutual agreement is what
 // rejects a candidate whose window holds nothing right.
 //
-// Accepted matches are written to frame.pts. Reports, per feature type: points.candidates,
-// keypoints.unmatched, matches.raw (candidates with at least one keypoint in their gate) and
-// matches.accepted.
-// Used in: Tracking::search_local_points, Tracking::accept_relocalization_hypothesis
-void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
-                                               const std::vector<cv::Point2f>& projections)
+// The three callables adapt it to where the keypoints live and where the result goes:
+//   keypoints_in_area(x, y, radius, feature_type) -> indices of the keypoints near (x, y)
+//   is_free(feature_type, keypoint_index)         -> whether that keypoint may take a point
+//   assign(feature_type, keypoint_index, point)   -> give it one
+template <typename KeypointsInArea, typename IsFree, typename Assign>
+std::map<FeatureType, GateMatchCounts> match_points_in_gate(
+    const AF_VSLAM::FeatureData& features,
+    const std::vector<AF_VSLAM::Pt>& map_pts, const std::vector<cv::Point2f>& projections,
+    const KeypointsInArea& keypoints_in_area, const IsFree& is_free, const Assign& assign)
 {
-    AF_REPORT_SCOPE();
+    using AF_VSLAM::FeatureMatcher;
+    using AF_VSLAM::Pt;
+    constexpr Descriptor_Distance_Type no_distance = std::numeric_limits<Descriptor_Distance_Type>::max();
+    constexpr float gate = FeatureMatcher::projection_match_scale_sigma2;
 
     // The candidates grouped by feature type: their index in map_pts and their descriptor. One
     // get_descriptor() per point -- it takes the point's lock -- and a point whose descriptor is
@@ -192,61 +210,58 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
         candidates.descriptors.push_back(std::move(descriptor));
     }
 
-    for (const auto& [ft, data] : frame.features.per_type) {
-        std::vector<Pt>& frame_pts = frame.pts.at(ft);
+    std::map<FeatureType, GateMatchCounts> counts_by_type;
+    for (const auto& [ft, data] : features.per_type) {
+        GateMatchCounts& counts = counts_by_type[ft];
         const size_t num_keypoints = data.count();
 
-        // The free keypoints (no observed map point yet), and a bound on their position
-        // variance: the largest gate any of them can have decides how far to look.
-        std::vector<char> is_free(num_keypoints, 0);
-        size_t num_free = 0;
+        // The free keypoints, and a bound on their position variance: the largest gate any of
+        // them can have decides how far to look.
+        std::vector<char> free_keypoint(num_keypoints, 0);
         float max_variance = 0.0f;
         for (size_t i = 0; i < num_keypoints; i++) {
-            if (frame_pts[i] && frame_pts[i]->number_of_observations() > 0)
+            if (!is_free(ft, i))
                 continue;
-            is_free[i] = 1;
-            num_free++;
+            free_keypoint[i] = 1;
+            counts.free_keypoints++;
             const mat2f& sigma2 = data.sigma2[i];
             max_variance = std::max(max_variance,
                                     std::max(sigma2(0, 0), sigma2(1, 1)) + std::abs(sigma2(0, 1)));
         }
 
         const auto candidates_it = candidates_by_type.find(ft);
-        AF_REPORT("points.candidates", get_feature_name(ft),
-                  candidates_it == candidates_by_type.end() ? 0 : candidates_it->second.indices.size());
-        AF_REPORT("keypoints.unmatched", get_feature_name(ft), num_free);
-
-        if (num_free == 0 || candidates_it == candidates_by_type.end()) {
-            AF_REPORT("matches.raw", get_feature_name(ft), 0);
-            AF_REPORT("matches.accepted", get_feature_name(ft), 0);
+        if (candidates_it == candidates_by_type.end())
             continue;
-        }
         const Candidates& candidates = candidates_it->second;
         const size_t num_candidates = candidates.indices.size();
+        counts.candidates = num_candidates;
+        if (counts.free_keypoints == 0)
+            continue;
+
         const std::vector<cv::KeyPoint>& keypoints = data.keypoints;
-        const cv::Mat& frame_descriptors = data.descriptors;
+        const cv::Mat& descriptors = data.descriptors;
 
         // Each side's best partner among the pairs the gate allows. Strict '<' keeps the first
         // of equal distances, so the result does not depend on anything but the input order.
-        const float search_radius = std::sqrt(projection_match_scale_sigma2 * max_variance);
+        const float search_radius = std::sqrt(gate * max_variance);
         std::vector<int> best_keypoint(num_candidates, -1);
-        std::vector<Descriptor_Distance_Type> best_keypoint_distance(num_candidates, highest_possible_distance);
+        std::vector<Descriptor_Distance_Type> best_keypoint_distance(num_candidates, no_distance);
         std::vector<int> best_candidate(num_keypoints, -1);
-        std::vector<Descriptor_Distance_Type> best_candidate_distance(num_keypoints, highest_possible_distance);
+        std::vector<Descriptor_Distance_Type> best_candidate_distance(num_keypoints, no_distance);
 
         for (size_t c = 0; c < num_candidates; c++) {
             const cv::Point2f& projection = projections[candidates.indices[c]];
-            for (const size_t k : frame.get_features_in_area(projection.x, projection.y, search_radius, ft)) {
-                if (!is_free[k])
+            for (const size_t k : keypoints_in_area(projection.x, projection.y, search_radius, ft)) {
+                if (!free_keypoint[k])
                     continue;
 
                 // The gate proper: the offset in units of this keypoint's own uncertainty
                 const vec2f offset(keypoints[k].pt.x - projection.x, keypoints[k].pt.y - projection.y);
-                if (offset.dot(data.information[k] * offset) >= projection_match_scale_sigma2)
+                if (offset.dot(data.information[k] * offset) >= gate)
                     continue;
 
-                const Descriptor_Distance_Type distance =
-                    descriptor_distance(candidates.descriptors[c], frame_descriptors.row(static_cast<int>(k)), ft);
+                const Descriptor_Distance_Type distance = FeatureMatcher::descriptor_distance(
+                    candidates.descriptors[c], descriptors.row(static_cast<int>(k)), ft);
                 if (distance < best_keypoint_distance[c]) {
                     best_keypoint_distance[c] = distance;
                     best_keypoint[c] = static_cast<int>(k);
@@ -259,21 +274,87 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
         }
 
         // Accept the pairs where each side chose the other
-        [[maybe_unused]] int num_with_keypoint = 0;
-        [[maybe_unused]] int num_accepted = 0;
         for (size_t c = 0; c < num_candidates; c++) {
             const int k = best_keypoint[c];
             if (k < 0)
                 continue;
-            num_with_keypoint++;
+            counts.with_keypoint++;
             if (best_candidate[k] != static_cast<int>(c))
                 continue;
-            frame_pts[k] = map_pts[candidates.indices[c]];
-            num_accepted++;
+            assign(ft, static_cast<size_t>(k), map_pts[candidates.indices[c]]);
+            counts.accepted++;
         }
-        AF_REPORT("matches.raw", get_feature_name(ft), num_with_keypoint);
-        AF_REPORT("matches.accepted", get_feature_name(ft), num_accepted);
     }
+    return counts_by_type;
+}
+} // namespace
+
+// Gives a map point to the frame keypoints that have none yet, from candidate map points and
+// where each projects in the frame (`projections[i]` belongs to `map_pts[i]`): the
+// pose-guided search of match_points_in_gate above, on the frame's keypoints. A keypoint is
+// free when it has no map point, or one that nothing observes. Accepted matches are written to
+// frame.pts.
+// Reports, per feature type: points.candidates, keypoints.unmatched, matches.raw (candidates
+// with at least one free keypoint in their gate) and matches.accepted.
+// Used in: Tracking::search_local_points, Tracking::accept_relocalization_hypothesis
+void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
+                                               const std::vector<cv::Point2f>& projections)
+{
+    AF_REPORT_SCOPE();
+
+    [[maybe_unused]] const std::map<FeatureType, GateMatchCounts> counts_by_type = match_points_in_gate(
+        frame.features, map_pts, projections,
+        [&frame](const float x, const float y, const float radius, const FeatureType ft) {
+            return frame.get_features_in_area(x, y, radius, ft);
+        },
+        [&frame](const FeatureType ft, const size_t keypoint_idx) {
+            const Pt& pt = frame.pts.at(ft)[keypoint_idx];
+            return !(pt && pt->number_of_observations() > 0);
+        },
+        [&frame](const FeatureType ft, const size_t keypoint_idx, const Pt& pt) {
+            frame.pts.at(ft)[keypoint_idx] = pt;
+        });
+
+    for ([[maybe_unused]] const auto& [ft, counts] : counts_by_type) {
+        AF_REPORT("points.candidates", get_feature_name(ft), counts.candidates);
+        AF_REPORT("keypoints.unmatched", get_feature_name(ft), counts.free_keypoints);
+        AF_REPORT("matches.raw", get_feature_name(ft), counts.with_keypoint);
+        AF_REPORT("matches.accepted", get_feature_name(ft), counts.accepted);
+    }
+}
+
+// The same search on a keyframe's keypoints of one feature type, writing into a vector the
+// caller owns: `matched_points` has one slot per keypoint of `feat_type`, a keypoint is free
+// when its slot is empty, and an accepted match fills it. The keyframe itself is not modified.
+// Reports points.candidates, keypoints.unmatched, matches.raw and matches.accepted.
+// Used in: LoopClosing::search_loop_map_points
+void FeatureMatcher::match_map_points_to_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_pts,
+                                                  const std::vector<cv::Point2f>& projections,
+                                                  const FeatureType feat_type, std::vector<Pt>& matched_points)
+{
+    AF_REPORT_SCOPE();
+
+    [[maybe_unused]] const std::map<FeatureType, GateMatchCounts> counts_by_type = match_points_in_gate(
+        keyframe->features, map_pts, projections,
+        [&keyframe](const float x, const float y, const float radius, const FeatureType ft) {
+            return keyframe->get_features_in_area(x, y, radius, ft);
+        },
+        [&matched_points, feat_type](const FeatureType ft, const size_t keypoint_idx) {
+            return ft == feat_type && keypoint_idx < matched_points.size() && !matched_points[keypoint_idx];
+        },
+        [&matched_points](const FeatureType, const size_t keypoint_idx, const Pt& pt) {
+            matched_points[keypoint_idx] = pt;
+        });
+
+    [[maybe_unused]] const auto counts_it = counts_by_type.find(feat_type);
+    AF_REPORT("points.candidates", get_feature_name(feat_type),
+              counts_it == counts_by_type.end() ? 0 : counts_it->second.candidates);
+    AF_REPORT("keypoints.unmatched", get_feature_name(feat_type),
+              counts_it == counts_by_type.end() ? 0 : counts_it->second.free_keypoints);
+    AF_REPORT("matches.raw", get_feature_name(feat_type),
+              counts_it == counts_by_type.end() ? 0 : counts_it->second.with_keypoint);
+    AF_REPORT("matches.accepted", get_feature_name(feat_type),
+              counts_it == counts_by_type.end() ? 0 : counts_it->second.accepted);
 }
 
 // Makes sure the matches between `keyframe` and each of `others` are in `keyframe`'s match
@@ -580,91 +661,6 @@ int FeatureMatcher::fuse_map_points_to_keyframe(const Keyframe& keyframe, const 
     }
 
     return n_fused;
-}
-
-/// @brief Projects candidate map points into @p keyframe using the Sim3 @p Scw and validates
-///        each projection against cached descriptor matches.
-///        Accepted matches are written into @p pts_matched at the matched keypoint index.
-/// @param keyframe      Target keyframe into which map points are projected.
-/// @param Scw           Sim3 transform from world to camera (scale × rotation + translation).
-/// @param pts           Candidate map points to project and validate.
-/// @param pts_matched   Output vector (indexed by keypoint); filled with accepted map points.
-/// @param pt_to_keyframe_id  Maps each map-point ID to the keyframe it was originally observed in.
-/// @return Number of new map point assignments written into @p pts_matched.
-/// @note Used in: LoopClosing::search_loop_map_points
-int FeatureMatcher::search_by_projection_for_compute_sim3(const Keyframe& keyframe, const mat4f& Scw,
-    const vector<Pt>& pts, vector<Pt>& pts_matched,
-    const map<PtId, Keyframe>& pt_to_keyframe_id)
-{
-    const float fx = keyframe->calibration->fx;
-    const float fy = keyframe->calibration->fy;
-    const float cx = keyframe->calibration->cx;
-    const float cy = keyframe->calibration->cy;
-
-    // Decompose Sim3 into rotation and translation
-    const mat3f sRcw = Scw.block<3,3>(0,0);
-    const float  scw  = sqrt(sRcw.row(0).dot(sRcw.row(0)));
-    const mat3f Rcw  = sRcw / scw;
-    const vec3f tcw  = Scw.block<3,1>(0,3);
-
-    // Build the set of already-matched map points to skip
-    unordered_set<Pt> pts_already_found(pts_matched.begin(), pts_matched.end());
-    pts_already_found.erase(nullptr);
-
-    int num_matches = 0;
-    const float radius2 = radiusTh_factor * radiusTh_factor;
-
-    for (const Pt& pt : pts) {
-        if (pt->is_bad() || pts_already_found.count(pt))
-            continue;
-
-        // Look up cached match index for this map point (per-type indices; read-only lookups under the keyframe's
-        // cache lock, which is a leaf: get_index_in_keyframe takes the point's own lock, so it runs first)
-        const Keyframe& ref_kf = pt_to_keyframe_id.at(pt->ptId);
-        const int ref_idx = pt->get_index_in_keyframe(ref_kf);
-        int bestIdx{-1};
-        {
-            std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
-            const auto cache_it = keyframe->cache_matched_pairs_feat_type.find(ref_kf->frame_id);
-            if (cache_it == keyframe->cache_matched_pairs_feat_type.end())
-                continue;
-            const auto type_it = cache_it->second.find(pt->featureType);
-            if (type_it == cache_it->second.end())
-                continue;
-            for (const auto& m : type_it->second) {
-                if (m.trainIdx == ref_idx) {
-                    bestIdx = m.queryIdx;
-                    break;
-                }
-            }
-        }
-        if (bestIdx < 0 || static_cast<size_t>(bestIdx) >= pts_matched.size())
-            continue;
-
-        // Project map point into the keyframe
-        const vec3f p3Dc = Rcw * pt->get_world_pos() + tcw;
-        if (p3Dc(2) < 0.0f)
-            continue;
-
-        const float invz = 1.0f / p3Dc(2);
-        const float u = fx * p3Dc(0) * invz + cx;
-        const float v = fy * p3Dc(1) * invz + cy;
-
-        if (!keyframe->calibration->is_in_image(u, v))
-            continue;
-
-        // Accept match only if bestIdx falls within the projected search radius. A direct distance
-        // test, not a get_features_in_area query: bestIdx is already known, so there is nothing to
-        // search for. (That query also made grid membership an implicit acceptance criterion.)
-        const cv::Point2f& kp = keyframe->features.at(pt->featureType).keypoints[bestIdx].pt;
-        const float dist_x = kp.x - u;
-        const float dist_y = kp.y - v;
-        if (dist_x * dist_x + dist_y * dist_y < radius2) {
-            pts_matched[bestIdx] = pt;
-            num_matches++;
-        }
-    }
-    return num_matches;
 }
 
 // Sim3 overload: projects map points into a keyframe using a Sim3 transform and fuses them.
