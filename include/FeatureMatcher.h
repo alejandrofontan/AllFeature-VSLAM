@@ -38,16 +38,14 @@ public:
     // Robust geometric match filtering via PoseLib LO-RANSAC: a fundamental matrix, a homography if that finds
     // no consensus, and the matches unfiltered if neither does. It replaced OpenCV's findFundamentalMat/USAC,
     // which threw on degenerate inputs and ground for seconds per call at zero-baseline frames.
-    // `matches` is taken by value: the filter sorts and truncates its own copy, the caller's list is untouched.
+    // Every match takes part and the result keeps the input order; there is no cap on the count.
     // Every queryIdx / trainIdx must be a valid index into kps1 / kps2.
-    static constexpr int filter_max_matches = 2000;            // best matches by descriptor distance kept
     static constexpr double filter_inlier_threshold_px = 3.0;  // Sampson (F) / transfer (H) error, pixels
     static constexpr size_t filter_min_inliers = 8;            // fewer: the model is rejected
     static constexpr size_t filter_min_iterations = 100;       // RANSAC rounds, lower and upper bound
     static constexpr size_t filter_max_iterations = 1000;
-    static std::vector<cv::DMatch> filter_matches_geometric(std::vector<cv::DMatch> matches,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-        int max_matches = filter_max_matches);
+    static std::vector<cv::DMatch> filter_matches_geometric(const std::vector<cv::DMatch>& matches,
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2);
 
     // Takes the two FeatureData directly: splitting them into per-type descriptor and keypoint
     // maps at the call site copied every keypoint vector on every call.

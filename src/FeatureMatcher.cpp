@@ -82,23 +82,6 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
     }
 }
 
-// Matches features from a keyframe to a frame across all requested feature types,
-// then associates the surviving matches to 3D map points.
-//
-// The matching proceeds in three stages:
-//   1. For each feature type, brute-force NN descriptor matching is run between
-//      the keyframe and the frame. All matches are pooled into a single list with
-//      globally offset indices.
-//   2. Outliers are jointly filtered across all feature types with PoseLib
-//      LO-RANSAC on the fundamental matrix (homography fallback for degenerate scenes).
-//   3. Each inlier match is resolved to a map point via the keyframe's map point
-//      associations. Only valid, non-bad map points are written to map_pts_matches.
-//
-// Every inlier pair, with or without a map point, is also cached on the frame. The keyframe is
-// not modified; the KeyFrame constructor copies the frame's cache if the frame is promoted, and
-// Local Mapping reuses it for triangulation.
-//
-// Returns the number of valid map point matches per feature type.
 // Used in: Tracking::track_reference_keyframe, Tracking::relocalize
 std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyframe& keyframe, Frame& frame,
     std::map<FeatureType, std::vector<Pt>>& map_pts_matches, const std::vector<FeatureType>& feat_types)
@@ -1067,21 +1050,17 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
 //      unfiltered -- pose optimization's chi2 outlier test downstream keeps that soft.
 // The iterations are hard-bounded (filter_min_iterations .. filter_max_iterations).
 //
-// Before any of that the matches are sorted by descriptor distance and cut to the best
-// max_matches, so the result is in that order and never longer than that.
+// Every match takes part, and the result keeps the input order. There is no cap on the count:
+// the cost is bounded by the iteration limit, and a cap by descriptor distance cannot be fair
+// across feature types -- LightGlue stores 1 - score (0..1) and the brute-force matcher a
+// Hamming or L2 distance (tens), so sorting them together ranks every learned match first, and
+// the old cut to the best 2000 removed brute-force matches only.
 //
 // Which of the three happened is not returned; it is recorded as the report entry
 // `filter.model`: 1 fundamental matrix, 2 homography, 0 unfiltered.
-std::vector<cv::DMatch> FeatureMatcher::filter_matches_geometric(std::vector<cv::DMatch> matches,
-    const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-    const int max_matches)
+std::vector<cv::DMatch> FeatureMatcher::filter_matches_geometric(const std::vector<cv::DMatch>& matches,
+    const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2)
 {
-    std::sort(matches.begin(), matches.end(),
-        [](const cv::DMatch& a, const cv::DMatch& b) { return a.distance < b.distance; });
-
-    if (matches.size() > static_cast<size_t>(max_matches))
-        matches.resize(max_matches);
-
     if (matches.size() < filter_min_inliers) {
         AF_REPORT("filter.model", "", 0);   // too few matches to fit a model
         return matches;
