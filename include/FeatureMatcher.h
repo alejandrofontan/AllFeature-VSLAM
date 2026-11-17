@@ -70,14 +70,14 @@ public:
         std::map<FeatureType, std::vector<Pt>>& map_pts_matches,
         const std::vector<FeatureType>& feat_types);
 
-    // Matches a set of map points to frame keypoints via descriptor matching + projection check.
-    // Returns the number of new map point assignments made to the frame.
-    // Used in: Tracking::track_local_map
-    const float projection_match_radius_th = 20.0f;
-    // `map_pts` are the candidates Tracking found visible and `projections` their projections
-    // into the frame, parallel arrays (Tracking::search_local_points).
-    int match_map_points_to_frame(Frame& Frame, const vector<Pt>& map_pts,
-                                  const vector<cv::Point2f>& projections);
+    // Gives a map point to the frame keypoints that have none yet: descriptor matching of the unmatched
+    // keypoints against the candidates, then a check that the candidate projects near the keypoint.
+    // `map_pts` are the candidates Tracking found visible and `projections` their projections into the frame,
+    // parallel arrays. Accepted matches are written to frame.pts.
+    // Used in: Tracking::search_local_points
+    static constexpr float projection_match_radius_th = 20.0f;   // pixels, whatever the image size
+    void match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
+                                   const std::vector<cv::Point2f>& projections);
 
     // Matches two keyframes across all feature types to find candidate pairs for triangulation.
     // Reuses cached matches if available; otherwise runs parallel descriptor matching + the geometric filter.

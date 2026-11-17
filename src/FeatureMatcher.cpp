@@ -164,87 +164,111 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
     return matches_count;
 }
 
-// For each feature type, matches unmatched frame keypoints against projected map points
-// by descriptor similarity, then verifies each match via a spatial projection check.
-// Returns the number of new map point assignments made to the frame.
-// Used in: Tracking::track_local_map
-int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& map_pts,
-                                              const vector<cv::Point2f>& projections)
+// Gives a map point to the frame keypoints that have none yet, from the candidates the caller
+// found visible. Per feature type: the unmatched keypoints are matched against the candidates by
+// descriptor alone (cross-checked brute force, over the whole image), and a match is accepted if
+// the candidate's projection lies within projection_match_radius_th of the keypoint.
+//
+// `projections[i]` is where `map_pts[i]` projects in this frame. Accepted matches are written to
+// frame.pts. Reports, per feature type: points.candidates, keypoints.unmatched, matches.raw and
+// matches.accepted.
+// Used in: Tracking::search_local_points
+void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
+                                               const std::vector<cv::Point2f>& projections)
 {
-    map<FeatureType, vector<size_t>> pt_idx, frame_idx;
-    map<FeatureType, cv::Mat> desc_pts, desc_frame;
+    AF_REPORT_SCOPE();
 
-    // Collect valid map points grouped by feature type. Two passes — indices first, then
-    // rows into a preallocated matrix: cv::Mat::push_back reallocates and re-copies the
-    // whole matrix as it grows, which at local-map size dominated this collection step.
+    // The candidates grouped by feature type: their index in map_pts and their descriptor. One
+    // get_descriptor() per point -- it takes the point's lock -- and the cv::Mat header it
+    // returns keeps that buffer alive until the rows are copied below. A point whose descriptor
+    // is still empty is skipped: it would otherwise leave an uninitialised row in the matrix
+    // (create does not zero, and copyTo from an empty Mat writes nothing), and that row would be
+    // matched.
+    struct Candidates
+    {
+        std::vector<size_t> indices;
+        std::vector<cv::Mat> descriptors;
+    };
+    std::map<FeatureType, Candidates> candidates_by_type;
     for (size_t idx = 0; idx < map_pts.size(); idx++) {
-        const auto& pt = map_pts[idx];
+        const Pt& pt = map_pts[idx];
         if (!pt || pt->is_bad())
             continue;
 
-        pt_idx[pt->featureType].push_back(idx);
-    }
-    for (const auto& [ft, idxs] : pt_idx) {
-        const cv::Mat first = map_pts[idxs[0]]->get_descriptor();
-        cv::Mat& d = desc_pts[ft];
-        d.create(static_cast<int>(idxs.size()), first.cols, first.type());
-        for (size_t k = 0; k < idxs.size(); k++)
-            map_pts[idxs[k]]->get_descriptor().copyTo(d.row(static_cast<int>(k)));
-    }
-
-    int num_matches = 0;
-    for (const auto& [ft, data]: frame.features.per_type) {
-        // Collect unmatched frame keypoints grouped by feature type (same two-pass shape)
-        const auto& pts_ft  = frame.pts.at(ft);
-        const auto& desc_ft = frame.features.at(ft).descriptors;
-        frame_idx[ft].reserve(data.count());
-        for (size_t i = 0; i < data.count(); i++) {
-            // Skip keypoints already assigned to an observed map point
-            if (pts_ft[i] && pts_ft[i]->number_of_observations() > 0)
-                continue;
-
-            frame_idx[ft].push_back(i);
-        }
-        if (!frame_idx[ft].empty()) {
-            cv::Mat& d = desc_frame[ft];
-            d.create(static_cast<int>(frame_idx[ft].size()), desc_ft.cols, desc_ft.type());
-            for (size_t k = 0; k < frame_idx[ft].size(); k++)
-                desc_ft.row(static_cast<int>(frame_idx[ft][k])).copyTo(d.row(static_cast<int>(k)));
-        }
-
-        // Skip feature types with no descriptors on either side
-        auto it1 = desc_frame.find(ft);
-        auto it2 = desc_pts.find(ft);
-        if (it1 == desc_frame.end() || it2 == desc_pts.end())
+        cv::Mat descriptor = pt->get_descriptor();
+        if (descriptor.empty())
             continue;
 
-        // Match frame keypoint descriptors against map point descriptors
-        vector<cv::DMatch> matches = match_descriptors_only(it1->second, it2->second, ft);
+        Candidates& candidates = candidates_by_type[pt->featureType];
+        candidates.indices.push_back(idx);
+        candidates.descriptors.push_back(std::move(descriptor));
+    }
 
-        // Validate each match: accept only if the map point projects near the matched keypoint.
-        // A direct distance test, not a get_features_in_area query: the keypoint is already known,
-        // so there is nothing to search for. (That query also made grid membership an implicit
-        // acceptance criterion — a keypoint pos_in_grid rejected lost its match even when the
+    const float radius2 = projection_match_radius_th * projection_match_radius_th;
+
+    for (const auto& [ft, data] : frame.features.per_type) {
+        std::vector<Pt>& frame_pts = frame.pts.at(ft);
+
+        // The keypoints with no observed map point yet.
+        std::vector<size_t> keypoint_indices;
+        keypoint_indices.reserve(data.count());
+        for (size_t i = 0; i < data.count(); i++) {
+            if (frame_pts[i] && frame_pts[i]->number_of_observations() > 0)
+                continue;
+            keypoint_indices.push_back(i);
+        }
+
+        const auto candidates_it = candidates_by_type.find(ft);
+        AF_REPORT("points.candidates", get_feature_name(ft),
+                  candidates_it == candidates_by_type.end() ? 0 : candidates_it->second.indices.size());
+        AF_REPORT("keypoints.unmatched", get_feature_name(ft), keypoint_indices.size());
+
+        if (keypoint_indices.empty() || candidates_it == candidates_by_type.end()) {
+            AF_REPORT("matches.raw", get_feature_name(ft), 0);
+            AF_REPORT("matches.accepted", get_feature_name(ft), 0);
+            continue;
+        }
+        const Candidates& candidates = candidates_it->second;
+
+        // Both sides as one descriptor matrix each, rows copied into a preallocated matrix:
+        // cv::Mat::push_back reallocates and re-copies the whole matrix as it grows.
+        const cv::Mat& first = candidates.descriptors.front();
+        cv::Mat point_descriptors(static_cast<int>(candidates.descriptors.size()), first.cols, first.type());
+        for (size_t k = 0; k < candidates.descriptors.size(); k++)
+            candidates.descriptors[k].copyTo(point_descriptors.row(static_cast<int>(k)));
+
+        const cv::Mat& frame_descriptors = data.descriptors;
+        cv::Mat keypoint_descriptors(static_cast<int>(keypoint_indices.size()),
+                                     frame_descriptors.cols, frame_descriptors.type());
+        for (size_t k = 0; k < keypoint_indices.size(); k++)
+            frame_descriptors.row(static_cast<int>(keypoint_indices[k]))
+                .copyTo(keypoint_descriptors.row(static_cast<int>(k)));
+
+        const std::vector<cv::DMatch> matches = match_descriptors_only(keypoint_descriptors, point_descriptors, ft);
+        AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
+
+        // Accept a match only if the map point projects near the matched keypoint. A direct
+        // distance test, not a get_features_in_area query: the keypoint is already known, so
+        // there is nothing to search for. (That query also made grid membership an implicit
+        // acceptance criterion -- a keypoint pos_in_grid rejected lost its match even when the
         // distance was fine.)
-        const auto& f_idx = frame_idx.at(ft);
-        const auto& p_idx = pt_idx.at(ft);
-        const auto& keypoints_ft = frame.features.at(ft).keypoints;
-        const float radius2 = projection_match_radius_th * projection_match_radius_th;
-        for (const auto& m : matches) {
-            const size_t query_idx = f_idx[m.queryIdx];
-            const size_t train_idx = p_idx[m.trainIdx];
-            const cv::Point2f& uv = projections[train_idx];
+        const std::vector<cv::KeyPoint>& keypoints = data.keypoints;
+        [[maybe_unused]] int num_accepted = 0;
+        for (const cv::DMatch& match : matches) {
+            const size_t keypoint_idx = keypoint_indices[match.queryIdx];
+            const size_t point_idx = candidates.indices[match.trainIdx];
 
-            const cv::Point2f& kp = keypoints_ft[query_idx].pt;
-            const float dist_x = kp.x - uv.x;
-            const float dist_y = kp.y - uv.y;
+            const cv::Point2f& keypoint = keypoints[keypoint_idx].pt;
+            const cv::Point2f& projection = projections[point_idx];
+            const float dist_x = keypoint.x - projection.x;
+            const float dist_y = keypoint.y - projection.y;
             if (dist_x * dist_x + dist_y * dist_y < radius2) {
-                frame.pts.at(ft)[query_idx] = map_pts[train_idx];
-                num_matches++;
+                frame_pts[keypoint_idx] = map_pts[point_idx];
+                num_accepted++;
             }
         }
+        AF_REPORT("matches.accepted", get_feature_name(ft), num_accepted);
     }
-    return num_matches;
 }
 
 // Matches two keyframes across all feature types to find candidate pairs for triangulation.
