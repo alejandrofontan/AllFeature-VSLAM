@@ -103,6 +103,33 @@ void LocalMapping::process_keyframe()
 
     local_bundle_adjustment();
 
+#ifdef ALLFEATURE_REPORT
+    // Report the keyframe's place in the covisibility graph once it has been fused with its
+    // neighbors and adjusted, and how many map points it observes. Inside the #ifdef because it
+    // copies the connection list and the map-point vectors only to count them.
+    {
+        const std::vector<Connection> connections = current_keyframe_->get_covisible_connections();
+        long weight_total = 0;
+        int weight_max = 0;
+        for(const Connection& connection : connections)
+        {
+            weight_total += connection.weight;
+            weight_max = std::max(weight_max, connection.weight);
+        }
+        AF_REPORT("connections.count", "", connections.size());
+        AF_REPORT("connections.weight_total", "", weight_total);
+        AF_REPORT("connections.weight_max", "", weight_max);
+        for(const FeatureType feature_type : current_keyframe_->feature_types)
+        {
+            size_t num_points = 0;
+            for(const Pt& point : current_keyframe_->get_map_point_matches(feature_type))
+                if(point && !point->is_bad())
+                    num_points++;
+            AF_REPORT("keyframe.map_points", get_feature_name(feature_type), num_points);
+        }
+    }
+#endif
+
     cull_keyframes();
 
     loop_closer_->insert_keyframe(current_keyframe_);
@@ -249,6 +276,19 @@ void LocalMapping::create_new_map_points()
     // Match the new keyframe against all its neighbors at once; the loop below reads the pairs back
     matcher_->match_keyframe_to_keyframes(current_keyframe_, neighbors, current_keyframe_->feature_types);
 
+    // What becomes of the matched pairs, per feature type; reported at the end
+    struct TriangulationCounts
+    {
+        size_t pairs{0};          // matched pairs read back
+        size_t candidates{0};     // neither keypoint has a map point yet
+        size_t no_parallax{0};    // no depth and too little parallax, or a degenerate solve
+        size_t behind_camera{0};
+        size_t reprojection{0};   // rejected by the reprojection gate in either view
+        size_t slot_taken{0};     // a keypoint got a map point between the check and the write
+        size_t created{0};
+    };
+    std::map<FeatureType, TriangulationCounts> triangulation_counts;
+
     // For each neighbor, place each matched keypoint pair in 3D: from sensor depth when either
     // view has it (cross-validated by the reprojection gates below), by two-view triangulation
     // otherwise.
@@ -268,12 +308,15 @@ void LocalMapping::create_new_map_points()
             const auto& inv_depth2_ft = neighbor->features.at(feature_type).inv_depth;
             const auto& keypoints1_ft = current_keyframe_->features.at(feature_type).keypoints;
             const auto& keypoints2_ft = neighbor->features.at(feature_type).keypoints;
+            TriangulationCounts& counts = triangulation_counts[feature_type];
+            counts.pairs += pairs.size();
 
             for(const auto& [idx1, idx2] : pairs)
             {
                 // Only a pair where neither keypoint has a map point yet is a candidate to triangulate
                 if(current_keyframe_->get_map_point(idx1, feature_type) || neighbor->get_map_point(idx2, feature_type))
                     continue;
+                counts.candidates++;
 
                 const cv::KeyPoint& kp1 = keypoints1_ft[idx1];
                 const cv::KeyPoint& kp2 = keypoints2_ft[idx2];
@@ -325,19 +368,26 @@ void LocalMapping::create_new_map_points()
                     const Eigen::JacobiSVD<Eigen::Matrix<float, 4, 4>> svd(A, Eigen::ComputeFullV);
                     const Eigen::Vector4f x_h = svd.matrixV().col(3);
                     if(std::abs(x_h(3)) < HOMOGENEOUS_W_EPSILON)
+                    {
+                        counts.no_parallax++;
                         continue;
+                    }
                     x3D = x_h.head<3>() / x_h(3);
                 }
                 else
+                {
+                    counts.no_parallax++;
                     continue; // no depth, and too little parallax to triangulate
+                }
 
                 // The point must lie in front of both cameras
                 const float z1 = Rcw1.row(2).dot(x3D) + tcw1(2);
-                if(z1 <= 0)
-                    continue;
                 const float z2 = Rcw2.row(2).dot(x3D) + tcw2(2);
-                if(z2 <= 0)
+                if(z1 <= 0 || z2 <= 0)
+                {
+                    counts.behind_camera++;
                     continue;
+                }
 
                 // Reprojection gate in this keyframe
                 const float u1 = fx1 * (Rcw1.row(0).dot(x3D) + tcw1(0)) / z1 + cx1;
@@ -345,7 +395,10 @@ void LocalMapping::create_new_map_points()
                 const float err_x1 = u1 - kp1.pt.x;
                 const float err_y1 = v1 - kp1.pt.y;
                 if(err_x1 * err_x1 + err_y1 * err_y1 > CHI2_2DOF * current_keyframe_->features.get_sigma2(idx1, feature_type))
+                {
+                    counts.reprojection++;
                     continue;
+                }
 
                 // Reprojection gate in the neighbor
                 const float u2 = fx2 * (Rcw2.row(0).dot(x3D) + tcw2(0)) / z2 + cx2;
@@ -353,15 +406,33 @@ void LocalMapping::create_new_map_points()
                 const float err_x2 = u2 - kp2.pt.x;
                 const float err_y2 = v2 - kp2.pt.y;
                 if(err_x2 * err_x2 + err_y2 * err_y2 > CHI2_2DOF * neighbor->features.get_sigma2(idx2, feature_type))
+                {
+                    counts.reprojection++;
                     continue;
+                }
 
                 const Pt map_point = map_->create_monocular_map_point(
                     x3D, current_keyframe_, KeypointIndex(idx1), neighbor, KeypointIndex(idx2), feature_type);
                 if(!map_point)
+                {
+                    counts.slot_taken++;
                     continue;   // a slot was taken between the emptiness check and the write
+                }
                 recent_map_points_.push_back(map_point);
+                counts.created++;
             }
         }
+    }
+
+    for([[maybe_unused]] const auto& [feature_type, counts] : triangulation_counts)
+    {
+        AF_REPORT("triangulation.pairs", get_feature_name(feature_type), counts.pairs);
+        AF_REPORT("triangulation.candidates", get_feature_name(feature_type), counts.candidates);
+        AF_REPORT("triangulation.no_parallax", get_feature_name(feature_type), counts.no_parallax);
+        AF_REPORT("triangulation.behind_camera", get_feature_name(feature_type), counts.behind_camera);
+        AF_REPORT("triangulation.reprojection", get_feature_name(feature_type), counts.reprojection);
+        AF_REPORT("triangulation.slot_taken", get_feature_name(feature_type), counts.slot_taken);
+        AF_REPORT("triangulation.created", get_feature_name(feature_type), counts.created);
     }
 
     create_depth_seeded_points();
