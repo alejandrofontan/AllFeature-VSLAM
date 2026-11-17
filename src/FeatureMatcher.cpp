@@ -237,18 +237,23 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
     }
 }
 
-// Makes sure the matches between `keyframe` and each of `others` are in the keyframes' match
+// Makes sure the matches between `keyframe` and each of `others` are in `keyframe`'s match
 // cache. Pairs already cached are skipped. For the rest: the descriptors of every feature type
 // are matched, all (other, feature type) combinations in parallel; then, per pair of keyframes,
-// the geometric filter runs on all its feature types jointly; the survivors are stored in both
-// keyframes' caches, per feature type and in per-type keypoint indices.
+// the geometric filter runs on all its feature types jointly; the survivors are stored in
+// `keyframe`'s cache, keyed by the other keyframe, per feature type and in per-type keypoint
+// indices. Nothing is stored in the other keyframe: every reader looks the pair up from
+// `keyframe`'s side.
+//
+// The cache is a hand-off, not a store: the caller reads the pairs back and then releases them
+// with clear_keyframe_matches.
 //
 // This is the only writer of the cache for keyframe pairs. Its other writer is tracking
 // (match_keyframe_to_frame, for a frame against its reference keyframe), which filters the same
 // way, so a cached entry is always a geometrically filtered one.
 // Used in: LocalMapping::create_new_map_points, LoopClosing::compute_sim3 and
 // LoopClosing::search_loop_map_points. The pairs are read back with get_keyframe_matches.
-void FeatureMatcher::cache_keyframe_matches(const Keyframe& keyframe, const std::vector<Keyframe>& others,
+void FeatureMatcher::match_keyframe_to_keyframes(const Keyframe& keyframe, const std::vector<Keyframe>& others,
     const std::vector<FeatureType>& feat_types)
 {
     const int num_others = static_cast<int>(others.size());
@@ -308,21 +313,14 @@ void FeatureMatcher::cache_keyframe_matches(const Keyframe& keyframe, const std:
         std::map<FeatureType, std::vector<cv::DMatch>> forward_by_type =
             filter_matches_geometric_jointly(raw_by_type, keyframe->features, other->features);
 
-        std::map<FeatureType, std::vector<cv::DMatch>> backward_by_type;
         for (int f = 0; f < num_feature_types; f++) {
             const auto it = forward_by_type.find(feat_types[f]);
-            if (it == forward_by_type.end())
-                continue;
-            num_filtered[f] += it->second.size();
-            std::vector<cv::DMatch>& backward = backward_by_type[feat_types[f]];
-            backward.reserve(it->second.size());
-            for (const cv::DMatch& match : it->second)
-                backward.emplace_back(match.trainIdx, match.queryIdx, match.distance);
+            if (it != forward_by_type.end())
+                num_filtered[f] += it->second.size();
         }
 
-        std::scoped_lock lock(keyframe->cache_mutex_, other->cache_mutex_);
+        std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
         keyframe->cache_matched_pairs_feat_type.insert_or_assign(other->frame_id, std::move(forward_by_type));
-        other->cache_matched_pairs_feat_type.insert_or_assign(keyframe->frame_id, std::move(backward_by_type));
     }
 
     // Totals over the pairs matched in this call, per feature type.
@@ -332,9 +330,33 @@ void FeatureMatcher::cache_keyframe_matches(const Keyframe& keyframe, const std:
     }
 }
 
+// Releases every match list `keyframe` holds. Called by the thread that filled them, once it has
+// read them back: Local Mapping after triangulating, Loop Closing when it is done with the
+// keyframe. The cache is otherwise never pruned, and a keyframe's matches against its
+// neighbors are a few hundred kilobytes. This includes the entry tracking left for the
+// reference keyframe, which Local Mapping has used by then.
+// Reports what was held: cache.entries (keyframes matched against) and cache.matches.
+void FeatureMatcher::clear_keyframe_matches(const Keyframe& keyframe)
+{
+    std::map<FrameId, std::map<FeatureType, std::vector<cv::DMatch>>> released;
+    {
+        std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
+        released.swap(keyframe->cache_matched_pairs_feat_type);
+    }
+
+#ifdef ALLFEATURE_REPORT
+    size_t num_matches = 0;
+    for (const auto& [frame_id, matches_by_type] : released)
+        for (const auto& [ft, matches] : matches_by_type)
+            num_matches += matches.size();
+    AF_REPORT("cache.entries", "", released.size());
+    AF_REPORT("cache.matches", "", num_matches);
+#endif
+}
+
 // The matched keypoint pairs (index in keyframe1, index in keyframe2) that keyframe1's match
 // cache holds for keyframe2, per feature type. A read only: it never matches. A pair of
-// keyframes that was not cached first (cache_keyframe_matches) gives no pairs.
+// keyframes that was not cached first (match_keyframe_to_keyframes) gives no pairs.
 // Used in: LocalMapping::create_new_map_points, LoopClosing::compute_sim3
 std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::get_keyframe_matches(const Keyframe& keyframe1, const Keyframe& keyframe2)
 {

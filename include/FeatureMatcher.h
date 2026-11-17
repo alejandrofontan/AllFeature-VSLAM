@@ -79,21 +79,27 @@ public:
     void match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
                                    const std::vector<cv::Point2f>& projections);
 
-    // Makes sure the matches between `keyframe` and each of `others` are in the keyframes' match cache: pairs
+    // Makes sure the matches between `keyframe` and each of `others` are in `keyframe`'s match cache: pairs
     // already cached are skipped; the rest are matched (all pairs and feature types in parallel), filtered
-    // geometrically per pair, jointly over the feature types, and stored in both keyframes. The only writer of
+    // geometrically per pair, jointly over the feature types, and stored in `keyframe` only. The only writer of
     // the cache for keyframe pairs; tracking writes it for a frame against its reference keyframe, filtered too.
+    // The cache is a hand-off: read the pairs back, then release them with clear_keyframe_matches.
     // Used in: LocalMapping::create_new_map_points, LoopClosing::compute_sim3, LoopClosing::search_loop_map_points.
     // The pairs are read back with get_keyframe_matches.
-    void cache_keyframe_matches(const Keyframe& keyframe, const std::vector<Keyframe>& others,
+    void match_keyframe_to_keyframes(const Keyframe& keyframe, const std::vector<Keyframe>& others,
         const std::vector<FeatureType>& feat_types);
 
     // The matched keypoint pairs (index in keyframe1, index in keyframe2) that keyframe1's match cache holds for
     // keyframe2, per feature type. A read only: it never matches. A pair of keyframes that was not cached first
-    // (cache_keyframe_matches) gives no pairs.
+    // (match_keyframe_to_keyframes) gives no pairs.
     // Used in: LocalMapping::create_new_map_points, LoopClosing::compute_sim3
     static std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> get_keyframe_matches(
         const Keyframe& keyframe1, const Keyframe& keyframe2);
+
+    // Releases every match list `keyframe` holds; the cache is otherwise never pruned. Called by the thread that
+    // filled them once it has read them back.
+    // Used in: LocalMapping::process_keyframe, LoopClosing::run
+    static void clear_keyframe_matches(const Keyframe& keyframe);
 
     // Matches keypoints between two frames across all feature types for monocular initialization.
     // Runs parallel descriptor matching, filters outliers jointly with the geometric filter

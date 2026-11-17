@@ -83,15 +83,23 @@ void LoopClosing::run()
     while(true)
     {
         // One queued keyframe per iteration: candidates, geometric verification, correction
-        if(has_new_keyframes() && detect_loop() && compute_sim3() && search_loop_map_points())
+        if(has_new_keyframes())
         {
-            const auto t_start = std::chrono::steady_clock::now();
-            correct_loop();
-            map_drawer_->AddLoopClosureKeyframe(current_keyframe_->get_Twc());
-            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
-            AF_INFO("[LoopClosing] loop closed: keyframes " << current_keyframe_->keyId << " <-> " << matched_keyframe_->keyId
-                    << " in " << seconds << " s (correction + essential graph; the global BA runs in its own thread)");
-            std::cout.flush();
+            if(detect_loop() && compute_sim3() && search_loop_map_points())
+            {
+                const auto t_start = std::chrono::steady_clock::now();
+                correct_loop();
+                map_drawer_->AddLoopClosureKeyframe(current_keyframe_->get_Twc());
+                const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
+                AF_INFO("[LoopClosing] loop closed: keyframes " << current_keyframe_->keyId << " <-> " << matched_keyframe_->keyId
+                        << " in " << seconds << " s (correction + essential graph; the global BA runs in its own thread)");
+                std::cout.flush();
+            }
+
+            // The matches against the loop candidates and loop keyframes have served their
+            // purpose, whatever the outcome; nothing reads them again (detect_loop always sets
+            // current_keyframe_)
+            FeatureMatcher::clear_keyframe_matches(current_keyframe_);
         }
 
         reset_if_requested();
@@ -285,7 +293,7 @@ bool LoopClosing::compute_sim3()
 
     // Match the current keyframe against all live candidates at once; the loop below reads the
     // pairs back
-    matcher_->cache_keyframe_matches(current_keyframe_, live_candidates, feature_types_);
+    matcher_->match_keyframe_to_keyframes(current_keyframe_, live_candidates, feature_types_);
 
     // By-value snapshots: get_map_point_matches copies under the keyframe's mutex
     const std::vector<Pt> current_points = current_keyframe_->get_map_point_matches(verification_feature_);
@@ -400,7 +408,7 @@ bool LoopClosing::search_loop_map_points()
 
     // search_by_projection_for_compute_sim3 below reads the current keyframe's match cache for
     // each of these keyframes.
-    matcher_->cache_keyframe_matches(current_keyframe_, loop_keyframes, feature_types_);
+    matcher_->match_keyframe_to_keyframes(current_keyframe_, loop_keyframes, feature_types_);
 
     loop_map_points_.clear();
     std::map<PtId, Keyframe> point_keyframe;   // the loop keyframe each point was collected from

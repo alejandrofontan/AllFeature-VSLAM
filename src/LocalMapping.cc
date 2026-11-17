@@ -96,6 +96,9 @@ void LocalMapping::process_keyframe()
 
     create_new_map_points();
 
+    // The matches against the neighbors have been triangulated from; nothing reads them again
+    FeatureMatcher::clear_keyframe_matches(current_keyframe_);
+
     // Find more matches in neighbor keyframes and fuse point duplications
     search_in_neighbors();
 
@@ -191,12 +194,53 @@ void LocalMapping::cull_map_points()
     });
 }
 
+// The covisible keyframes to triangulate against: the create_new_map_points_keyframes most
+// covisible ones THAT HAVE ENOUGH BASELINE to the current keyframe, relative to their scene
+// depth -- a near-zero-parallax pair only yields ill-conditioned triangulations. The covisible
+// keyframes are walked from most to least covisible until that many pass, so a neighbor that is
+// too close is replaced by the next one down the list rather than just dropped. Selected before
+// any matching, so no neighbor is matched and filtered only to be skipped.
+std::vector<Keyframe> LocalMapping::select_triangulation_neighbors() const
+{
+    const std::vector<Keyframe> covisible = current_keyframe_->get_covisible_keyframes();   // most covisible first
+    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose();
+
+    const size_t num_wanted = static_cast<size_t>(std::max(params.create_new_map_points_keyframes, 0));
+    std::vector<Keyframe> neighbors;
+    neighbors.reserve(num_wanted);
+    [[maybe_unused]] size_t num_examined = 0;
+    for(const Keyframe& candidate : covisible)
+    {
+        if(neighbors.size() >= num_wanted)
+            break;
+        num_examined++;
+
+        const auto [Tcw2, Twc2, Rcw2, Rwc2, tcw2, twc2] = candidate->get_pose();
+        const float baseline = (twc2 - twc1).norm();
+        // No map points, or a scene sitting on the camera plane: nothing to measure the
+        // baseline against. The old form divided by the -1 sentinel and skipped because the
+        // result came out negative -- and divided by a legitimate 0 to get inf, which did NOT
+        // skip.
+        const std::optional<float> scene_depth = candidate->compute_scene_median_depth();
+        if(!scene_depth || *scene_depth <= 0.0f
+           || baseline / *scene_depth < params.create_new_map_points_min_baseline_depth_ratio)
+            continue;
+        neighbors.push_back(candidate);
+    }
+
+    // How far down the covisibility list the selection had to go, and how many it found
+    AF_REPORT("neighbors.covisible", "", covisible.size());
+    AF_REPORT("neighbors.examined", "", num_examined);
+    AF_REPORT("neighbors.enough_baseline", "", neighbors.size());
+    return neighbors;
+}
+
 void LocalMapping::create_new_map_points()
 {
     StageTimer timer{};
+    AF_REPORT_SCOPE();
 
-    const std::vector<Keyframe> neighbors =
-        current_keyframe_->get_best_covisibility_keyframes(params.create_new_map_points_keyframes);
+    const std::vector<Keyframe> neighbors = select_triangulation_neighbors();
 
     const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose();
     const float fx1 = current_keyframe_->calibration->fx, fy1 = current_keyframe_->calibration->fy;
@@ -204,29 +248,17 @@ void LocalMapping::create_new_map_points()
     const float invfx1 = current_keyframe_->calibration->invfx, invfy1 = current_keyframe_->calibration->invfy;
 
     // Match the new keyframe against all its neighbors at once; the loop below reads the pairs back
-    matcher_->cache_keyframe_matches(current_keyframe_, neighbors, current_keyframe_->feature_types);
+    matcher_->match_keyframe_to_keyframes(current_keyframe_, neighbors, current_keyframe_->feature_types);
 
-    // For each neighbor with enough baseline, place each matched keypoint pair in 3D:
-    // from sensor depth when either view has it (cross-validated by the reprojection
-    // gates below), by two-view triangulation otherwise.
+    // For each neighbor, place each matched keypoint pair in 3D: from sensor depth when either
+    // view has it (cross-validated by the reprojection gates below), by two-view triangulation
+    // otherwise.
     for(const Keyframe& neighbor : neighbors)
     {
         const auto [Tcw2, Twc2, Rcw2, Rwc2, tcw2, twc2] = neighbor->get_pose();
         const float fx2 = neighbor->calibration->fx, fy2 = neighbor->calibration->fy;
         const float cx2 = neighbor->calibration->cx, cy2 = neighbor->calibration->cy;
         const float invfx2 = neighbor->calibration->invfx, invfy2 = neighbor->calibration->invfy;
-
-        // Discard neighbors whose baseline is too short relative to their scene depth:
-        // a near-zero-parallax pair only yields ill-conditioned triangulations
-        const float baseline = (twc2 - twc1).norm();
-        // No map points, or a scene sitting on the camera plane: nothing to measure the
-        // baseline against. The old form divided by the -1 sentinel and skipped because the
-        // result came out negative -- and divided by a legitimate 0 to get inf, which did NOT
-        // skip.
-        const std::optional<float> scene_depth = neighbor->compute_scene_median_depth();
-        if(!scene_depth || *scene_depth <= 0.0f
-           || baseline / *scene_depth < params.create_new_map_points_min_baseline_depth_ratio)
-            continue;
 
         const std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_indices =
             FeatureMatcher::get_keyframe_matches(current_keyframe_, neighbor);

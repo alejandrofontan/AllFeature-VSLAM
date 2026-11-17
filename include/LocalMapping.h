@@ -169,6 +169,9 @@ protected:
     void process_new_keyframe();
     void cull_map_points();
     void create_new_map_points();
+    // create_new_map_points() helper: the create_new_map_points_keyframes most covisible keyframes that have
+    // enough baseline to triangulate against
+    [[nodiscard]] std::vector<Keyframe> select_triangulation_neighbors() const;
     // create_new_map_points() helper: back-project unmatched keypoints with depth
     void create_depth_seeded_points();
     void search_in_neighbors();
