@@ -40,11 +40,6 @@ public:
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type,
         int image_width, int image_height);
 
-    // The same without keypoints, for a side that has descriptors but no image positions (map points): every
-    // float descriptor, learned or not, by L2 brute force; every binary one by Hamming brute force.
-    std::vector<cv::DMatch> match_descriptors_only(const cv::Mat& desc1, const cv::Mat& desc2,
-        const FeatureType& feat_type);
-
     // Robust geometric match filtering via PoseLib LO-RANSAC: a fundamental matrix, a homography if that finds
     // no consensus, and the matches unfiltered if neither does. It replaced OpenCV's findFundamentalMat/USAC,
     // which threw on degenerate inputs and ground for seconds per call at zero-baseline frames.

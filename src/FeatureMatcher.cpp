@@ -774,27 +774,6 @@ void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_setti
     AF_CONFIG_END();
 }
 
-// The matches between two descriptor sets of one feature type, WITHOUT keypoints: for a side
-// that has descriptors but no image positions, such as map points. LightGlue needs keypoints,
-// so here every float descriptor, learned or not, is matched by L2 brute force, and every
-// binary one by Hamming brute force. Brute force is mutual nearest neighbour, with no distance
-// threshold. queryIdx indexes desc1, trainIdx desc2; distance is the L2 or Hamming distance.
-// Used in: match_map_points_to_frame
-std::vector<cv::DMatch> FeatureMatcher::match_descriptors_only(
-    const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& feat_type)
-{
-    switch(get_feature(feat_type).get_matcher_type()) {
-        case LIGHTGLUE_SUPERPOINT:
-        case LIGHTGLUE_ALIKED:
-        case LIGHTGLUE_SIFT:
-        case BF_L2:
-            return bruteforce_match_l2(desc1, desc2);
-        case BF_HAMMING:
-            return bruteforce_match_hamming(desc1, desc2);
-    }
-    return {};   // not reached: every MatcherType is handled above
-}
-
 // The matches between the keypoints of two images, for one feature type, with the matcher that
 // feature declares (Feature::get_matcher_type): LightGlue for the learned features, mutual
 // nearest neighbour brute force (L2 or Hamming, no distance threshold) for the others.
