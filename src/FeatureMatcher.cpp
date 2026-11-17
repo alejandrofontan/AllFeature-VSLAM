@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <numeric>
 #include <sstream>
 #include <unordered_set>
 #include <vector>
@@ -86,16 +85,8 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
 std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyframe& keyframe, Frame& frame,
     std::map<FeatureType, std::vector<Pt>>& map_pts_matches, const std::vector<FeatureType>& feat_types)
 {
-    struct MatchOrigin
-    {
-        FeatureType feat_type;
-        int keyframe_idx;
-        int frame_idx;
-    };
-    vector<cv::DMatch> all_matches;
-    vector<MatchOrigin> origins;
-    vector<cv::KeyPoint> keyframe_kps, frame_kps;
-    map<FeatureType, vector<Pt>> map_pts_kf;
+    std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type;
+    std::map<FeatureType, std::vector<Pt>> map_pts_kf;
 
     map_pts_matches.clear();
 
@@ -103,55 +94,50 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
     AF_REPORT("keyframe.frame_id", "", keyframe->frame_id);
 
     for (const auto& ft : feat_types) {
-        auto it1 = keyframe->features.per_type.find(ft);
-        auto it2 = frame.features.per_type.find(ft);
-
-        if (it1 == keyframe->features.per_type.end() || it2 == frame.features.per_type.end())
+        if (!keyframe->features.has(ft) || !frame.features.has(ft))
             continue;
 
         map_pts_kf[ft] = keyframe->get_map_point_matches(ft);
 
-        const auto& v1 = keyframe->features.at(ft).keypoints;
-        const auto& v2 = frame.features.at(ft).keypoints;
-        vector<cv::DMatch> matches = match_descriptors(
-            it1->second.descriptors, it2->second.descriptors,
-            v1, v2, ft);
+        const KeypointData& keyframe_data = keyframe->features.at(ft);
+        const KeypointData& frame_data = frame.features.at(ft);
+        std::vector<cv::DMatch> matches = match_descriptors(
+            keyframe_data.descriptors, frame_data.descriptors,
+            keyframe_data.keypoints, frame_data.keypoints, ft);
         AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
 
-        for (cv::DMatch& m : matches) {
-            const int slot = static_cast<int>(origins.size());
-            origins.push_back(MatchOrigin{ft, m.queryIdx, m.trainIdx});
-            keyframe_kps.push_back(v1[m.queryIdx]);
-            frame_kps.push_back(v2[m.trainIdx]);
+        if (!matches.empty())
+            matches_by_type[ft] = std::move(matches);
 
-            m.queryIdx = slot;
-            m.trainIdx = slot;
-            all_matches.push_back(m);
-        }
-
-        map_pts_matches[ft] = vector<Pt>(frame.features.at(ft).count(), nullptr);
+        map_pts_matches[ft] = std::vector<Pt>(frame_data.count(), nullptr);
     }
 
-    auto robust_matches = filter_matches_geometric(all_matches, keyframe_kps, frame_kps);
+    // One model for all feature types: they all see the same two views
+    const std::map<FeatureType, std::vector<cv::DMatch>> robust_by_type =
+        filter_matches_geometric_jointly(matches_by_type, keyframe->features, frame.features);
 
     std::map<FeatureType, std::vector<cv::DMatch>> frame_side;
 
-    map<FeatureType, int> matches_count;
+    std::map<FeatureType, int> matches_count;
     for (const auto& ft : feat_types)
         matches_count[ft] = 0;
-    for (const auto& m : robust_matches) {
-        const MatchOrigin& origin = origins[m.queryIdx];
-        const int query_idx = origin.keyframe_idx;
-        const int train_idx = origin.frame_idx;
-        const FeatureType feat_type = origin.feat_type;
+    for (const auto& [ft, robust_matches] : robust_by_type) {
+        std::vector<cv::DMatch>& frame_side_ft = frame_side[ft];
+        frame_side_ft.reserve(robust_matches.size());
+        const std::vector<Pt>& keyframe_pts = map_pts_kf.at(ft);
+        std::vector<Pt>& frame_pts = map_pts_matches.at(ft);
+        for (const cv::DMatch& match : robust_matches) {
+            const int keyframe_idx = match.queryIdx;
+            const int frame_idx = match.trainIdx;
 
-        frame_side[feat_type].push_back(cv::DMatch(train_idx, query_idx, m.distance));
+            frame_side_ft.emplace_back(frame_idx, keyframe_idx, match.distance);
 
-        const Pt pt = map_pts_kf[feat_type][query_idx];
-        if (!pt || pt->is_bad())
-            continue;
-        map_pts_matches[feat_type][train_idx] = pt;
-        matches_count[feat_type]++;
+            const Pt& pt = keyframe_pts[keyframe_idx];
+            if (!pt || pt->is_bad())
+                continue;
+            frame_pts[frame_idx] = pt;
+            matches_count[ft]++;
+        }
     }
     for ([[maybe_unused]] const auto& ft : feat_types) {
         AF_REPORT("matches.filtered", get_feature_name(ft),
@@ -498,61 +484,20 @@ int FeatureMatcher::fuse_map_points_to_keyframe(const Keyframe& keyframe, const 
 map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_initialization(const Frame& F1, const Frame& F2,
     const vector<FeatureType>& feat_types)
 {
-    map<FeatureType, vector<cv::DMatch>> matches_by_type;
-    matches_by_type = match_descriptors_parallel(feat_types, F1.features, F2.features);
+    const std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type =
+        match_descriptors_parallel(feat_types, F1.features, F2.features);
 
-    // Offset match indices to account for previously appended feature types
-    vector<cv::KeyPoint> kps1, kps2;
-    vector<size_t> kps1_indexes, kps2_indexes;
-    vector<cv::DMatch> all_matches;
-    vector<FeatureType> used_feature_types;
-    for (const auto& ft : feat_types) {
-        // Ensure both frames contain the requested feature type
-        auto it1 = F1.features.per_type.find(ft);
-        auto it2 = F2.features.per_type.find(ft);
-        if (it1 == F1.features.per_type.end() || it2 == F2.features.per_type.end())
-            continue;
-
-        // Accumulate keypoints and track per-feature-type original indices for later lookup
-        auto const& v1 = F1.features.at(ft).keypoints;
-        auto const& v2 = F2.features.at(ft).keypoints;
-
-        auto matches = std::move(matches_by_type[ft]);
-        const size_t size_kpts1 = kps1.size();
-        const size_t size_kpts2 = kps2.size();
-        for (auto& m : matches) {
-            m.queryIdx += size_kpts1;
-            m.trainIdx += size_kpts2;
-        }
-        all_matches.insert(all_matches.end(),
-            std::make_move_iterator(matches.begin()),
-            std::make_move_iterator(matches.end()));
-
-        kps1.insert(kps1.end(), v1.begin(), v1.end());
-        kps2.insert(kps2.end(), v2.begin(), v2.end());
-
-        const size_t base1 = kps1_indexes.size();
-        kps1_indexes.resize(base1 + v1.size());
-        std::iota(kps1_indexes.begin() + base1, kps1_indexes.end(), 0);
-        const size_t base2 = kps2_indexes.size();
-        kps2_indexes.resize(base2 + v2.size());
-        std::iota(kps2_indexes.begin() + base2, kps2_indexes.end(), 0);
-        used_feature_types.insert(used_feature_types.end(), v1.size(), ft);
-    }
-
-    // Filter outliers jointly across all feature types (PoseLib LO-RANSAC, fundamental matrix)
-    auto filtered_matches = filter_matches_geometric(all_matches, kps1, kps2);
+    // One model for all feature types: they all see the same two views
+    const std::map<FeatureType, std::vector<cv::DMatch>> filtered_by_type =
+        filter_matches_geometric_jointly(matches_by_type, F1.features, F2.features);
 
     // One entry per requested feature type, empty when none of its matches survive (callers read them with .at(ft))
-    std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs;
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_pairs;
     for (const auto& ft : feat_types)
         matched_pairs[ft];
-    for (const auto& m : filtered_matches) {
-        const size_t query_idx = kps1_indexes[m.queryIdx];
-        const size_t train_idx = kps2_indexes[m.trainIdx];
-        const FeatureType feat_type = used_feature_types[m.queryIdx];
-        matched_pairs[feat_type].emplace_back(query_idx, train_idx);
-    }
+    for (const auto& [ft, filtered] : filtered_by_type)
+        for (const cv::DMatch& match : filtered)
+            matched_pairs[ft].emplace_back(size_t(match.queryIdx), size_t(match.trainIdx));
 
     return matched_pairs;
 }
