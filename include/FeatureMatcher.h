@@ -75,7 +75,13 @@ public:
     // `map_pts` are the candidates Tracking found visible and `projections` their projections into the frame,
     // parallel arrays. Accepted matches are written to frame.pts.
     // Used in: Tracking::search_local_points
-    static constexpr float projection_match_radius_th = 20.0f;   // pixels, whatever the image size
+    // The gate: a match is accepted when the squared offset between keypoint and projection is below this many
+    // times the keypoint's own position variance (KeypointData::sigma2 / information), the model pose
+    // optimization tests outliers with -- so a coarser keypoint gets a wider gate. 64 is (8 sigmas)^2: on
+    // ETH table_3 the correct orb32 matches lie within 8 px at sigma 1, and beyond that it is mostly wrong
+    // pairings. It is well above the optimizer's chi2 of 5.99 because the gate also has to absorb the pose's
+    // and the map point's error. Was a fixed 20 px (400 in these units at sigma 1).
+    static constexpr float projection_match_scale_sigma2 = 64.0f;
     void match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
                                    const std::vector<cv::Point2f>& projections);
 

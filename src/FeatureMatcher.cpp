@@ -167,7 +167,8 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
 // Gives a map point to the frame keypoints that have none yet, from the candidates the caller
 // found visible. Per feature type: the unmatched keypoints are matched against the candidates by
 // descriptor alone (cross-checked brute force, over the whole image), and a match is accepted if
-// the candidate's projection lies within projection_match_radius_th of the keypoint.
+// the squared offset between the keypoint and the candidate's projection is below
+// projection_match_scale_sigma2 times the keypoint's own position variance.
 //
 // `projections[i]` is where `map_pts[i]` projects in this frame. Accepted matches are written to
 // frame.pts. Reports, per feature type: points.candidates, keypoints.unmatched, matches.raw and
@@ -203,8 +204,6 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
         candidates.indices.push_back(idx);
         candidates.descriptors.push_back(std::move(descriptor));
     }
-
-    const float radius2 = projection_match_radius_th * projection_match_radius_th;
 
     for (const auto& [ft, data] : frame.features.per_type) {
         std::vector<Pt>& frame_pts = frame.pts.at(ft);
@@ -247,7 +246,9 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
         const std::vector<cv::DMatch> matches = match_descriptors_only(keypoint_descriptors, point_descriptors, ft);
         AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
 
-        // Accept a match only if the map point projects near the matched keypoint. A direct
+        // Accept a match only if the map point projects near the matched keypoint: the squared
+        // Mahalanobis distance d^T * information * d must be below projection_match_scale_sigma2.
+        // For an isotropic keypoint of variance s^2 that is |d|^2 < scale * s^2. A direct
         // distance test, not a get_features_in_area query: the keypoint is already known, so
         // there is nothing to search for. (That query also made grid membership an implicit
         // acceptance criterion -- a keypoint pos_in_grid rejected lost its match even when the
@@ -262,7 +263,8 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
             const cv::Point2f& projection = projections[point_idx];
             const float dist_x = keypoint.x - projection.x;
             const float dist_y = keypoint.y - projection.y;
-            if (dist_x * dist_x + dist_y * dist_y < radius2) {
+            const vec2f offset(dist_x, dist_y);
+            if (offset.dot(data.information[keypoint_idx] * offset) < projection_match_scale_sigma2) {
                 frame_pts[keypoint_idx] = map_pts[point_idx];
                 num_accepted++;
             }
