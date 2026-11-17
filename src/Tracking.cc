@@ -94,8 +94,6 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.RelocInliersHigh", params.reloc_inliers_high);
     read_if_present("Tracking.RelocInliersMedium", params.reloc_inliers_medium);
     read_if_present("Tracking.RelocInliersLow", params.reloc_inliers_low);
-    read_if_present("Tracking.RelocSearchRadiusCoarse", params.reloc_search_radius_coarse);
-    read_if_present("Tracking.RelocSearchRadiusNarrow", params.reloc_search_radius_narrow);
     read_if_present("Tracking.RelocRansacProbability", params.reloc_ransac_probability);
     read_if_present("Tracking.RelocRansacMinInliers", params.reloc_ransac_min_inliers);
     read_if_present("Tracking.RelocRansacMaxIterations", params.reloc_ransac_max_iterations);
@@ -1232,12 +1230,18 @@ bool Tracking::relocalize()
     if(!place_recognition_->is_active())
         return false;
 
+    AF_REPORT_SCOPE();
+
     const FeatureType feature_type = place_recognition_->verification_feature();
     current_frame_.compute_global_descriptor();
 
     const std::vector<Keyframe> candidates = place_recognition_->detect_relocalization_candidates(current_frame_);
+    AF_REPORT("reloc.candidates", "", candidates.size());
     if(candidates.empty())
+    {
+        AF_REPORT("reloc.success", "", 0);
         return false;
+    }
     const size_t num_candidates = candidates.size();
 
     // Match each candidate against the frame; enough matches arm a PnP solver for it
@@ -1266,6 +1270,7 @@ bool Tracking::relocalize()
                                         RANSAC_MIN_SET, params.reloc_ransac_epsilon, RANSAC_TH2);
         num_active++;
     }
+    AF_REPORT("reloc.candidates_armed", "", num_active);   // enough matches for a PnP solver
 
     // Round-robin P4P RANSAC over the surviving candidates until one pose
     // hypothesis is supported by enough inliers
@@ -1295,16 +1300,24 @@ bool Tracking::relocalize()
                                                 inliers, feature_type))
             {
                 last_reloc_frame_id_ = current_frame_.frame_id;
+                AF_REPORT("reloc.success", "", 1);
                 return true;
             }
         }
     }
+    AF_REPORT("reloc.success", "", 0);
     return false;
 }
 
 bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,
                                                 const std::vector<bool>& inliers, const FeatureType feature_type)
 {
+    // One report scope per pose hypothesis: which candidate, the inliers at each step, what
+    // each projection search added, and whether it was accepted
+    AF_REPORT_SCOPE();
+    AF_REPORT("reloc.keyframe_frame_id", "", candidate->frame_id);
+    AF_REPORT("reloc.pnp_inliers", "", std::count(inliers.begin(), inliers.end(), true));
+
     // Seed the frame with the hypothesis' inlier matches
     std::set<Pt> found;
     for(size_t j = 0; j < inliers.size(); j++)
@@ -1319,35 +1332,72 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
     }
 
     int num_good = Optimizer::pose_optimization(&current_frame_);
+    AF_REPORT("reloc.inliers_optimized", "", num_good);
     if(num_good < params.reloc_inliers_low)
+    {
+        AF_REPORT("reloc.accepted", "", 0);
         return false;
+    }
 
     for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
         if(current_frame_.outliers.at(feature_type)[j])
             current_frame_.pts.at(feature_type)[j] = nullptr;
 
-    // Few inliers: search by projection in a coarse window and optimize again
+    // More matches for the hypothesis, now that it has a pose: project the candidate keyframe's
+    // map points that are not matched yet into the frame, and match them to the frame's free
+    // keypoints -- the same pose-guided step normal tracking uses for the local map
+    // (search_local_points). The viewing-angle test is disabled (-1): relocalization must accept
+    // a point seen from any direction. Returns the number of keypoints that gained a map point.
+    const auto match_more_points = [&](const std::set<Pt>& already_found)
+    {
+        std::vector<Pt> points;
+        std::vector<cv::Point2f> projections;
+        for(const Pt& pt : candidate->get_map_point_matches(feature_type))
+        {
+            if(!pt || pt->is_bad() || already_found.count(pt))
+                continue;
+            if(const std::optional<cv::Point2f> uv = current_frame_.project_if_visible(pt, -1.0f))
+            {
+                points.push_back(pt);
+                projections.push_back(*uv);
+            }
+        }
+        if(points.empty())
+            return 0;
+
+        const std::vector<Pt>& frame_points = current_frame_.pts.at(feature_type);
+        const auto num_matched = [&frame_points] {
+            return std::count_if(frame_points.begin(), frame_points.end(), [](const Pt& pt) { return bool(pt); });
+        };
+        const auto before = num_matched();
+        matcher_->match_map_points_to_frame(current_frame_, points, projections);
+        return static_cast<int>(num_matched() - before);
+    };
+
+    // Few inliers: look for more matches with the hypothesis pose and optimize again
     if(num_good < params.reloc_inliers_high)
     {
-        const int additional = matcher_->search_by_projection(current_frame_, candidate, found,
-                                                            params.reloc_search_radius_coarse, true, feature_type);
+        const int additional = match_more_points(found);
+        AF_REPORT("reloc.first_search_added", "", additional);
         if(additional + num_good >= params.reloc_inliers_high)
         {
             num_good = Optimizer::pose_optimization(&current_frame_);
+            AF_REPORT("reloc.inliers_after_first_search", "", num_good);
 
-            // Many inliers but still not enough: the pose is already close, so search
-            // once more in a narrower window and run a final optimization
+            // Many inliers but still not enough: the pose has moved, so the projections have
+            // too -- search once more and run a final optimization
             if(num_good > params.reloc_inliers_medium && num_good < params.reloc_inliers_high)
             {
                 found.clear();
                 for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
                     if(current_frame_.pts.at(feature_type)[j])
                         found.insert(current_frame_.pts.at(feature_type)[j]);
-                const int narrow_additional = matcher_->search_by_projection(current_frame_, candidate, found,
-                                                                           params.reloc_search_radius_narrow, false, feature_type);
-                if(num_good + narrow_additional >= params.reloc_inliers_high)
+                const int second_additional = match_more_points(found);
+                AF_REPORT("reloc.second_search_added", "", second_additional);
+                if(num_good + second_additional >= params.reloc_inliers_high)
                 {
                     num_good = Optimizer::pose_optimization(&current_frame_);
+                    AF_REPORT("reloc.inliers_after_second_search", "", num_good);
                     for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
                         if(current_frame_.outliers.at(feature_type)[j])
                             current_frame_.pts.at(feature_type)[j] = nullptr;
@@ -1356,6 +1406,7 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
         }
     }
 
+    AF_REPORT("reloc.accepted", "", num_good >= params.reloc_inliers_high);
     if(num_good < params.reloc_inliers_high)
         return false;
 

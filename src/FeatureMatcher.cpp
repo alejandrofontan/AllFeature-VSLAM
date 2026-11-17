@@ -26,8 +26,6 @@ namespace AF_VSLAM
 {
 
 std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::TH_LOW = {};
-std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::descDistTh_high_reloc = {};
-std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::descDistTh_low_reloc = {};
 
 VerbosityLevel FeatureMatcher::verbosity{MEDIUM};
 
@@ -50,8 +48,8 @@ const char* lightglue_variant(const MatcherType matcher_type)
 
 // Loads (once per process, onnx::shared_lightglue) and warms up the LightGlue variant of every learned feature.
 FeatureMatcher::FeatureMatcher(const std::vector<FeatureType>& feature_types,
-    std::string name, float nnratio, bool checkOri):
-    name(name), mfNNratio(nnratio), mbCheckOrientation(checkOri),
+    std::string name):
+    name(name),
     feature_types(feature_types)
 {
     AF_INFO("Initializing FeatureMatcher: " + name);
@@ -150,12 +148,30 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
     return matches_count;
 }
 
-// Used in: Tracking::search_local_points
+// Gives a map point to the frame keypoints that have none yet, from candidate map points and
+// where each projects in the frame (`projections[i]` belongs to `map_pts[i]`).
+//
+// Per feature type, a candidate and a free keypoint can be paired only if the keypoint lies
+// inside the gate around the candidate's projection: the squared offset, in units of the
+// keypoint's own position variance, below projection_match_scale_sigma2. Among the pairs the
+// gate allows, a pair is accepted when each side is the other's best descriptor match: the
+// candidate's nearest keypoint, and that keypoint's nearest candidate. So the search is local
+// -- a correct keypoint next to the projection is never lost to a better-looking one elsewhere
+// in the image -- and it needs no descriptor-distance threshold: mutual agreement is what
+// rejects a candidate whose window holds nothing right.
+//
+// Accepted matches are written to frame.pts. Reports, per feature type: points.candidates,
+// keypoints.unmatched, matches.raw (candidates with at least one keypoint in their gate) and
+// matches.accepted.
+// Used in: Tracking::search_local_points, Tracking::accept_relocalization_hypothesis
 void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
                                                const std::vector<cv::Point2f>& projections)
 {
     AF_REPORT_SCOPE();
 
+    // The candidates grouped by feature type: their index in map_pts and their descriptor. One
+    // get_descriptor() per point -- it takes the point's lock -- and a point whose descriptor is
+    // still empty is skipped.
     struct Candidates
     {
         std::vector<size_t> indices;
@@ -178,61 +194,84 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
 
     for (const auto& [ft, data] : frame.features.per_type) {
         std::vector<Pt>& frame_pts = frame.pts.at(ft);
+        const size_t num_keypoints = data.count();
 
-        // The keypoints with no observed map point yet.
-        std::vector<size_t> keypoint_indices;
-        keypoint_indices.reserve(data.count());
-        for (size_t i = 0; i < data.count(); i++) {
+        // The free keypoints (no observed map point yet), and a bound on their position
+        // variance: the largest gate any of them can have decides how far to look.
+        std::vector<char> is_free(num_keypoints, 0);
+        size_t num_free = 0;
+        float max_variance = 0.0f;
+        for (size_t i = 0; i < num_keypoints; i++) {
             if (frame_pts[i] && frame_pts[i]->number_of_observations() > 0)
                 continue;
-            keypoint_indices.push_back(i);
+            is_free[i] = 1;
+            num_free++;
+            const mat2f& sigma2 = data.sigma2[i];
+            max_variance = std::max(max_variance,
+                                    std::max(sigma2(0, 0), sigma2(1, 1)) + std::abs(sigma2(0, 1)));
         }
 
         const auto candidates_it = candidates_by_type.find(ft);
         AF_REPORT("points.candidates", get_feature_name(ft),
                   candidates_it == candidates_by_type.end() ? 0 : candidates_it->second.indices.size());
-        AF_REPORT("keypoints.unmatched", get_feature_name(ft), keypoint_indices.size());
+        AF_REPORT("keypoints.unmatched", get_feature_name(ft), num_free);
 
-        if (keypoint_indices.empty() || candidates_it == candidates_by_type.end()) {
+        if (num_free == 0 || candidates_it == candidates_by_type.end()) {
             AF_REPORT("matches.raw", get_feature_name(ft), 0);
             AF_REPORT("matches.accepted", get_feature_name(ft), 0);
             continue;
         }
         const Candidates& candidates = candidates_it->second;
-
-        // Both sides as one descriptor matrix each, rows copied into a preallocated matrix:
-        // cv::Mat::push_back reallocates and re-copies the whole matrix as it grows.
-        const cv::Mat& first = candidates.descriptors.front();
-        cv::Mat point_descriptors(static_cast<int>(candidates.descriptors.size()), first.cols, first.type());
-        for (size_t k = 0; k < candidates.descriptors.size(); k++)
-            candidates.descriptors[k].copyTo(point_descriptors.row(static_cast<int>(k)));
-
-        const cv::Mat& frame_descriptors = data.descriptors;
-        cv::Mat keypoint_descriptors(static_cast<int>(keypoint_indices.size()),
-                                     frame_descriptors.cols, frame_descriptors.type());
-        for (size_t k = 0; k < keypoint_indices.size(); k++)
-            frame_descriptors.row(static_cast<int>(keypoint_indices[k]))
-                .copyTo(keypoint_descriptors.row(static_cast<int>(k)));
-
-        const std::vector<cv::DMatch> matches = match_descriptors_only(keypoint_descriptors, point_descriptors, ft);
-        AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
-
+        const size_t num_candidates = candidates.indices.size();
         const std::vector<cv::KeyPoint>& keypoints = data.keypoints;
-        [[maybe_unused]] int num_accepted = 0;
-        for (const cv::DMatch& match : matches) {
-            const size_t keypoint_idx = keypoint_indices[match.queryIdx];
-            const size_t point_idx = candidates.indices[match.trainIdx];
+        const cv::Mat& frame_descriptors = data.descriptors;
 
-            const cv::Point2f& keypoint = keypoints[keypoint_idx].pt;
-            const cv::Point2f& projection = projections[point_idx];
-            const float dist_x = keypoint.x - projection.x;
-            const float dist_y = keypoint.y - projection.y;
-            const vec2f offset(dist_x, dist_y);
-            if (offset.dot(data.information[keypoint_idx] * offset) < projection_match_scale_sigma2) {
-                frame_pts[keypoint_idx] = map_pts[point_idx];
-                num_accepted++;
+        // Each side's best partner among the pairs the gate allows. Strict '<' keeps the first
+        // of equal distances, so the result does not depend on anything but the input order.
+        const float search_radius = std::sqrt(projection_match_scale_sigma2 * max_variance);
+        std::vector<int> best_keypoint(num_candidates, -1);
+        std::vector<Descriptor_Distance_Type> best_keypoint_distance(num_candidates, highest_possible_distance);
+        std::vector<int> best_candidate(num_keypoints, -1);
+        std::vector<Descriptor_Distance_Type> best_candidate_distance(num_keypoints, highest_possible_distance);
+
+        for (size_t c = 0; c < num_candidates; c++) {
+            const cv::Point2f& projection = projections[candidates.indices[c]];
+            for (const size_t k : frame.get_features_in_area(projection.x, projection.y, search_radius, ft)) {
+                if (!is_free[k])
+                    continue;
+
+                // The gate proper: the offset in units of this keypoint's own uncertainty
+                const vec2f offset(keypoints[k].pt.x - projection.x, keypoints[k].pt.y - projection.y);
+                if (offset.dot(data.information[k] * offset) >= projection_match_scale_sigma2)
+                    continue;
+
+                const Descriptor_Distance_Type distance =
+                    descriptor_distance(candidates.descriptors[c], frame_descriptors.row(static_cast<int>(k)), ft);
+                if (distance < best_keypoint_distance[c]) {
+                    best_keypoint_distance[c] = distance;
+                    best_keypoint[c] = static_cast<int>(k);
+                }
+                if (distance < best_candidate_distance[k]) {
+                    best_candidate_distance[k] = distance;
+                    best_candidate[k] = static_cast<int>(c);
+                }
             }
         }
+
+        // Accept the pairs where each side chose the other
+        [[maybe_unused]] int num_with_keypoint = 0;
+        [[maybe_unused]] int num_accepted = 0;
+        for (size_t c = 0; c < num_candidates; c++) {
+            const int k = best_keypoint[c];
+            if (k < 0)
+                continue;
+            num_with_keypoint++;
+            if (best_candidate[k] != static_cast<int>(c))
+                continue;
+            frame_pts[k] = map_pts[candidates.indices[c]];
+            num_accepted++;
+        }
+        AF_REPORT("matches.raw", get_feature_name(ft), num_with_keypoint);
         AF_REPORT("matches.accepted", get_feature_name(ft), num_accepted);
     }
 }
@@ -721,92 +760,6 @@ int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f&
     return nFused;
 }
 
-// Projects map points from a keyframe into a current frame for relocalization.
-// Applies rotation histogram filtering to reject orientation-inconsistent matches.
-int FeatureMatcher::search_by_projection(Frame &CurrentFrame, Keyframe pKF, const set<Pt> &sAlreadyFound, const float& radiusTh,
-     const bool& useHighMatchingThreshold, const FeatureType& feature_type)
-{
-    Descriptor_Distance_Type descDistanceTh = descDistTh_low_reloc[feature_type];
-    if(useHighMatchingThreshold)
-        descDistanceTh = descDistTh_high_reloc[feature_type];
-
-    // Rotation Histogram (to check rotation consistency)
-    int nMatches{0};
-    float rotFactor{};
-    vector<vector<int>>& rotHist = initRotationHistogram(rotFactor,HISTO_LENGTH);
-
-    const vector<Pt> vpMPs = pKF->get_map_point_matches(feature_type);
-    const Calibration& cal = *CurrentFrame.calibration;   // hoisted out of the loop below
-
-    for(size_t i=0, iend=vpMPs.size(); i<iend; i++)
-    {
-        const Pt pMP = vpMPs[i];
-
-        if(pMP)
-        {
-            if(!pMP->is_bad() && !sAlreadyFound.count(pMP))
-            {
-                // Depth, image bounds and the depth window, as everywhere else.
-                // -1 for the viewing-angle limit disables that test (no cosine is below -1):
-                // relocalization is the one path that must accept a point seen from any
-                // direction, since the whole point is that the current viewpoint is unknown.
-                // This is also the first time the path rejects a point BEHIND the camera --
-                // it used to divide by x3Dc(2) without checking its sign.
-                const std::optional<Projection> projection =
-                    project_if_visible(CurrentFrame.get_pose(), cal, pMP, -1.0f);
-                if(!projection)
-                    continue;
-
-                const float u = projection->uv.x;
-                const float v = projection->uv.y;
-                const float dist3D = projection->dist;
-
-                // Search in a window
-                const float predictedSize = pMP->predict_size(dist3D);
-                const float radius = radiusScale * radiusTh * predictedSize;
-
-                const vector<size_t> vIndices2 = CurrentFrame.get_features_in_area(u, v, radius, feature_type);
-
-                if(vIndices2.empty())
-                    continue;
-
-                const cv::Mat refDescriptor = pMP->get_descriptor();
-                Descriptor_Distance_Type bestDist{highest_possible_distance};
-                int bestIdx2{-1};
-
-                for(const size_t i2 : vIndices2)
-                {
-                    if(CurrentFrame.pts.at(feature_type)[i2])
-                        continue;
-
-                    const cv::Mat &descriptor = CurrentFrame.features.at(feature_type).descriptors.row(i2);
-                    const Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
-
-                    if(descDist < bestDist)
-                    {
-                        bestDist = descDist;
-                        bestIdx2 = i2;
-                    }
-                }
-
-                if(bestDist <= descDistanceTh)
-                {
-                    CurrentFrame.pts.at(feature_type)[bestIdx2]=pMP;
-                    nMatches++;
-
-                    if(mbCheckOrientation)
-                        updateRotationHistogram(rotHist,bestIdx2, pKF->features.at(feature_type).keypoints[i],CurrentFrame.features.at(feature_type).keypoints[bestIdx2],rotFactor,HISTO_LENGTH);
-                }
-            }
-        }
-    }
-
-    if(mbCheckOrientation)
-        filterMatchesWithOrientation(rotHist,CurrentFrame.pts.at(feature_type),nMatches);
-
-    return nMatches;
-}
-
 Descriptor_Distance_Type FeatureMatcher::descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_)
 {
     const AF_VSLAM::Feature& ft = get_feature(featureType_);
@@ -819,118 +772,11 @@ void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_setti
     cv::FileStorage fSettings(feature_settings_yaml_file, cv::FileStorage::READ);
 
     FeatureMatcher::TH_LOW[featureType] = fSettings["FeatureMatcher.TH_LOW"];
-    FeatureMatcher::descDistTh_low_reloc[featureType] = fSettings["FeatureMatcher.descDistTh_high_reloc"];
-    FeatureMatcher::descDistTh_high_reloc[featureType] = fSettings["FeatureMatcher.descDistTh_low_reloc"];
 
     AF_CONFIG_BEGIN("feature_settings_yaml_file");
         AF_CONFIG_FIELD("FeatureMatcher.TH_LOW", FeatureMatcher::TH_LOW[featureType]);
-        AF_CONFIG_FIELD("FeatureMatcher.descDistTh_low_reloc", FeatureMatcher::descDistTh_low_reloc[featureType]);
-        AF_CONFIG_FIELD("FeatureMatcher.descDistTh_high_reloc", FeatureMatcher::descDistTh_high_reloc[featureType]);
     AF_CONFIG_END();
 }
-
-vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, const int& histLength){
-    // Reused thread-local buffer: the old per-call construction allocated histLength
-    // vectors (each reserve(500)) on every search_by_projection invocation.
-    static thread_local vector<vector<int>> rotHist;
-    rotHist.resize(histLength);
-    for(auto& bin : rotHist)
-        bin.clear();   // keeps each bin's capacity across calls
-    rotFactor = 1.0f / static_cast<float>(histLength);
-    return rotHist;
-}
-
-    // Bin a match by the rotation between its two keypoints, so filterMatchesWithOrientation can
-    // keep only the three most populated bins -- matches whose orientation change disagrees with
-    // the frame's consensus are outliers.
-    //
-    // Inert for aliked128 and superpoint256: AlikedOnnx and SuperPointOnnx build every keypoint
-    // with angle 0 (both detectors are orientation-free), so every match lands in bin 0 and the
-    // filter keeps all of them. Harmless -- one full bin is still "the top bins" -- but it means
-    // those two features get no orientation check at all, not a lenient one. orb32, brisk48,
-    // kaze64, akaze61 and sift128 all carry a real angle from their detector.
-    void FeatureMatcher::updateRotationHistogram(vector<vector<int>>& rotHist,
-                                                     const KeypointIndex& idx,
-                                                     const cv::KeyPoint& keyPt, const cv::KeyPoint& refKeyPt,
-                                                     const float& rotFactor, const int& histLength){
-        float rot = keyPt.angle - refKeyPt.angle;
-        if(rot < 0.0)
-            rot += 360.0f;
-        int bin = static_cast<int>(round(rot * rotFactor));
-        if(bin == histLength)
-            bin = 0;
-        assert(bin >= 0 && bin < histLength);
-        rotHist[bin].push_back(idx);
-    }
-
-    void FeatureMatcher::filterMatchesWithOrientation(vector<vector<int>>& rotHist, vector<Pt>& points, int& nMatches){
-        int ind1{-1}, ind2{-1}, ind3{-1};
-        computeThreeMaxima(rotHist,ind1,ind2,ind3);
-
-        for(int i = 0; i < static_cast<int>(rotHist.size()); i++){
-            if(i == ind1 || i == ind2 || i == ind3)
-                continue;
-            for(int j : rotHist[i]){
-                points[j] = static_cast<Pt>(nullptr);
-                nMatches--;
-            }
-        }
-    }
-
-    void FeatureMatcher::filterMatchesWithOrientation(vector<vector<int>>& rotHist, vector<int>& matches, int& nMatches){
-        int ind1{-1}, ind2{-1}, ind3{-1};
-        computeThreeMaxima(rotHist,ind1,ind2,ind3);
-
-        for(int i = 0; i < static_cast<int>(rotHist.size()); i++){
-            if(i == ind1 || i == ind2 || i == ind3)
-                continue;
-            for(int idx1 : rotHist[i]){
-                if(matches[idx1] >= 0){
-                    nMatches--;
-                    matches[idx1] =-1;
-                }
-            }
-        }
-    }
-
-    void FeatureMatcher::computeThreeMaxima(vector<vector<int>>& rotHist, int &ind1, int &ind2, int &ind3){
-        int max1{0}, max2{0}, max3{0};
-        for(int i = 0; i < static_cast<int>(rotHist.size()); i++)
-        {
-            const int s = static_cast<int>(rotHist[i].size());
-            if(s > max1)
-            {
-                max3=max2;
-                max2=max1;
-                max1=s;
-                ind3=ind2;
-                ind2=ind1;
-                ind1=i;
-            }
-            else if(s > max2)
-            {
-                max3=max2;
-                max2=s;
-                ind3=ind2;
-                ind2=i;
-            }
-            else if(s > max3)
-            {
-                max3=s;
-                ind3=i;
-            }
-        }
-
-        if(max2 < 0.1f * static_cast<float>(max1))
-        {
-            ind2=-1;
-            ind3=-1;
-        }
-        else if(max3 < 0.1f * static_cast<float>(max1))
-        {
-            ind3=-1;
-        }
-    }
 
 // The matches between two descriptor sets of one feature type, WITHOUT keypoints: for a side
 // that has descriptors but no image positions, such as map points. LightGlue needs keypoints,

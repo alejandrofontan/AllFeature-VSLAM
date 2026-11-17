@@ -151,10 +151,8 @@ Tracking.EmergencyKeyframeCooldown: 10 # min frames between emergency keyframes
 # Relocalization
 Tracking.RelocMinMatches: 15          # per-candidate matching gate
 Tracking.RelocInliersHigh: 50         # inliers to accept a pose hypothesis
-Tracking.RelocInliersMedium: 30       # enter the narrow-window escalation
+Tracking.RelocInliersMedium: 30       # above this after the first search: search once more
 Tracking.RelocInliersLow: 10          # below this, abandon the hypothesis
-Tracking.RelocSearchRadiusCoarse: 10.0 # first projection-search window
-Tracking.RelocSearchRadiusNarrow: 3.0  # second, near-converged window
 Tracking.RelocRansacProbability: 0.99  # P4P RANSAC (PnPsolver)
 Tracking.RelocRansacMinInliers: 10
 Tracking.RelocRansacMaxIterations: 3000

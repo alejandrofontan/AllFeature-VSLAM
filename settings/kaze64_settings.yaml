@@ -7,5 +7,3 @@ FeatureExtractor.maxNumFeatures: 1000
 
 # Feature Matcher
 FeatureMatcher.TH_LOW: 0.32
-FeatureMatcher.descDistTh_high_reloc: 0.71
-FeatureMatcher.descDistTh_low_reloc: 0.43

@@ -130,10 +130,8 @@ struct TrackingParameters
     // relocalize()
     int reloc_min_matches{15};    // per-candidate matching gate
     int reloc_inliers_high{50};   // inliers to accept a pose hypothesis
-    int reloc_inliers_medium{30}; // enter the narrow-window escalation
+    int reloc_inliers_medium{30}; // above this (and below high) after the first search: search once more
     int reloc_inliers_low{10};    // below this, abandon the hypothesis
-    float reloc_search_radius_coarse{10.0f}; // first projection-search window
-    float reloc_search_radius_narrow{3.0f};  // second, near-converged window
     float reloc_ransac_probability{0.99f};   // P4P RANSAC (PnPsolver)
     int reloc_ransac_min_inliers{10};
     int reloc_ransac_max_iterations{3000};
@@ -257,8 +255,9 @@ protected:
 
     bool relocalize();
     // One RANSAC pose hypothesis for a relocalization candidate: seed the frame
-    // with the hypothesis' inlier matches, optimize, escalate through coarse and
-    // narrow projection searches; true when params.reloc_inliers_high inliers support it.
+    // with the hypothesis' inlier matches, optimize, and while too few inliers support it look
+    // for more matches with the new pose (FeatureMatcher::match_map_points_to_frame, up to
+    // twice); true when params.reloc_inliers_high inliers support it.
     // (candidate by value: the legacy matcher APIs take non-const Keyframe&)
     bool accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,
                                           const std::vector<bool>& inliers, FeatureType feature_type);

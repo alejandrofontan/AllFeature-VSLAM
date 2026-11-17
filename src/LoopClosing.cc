@@ -58,7 +58,7 @@ LoopClosing::LoopClosing(std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognit
     place_recognition_(std::move(place_recognition)),
     local_mapper_(std::move(local_mapper)),
     map_drawer_(std::move(map_drawer)),
-    matcher_(std::make_shared<FeatureMatcher>(feature_types, "LoopClosing", 0.8, true))
+    matcher_(std::make_shared<FeatureMatcher>(feature_types, "LoopClosing"))
 {
 }
 

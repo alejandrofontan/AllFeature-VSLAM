@@ -23,7 +23,7 @@ public:
 
     // Loads (once per process) and warms up the LightGlue variant of every learned feature in `feature_types`.
     FeatureMatcher(const std::vector<FeatureType>& feature_types,
-        std::string name = "Extractor", float nnratio=0.6, bool checkOri=true);
+        std::string name = "Extractor");
 
     // Computes the Hamming distance between two ORB descriptors
     static Descriptor_Distance_Type descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_);
@@ -68,17 +68,16 @@ public:
         std::map<FeatureType, std::vector<Pt>>& map_pts_matches,
         const std::vector<FeatureType>& feat_types);
 
-    // Gives a map point to the frame keypoints that have none yet: descriptor matching of the unmatched
-    // keypoints against the candidates, then a check that the candidate projects near the keypoint.
-    // `map_pts` are the candidates Tracking found visible and `projections` their projections into the frame,
-    // parallel arrays. Accepted matches are written to frame.pts.
-    // Used in: Tracking::search_local_points
-    // The gate: a match is accepted when the squared offset between keypoint and projection is below this many
-    // times the keypoint's own position variance (KeypointData::sigma2 / information), the model pose
-    // optimization tests outliers with -- so a coarser keypoint gets a wider gate. 64 is (8 sigmas)^2: on
-    // ETH table_3 the correct orb32 matches lie within 8 px at sigma 1, and beyond that it is mostly wrong
-    // pairings. It is well above the optimizer's chi2 of 5.99 because the gate also has to absorb the pose's
-    // and the map point's error. Was a fixed 20 px (400 in these units at sigma 1).
+    // Gives a map point to the frame keypoints that have none yet. `map_pts` are the candidates and
+    // `projections` where each projects in the frame, parallel arrays. A candidate and a free keypoint can be
+    // paired only inside the gate below; among those pairs, one is accepted when each side is the other's best
+    // descriptor match. Local search, no descriptor-distance threshold. Accepted matches go to frame.pts.
+    // Used in: Tracking::search_local_points, Tracking::accept_relocalization_hypothesis
+    // The gate: the squared offset between keypoint and projection must be below this many times the keypoint's
+    // own position variance (KeypointData::sigma2 / information), the model pose optimization tests outliers
+    // with -- so a coarser keypoint gets a wider gate. 64 is (8 sigmas)^2: on ETH table_3 the correct orb32
+    // matches lie within 8 px at sigma 1. It is well above the optimizer's chi2 of 5.99 because the gate also
+    // has to absorb the pose's and the map point's error.
     static constexpr float projection_match_scale_sigma2 = 64.0f;
     void match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
                                    const std::vector<cv::Point2f>& projections);
@@ -144,19 +143,12 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    // Project MapPoints seen in KeyFrame into the Frame and search matches.
-    // Used in relocalisation (Tracking)
-    int search_by_projection(Frame &CurrentFrame, Keyframe pKF, const std::set<Pt> &sAlreadyFound, const float& radiusTh, const bool& useHighMatchingThreshold, const FeatureType& featureType);
     static void setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType);
 
 public:
 
     static VerbosityLevel verbosity;
     static std::map<FeatureType, Descriptor_Distance_Type> TH_LOW;
-    static std::map<FeatureType, Descriptor_Distance_Type> descDistTh_high_reloc;
-    static std::map<FeatureType, Descriptor_Distance_Type> descDistTh_low_reloc;
-
-    static constexpr int HISTO_LENGTH = 30;
     static float radiusScale;
 
 protected:
@@ -169,18 +161,6 @@ protected:
         const FeatureData& features1, const FeatureData& features2);
 
     string name{};
-    // Returns a reused thread-local buffer, cleared per call — do not hold across calls.
-    static vector<vector<int>>& initRotationHistogram(float& rotFactor, const int& histLength);
-    static void updateRotationHistogram(vector<vector<int>>& rotHist,
-                                        const KeypointIndex& idx,
-                                        const cv::KeyPoint& keyPt, const cv::KeyPoint& refKeyPt,
-                                        const float& rotFactor, const int& histLength);
-    static void computeThreeMaxima(vector<vector<int>>& rotHist, int &ind1, int &ind2, int &ind3);
-    static void filterMatchesWithOrientation(vector<vector<int>>& rotHist, vector<Pt>& points, int& nMatches);
-    static void filterMatchesWithOrientation(vector<vector<int>>& rotHist, vector<int>& matches, int& nMatches);
-
-    float mfNNratio;
-    bool mbCheckOrientation;
 
     const Descriptor_Distance_Type highest_possible_distance{std::numeric_limits<Descriptor_Distance_Type>::max()};
 
