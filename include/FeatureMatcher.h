@@ -1,5 +1,4 @@
-#ifndef AF_VSLAM_FEATURE_MATCHER_H
-#define AF_VSLAM_FEATURE_MATCHER_H
+#pragma once
 
 #include <mutex>
 #include <vector>
@@ -23,7 +22,6 @@ class FeatureMatcher
 public:
 
     // Loads (once per process) and warms up the LightGlue variant of every learned feature in `feature_types`.
-    const int max_supported = 4000;
     FeatureMatcher(const int& image_width, const int& image_height,
         const std::vector<FeatureType>& feature_types,
         std::string name = "Extractor", float nnratio=0.6, bool checkOri=true);
@@ -63,9 +61,9 @@ public:
     // Runs brute-force NN matching, filters outliers with MAGSAC, and associates
     // inlier matches to map points. Mutates both keyframe and frame (match cache).
     // Returns the number of valid map point matches per feature type.
-    map<FeatureType, int> match_keyframe_to_frame(Keyframe& keyframe, Frame& frame,
-        map<FeatureType, vector<Pt>>& map_pts_matches,
-        const vector<FeatureType>& feat_types);
+    std::map<FeatureType, int> match_keyframe_to_frame(const Keyframe& keyframe, Frame& frame,
+        std::map<FeatureType, std::vector<Pt>>& map_pts_matches,
+        const std::vector<FeatureType>& feat_types);
 
     // Matches a set of map points to frame keypoints via descriptor matching + projection check.
     // Returns the number of new map point assignments made to the frame.
@@ -169,20 +167,6 @@ protected:
 
     // Matching options
     std::vector<FeatureType> feature_types;
-
-    // match_keyframe_to_frame Keyframe-Frame
-    // Tracking::match_keyframe_to_frame & Tracking::relocalize
-    static constexpr bool sBF_kf_lightglue = true;
-
-    // match_keyframes_for_triangulation Keyframe-Keyframe
-    // LocalMapping::CreateNewMapPoints
-    static constexpr bool sFT_kk_lightglue = true;
-
-    // SearchForInitialization Frame-Frame
-    // Tracking::monocular_initialization
-    static constexpr int sFI_ff_outlierMethod = cv::FM_RANSAC;
 };
 
 }
-
-#endif // AF_VSLAM_FEATURE_MATCHER_H

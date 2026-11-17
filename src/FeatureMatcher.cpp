@@ -1,7 +1,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -99,8 +98,8 @@ FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
 //
 // Returns the number of valid map point matches per feature type.
 // Used in: Tracking::track_reference_keyframe, Tracking::relocalize
-map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe, Frame& frame,
-    map<FeatureType, vector<Pt>>& map_pts_matches, const vector<FeatureType>& feat_types)
+std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyframe& keyframe, Frame& frame,
+    std::map<FeatureType, std::vector<Pt>>& map_pts_matches, const std::vector<FeatureType>& feat_types)
 {
     vector<cv::KeyPoint> kps1, kps2;
     vector<int> kps1_indexes, kps2_indexes;
@@ -108,34 +107,21 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
     vector<FeatureType> used_feature_types;
     map<FeatureType, vector<Pt>> map_pts_kf;
 
-    // Slow-call diagnosis (hiccup profiling): per-feature matching and filter timings
-    using MatchClock = std::chrono::steady_clock;
-    const auto matchMs = [](MatchClock::time_point a, MatchClock::time_point b) {
-        return std::chrono::duration<double, std::milli>(b - a).count();
-    };
-    std::map<FeatureType, double> msMatchByFt;
-
     for (const auto& ft : feat_types) {
-        // Skip feature types not present in both keyframe and frame
         auto it1 = keyframe->features.per_type.find(ft);
         auto it2 = frame.features.per_type.find(ft);
 
         if (it1 == keyframe->features.per_type.end() || it2 == frame.features.per_type.end())
             continue;
 
-        // Get map points associated to the keyframe for this feature type
         map_pts_kf[ft] = keyframe->get_map_point_matches(ft);
 
-        // Brute-force NN matching between keyframe and frame descriptors
         const auto& v1 = keyframe->features.at(ft).keypoints;
         const auto& v2 = frame.features.at(ft).keypoints;
-        const auto tMatch0 = MatchClock::now();
         vector<cv::DMatch> matches = match_descriptors(
             it1->second.descriptors, it2->second.descriptors,
             v1, v2, ft);
-        msMatchByFt[ft] = matchMs(tMatch0, MatchClock::now());
 
-        // Offset match indices to account for previously appended feature types
         const size_t size_kpts1 = kps1.size();
         const size_t size_kpts2 = kps2.size();
         for (auto& m : matches) {
@@ -143,12 +129,10 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
             m.trainIdx += size_kpts2;
         }
 
-        // Accumulate matches and keypoints across feature types
         all_matches.insert(all_matches.end(), matches.begin(), matches.end());
         kps1.insert(kps1.end(), v1.begin(), v1.end());
         kps2.insert(kps2.end(), v2.begin(), v2.end());
 
-        // Track per-feature-type original keypoint indices for later map point lookup
         const size_t base1 = kps1_indexes.size();
         kps1_indexes.resize(base1 + v1.size());
         std::iota(kps1_indexes.begin() + base1, kps1_indexes.end(), 0);
@@ -159,31 +143,13 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
 
         used_feature_types.insert(used_feature_types.end(), v1.size(), ft);
 
-        // Initialize output map point matches for this feature type
         map_pts_matches[ft] = vector<Pt>(frame.features.at(ft).count(), nullptr);
     }
 
-    // Filter outliers robustly (PoseLib LO-RANSAC) across all feature types jointly
-    const auto tFilter0 = MatchClock::now();
     auto robust_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
-    const double msFilter = matchMs(tFilter0, MatchClock::now());
 
-    double msMatchTotal = 0.0;
-    for (const auto& [ft, ms] : msMatchByFt) msMatchTotal += ms;
-    if (msMatchTotal + msFilter > 100.0) {
-        std::ostringstream perFt;
-        for (const auto& [ft, ms] : msMatchByFt)
-            perFt << " ft" << int(ft) << "=" << int(ms) << "ms(n=" << keyframe->features.at(ft).keypoints.size() << ")";
-        AF_WARN("match_keyframe_to_frame slow: match=" << int(msMatchTotal) << "ms [" << perFt.str()
-                << " ], filter=" << int(msFilter) << "ms (nMatches=" << all_matches.size() << ")");
-    }
+    std::map<FeatureType, std::vector<cv::DMatch>> frame_side;
 
-    // Associate surviving matches to map points. The caches take per-type keypoint indices (query_idx /
-    // train_idx), like cache_neighbor_matches: the stacked m.queryIdx / m.trainIdx are offset by the earlier types.
-    std::map<FeatureType, std::vector<cv::DMatch>> keyframe_side, frame_side;
-
-    // One entry per requested feature type, zero for types with no match: callers index this
-    // with .at(ft) (a type with zero matches used to be a missing key -> std::out_of_range)
     map<FeatureType, int> matches_count;
     for (const auto& ft : feat_types)
         matches_count[ft] = 0;
@@ -192,9 +158,6 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
         const int train_idx = kps2_indexes[m.trainIdx];
         const FeatureType feat_type = used_feature_types[m.queryIdx];
 
-        // Cache every robust match, map point or not: match_keyframes reuses these caches for
-        // triangulation, which wants precisely the pairs that have no map point yet.
-        keyframe_side[feat_type].push_back(cv::DMatch(query_idx, train_idx, m.distance));
         frame_side[feat_type].push_back(cv::DMatch(train_idx, query_idx, m.distance));
 
         const Pt pt = map_pts_kf[feat_type][query_idx];
@@ -204,13 +167,7 @@ map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(Keyframe& keyframe
         matches_count[feat_type]++;
     }
 
-    // Cache matched pairs in both keyframe and frame for downstream use. The frame is this (Tracking) thread's own;
-    // the keyframe's cache is shared with LocalMapping and LoopClosing (KeyFrame::cache_mutex_).
     frame.cache_matched_pairs_feat_type.insert_or_assign(keyframe->frame_id, std::move(frame_side));
-    {
-        std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
-        keyframe->cache_matched_pairs_feat_type.insert_or_assign(frame.frame_id, std::move(keyframe_side));
-    }
 
     return matches_count;
 }
