@@ -149,7 +149,7 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
         map_pts_matches[ft] = vector<Pt>(frame.features.at(ft).count(), nullptr);
     }
 
-    auto robust_matches = filter_matches_by_fundamental(all_matches, keyframe_kps, frame_kps);
+    auto robust_matches = filter_matches_geometric(all_matches, keyframe_kps, frame_kps);
 
     std::map<FeatureType, std::vector<cv::DMatch>> frame_side;
 
@@ -266,7 +266,7 @@ int FeatureMatcher::match_map_points_to_frame(Frame& frame, const vector<Pt>& ma
 
 // Matches two keyframes across all feature types to find candidate pairs for triangulation.
 // Reuses cached matches from a prior tracking step if available; otherwise runs parallel
-// descriptor matching followed by LMEDS fundamental matrix filtering.
+// descriptor matching followed by the geometric filter (filter_matches_geometric).
 // Outputs only pairs where neither keyframe has an existing 3D map point for those keypoints.
 // Used in: LocalMapping::CreateNewMapPoints
 map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
@@ -348,7 +348,7 @@ map<FeatureType, vector<pair<size_t,size_t>>> FeatureMatcher::match_keyframes(co
     if (all_matches.size() < min_match_keyframes)
         return matched_pairs; // Not enough matches to reliably estimate fundamental matrix
 
-    const vector<cv::DMatch> filtered_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
+    const vector<cv::DMatch> filtered_matches = filter_matches_geometric(all_matches, kps1, kps2);
 
     // Decode the stacked indices back to per-type ones, both for the caller and for the cache
     std::map<FeatureType, vector<cv::DMatch>> forward_by_type, backward_by_type;
@@ -527,7 +527,7 @@ int FeatureMatcher::fuse_map_points_to_keyframe(const Keyframe& keyframe, const 
 
 // Matches keypoints between two frames across all feature types for monocular initialization.
 // Descriptors are matched in parallel per feature type, then all matches are pooled and filtered
-// jointly via LMEDS fundamental matrix estimation. Matched index pairs are written into
+// jointly with the geometric filter (filter_matches_geometric). Matched index pairs are written into
 // matched_pairs per feature type.
 // Used in: Tracking::monocular_initialization
 map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_initialization(const Frame& F1, const Frame& F2,
@@ -575,8 +575,8 @@ map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_
         used_feature_types.insert(used_feature_types.end(), v1.size(), ft);
     }
 
-    // Filter outliers jointly across all feature types using fundamental matrix (LMEDS)
-    auto filtered_matches = filter_matches_by_fundamental(all_matches, kps1, kps2);
+    // Filter outliers jointly across all feature types (PoseLib LO-RANSAC, fundamental matrix)
+    auto filtered_matches = filter_matches_geometric(all_matches, kps1, kps2);
 
     // One entry per requested feature type, empty when none of its matches survive (callers read them with .at(ft))
     std::map<FeatureType, std::vector<pair<size_t, size_t>>> matched_pairs;
@@ -1059,96 +1059,93 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
         return matches;
     }
 
-    std::vector<cv::DMatch> FeatureMatcher::filter_matches_by_fundamental(std::vector<cv::DMatch>& matches,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-        const int maxForRansac){
+// Keeps the matches consistent with one two-view geometry, estimated with PoseLib LO-RANSAC:
+//   1. a fundamental matrix (it works at zero baseline too: F = [t]x fits identical points);
+//   2. if that finds no consensus, a homography, the right model for a planar or
+//      rotation-only scene;
+//   3. if both fail, or there are too few matches to fit either, the matches are returned
+//      unfiltered -- pose optimization's chi2 outlier test downstream keeps that soft.
+// The iterations are hard-bounded (filter_min_iterations .. filter_max_iterations).
+//
+// Before any of that the matches are sorted by descriptor distance and cut to the best
+// max_matches, so the result is in that order and never longer than that.
+//
+// Which of the three happened is not returned; it is recorded as the report entry
+// `filter.model`: 1 fundamental matrix, 2 homography, 0 unfiltered.
+std::vector<cv::DMatch> FeatureMatcher::filter_matches_geometric(std::vector<cv::DMatch> matches,
+    const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
+    const int max_matches)
+{
+    std::sort(matches.begin(), matches.end(),
+        [](const cv::DMatch& a, const cv::DMatch& b) { return a.distance < b.distance; });
 
-        std::sort(matches.begin(), matches.end(),
-            [](const cv::DMatch& a, const cv::DMatch& b) { return a.distance < b.distance; });
+    if (matches.size() > static_cast<size_t>(max_matches))
+        matches.resize(max_matches);
 
-        if (matches.size() > static_cast<size_t>(maxForRansac)) matches.resize(maxForRansac);
-
-        // Build point correspondences ---
-        std::vector<poselib::Point2D> pts1; pts1.reserve(matches.size());
-        std::vector<poselib::Point2D> pts2; pts2.reserve(matches.size());
-        for (const auto& m : matches) {
-            // Safety: ensure indices are valid
-            if (m.queryIdx < 0 || m.queryIdx >= static_cast<int>(kps1.size())) continue;
-            if (m.trainIdx < 0 || m.trainIdx >= static_cast<int>(kps2.size())) continue;
-
-            const auto& p1 = kps1[m.queryIdx].pt;
-            const auto& p2 = kps2[m.trainIdx].pt;
-            pts1.emplace_back(p1.x, p1.y);
-            pts2.emplace_back(p2.x, p2.y);
-        }
-
-        if (pts1.size() < 8) return matches; // not enough after filtering
-
-        constexpr double inlierThreshold = 3.0;  // pixels (Sampson / transfer error)
-        constexpr size_t minInliersForModel = 8;
-
-        // Robust filtering via PoseLib LO-RANSAC. Iterations are hard-bounded: OpenCV's
-        // USAC_MAGSAC previously used here both threw an internal assertion on
-        // H-degenerate+outlier inputs (crash) and ground for seconds per call on real
-        // zero-baseline frames (the stop-section hiccups) — PoseLib does neither.
-        //   1. Fundamental matrix (works at zero baseline too: F=[t]x fits identical points).
-        //   2. If F finds no usable consensus, homography (the right model when the
-        //      scene is planar/rotation-only).
-        //   3. If both fail, pass matches through unfiltered; pose optimization's chi2
-        //      outlier test downstream keeps that soft.
-        std::vector<char> inlierMask;
-        poselib::RelativePoseOptions fOpt;
-        fOpt.max_error = inlierThreshold;
-        fOpt.ransac.max_iterations = 1000;
-        fOpt.ransac.min_iterations = 100;
-
-        Eigen::Matrix3d F;
-        poselib::RansacStats stats = poselib::estimate_fundamental(pts1, pts2, fOpt, &F, &inlierMask);
-
-        if (stats.num_inliers < minInliersForModel) {
-            poselib::HomographyOptions hOpt;
-            hOpt.max_error = inlierThreshold;
-            hOpt.ransac.max_iterations = 1000;
-            hOpt.ransac.min_iterations = 100;
-
-            Eigen::Matrix3d H;
-            inlierMask.clear();
-            stats = poselib::estimate_homography(pts1, pts2, hOpt, &H, &inlierMask);
-            if (stats.num_inliers < minInliersForModel) {
-                AF_WARN("filter_matches_by_fundamental: no F/H consensus ("
-                    + std::to_string(stats.num_inliers) + " inliers), passing "
-                    + std::to_string(matches.size()) + " matches unfiltered");
-                return matches; // unfiltered fallback
-            }
-            AF_WARN("filter_matches_by_fundamental: F found no consensus, homography kept "
-                + std::to_string(stats.num_inliers) + "/" + std::to_string(pts1.size()) + " matches");
-        }
-
-        if (inlierMask.size() != pts1.size())
-            return matches;
-
-        std::vector<cv::DMatch> inlierMatches;
-        inlierMatches.reserve(matches.size());
-
-        // Rebuild matchesUsed aligned with pts1/pts2:
-        std::vector<cv::DMatch> matchesUsed;
-        matchesUsed.reserve(matches.size());
-
-        for (const auto& m : matches) {
-            if (m.queryIdx < 0 || m.queryIdx >= static_cast<int>(kps1.size())) continue;
-            if (m.trainIdx < 0 || m.trainIdx >= static_cast<int>(kps2.size())) continue;
-            matchesUsed.push_back(m);
-        }
-
-        if (matchesUsed.size() != inlierMask.size())
-            return matches; // alignment mismatch fallback
-
-        for (size_t i = 0; i < inlierMask.size(); ++i) {
-            if (inlierMask[i]) inlierMatches.push_back(matchesUsed[i]);
-        }
-
-        return inlierMatches;
+    if (matches.size() < filter_min_inliers) {
+        AF_REPORT("filter.model", "", 0);   // too few matches to fit a model
+        return matches;
     }
+
+    // Point correspondences, one per match and in the same order, so the inlier mask PoseLib
+    // returns below indexes `matches` directly.
+    std::vector<poselib::Point2D> points1, points2;
+    points1.reserve(matches.size());
+    points2.reserve(matches.size());
+    for (const cv::DMatch& match : matches) {
+        const cv::Point2f& p1 = kps1[match.queryIdx].pt;
+        const cv::Point2f& p2 = kps2[match.trainIdx].pt;
+        points1.emplace_back(p1.x, p1.y);
+        points2.emplace_back(p2.x, p2.y);
+    }
+
+    // The same threshold and iteration bounds for both models.
+    const auto configure = [](auto& options) {
+        options.max_error = filter_inlier_threshold_px;
+        options.ransac.min_iterations = filter_min_iterations;
+        options.ransac.max_iterations = filter_max_iterations;
+    };
+
+    std::vector<char> inlier_mask;
+    poselib::RelativePoseOptions fundamental_options;
+    configure(fundamental_options);
+
+    Eigen::Matrix3d fundamental;
+    poselib::RansacStats stats =
+        poselib::estimate_fundamental(points1, points2, fundamental_options, &fundamental, &inlier_mask);
+
+    if (stats.num_inliers < filter_min_inliers) {
+        poselib::HomographyOptions homography_options;
+        configure(homography_options);
+
+        Eigen::Matrix3d homography;
+        inlier_mask.clear();
+        stats = poselib::estimate_homography(points1, points2, homography_options, &homography, &inlier_mask);
+        if (stats.num_inliers < filter_min_inliers) {
+            AF_WARN("filter_matches_geometric: no F/H consensus ("
+                + std::to_string(stats.num_inliers) + " inliers), passing "
+                + std::to_string(matches.size()) + " matches unfiltered");
+            AF_REPORT("filter.model", "", 0);
+            return matches;
+        }
+        // Not a failure -- the homography is the right model for a planar or rotation-only
+        // view -- so it is recorded, not warned about: on such a stretch it is every frame.
+        AF_REPORT("filter.model", "", 2);
+    }
+    else
+        AF_REPORT("filter.model", "", 1);
+
+    // A model with at least filter_min_inliers inliers was found, and for such a model PoseLib
+    // fills the mask with one entry per input point.
+    std::vector<cv::DMatch> inlier_matches;
+    inlier_matches.reserve(stats.num_inliers);
+    for (size_t i = 0; i < matches.size(); ++i) {
+        if (inlier_mask[i])
+            inlier_matches.push_back(matches[i]);
+    }
+
+    return inlier_matches;
+}
 
     std::map<FeatureType, std::vector<cv::DMatch>> FeatureMatcher::match_descriptors_parallel(
         const std::vector<FeatureType>& feature_types,

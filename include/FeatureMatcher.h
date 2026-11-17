@@ -35,12 +35,19 @@ public:
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type);
     std::vector<cv::DMatch> match_descriptors_only(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& feat_type);
 
-    // Robust geometric match filtering via PoseLib LO-RANSAC (replaced OpenCV's
-    // findFundamentalMat/USAC, which both threw on degenerate inputs and ground for
-    // seconds per call at zero-baseline frames — see CLAUDE.md, Stop-Induced Keyframe
-    // Runaway Investigation).
-    std::vector<cv::DMatch> filter_matches_by_fundamental(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-        const int maxForRansac = 2000);
+    // Robust geometric match filtering via PoseLib LO-RANSAC: a fundamental matrix, a homography if that finds
+    // no consensus, and the matches unfiltered if neither does. It replaced OpenCV's findFundamentalMat/USAC,
+    // which threw on degenerate inputs and ground for seconds per call at zero-baseline frames.
+    // `matches` is taken by value: the filter sorts and truncates its own copy, the caller's list is untouched.
+    // Every queryIdx / trainIdx must be a valid index into kps1 / kps2.
+    static constexpr int filter_max_matches = 2000;            // best matches by descriptor distance kept
+    static constexpr double filter_inlier_threshold_px = 3.0;  // Sampson (F) / transfer (H) error, pixels
+    static constexpr size_t filter_min_inliers = 8;            // fewer: the model is rejected
+    static constexpr size_t filter_min_iterations = 100;       // RANSAC rounds, lower and upper bound
+    static constexpr size_t filter_max_iterations = 1000;
+    static std::vector<cv::DMatch> filter_matches_geometric(std::vector<cv::DMatch> matches,
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
+        int max_matches = filter_max_matches);
 
     // Takes the two FeatureData directly: splitting them into per-type descriptor and keypoint
     // maps at the call site copied every keypoint vector on every call.
@@ -75,7 +82,7 @@ public:
                                   const vector<cv::Point2f>& projections);
 
     // Matches two keyframes across all feature types to find candidate pairs for triangulation.
-    // Reuses cached matches if available; otherwise runs parallel descriptor matching + LMEDS filtering.
+    // Reuses cached matches if available; otherwise runs parallel descriptor matching + the geometric filter.
     // Used in: LocalMapping::CreateNewMapPoints
     const size_t min_match_keyframes = 10;
     map<FeatureType, vector<pair<size_t,size_t>>> match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
@@ -88,8 +95,8 @@ public:
                                 const vector<FeatureType>& feat_types);
 
     // Matches keypoints between two frames across all feature types for monocular initialization.
-    // Runs parallel descriptor matching, filters outliers jointly with LMEDS fundamental matrix
-    // estimation, and populates matched_pairs per feature type.
+    // Runs parallel descriptor matching, filters outliers jointly with the geometric filter
+    // (filter_matches_geometric), and populates matched_pairs per feature type.
     // Used in: Tracking::monocular_initialization
     map<FeatureType, vector<pair<size_t, size_t>>> match_frames_for_initialization(const Frame& F1, const Frame& F2,
         const vector<FeatureType>& feat_types);
