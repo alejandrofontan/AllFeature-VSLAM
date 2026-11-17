@@ -47,12 +47,6 @@ public:
     static std::vector<cv::DMatch> filter_matches_geometric(const std::vector<cv::DMatch>& matches,
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2);
 
-    // Takes the two FeatureData directly: splitting them into per-type descriptor and keypoint
-    // maps at the call site copied every keypoint vector on every call.
-    std::map<FeatureType, std::vector<cv::DMatch>> match_descriptors_parallel(
-        const std::vector<FeatureType>& feature_types,
-        const FeatureData& features1, const FeatureData& features2);
-
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -101,12 +95,12 @@ public:
     // Used in: LocalMapping::process_keyframe, LoopClosing::run
     static void clear_keyframe_matches(const Keyframe& keyframe);
 
-    // Matches keypoints between two frames across all feature types for monocular initialization.
-    // Runs parallel descriptor matching, filters outliers jointly with the geometric filter
-    // (filter_matches_geometric), and populates matched_pairs per feature type.
-    // Used in: Tracking::monocular_initialization
-    map<FeatureType, vector<pair<size_t, size_t>>> match_frames_for_initialization(const Frame& F1, const Frame& F2,
-        const vector<FeatureType>& feat_types);
+    // The matched keypoint pairs (index in frame1, index in frame2) of two frames, per feature type, for
+    // monocular initialization: descriptor matching per type, then the geometric filter on all types jointly.
+    // The result has an entry for every requested feature type, empty when none of its matches survive.
+    // Used in: Tracking::attempt_monocular_initialization
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> match_frames_for_initialization(const Frame& frame1,
+        const Frame& frame2, const std::vector<FeatureType>& feat_types);
 
     // Projects map points into a keyframe and fuses them with existing keypoints.
     // Applies visibility checks (depth, image bounds, scale, viewing angle), then matches by descriptor distance within radius_th.

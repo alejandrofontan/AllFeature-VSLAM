@@ -376,6 +376,49 @@ std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::ge
     return matched_pairs;
 }
 
+
+// The matched keypoint pairs (index in frame1, index in frame2) of two frames, per feature
+// type, for monocular initialization: the descriptors of each feature type are matched, and the
+// geometric filter runs on all types jointly. The result has an entry for every requested
+// feature type, empty when none of its matches survive -- the caller reads them with .at(ft).
+// Reports matches.raw and matches.filtered per feature type.
+// Used in: Tracking::attempt_monocular_initialization
+std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::match_frames_for_initialization(const Frame& frame1, const Frame& frame2,
+    const std::vector<FeatureType>& feat_types)
+{
+    AF_REPORT_SCOPE();
+
+    // One feature type after the other, on the calling thread: with one learned feature the
+    // LightGlue match dominates and there is nothing to gain from a parallel loop, and on this
+    // thread the tracking thread's run priority applies to it (OrtSession, Threading).
+    std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type;
+    for (const auto& ft : feat_types) {
+        if (!frame1.features.has(ft) || !frame2.features.has(ft))
+            continue;
+        const KeypointData& data1 = frame1.features.at(ft);
+        const KeypointData& data2 = frame2.features.at(ft);
+        matches_by_type[ft] = match_descriptors(data1.descriptors, data2.descriptors,
+                                                data1.keypoints, data2.keypoints, ft);
+        AF_REPORT("matches.raw", get_feature_name(ft), matches_by_type.at(ft).size());
+    }
+
+    // One model for all feature types: they all see the same two views
+    const std::map<FeatureType, std::vector<cv::DMatch>> filtered_by_type =
+        filter_matches_geometric_jointly(matches_by_type, frame1.features, frame2.features);
+
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_pairs;
+    for (const auto& ft : feat_types)
+        matched_pairs[ft];
+    for (const auto& [ft, filtered] : filtered_by_type)
+        for (const cv::DMatch& match : filtered)
+            matched_pairs[ft].emplace_back(size_t(match.queryIdx), size_t(match.trainIdx));
+
+    for ([[maybe_unused]] const auto& ft : feat_types)
+        AF_REPORT("matches.filtered", get_feature_name(ft), matched_pairs.at(ft).size());
+
+    return matched_pairs;
+}
+
 // Projects each map point into the keyframe and attempts to fuse it with an existing keypoint.
 // For each map point, applies visibility checks (depth, image bounds, scale, viewing angle),
 // then finds the closest keypoint by descriptor distance within radius_th.
@@ -496,32 +539,6 @@ int FeatureMatcher::fuse_map_points_to_keyframe(const Keyframe& keyframe, const 
     }
 
     return n_fused;
-}
-
-// Matches keypoints between two frames across all feature types for monocular initialization.
-// Descriptors are matched in parallel per feature type, then all matches are pooled and filtered
-// jointly with the geometric filter (filter_matches_geometric). Matched index pairs are written into
-// matched_pairs per feature type.
-// Used in: Tracking::monocular_initialization
-map<FeatureType, vector<pair<size_t, size_t>>> FeatureMatcher::match_frames_for_initialization(const Frame& F1, const Frame& F2,
-    const vector<FeatureType>& feat_types)
-{
-    const std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type =
-        match_descriptors_parallel(feat_types, F1.features, F2.features);
-
-    // One model for all feature types: they all see the same two views
-    const std::map<FeatureType, std::vector<cv::DMatch>> filtered_by_type =
-        filter_matches_geometric_jointly(matches_by_type, F1.features, F2.features);
-
-    // One entry per requested feature type, empty when none of its matches survive (callers read them with .at(ft))
-    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_pairs;
-    for (const auto& ft : feat_types)
-        matched_pairs[ft];
-    for (const auto& [ft, filtered] : filtered_by_type)
-        for (const cv::DMatch& match : filtered)
-            matched_pairs[ft].emplace_back(size_t(match.queryIdx), size_t(match.trainIdx));
-
-    return matched_pairs;
 }
 
 /// @brief Projects candidate map points into @p keyframe using the Sim3 @p Scw and validates
@@ -1112,47 +1129,4 @@ std::map<FeatureType, std::vector<cv::DMatch>> FeatureMatcher::filter_matches_ge
     return filtered_by_type;
 }
 
-    std::map<FeatureType, std::vector<cv::DMatch>> FeatureMatcher::match_descriptors_parallel(
-        const std::vector<FeatureType>& feature_types,
-        const FeatureData& features1, const FeatureData& features2
-    ){
-
-        struct MatchOut {
-            FeatureType ft{};
-            bool valid = false;
-            std::vector<cv::DMatch> matches;
-            size_t frameN = 0;
-        };
-
-        std::vector<FeatureType> jobs;
-        jobs.reserve(feature_types.size());
-        for (const auto ft : feature_types) {
-            if (!features1.has(ft) || !features2.has(ft))
-                continue;
-            jobs.push_back(ft);
-        }
-
-            std::vector<MatchOut> outs(jobs.size());
-
-        #pragma omp parallel for schedule(static)
-        for (int i = 0; i < static_cast<int>(jobs.size()); ++i) {
-            const auto ft = jobs[i];
-            auto& o = outs[i];
-            o.ft = ft;
-            o.valid = true;
-
-            const KeypointData& data1 = features1.at(ft);
-            const KeypointData& data2 = features2.at(ft);
-            o.matches = match_descriptors(data1.descriptors, data2.descriptors,
-                                          data1.keypoints, data2.keypoints, ft);
-        }
-
-        std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type;
-        for (auto& o : outs) {
-            if (!o.valid) continue;
-            matches_by_type[o.ft] = std::move(o.matches);
-        }
-        return matches_by_type;
-    }
-
-    } //namespace ORB_SLAM
+} // namespace AF_VSLAM
