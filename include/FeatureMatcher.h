@@ -22,8 +22,7 @@ class FeatureMatcher
 public:
 
     // Loads (once per process) and warms up the LightGlue variant of every learned feature in `feature_types`.
-    FeatureMatcher(const int& image_width, const int& image_height,
-        const std::vector<FeatureType>& feature_types,
+    FeatureMatcher(const std::vector<FeatureType>& feature_types,
         std::string name = "Extractor", float nnratio=0.6, bool checkOri=true);
 
     // Computes the Hamming distance between two ORB descriptors
@@ -31,9 +30,20 @@ public:
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // The matches between the keypoints of two images, for one feature type, with the matcher that feature
+    // declares: LightGlue for the learned features, mutual nearest neighbour brute force (no distance threshold)
+    // for the others. queryIdx indexes the first set, trainIdx the second. `distance` is 1 - score for LightGlue
+    // and the L2 or Hamming distance for brute force: not comparable across feature types.
+    // `image_width` x `image_height` is the size of the image both keypoint sets were detected in (the frame's
+    // calibration); LightGlue normalises the keypoints with it. Unused by the brute-force matchers.
     std::vector<cv::DMatch> match_descriptors(const cv::Mat& desc1, const cv::Mat& desc2,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type);
-    std::vector<cv::DMatch> match_descriptors_only(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& feat_type);
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type,
+        int image_width, int image_height);
+
+    // The same without keypoints, for a side that has descriptors but no image positions (map points): every
+    // float descriptor, learned or not, by L2 brute force; every binary one by Hamming brute force.
+    std::vector<cv::DMatch> match_descriptors_only(const cv::Mat& desc1, const cv::Mat& desc2,
+        const FeatureType& feat_type);
 
     // Robust geometric match filtering via PoseLib LO-RANSAC: a fundamental matrix, a homography if that finds
     // no consensus, and the matches unfiltered if neither does. It replaced OpenCV's findFundamentalMat/USAC,
@@ -173,12 +183,6 @@ protected:
     bool mbCheckOrientation;
 
     const Descriptor_Distance_Type highest_possible_distance{std::numeric_limits<Descriptor_Distance_Type>::max()};
-
-    // Brute-force matching now goes through BruteForceMatcher.h (issue #13 P2), which
-    // replicates the cv::BFMatcher(<norm>, crossCheck=true) semantics these members had.
-    int image_width;
-    int image_height;
-
 
     // Matching options
     std::vector<FeatureType> feature_types;

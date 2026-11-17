@@ -34,10 +34,9 @@
 namespace AF_VSLAM
 {
 
-LocalMapping::LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureType>& feature_types,
-                           const int image_width, const int image_height):
+LocalMapping::LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureType>& feature_types):
     map_(std::move(map)),
-    matcher_(std::make_shared<FeatureMatcher>(image_width, image_height, feature_types, "LocalMapping"))
+    matcher_(std::make_shared<FeatureMatcher>(feature_types, "LocalMapping"))
 {
 }
 

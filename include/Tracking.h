@@ -198,8 +198,6 @@ public:
 
     std::vector<FeatureType> feature_types_{};
 
-    int get_image_width() const {return image_width_;};
-    int get_image_height() const {return image_height_;};
 
     ////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////

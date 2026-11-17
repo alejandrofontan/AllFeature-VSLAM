@@ -102,8 +102,7 @@ public:
     // this object (System's constructor). fix_scale: stereo/RGB-D (SE3 correction).
     LoopClosing(std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognition> place_recognition,
                 std::shared_ptr<LocalMapping> local_mapper, std::shared_ptr<MapDrawer> map_drawer,
-                bool fix_scale, const std::vector<FeatureType>& feature_types,
-                int image_width, int image_height);
+                bool fix_scale, const std::vector<FeatureType>& feature_types);
     // Joins a finished global BA thread (System::Shutdown waits for is_gba_running() first)
     ~LoopClosing();
 

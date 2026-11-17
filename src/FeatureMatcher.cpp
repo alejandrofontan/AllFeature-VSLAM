@@ -49,10 +49,9 @@ const char* lightglue_variant(const MatcherType matcher_type)
 } // namespace
 
 // Loads (once per process, onnx::shared_lightglue) and warms up the LightGlue variant of every learned feature.
-FeatureMatcher::FeatureMatcher(const int& image_width, const int& image_height,
-    const std::vector<FeatureType>& feature_types,
+FeatureMatcher::FeatureMatcher(const std::vector<FeatureType>& feature_types,
     std::string name, float nnratio, bool checkOri):
-    name(name), mfNNratio(nnratio), mbCheckOrientation(checkOri), image_width(image_width), image_height(image_height),
+    name(name), mfNNratio(nnratio), mbCheckOrientation(checkOri),
     feature_types(feature_types)
 {
     AF_INFO("Initializing FeatureMatcher: " + name);
@@ -103,7 +102,8 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
         const KeypointData& frame_data = frame.features.at(ft);
         std::vector<cv::DMatch> matches = match_descriptors(
             keyframe_data.descriptors, frame_data.descriptors,
-            keyframe_data.keypoints, frame_data.keypoints, ft);
+            keyframe_data.keypoints, frame_data.keypoints, ft,
+            frame.calibration->width, frame.calibration->height);
         AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
 
         if (!matches.empty())
@@ -292,7 +292,8 @@ void FeatureMatcher::match_keyframe_to_keyframes(const Keyframe& keyframe, const
             const KeypointData& data1 = keyframe->features.at(ft);
             const KeypointData& data2 = others[k]->features.at(ft);
             matches[k][f] = match_descriptors(data1.descriptors, data2.descriptors,
-                                              data1.keypoints, data2.keypoints, ft);
+                                              data1.keypoints, data2.keypoints, ft,
+                                              keyframe->calibration->width, keyframe->calibration->height);
         }
     }
 
@@ -398,7 +399,8 @@ std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::ma
         const KeypointData& data1 = frame1.features.at(ft);
         const KeypointData& data2 = frame2.features.at(ft);
         matches_by_type[ft] = match_descriptors(data1.descriptors, data2.descriptors,
-                                                data1.keypoints, data2.keypoints, ft);
+                                                data1.keypoints, data2.keypoints, ft,
+                                                frame1.calibration->width, frame1.calibration->height);
         AF_REPORT("matches.raw", get_feature_name(ft), matches_by_type.at(ft).size());
     }
 
@@ -930,83 +932,77 @@ vector<vector<int>>& FeatureMatcher::initRotationHistogram(float& rotFactor, con
         }
     }
 
-    std::vector<cv::DMatch> FeatureMatcher::match_descriptors_only(
-        const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& featType_){
+// The matches between two descriptor sets of one feature type, WITHOUT keypoints: for a side
+// that has descriptors but no image positions, such as map points. LightGlue needs keypoints,
+// so here every float descriptor, learned or not, is matched by L2 brute force, and every
+// binary one by Hamming brute force. Brute force is mutual nearest neighbour, with no distance
+// threshold. queryIdx indexes desc1, trainIdx desc2; distance is the L2 or Hamming distance.
+// Used in: match_map_points_to_frame
+std::vector<cv::DMatch> FeatureMatcher::match_descriptors_only(
+    const cv::Mat& desc1, const cv::Mat& desc2, const FeatureType& feat_type)
+{
+    switch(get_feature(feat_type).get_matcher_type()) {
+        case LIGHTGLUE_SUPERPOINT:
+        case LIGHTGLUE_ALIKED:
+        case LIGHTGLUE_SIFT:
+        case BF_L2:
+            return bruteforce_match_l2(desc1, desc2);
+        case BF_HAMMING:
+            return bruteforce_match_hamming(desc1, desc2);
+    }
+    return {};   // not reached: every MatcherType is handled above
+}
 
-        const AF_VSLAM::Feature& ft = get_feature(featType_);
-        const MatcherType matcherType = ft.get_matcher_type();
+// The matches between the keypoints of two images, for one feature type, with the matcher that
+// feature declares (Feature::get_matcher_type): LightGlue for the learned features, mutual
+// nearest neighbour brute force (L2 or Hamming, no distance threshold) for the others.
+// queryIdx indexes the first set, trainIdx the second. What `distance` holds depends on the
+// matcher: 1 - score for LightGlue (0..1), the L2 or Hamming distance for brute force. The two
+// are not comparable, so nothing may rank matches of different feature types by it.
+// `image_width` x `image_height` is the size of the image both keypoint sets were detected in.
+// Used in: match_keyframe_to_frame, match_keyframe_to_keyframes, match_frames_for_initialization
+std::vector<cv::DMatch> FeatureMatcher::match_descriptors(
+    const cv::Mat& desc1, const cv::Mat& desc2,
+    const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
+    const FeatureType& feat_type, const int image_width, const int image_height)
+{
+    // A side without keypoints (a type a frame did not detect: its descriptors are an empty Mat)
+    // has nothing to match, and its shape would fail the matchers' checks
+    if(desc1.empty() || desc2.empty() || kps1.empty() || kps2.empty())
+        return {};
 
-        std::vector<cv::DMatch> matches;
-        switch(matcherType) {
-            // descriptor-only matching of every float descriptor, learned or not: the cross-checked brute force
-            // (SIFT came through SiftMatchGPU's ratio test until 2026-10-16)
-            case LIGHTGLUE_SUPERPOINT:
-            case LIGHTGLUE_ALIKED:
-            case LIGHTGLUE_SIFT:
-            case BF_L2:{
-                matches = bruteforce_match_l2(desc1, desc2);
-                break;
-            }
-            case BF_HAMMING:
+    const MatcherType matcher_type = get_feature(feat_type).get_matcher_type();
+    switch(matcher_type) {
+        // LightGlue on ONNX Runtime: it normalises the keypoints with the size of the image they
+        // were detected in, which the caller passes from the frame's calibration. That is the
+        // image as resized AND cropped, not the size Tracking requested, which is larger when
+        // the crop to multiples of 32 trims it (703x436 requested, 672x416 actual on ETH).
+        case LIGHTGLUE_SIFT:
+        case LIGHTGLUE_ALIKED:
+        case LIGHTGLUE_SUPERPOINT:
+        {
+            // A failed Run (a transient Core ML / ONNX Runtime error) costs this match, not the
+            // process: this runs on the tracking, mapping (inside OpenMP regions) and
+            // loop-closing threads, where an escaping exception is std::terminate
+            try
             {
-                matches = bruteforce_match_hamming(desc1, desc2);
-                break;
+                return onnx::shared_lightglue(lightglue_variant(matcher_type),
+                                              static_cast<int>(std::max(kps1.size(), kps2.size())))
+                           .match(kps1, desc1, kps2, desc2, image_width, image_height);
+            }
+            catch(const std::exception& e)
+            {
+                AF_WARN("LightGlue match failed, no matches for this pair: " << e.what());
+                return {};
             }
         }
-
-        return matches;
+        case BF_L2:
+            return bruteforce_match_l2(desc1, desc2);
+        case BF_HAMMING:
+            return bruteforce_match_hamming(desc1, desc2);
     }
-
-    std::vector<cv::DMatch> FeatureMatcher::match_descriptors(
-        const cv::Mat& desc1, const cv::Mat& desc2,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-        const FeatureType& featType_){
-
-        const AF_VSLAM::Feature& ft = get_feature(featType_);
-        const MatcherType matcherType = ft.get_matcher_type();
-
-        std::vector<cv::DMatch> matches;
-        // A side without keypoints (a type a frame did not detect: its descriptors are an empty Mat) has nothing to
-        // match, and its shape would fail the matchers' checks
-        if(desc1.empty() || desc2.empty() || kps1.empty() || kps2.empty())
-            return matches;
-        switch(matcherType) {
-            // LightGlue on ONNX Runtime: the keypoints are normalised with the real image size inside
-            // (the TensorRT path normalised with a 320x240 config until 2026-10-16)
-            case LIGHTGLUE_SIFT:
-            case LIGHTGLUE_ALIKED:
-            case LIGHTGLUE_SUPERPOINT:
-            {
-                // A failed Run (a transient Core ML / ONNX Runtime error) costs this match, not the process: this
-                // runs on the tracking, mapping (inside OpenMP regions) and loop-closing threads, where an escaping
-                // exception is std::terminate
-                try
-                {
-                    matches = onnx::shared_lightglue(lightglue_variant(matcherType),
-                                                     static_cast<int>(std::max(kps1.size(), kps2.size())))
-                                  .match(kps1, desc1, kps2, desc2, image_width, image_height);
-                }
-                catch(const std::exception& e)
-                {
-                    AF_WARN("LightGlue match failed, no matches for this pair: " << e.what());
-                    matches.clear();
-                }
-                break;
-            }
-            case BF_L2:
-            {
-                matches = bruteforce_match_l2(desc1, desc2);
-                break;
-            }
-            case BF_HAMMING:
-            {
-                matches = bruteforce_match_hamming(desc1, desc2);
-                break;
-            }
-        }
-
-        return matches;
-    }
+    return {};   // not reached: every MatcherType is handled above
+}
 
 // Keeps the matches consistent with one two-view geometry, estimated with PoseLib LO-RANSAC:
 //   1. a fundamental matrix (it works at zero baseline too: F = [t]x fits identical points);

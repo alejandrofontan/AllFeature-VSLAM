@@ -50,8 +50,7 @@ namespace AF_VSLAM
 
 LoopClosing::LoopClosing(std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognition> place_recognition,
                          std::shared_ptr<LocalMapping> local_mapper, std::shared_ptr<MapDrawer> map_drawer,
-                         const bool fix_scale, const std::vector<FeatureType>& feature_types,
-                         const int image_width, const int image_height):
+                         const bool fix_scale, const std::vector<FeatureType>& feature_types):
     verification_feature_(place_recognition->verification_feature()),
     feature_types_(feature_types),
     fix_scale_(fix_scale),
@@ -59,7 +58,7 @@ LoopClosing::LoopClosing(std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognit
     place_recognition_(std::move(place_recognition)),
     local_mapper_(std::move(local_mapper)),
     map_drawer_(std::move(map_drawer)),
-    matcher_(std::make_shared<FeatureMatcher>(image_width, image_height, feature_types, "LoopClosing", 0.8, true))
+    matcher_(std::make_shared<FeatureMatcher>(feature_types, "LoopClosing", 0.8, true))
 {
 }
 

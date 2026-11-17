@@ -272,7 +272,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                              feature_types, fixImageSize);
 
     //Initialize the Local Mapping thread and launch
-    localMapper = make_shared<LocalMapping>(mpMap, feature_types, tracker->get_image_width(), tracker->get_image_height());
+    localMapper = make_shared<LocalMapping>(mpMap, feature_types);
     mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::run, localMapper);
 
     //Initialize the Loop Closing thread and launch. Without an active VPR backend the object
@@ -280,8 +280,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //thread never starts: LoopClosing starts with finished_ = true, so Shutdown()'s
     //is_finished()/is_gba_running() waits pass immediately.
     loopCloser =  make_shared<LoopClosing>(mpMap, place_recognition, localMapper, mapDrawer,
-        mSensor!=MONOCULAR, feature_types,
-        tracker->get_image_width(), tracker->get_image_height());
+        mSensor!=MONOCULAR, feature_types);
     if(place_recognition->is_active())
         mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::run, loopCloser);
 

@@ -123,7 +123,7 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
         init_feature_extractor_[ft] = get_feature_extractor(params.init_extractor_features_scale, feature_settings_yaml_file.at(ft), ft);
     }
 
-    matcher_ = std::make_shared<FeatureMatcher>(image_width_, image_height_, feature_types, "Tracking");
+    matcher_ = std::make_shared<FeatureMatcher>(feature_types, "Tracking");
     if(params.frame_tracking == "optical_flow")
         AF_INFO("[Tracking] frame-to-frame stage: optical_flow (KLT on the last frame's tracked points, association radius "
                 << params.flow_association_radius << " px, min " << params.flow_min_matches

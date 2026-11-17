@@ -104,8 +104,7 @@ struct LocalMappingParameters
 class LocalMapping
 {
 public:
-    LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureType>& feature_types,
-                 int image_width, int image_height);
+    LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureType>& feature_types);
 
     // Tunable parameters, loaded from the settings YAML at System startup
     static LocalMappingParameters params;

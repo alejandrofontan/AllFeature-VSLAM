@@ -474,12 +474,11 @@ std::shared_ptr<AF_VSLAM::FeatureExtractor> build_extractor(const FeatureType fe
 /// The feature matcher of one feature type, built as System + Tracking build it: the descriptor-distance thresholds
 /// from the feature's settings yaml, then a FeatureMatcher for this type alone (it loads the LightGlue session of a
 /// learned feature).
-std::shared_ptr<AF_VSLAM::FeatureMatcher> build_matcher(const FeatureType feature_type, const int image_width,
-                                                        const int image_height)
+std::shared_ptr<AF_VSLAM::FeatureMatcher> build_matcher(const FeatureType feature_type)
 {
     const AF_VSLAM::Feature& feature = get_feature(feature_type);
     AF_VSLAM::FeatureMatcher::setDescriptorDistanceThresholds(feature.get_settings_yaml_file(), feature_type);
-    return std::make_shared<AF_VSLAM::FeatureMatcher>(image_width, image_height, std::vector<FeatureType>{feature_type},
+    return std::make_shared<AF_VSLAM::FeatureMatcher>(std::vector<FeatureType>{feature_type},
                                                       "feature_benchmark/" + feature.get_feature_name());
 }
 
@@ -767,7 +766,7 @@ int main(int argc, char** argv)
             run.name = specs[f].label;
             run.bruteforce = specs[f].bruteforce;
             run.extractor = build_extractor(run.type, specs[f], arguments.output_dir);
-            run.matcher = build_matcher(run.type, image_width, image_height);
+            run.matcher = build_matcher(run.type);
             run.cache.resize(visited.size());
             run.csv_path = (output_dir / (run.name + ".csv")).string();
             run.csv.open(run.csv_path);
@@ -812,7 +811,8 @@ int main(int argc, char** argv)
                 const std::vector<cv::DMatch> matches = run.bruteforce
                     ? run.matcher->match_descriptors_only(first.data.descriptors, second.data.descriptors, run.type)
                     : run.matcher->match_descriptors(first.data.descriptors, second.data.descriptors,
-                                                     first.data.keypoints, second.data.keypoints, run.type);
+                                                     first.data.keypoints, second.data.keypoints, run.type,
+                                                     image_width, image_height);
                 const double match_ms = ms_since(t0);
 
                 const auto t1 = Clock::now();
