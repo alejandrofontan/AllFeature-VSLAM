@@ -211,6 +211,16 @@ void OrtSession::read_io_names()
         output_names_.emplace_back(session_->GetOutputNameAllocated(i, allocator).get());
 }
 
+namespace
+{
+thread_local bool thread_run_priority{false};
+}
+
+void set_run_priority(const bool priority)
+{
+    thread_run_priority = priority;
+}
+
 std::vector<Tensor> OrtSession::run(const std::vector<TensorView>& inputs)
 {
     if (inputs.size() != input_names_.size())
@@ -236,7 +246,34 @@ std::vector<Tensor> OrtSession::run(const std::vector<TensorView>& inputs)
         out_names.push_back(name.c_str());
 
     std::vector<Ort::Value> out_values;
-    std::lock_guard<std::mutex> run_lock(run_mutex_);   // one Run at a time per session (header: Threading)
+    // One Run at a time per session, priority callers first (header: Threading). A normal caller also waits while
+    // any priority caller is waiting, which is what lets the priority one overtake a queue of normal ones.
+    {
+        std::unique_lock<std::mutex> lock(run_mutex_);
+        if (thread_run_priority)
+        {
+            ++priority_waiting_;
+            run_turn_.wait(lock, [this] { return !running_; });
+            --priority_waiting_;
+        }
+        else
+            run_turn_.wait(lock, [this] { return !running_ && priority_waiting_ == 0; });
+        running_ = true;
+    }
+    // Ends the turn on every way out of this function, the throw below included. notify_all, not notify_one: the
+    // waiters have different conditions, and the one woken must be the one whose condition holds.
+    struct EndTurn
+    {
+        OrtSession& session;
+        ~EndTurn()
+        {
+            {
+                std::lock_guard<std::mutex> lock(session.run_mutex_);
+                session.running_ = false;
+            }
+            session.run_turn_.notify_all();
+        }
+    } end_turn{*this};
     try
     {
         out_values = session_->Run(Ort::RunOptions{nullptr}, in_names.data(), in_values.data(), in_values.size(),

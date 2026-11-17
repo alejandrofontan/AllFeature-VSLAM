@@ -31,6 +31,7 @@
 #include "Tracking_aux.h"
 #include "Utils.h"
 #include "afvslam_log.hpp"
+#include "onnx/OrtSession.h"
 
 namespace AF_VSLAM
 {
@@ -133,6 +134,11 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
 
 mat4f Tracking::grab_image(Image &im, const double timestamp)
 {
+    // This thread's model runs go ahead of Local Mapping's and Loop Closing's on a shared session
+    // (OrtSession, Threading). Set per frame rather than once: this is the thread's entry point,
+    // and the flag is a thread-local bool.
+    onnx::set_run_priority(true);
+
     GrabProfiler profiler{};
 
     // Convert image to grayscale and resize

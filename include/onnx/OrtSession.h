@@ -32,11 +32,18 @@
  * kernels one after the other anyway, so the lock costs nothing there; it only removes the overlap of the host-side
  * packing, which is microseconds. One OrtSession still serves the tracking and the local-mapping threads; they
  * take turns.
+ *
+ * The turns are not first-come-first-served: a thread that called set_run_priority(true) goes ahead of every waiting
+ * thread that did not. Tracking is the priority thread. Local Mapping matches a new keyframe against several
+ * neighbours at once, so its Runs queue up on the shared LightGlue session, and the next frame's match used to wait
+ * behind all of them (four ALIKED matches, about 80 ms, on the first frame after every keyframe). With priority it
+ * waits for at most the one Run already in progress, which cannot be interrupted.
  */
 
 #ifndef AF_VSLAM_ONNX_ORT_SESSION_H
 #define AF_VSLAM_ONNX_ORT_SESSION_H
 
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -75,6 +82,10 @@ struct Tensor
     [[nodiscard]] int64_t dim(size_t i) const { return shape.at(i); }
 };
 
+/// Marks the calling thread's run() calls, on every session, as priority (true) or normal (false, the default):
+/// a waiting priority call is served before any waiting normal call. See the header comment, Threading.
+void set_run_priority(bool priority);
+
 class OrtSession
 {
   public:
@@ -103,7 +114,11 @@ class OrtSession
 
     std::string model_path_;
     std::string provider_;
-    mutable std::mutex run_mutex_;   // one Run at a time per session (see the header comment)
+    // One Run at a time per session, priority callers first (see the header comment, Threading).
+    std::mutex run_mutex_;
+    std::condition_variable run_turn_;
+    bool running_{false};          // a Run is in progress
+    int priority_waiting_{0};      // priority callers waiting for their turn
     Ort::SessionOptions options_;
     std::unique_ptr<Ort::Session> session_;
     Ort::MemoryInfo memory_info_;
