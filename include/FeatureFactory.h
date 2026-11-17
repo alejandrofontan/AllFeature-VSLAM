@@ -99,15 +99,22 @@ return table;
 // The FeatureType of a settings-yaml feature name.
 // @throws std::runtime_error naming the unknown feature and listing the known ones.
 inline FeatureType get_feature_type(const std::string& str) {
-for (const auto& [name, feature_type] : feature_name_table())
-    if (name == str)
-        return feature_type;
+    for (const auto& [name, feature_type] : feature_name_table())
+        if (name == str)
+            return feature_type;
+    std::string known;
+    for (const auto& [name, feature_type] : feature_name_table())
+        known += (known.empty() ? "" : ", ") + name;
 
-std::string known;
-for (const auto& [name, feature_type] : feature_name_table())
-    known += (known.empty() ? "" : ", ") + name;
-
-throw std::runtime_error("unknown feature '" + str + "' in `features:`; known features are "
-                         + known);
+    throw std::runtime_error("unknown feature '" + str + "' in `features:`; known features are "
+                            + known);
 }
 
+// The settings-yaml name of a FeatureType; "unknown" for a value missing from the table.
+inline const std::string& get_feature_name(const FeatureType feature_type) {
+    static const std::string unknown{"unknown"};
+    for (const auto& [name, type] : feature_name_table())
+        if (type == feature_type)
+            return name;
+    return unknown;
+}

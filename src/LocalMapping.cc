@@ -27,6 +27,7 @@
 #include "FeatureMatcher.h"
 #include "LoopClosing.h"
 #include "Optimizer.h"
+#include "Report.h"
 #include "Utils.h"
 #include "afvslam_log.hpp"
 
@@ -118,6 +119,7 @@ void LocalMapping::process_new_keyframe()
         current_keyframe_ = new_keyframes_.front();
         new_keyframes_.pop_front();
     }
+    AF_REPORT_CONTEXT("local_mapping", current_keyframe_->frame_id);
 
     // Global descriptor (VPR image embedding, backend-dependent)
     current_keyframe_->compute_global_descriptor();

@@ -80,6 +80,14 @@ foreach(_opt ALLFEATURE_WITH_TENSORRT ALLFEATURE_WITH_MEGALOC)
 endforeach()
 message(STATUS "AllFeature backends: learned features + MegaLoc on ONNX Runtime (MegaLoc=${ALLFEATURE_WITH_MEGALOC}), TensorRT segmentation=${ALLFEATURE_WITH_TENSORRT}")
 
+# Debug report: AF_REPORT(key, value) calls write per-frame diagnostics to a CSV (include/Report.h).
+# OFF by default; when OFF the macro expands to nothing and the calls cost nothing.
+option(ALLFEATURE_REPORT "Collect AF_REPORT diagnostics and write them to a CSV at shutdown" OFF)
+if(ALLFEATURE_REPORT)
+  add_compile_definitions(ALLFEATURE_REPORT)
+endif()
+message(STATUS "AllFeature report: ${ALLFEATURE_REPORT}")
+
 # brisk / akaze (standalone feature libraries from prefix.dev/vslamlab, VSLAM-LAB/conda-recipes): optional, so a
 # platform without the packages yet (osx-arm64 until their recipes are built there) still builds with the other
 # features; brisk48 / akaze61 are then refused at startup like the
@@ -128,6 +136,7 @@ set(SRCS_ALLFEATURE
         src/Image.cpp
         src/Feature_orb32.cpp
         src/Feature_kaze64.cpp
+        src/Report.cc
 )
 if(brisk_FOUND)
   list(APPEND SRCS_ALLFEATURE src/Feature_brisk48.cpp)

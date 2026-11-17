@@ -27,6 +27,7 @@
 #include "Map.h"
 #include "Optimizer.h"
 #include "PnPsolver.h"
+#include "Report.h"
 #include "Tracking_aux.h"
 #include "Utils.h"
 #include "afvslam_log.hpp"
@@ -178,6 +179,8 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
 
 void Tracking::track()
 {
+    AF_REPORT_CONTEXT("tracking", current_frame_.frame_id);
+
     // A degenerate initialization asked for a reset (create_initial_map): run it here, before the map lock is
     // taken. reset() waits for Local Mapping and Loop Closing, and a global-BA correction holding Local Mapping
     // stopped while it waits for map_update_mutex_ deadlocked against a reset run under that lock.

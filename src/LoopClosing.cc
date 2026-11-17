@@ -41,6 +41,7 @@
 #include "LocalMapping.h"
 #include "MapDrawer.h"
 #include "Optimizer.h"
+#include "Report.h"
 #include "Sim3Solver.h"
 #include "afvslam_log.hpp"
 
@@ -141,6 +142,7 @@ bool LoopClosing::detect_loop()
         // success compute_sim3/correct_loop keep it until the loop is closed or rejected.
         current_keyframe_->pin();
     }
+    AF_REPORT_CONTEXT("loop_closing", current_keyframe_->frame_id);
 
     // Culled while it waited in the queue: no loop detection for (and no place-recognition entry from) a keyframe
     // that is no longer in the map; a loop accepted on it would re-link it into the graph (update_connections)

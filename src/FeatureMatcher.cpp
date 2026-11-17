@@ -15,6 +15,7 @@
 #include "FeatureFactory.h"
 #include "FeatureMatcher.h"
 #include "onnx/FeatureModels.h"
+#include "Report.h"
 
 #include <opencv2/core/utility.hpp>
 
@@ -107,6 +108,9 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
     vector<FeatureType> used_feature_types;
     map<FeatureType, vector<Pt>> map_pts_kf;
 
+    AF_REPORT_SCOPE();
+    AF_REPORT("keyframe.frame_id", "", keyframe->frame_id);
+
     for (const auto& ft : feat_types) {
         auto it1 = keyframe->features.per_type.find(ft);
         auto it2 = frame.features.per_type.find(ft);
@@ -121,6 +125,7 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
         vector<cv::DMatch> matches = match_descriptors(
             it1->second.descriptors, it2->second.descriptors,
             v1, v2, ft);
+        AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
 
         const size_t size_kpts1 = kps1.size();
         const size_t size_kpts2 = kps2.size();
@@ -165,6 +170,11 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
             continue;
         map_pts_matches[feat_type][train_idx] = pt;
         matches_count[feat_type]++;
+    }
+    for (const auto& ft : feat_types) {
+        const auto it = frame_side.find(ft);
+        AF_REPORT("matches.filtered", get_feature_name(ft), it == frame_side.end() ? 0 : it->second.size());
+        AF_REPORT("matches.with_point", get_feature_name(ft), matches_count.at(ft));
     }
 
     frame.cache_matched_pairs_feat_type.insert_or_assign(keyframe->frame_id, std::move(frame_side));
