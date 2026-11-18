@@ -125,7 +125,7 @@ void LocalMapping::process_keyframe()
             for(const Pt& point : current_keyframe_->get_map_point_matches(feature_type))
                 if(point && !point->is_bad())
                     num_points++;
-            AF_REPORT("keyframe.map_points", get_feature_name(feature_type), num_points);
+            AF_REPORT("keyframe.map_points", get_feature(feature_type).get_feature_name(), num_points);
         }
     }
 #endif
@@ -426,13 +426,13 @@ void LocalMapping::create_new_map_points()
 
     for([[maybe_unused]] const auto& [feature_type, counts] : triangulation_counts)
     {
-        AF_REPORT("triangulation.pairs", get_feature_name(feature_type), counts.pairs);
-        AF_REPORT("triangulation.candidates", get_feature_name(feature_type), counts.candidates);
-        AF_REPORT("triangulation.no_parallax", get_feature_name(feature_type), counts.no_parallax);
-        AF_REPORT("triangulation.behind_camera", get_feature_name(feature_type), counts.behind_camera);
-        AF_REPORT("triangulation.reprojection", get_feature_name(feature_type), counts.reprojection);
-        AF_REPORT("triangulation.slot_taken", get_feature_name(feature_type), counts.slot_taken);
-        AF_REPORT("triangulation.created", get_feature_name(feature_type), counts.created);
+        AF_REPORT("triangulation.pairs", get_feature(feature_type).get_feature_name(), counts.pairs);
+        AF_REPORT("triangulation.candidates", get_feature(feature_type).get_feature_name(), counts.candidates);
+        AF_REPORT("triangulation.no_parallax", get_feature(feature_type).get_feature_name(), counts.no_parallax);
+        AF_REPORT("triangulation.behind_camera", get_feature(feature_type).get_feature_name(), counts.behind_camera);
+        AF_REPORT("triangulation.reprojection", get_feature(feature_type).get_feature_name(), counts.reprojection);
+        AF_REPORT("triangulation.slot_taken", get_feature(feature_type).get_feature_name(), counts.slot_taken);
+        AF_REPORT("triangulation.created", get_feature(feature_type).get_feature_name(), counts.created);
     }
 
     create_depth_seeded_points();
@@ -535,13 +535,13 @@ void LocalMapping::search_in_neighbors()
         }
         [[maybe_unused]] const FuseCounts into_current = fuse_into_keyframe(current_keyframe_, candidates, feature_type);
 
-        AF_REPORT("fuse.points", get_feature_name(feature_type),
+        AF_REPORT("fuse.points", get_feature(feature_type).get_feature_name(),
                   std::count_if(map_points.begin(), map_points.end(), [](const Pt& pt) { return pt != nullptr; }));
-        AF_REPORT("fuse.into_targets", get_feature_name(feature_type), into_targets.merged + into_targets.observed);
-        AF_REPORT("fuse.into_targets_merged", get_feature_name(feature_type), into_targets.merged);
-        AF_REPORT("fuse.candidates", get_feature_name(feature_type), candidates.size());
-        AF_REPORT("fuse.into_current", get_feature_name(feature_type), into_current.merged + into_current.observed);
-        AF_REPORT("fuse.into_current_merged", get_feature_name(feature_type), into_current.merged);
+        AF_REPORT("fuse.into_targets", get_feature(feature_type).get_feature_name(), into_targets.merged + into_targets.observed);
+        AF_REPORT("fuse.into_targets_merged", get_feature(feature_type).get_feature_name(), into_targets.merged);
+        AF_REPORT("fuse.candidates", get_feature(feature_type).get_feature_name(), candidates.size());
+        AF_REPORT("fuse.into_current", get_feature(feature_type).get_feature_name(), into_current.merged + into_current.observed);
+        AF_REPORT("fuse.into_current_merged", get_feature(feature_type).get_feature_name(), into_current.merged);
 
         // Refresh the surviving matches (fusion may have replaced points)
         for(const Pt& map_point : current_keyframe_->get_map_point_matches(feature_type))
@@ -599,7 +599,7 @@ void LocalMapping::estimate_fuse_max_descriptor_distance(const FeatureType featu
         }
     }
 
-    AF_REPORT("descdist.count", get_feature_name(feature_type), distances.size());
+    AF_REPORT("descdist.count", get_feature(feature_type).get_feature_name(), distances.size());
     if(distances.empty())
         return;
 
@@ -607,7 +607,7 @@ void LocalMapping::estimate_fuse_max_descriptor_distance(const FeatureType featu
     const size_t index = std::min(distances.size() - 1, static_cast<size_t>(quantile * distances.size()));
     std::nth_element(distances.begin(), distances.begin() + static_cast<std::ptrdiff_t>(index), distances.end());
     map_->set_fuse_max_descriptor_distance(feature_type, distances[index]);
-    AF_REPORT("descdist.fuse_max", get_feature_name(feature_type), distances[index]);
+    AF_REPORT("descdist.fuse_max", get_feature(feature_type).get_feature_name(), distances[index]);
 }
 
 LocalMapping::FuseCounts LocalMapping::fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points,

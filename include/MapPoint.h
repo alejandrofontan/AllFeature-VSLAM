@@ -77,6 +77,10 @@ public:
 
     Pt compute_distinctive_descriptors();
 
+    // Shares the buffer with the point (no copy): read-only. The point never writes it in place, it
+
+    // replaces it as a whole, so a returned Mat stays valid and unchanged. Empty before the first observation.
+
     cv::Mat get_descriptor() const;
 
     // ========================================================================
@@ -174,7 +178,8 @@ protected:
     // Descriptor
     // ========================================================================
 
-    // Best descriptor to fast matching
+    // The representative descriptor: the observation's with the least median distance to the others
+    // (compute_distinctive_descriptors). Empty until the first observation.
     cv::Mat descriptor_;
 
     // ========================================================================

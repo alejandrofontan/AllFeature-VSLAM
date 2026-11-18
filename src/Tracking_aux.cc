@@ -138,7 +138,7 @@ void Tracking::apply_features_fraction()
         const int max_num_features = features_budget(ft, features_fraction);
         feature_extractor_left_.at(ft)->set_budget(max_num_features);
         init_feature_extractor_.at(ft)->set_budget(params.init_extractor_features_scale * max_num_features);
-        AF_INFO("[Tracking] " << get_feature_name(ft) << ": " << max_num_features
+        AF_INFO("[Tracking] " << get_feature(ft).get_feature_name() << ": " << max_num_features
                 << " keypoints per frame (features fraction " << features_fraction << ")");
     }
 }

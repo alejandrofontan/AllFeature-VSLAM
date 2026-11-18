@@ -1,13 +1,15 @@
 #include "KeyFrame.h"
+
+#include <algorithm>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+
 #include "afvslam_log.hpp"
 #include "Converter.h"
 #include "Map.h"
 #include "MapPoint.h"
-#include <mutex>
-#include <algorithm>
-#include <memory>
-#include <stdexcept>
-#include <string>
 
 namespace AF_VSLAM
 {

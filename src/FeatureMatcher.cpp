@@ -281,7 +281,7 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
             keyframe_data.descriptors, frame_data.descriptors,
             keyframe_data.keypoints, frame_data.keypoints, ft,
             image_size(*keyframe->calibration), image_size(*frame.calibration));
-        AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
+        AF_REPORT("matches.raw", get_feature(ft).get_feature_name(), matches.size());
 
         if (!matches.empty())
             matches_by_type[ft] = std::move(matches);
@@ -319,9 +319,9 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
         }
     }
     for ([[maybe_unused]] const auto& ft : feat_types) {
-        AF_REPORT("matches.filtered", get_feature_name(ft),
+        AF_REPORT("matches.filtered", get_feature(ft).get_feature_name(),
                   frame_side.count(ft) ? frame_side.at(ft).size() : 0);
-        AF_REPORT("matches.with_point", get_feature_name(ft), matches_count.at(ft));
+        AF_REPORT("matches.with_point", get_feature(ft).get_feature_name(), matches_count.at(ft));
     }
 
     // 4. Cache every filtered pair on the frame, keyed by the keyframe
@@ -403,8 +403,8 @@ void FeatureMatcher::match_keyframe_to_keyframes(const Keyframe& keyframe, const
 
     // 4. Report: totals over the pairs matched in this call
     for (int f = 0; f < num_feature_types; f++) {
-        AF_REPORT("matches.raw", get_feature_name(feat_types[f]), num_raw[f]);
-        AF_REPORT("matches.filtered", get_feature_name(feat_types[f]), num_filtered[f]);
+        AF_REPORT("matches.raw", get_feature(feat_types[f]).get_feature_name(), num_raw[f]);
+        AF_REPORT("matches.filtered", get_feature(feat_types[f]).get_feature_name(), num_filtered[f]);
     }
 }
 
@@ -449,7 +449,7 @@ std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::ma
         matches_by_type[ft] = match_descriptors(data1.descriptors, data2.descriptors,
                                                 data1.keypoints, data2.keypoints, ft,
                                                 image_size(*frame1.calibration), image_size(*frame2.calibration));
-        AF_REPORT("matches.raw", get_feature_name(ft), matches_by_type.at(ft).size());
+        AF_REPORT("matches.raw", get_feature(ft).get_feature_name(), matches_by_type.at(ft).size());
     }
 
     // 2. Geometric filter: one model for all feature types
@@ -466,7 +466,7 @@ std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::ma
             matched_pairs[ft].emplace_back(size_t(match.queryIdx), size_t(match.trainIdx));
 
     for ([[maybe_unused]] const auto& ft : feat_types)
-        AF_REPORT("matches.filtered", get_feature_name(ft), matched_pairs.at(ft).size());
+        AF_REPORT("matches.filtered", get_feature(ft).get_feature_name(), matched_pairs.at(ft).size());
 
     return matched_pairs;
 }
@@ -623,10 +623,10 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
         });
 
     for ([[maybe_unused]] const auto& [ft, counts] : counts_by_type) {
-        AF_REPORT("points.candidates", get_feature_name(ft), counts.candidates);
-        AF_REPORT("keypoints.unmatched", get_feature_name(ft), counts.free_keypoints);
-        AF_REPORT("matches.raw", get_feature_name(ft), counts.with_keypoint);
-        AF_REPORT("matches.accepted", get_feature_name(ft), counts.accepted);
+        AF_REPORT("points.candidates", get_feature(ft).get_feature_name(), counts.candidates);
+        AF_REPORT("keypoints.unmatched", get_feature(ft).get_feature_name(), counts.free_keypoints);
+        AF_REPORT("matches.raw", get_feature(ft).get_feature_name(), counts.with_keypoint);
+        AF_REPORT("matches.accepted", get_feature(ft).get_feature_name(), counts.accepted);
     }
 }
 
@@ -636,6 +636,9 @@ void FeatureMatcher::match_map_points_to_keyframe(const Keyframe& keyframe, cons
                                                   const float gate_scale_sigma2,
                                                   const Descriptor_Distance_Type max_descriptor_distance)
 {
+    if (keyframe->is_bad())   // a culled keyframe takes no new points
+        return;
+
     AF_REPORT_SCOPE();
 
     [[maybe_unused]] const std::map<FeatureType, GateMatchCounts> counts_by_type = match_points_in_gate(
@@ -652,13 +655,13 @@ void FeatureMatcher::match_map_points_to_keyframe(const Keyframe& keyframe, cons
         });
 
     [[maybe_unused]] const auto counts_it = counts_by_type.find(feat_type);
-    AF_REPORT("points.candidates", get_feature_name(feat_type),
+    AF_REPORT("points.candidates", get_feature(feat_type).get_feature_name(),
               counts_it == counts_by_type.end() ? 0 : counts_it->second.candidates);
-    AF_REPORT("keypoints.unmatched", get_feature_name(feat_type),
+    AF_REPORT("keypoints.unmatched", get_feature(feat_type).get_feature_name(),
               counts_it == counts_by_type.end() ? 0 : counts_it->second.free_keypoints);
-    AF_REPORT("matches.raw", get_feature_name(feat_type),
+    AF_REPORT("matches.raw", get_feature(feat_type).get_feature_name(),
               counts_it == counts_by_type.end() ? 0 : counts_it->second.with_keypoint);
-    AF_REPORT("matches.accepted", get_feature_name(feat_type),
+    AF_REPORT("matches.accepted", get_feature(feat_type).get_feature_name(),
               counts_it == counts_by_type.end() ? 0 : counts_it->second.accepted);
 }
 

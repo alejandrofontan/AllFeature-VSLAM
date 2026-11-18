@@ -109,12 +109,3 @@ inline FeatureType get_feature_type(const std::string& str) {
     throw std::runtime_error("unknown feature '" + str + "' in `features:`; known features are "
                             + known);
 }
-
-// The settings-yaml name of a FeatureType; "unknown" for a value missing from the table.
-inline const std::string& get_feature_name(const FeatureType feature_type) {
-    static const std::string unknown{"unknown"};
-    for (const auto& [name, type] : feature_name_table())
-        if (type == feature_type)
-            return name;
-    return unknown;
-}

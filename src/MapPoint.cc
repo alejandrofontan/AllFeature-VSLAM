@@ -85,10 +85,9 @@ void MapPoint::add_observations(const std::vector<std::pair<Keyframe, KeypointIn
         std::unique_lock<std::mutex> lock(features_mutex_);
         for(const auto& [keyframe, index] : new_observations)
         {
-            if(observations_.count(keyframe->keyId))
+            if(!observations_.try_emplace(keyframe->keyId, Observation{keyframe, index}).second)
                 continue;
 
-            observations_[keyframe->keyId] = Observation{keyframe, index};
             increase_observability(keyframe, index);
             inserted = true;
         }
@@ -102,14 +101,13 @@ void MapPoint::erase_observation(const Keyframe& keyframe)
     bool removePoint = false;
     {
         std::unique_lock<std::mutex> lock(features_mutex_);
-        if(observations_.count(keyframe->keyId))
+        if(const auto it = observations_.find(keyframe->keyId); it != observations_.end())
         {
-            KeypointIndex index = observations_[keyframe->keyId].index;
-            decrease_observability(keyframe, index);
+            decrease_observability(keyframe, it->second.index);
 
-            observations_.erase(keyframe->keyId);
+            observations_.erase(it);
 
-            if(ref_keyframe_->keyId == keyframe->keyId && !observations_.empty())
+            if((!ref_keyframe_ || ref_keyframe_->keyId == keyframe->keyId) && !observations_.empty())
                 ref_keyframe_ = observations_.begin()->second.keyframe;
 
             removePoint = (static_cast<int>(observations_.size()) <= min_observing_keyframes);
@@ -284,7 +282,7 @@ void MapPoint::update_normal_and_depth()
     if(observations.empty())
         return;
 
-    if(observations.find(ref_keyframe->keyId) == observations.end())
+    if(!ref_keyframe || observations.find(ref_keyframe->keyId) == observations.end())
         return;
 
     vec3f normal{vec3f::Zero()};
@@ -294,9 +292,14 @@ void MapPoint::update_normal_and_depth()
         Keyframe keyframe = obs.second.keyframe;
         vec3f camera_centre = keyframe->get_twc();
         vec3f viewing_direction = world_pos - camera_centre;
-        normal = normal + viewing_direction / viewing_direction.norm();
+        const float distance = viewing_direction.norm();
+        if(distance <= 0.0f)
+            continue;   // the point at a camera centre has no viewing direction: it would make the normal NaN
+        normal = normal + viewing_direction / distance;
         num_observers++;
     }
+    if(num_observers == 0)
+        return;
 
     vec3f ref_to_point = world_pos - ref_keyframe->get_twc();
     const float dist = ref_to_point.norm();
@@ -372,6 +375,7 @@ void MapPoint::set_bad_flag()
         bad_ = true;
         observations = observations_;
         observations_.clear();
+        ref_keyframe_.reset();   // a dead point must not keep a keyframe alive
     }
     for(auto& obs: observations)
     {
@@ -400,6 +404,7 @@ void MapPoint::replace(const Pt& replacement)
         std::unique_lock<std::mutex> lock(features_mutex_);
         observations = observations_;
         observations_.clear();
+        ref_keyframe_.reset();   // as in set_bad_flag
         bad_ = true;
         num_visible = num_visible_;
         num_found = num_found_;
