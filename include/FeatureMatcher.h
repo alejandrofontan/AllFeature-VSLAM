@@ -30,35 +30,21 @@ public:
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // The matches between the keypoints of two images, for one feature type, with the matcher that feature
-    // declares: LightGlue for the learned features, mutual nearest neighbour brute force (no distance threshold)
-    // for the others. queryIdx indexes the first set, trainIdx the second. `distance` is 1 - score for LightGlue
-    // and the L2 or Hamming distance for brute force: not comparable across feature types.
-    // `image_width` x `image_height` is the size of the image both keypoint sets were detected in (the frame's
-    // calibration); LightGlue normalises the keypoints with it. Unused by the brute-force matchers.
     std::vector<cv::DMatch> match_descriptors(const cv::Mat& desc1, const cv::Mat& desc2,
         const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type,
-        int image_width, int image_height);
+        cv::Size image_size1, cv::Size image_size2);
 
-    // Robust geometric match filtering via PoseLib LO-RANSAC: a fundamental matrix, a homography if that finds
-    // no consensus, and the matches unfiltered if neither does. It replaced OpenCV's findFundamentalMat/USAC,
-    // which threw on degenerate inputs and ground for seconds per call at zero-baseline frames.
-    // Every match takes part and the result keeps the input order; there is no cap on the count.
-    // Every queryIdx / trainIdx must be a valid index into kps1 / kps2.
-    static constexpr double filter_inlier_threshold_px = 3.0;  // Sampson (F) / transfer (H) error, pixels
+    static constexpr double filter_inlier_threshold_px = 3.0;  // RANSAC's Sampson error and refinement loss, pixels
     static constexpr size_t filter_min_inliers = 8;            // fewer: the model is rejected
     static constexpr size_t filter_min_iterations = 100;       // RANSAC rounds, lower and upper bound
     static constexpr size_t filter_max_iterations = 1000;
     static std::vector<cv::DMatch> filter_matches_geometric(const std::vector<cv::DMatch>& matches,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2);
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
+        const std::vector<mat2f>& sigma2_1, const std::vector<mat2f>& sigma2_2,
+        const Calibration& calibration1, const Calibration& calibration2);
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    // Matches features from a keyframe to a frame across all requested feature types.
-    // Matches descriptors per type, filters outliers jointly with PoseLib LO-RANSAC, and associates
-    // inlier matches to map points. Writes the frame's match cache; the keyframe is not modified.
-    // Returns the number of valid map point matches per feature type.
     std::map<FeatureType, int> match_keyframe_to_frame(const Keyframe& keyframe, Frame& frame,
         std::map<FeatureType, std::vector<Pt>>& map_pts_matches,
         const std::vector<FeatureType>& feat_types);
@@ -152,12 +138,10 @@ public:
 
 protected:
 
-    // filter_matches_geometric on the matches of several feature types at once: one model is fitted to all of
-    // them, since every type sees the same two views. `matches_by_type` holds per-type keypoint indices into
-    // features1 (queryIdx) and features2 (trainIdx); so does the result, which keeps the surviving matches.
     static std::map<FeatureType, std::vector<cv::DMatch>> filter_matches_geometric_jointly(
         const std::map<FeatureType, std::vector<cv::DMatch>>& matches_by_type,
-        const FeatureData& features1, const FeatureData& features2);
+        const FeatureData& features1, const FeatureData& features2,
+        const Calibration& calibration1, const Calibration& calibration2);
 
     string name{};
 

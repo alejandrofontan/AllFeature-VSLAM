@@ -132,7 +132,7 @@ void LightGlueOnnx::read_sidecar(const std::string& path)
 
 std::vector<cv::DMatch> LightGlueOnnx::match(const std::vector<cv::KeyPoint>& keypoints0, const cv::Mat& descriptors0,
                                              const std::vector<cv::KeyPoint>& keypoints1, const cv::Mat& descriptors1,
-                                             int image_width, int image_height)
+                                             const cv::Size image_size0, const cv::Size image_size1)
 {
     const auto t_start = Clock::now();
     std::vector<cv::DMatch> matches;
@@ -149,12 +149,14 @@ std::vector<cv::DMatch> LightGlueOnnx::match(const std::vector<cv::KeyPoint>& ke
     const int rows = padded_length_ > 0 ? padded_length_ : 0;                 // the graph's rows per side (0: n0 / n1)
     const int r0 = rows > 0 ? rows : n0, r1 = rows > 0 ? rows : n1;
 
-    // upstream normalize_keypoints with image_size = [W, H]: shift = size / 2, scale = max(size) / 2
-    const float shift_x = image_width / 2.0f, shift_y = image_height / 2.0f;
-    const float scale = std::max(image_width, image_height) / 2.0f;
+    // upstream normalize_keypoints with each side's image_size = [W, H]: shift = size / 2, scale = max(size) / 2
     SideBuffers s0, s1;
-    pack_side(keypoints0, descriptors0, input_dim_, add_scale_ori_, shift_x, shift_y, scale, rows, mask_padded_value_, s0);
-    pack_side(keypoints1, descriptors1, input_dim_, add_scale_ori_, shift_x, shift_y, scale, rows, mask_padded_value_, s1);
+    pack_side(keypoints0, descriptors0, input_dim_, add_scale_ori_, image_size0.width / 2.0f,
+              image_size0.height / 2.0f, std::max(image_size0.width, image_size0.height) / 2.0f, rows,
+              mask_padded_value_, s0);
+    pack_side(keypoints1, descriptors1, input_dim_, add_scale_ori_, image_size1.width / 2.0f,
+              image_size1.height / 2.0f, std::max(image_size1.width, image_size1.height) / 2.0f, rows,
+              mask_padded_value_, s1);
 
     std::vector<TensorView> inputs{
         {"keypoints_0", s0.keypoints.data(), {1, r0, 2}},

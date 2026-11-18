@@ -20,6 +20,7 @@ namespace AF_VSLAM {
     // double, matching the literals they replace: the float members below initialize from these
     // and get the same float, while Sim3Solver's double arithmetic is unchanged.
     namespace ChiSquared {
+        inline constexpr double dof1_95{3.841};
         inline constexpr double dof2_95{5.991};
         inline constexpr double dof2_99{9.210};
         inline constexpr double dof3_95{7.815};

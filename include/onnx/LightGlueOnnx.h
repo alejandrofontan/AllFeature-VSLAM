@@ -57,10 +57,11 @@ class LightGlueOnnx
     LightGlueOnnx(const std::string& onnx_path, const OrtSettings& settings, const std::string& sidecar_path = "");
 
     /// Match set 0 against set 1. Descriptors: [N, input_dim] CV_32F, one row per keypoint, as the extractor
-    /// produced them. `image_width/height`: the frame size both sets live in (keypoint normalisation).
+    /// produced them. `image_size0/1`: the size of the image each set was detected in (keypoint normalisation,
+    /// per side: the two may come from different cameras).
     std::vector<cv::DMatch> match(const std::vector<cv::KeyPoint>& keypoints0, const cv::Mat& descriptors0,
                                   const std::vector<cv::KeyPoint>& keypoints1, const cv::Mat& descriptors1,
-                                  int image_width, int image_height);
+                                  cv::Size image_size0, cv::Size image_size1);
 
     [[nodiscard]] const std::string& features() const { return features_; }
     [[nodiscard]] int input_dim() const { return input_dim_; }

@@ -250,11 +250,11 @@ int main(int argc, char** argv)
         reference_to_features(ref1, kps1, desc1);
 
         AF_VSLAM::onnx::LightGlueOnnx lg(model, settings);
-        std::vector<cv::DMatch> got = lg.match(kps0, desc0, kps1, desc1, ref0.width, ref0.height);
+        std::vector<cv::DMatch> got = lg.match(kps0, desc0, kps1, desc1, cv::Size(ref0.width, ref0.height), cv::Size(ref1.width, ref1.height));
         std::vector<double> graph_ms, total_ms;
         for (int i = 0; i < iters; ++i)
         {
-            lg.match(kps0, desc0, kps1, desc1, ref0.width, ref0.height);
+            lg.match(kps0, desc0, kps1, desc1, cv::Size(ref0.width, ref0.height), cv::Size(ref1.width, ref1.height));
             graph_ms.push_back(lg.last_graph_ms());
             total_ms.push_back(lg.last_total_ms());
         }
