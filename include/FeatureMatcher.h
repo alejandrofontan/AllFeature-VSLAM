@@ -79,11 +79,16 @@ public:
 
     // The same search on a keyframe's keypoints of one feature type, writing into a vector the caller owns:
     // `matched_points` has one slot per keypoint of `feat_type`; a keypoint is free when its slot is empty, and an
-    // accepted match fills it. The keyframe is not modified.
-    // Used in: LoopClosing::search_loop_map_points
+    // accepted match fills it. The keyframe is not modified. An all-empty `matched_points` makes every keypoint a
+    // target, occupied or not, which is what fusion wants. `gate_scale_sigma2` replaces the gate above, and a pair
+    // whose descriptor distance exceeds `max_descriptor_distance` is dropped (only fusion sets it).
+    // Used in: LoopClosing::search_loop_map_points, LoopClosing::search_and_fuse, LocalMapping::fuse_into_keyframe
     void match_map_points_to_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_pts,
                                       const std::vector<cv::Point2f>& projections,
-                                      FeatureType feat_type, std::vector<Pt>& matched_points);
+                                      FeatureType feat_type, std::vector<Pt>& matched_points,
+                                      float gate_scale_sigma2 = projection_match_scale_sigma2,
+                                      Descriptor_Distance_Type max_descriptor_distance =
+                                          std::numeric_limits<Descriptor_Distance_Type>::max());
 
     // Makes sure the matches between `keyframe` and each of `others` are in `keyframe`'s match cache: pairs
     // already cached are skipped; the rest are matched (all pairs and feature types in parallel), filtered
@@ -114,17 +119,6 @@ public:
     std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> match_frames_for_initialization(const Frame& frame1,
         const Frame& frame2, const std::vector<FeatureType>& feat_types);
 
-    // Projects map points into a keyframe and fuses them with existing keypoints.
-    // Applies visibility checks (depth, image bounds, scale, viewing angle), then matches by descriptor distance within radius_th.
-    // Replaces the weaker map point if one already exists, or adds a new observation.
-    // Used in: LocalMapping::SearchInNeighbors
-    const float cos_viewing_angle_th = 0.5f;
-    const float chi2_perc = ChiSquared::dof2_95;
-    int fuse_map_points_to_keyframe(const Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type);
-
-    int fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f& Scw,
-        const std::vector<Pt> &map_pts, const float& radius_th, vector<Pt> &replace_pts, const FeatureType& feat_type);
-
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -137,14 +131,10 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    static void setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType);
 
 public:
 
     static VerbosityLevel verbosity;
-    static std::map<FeatureType, Descriptor_Distance_Type> TH_LOW;
-    static float radiusScale;
 
 protected:
 
@@ -156,8 +146,6 @@ protected:
         const FeatureData& features1, const FeatureData& features2);
 
     string name{};
-
-    const Descriptor_Distance_Type highest_possible_distance{std::numeric_limits<Descriptor_Distance_Type>::max()};
 
     // Matching options
     std::vector<FeatureType> feature_types;

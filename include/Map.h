@@ -1,7 +1,9 @@
 #pragma once
 
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -57,6 +59,17 @@ public:
     long unsigned int get_max_keyframe_id();
 
     // ========================================================================
+    // Fusion's descriptor distance
+    // ========================================================================
+
+    // The largest descriptor distance at which fusion still accepts a match, per feature type.
+    // Estimated by Local Mapping at every keyframe (a quantile of the distances between map points'
+    // descriptors and their own observations) and read by both fusions, Local Mapping's and Loop
+    // Closing's. Empty for a type until its first estimate.
+    void set_fuse_max_descriptor_distance(FeatureType feature_type, Descriptor_Distance_Type distance);
+    [[nodiscard]] std::optional<Descriptor_Distance_Type> get_fuse_max_descriptor_distance(FeatureType feature_type) const;
+
+    // ========================================================================
     // Lifecycle
     // ========================================================================
 
@@ -105,7 +118,9 @@ protected:
     // Locks
     // ========================================================================
 
-    std::mutex map_mutex_;
+    std::map<FeatureType, Descriptor_Distance_Type> fuse_max_descriptor_distance_;
+
+    mutable std::mutex map_mutex_;
 };
 
 }

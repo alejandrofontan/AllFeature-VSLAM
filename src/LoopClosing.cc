@@ -642,24 +642,87 @@ std::map<KeyframeId, LoopConnections> LoopClosing::loop_connections_after_fusion
     return loop_connections;
 }
 
-// Projects the loop-side map points into every corrected keyframe (with its corrected
-// pose) and merges the duplicates found there into the loop-side points
+// Projects the loop-side map points into every corrected keyframe (with its corrected pose) and
+// fuses them there by FeatureMatcher's gated mutual search, every keypoint a target, at most the
+// map's fuse descriptor distance apart (Map::get_fuse_max_descriptor_distance): a match on
+// an empty keypoint adds the observation; a match on a keypoint holding another point merges that
+// point into the loop-side one, under the map update lock.
 void LoopClosing::search_and_fuse(const KeyframePoses& corrected_poses)
 {
-    for(const auto& [corrected_keyframe, g2o_Scw] : corrected_poses)
-    {
-        Keyframe keyframe = corrected_keyframe;   // fuse_map_points_to_keyframe takes a non-const reference
-        const mat4f Scw = Converter::to_matrix4f(g2o_Scw);
+    AF_REPORT_SCOPE();
+    [[maybe_unused]] int num_observed = 0;
+    [[maybe_unused]] int num_replaced = 0;
 
-        std::vector<Pt> replaced_points(loop_map_points_.size(), nullptr);
-        matcher_->fuse_map_points_to_keyframe(keyframe, Scw, loop_map_points_, params.fuse_radius, replaced_points,
-                                              verification_feature_);
+    // Local Mapping's estimate (LocalMapping::estimate_fuse_max_descriptor_distance); none yet: no fusion
+    const std::optional<Descriptor_Distance_Type> max_descriptor_distance =
+        map_->get_fuse_max_descriptor_distance(verification_feature_);
+    if(!max_descriptor_distance)
+        return;
+
+    for(const auto& [keyframe, g2o_Scw] : corrected_poses)
+    {
+        // Scw = [sR | t] is a Sim3; the visibility tests want the SE3 [R | t/s] that projects
+        // the same way, in the map's metric (the scale-range test compares distances)
+        const mat4f Scw = Converter::to_matrix4f(g2o_Scw);
+        const float scale = Scw.block<3,3>(0,0).row(0).norm();
+        mat4f Tcw = mat4f::Identity();
+        Tcw.block<3,3>(0,0) = Scw.block<3,3>(0,0) / scale;
+        Tcw.block<3,1>(0,3) = Scw.block<3,1>(0,3) / scale;
+        Pose pose;
+        if(!pose.set(Tcw))
+            continue;   // a non-finite corrected pose: nothing can be projected
+
+        std::vector<Pt> candidates;
+        std::vector<cv::Point2f> projections;
+        for(const Pt& pt : loop_map_points_)
+        {
+            if(!pt || pt->is_bad() || pt->featureType != verification_feature_ || pt->is_in_keyframe(keyframe))
+                continue;
+            const std::optional<Projection> projection =
+                project_if_visible(pose, *keyframe->calibration, pt, params.fuse_viewing_cos_limit);
+            if(!projection)
+                continue;
+            candidates.push_back(pt);
+            projections.push_back(projection->uv);
+        }
+
+        std::vector<Pt> matches(keyframe->features.at(verification_feature_).count());
+        matcher_->match_map_points_to_keyframe(keyframe, candidates, projections, verification_feature_, matches,
+                                               FeatureMatcher::projection_match_scale_sigma2, *max_descriptor_distance);
+
+        std::vector<std::pair<Pt, Pt>> replacements;   // (the keyframe's point, the loop point replacing it)
+        for(size_t idx = 0; idx < matches.size(); idx++)
+        {
+            const Pt& pt = matches[idx];
+            if(!pt)
+                continue;
+            const KeypointIndex index = static_cast<KeypointIndex>(idx);
+            const Pt existing = keyframe->get_map_point(index, verification_feature_);
+            if(existing)
+            {
+                if(!existing->is_bad())
+                    replacements.emplace_back(existing, pt);
+            }
+            // Publish first, observe only if the slot was won (see LocalMapping::fuse_into_keyframe)
+            else if(keyframe->add_map_point(pt, index))
+            {
+                pt->add_observation(keyframe, index);
+                num_observed++;
+            }
+        }
 
         std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
-        for(size_t i = 0; i < loop_map_points_.size(); i++)
-            if(replaced_points[i])
-                replaced_points[i]->replace(loop_map_points_[i]);
+        for(const auto& [existing, loop_point] : replacements)
+        {
+            existing->replace(loop_point);
+            num_replaced++;
+        }
     }
+
+    AF_REPORT("fuse.keyframes", "", corrected_poses.size());
+    AF_REPORT("fuse.loop_points", "", loop_map_points_.size());
+    AF_REPORT("fuse.fused", "", num_observed + num_replaced);   // as before: matches that changed the map
+    AF_REPORT("fuse.replaced", "", num_replaced);               // of those, a duplicate merged into the loop point
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

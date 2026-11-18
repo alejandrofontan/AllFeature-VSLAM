@@ -25,11 +25,7 @@ using namespace std;
 namespace AF_VSLAM
 {
 
-std::map<FeatureType, Descriptor_Distance_Type> FeatureMatcher::TH_LOW = {};
-
 VerbosityLevel FeatureMatcher::verbosity{MEDIUM};
-
-float FeatureMatcher::radiusScale{1.15f};
 
 namespace
 {
@@ -165,12 +161,13 @@ struct GateMatchCounts
 //
 // Per feature type, a candidate and a free keypoint can be paired only if the keypoint lies
 // inside the gate around the candidate's projection: the squared offset, in units of the
-// keypoint's own position variance, below projection_match_scale_sigma2. Among the pairs the
+// keypoint's own position variance, below `gate`. Among the pairs the
 // gate allows, a pair is accepted when each side is the other's best descriptor match: the
 // candidate's nearest keypoint, and that keypoint's nearest candidate. So the search is local
 // -- a correct keypoint next to the projection is never lost to a better-looking one elsewhere
 // in the image -- and it needs no descriptor-distance threshold: mutual agreement is what
-// rejects a candidate whose window holds nothing right.
+// rejects a candidate whose window holds nothing right. `max_distance` drops a mutual pair whose
+// descriptor distance is larger (the type's maximum value: no limit).
 //
 // The three callables adapt it to where the keypoints live and where the result goes:
 //   keypoints_in_area(x, y, radius, feature_type) -> indices of the keypoints near (x, y)
@@ -179,13 +176,13 @@ struct GateMatchCounts
 template <typename KeypointsInArea, typename IsFree, typename Assign>
 std::map<FeatureType, GateMatchCounts> match_points_in_gate(
     const AF_VSLAM::FeatureData& features,
-    const std::vector<AF_VSLAM::Pt>& map_pts, const std::vector<cv::Point2f>& projections,
+    const std::vector<AF_VSLAM::Pt>& map_pts, const std::vector<cv::Point2f>& projections, const float gate,
+    const Descriptor_Distance_Type max_distance,
     const KeypointsInArea& keypoints_in_area, const IsFree& is_free, const Assign& assign)
 {
     using AF_VSLAM::FeatureMatcher;
     using AF_VSLAM::Pt;
     constexpr Descriptor_Distance_Type no_distance = std::numeric_limits<Descriptor_Distance_Type>::max();
-    constexpr float gate = FeatureMatcher::projection_match_scale_sigma2;
 
     // The candidates grouped by feature type: their index in map_pts and their descriptor. One
     // get_descriptor() per point -- it takes the point's lock -- and a point whose descriptor is
@@ -281,6 +278,8 @@ std::map<FeatureType, GateMatchCounts> match_points_in_gate(
             counts.with_keypoint++;
             if (best_candidate[k] != static_cast<int>(c))
                 continue;
+            if (best_keypoint_distance[c] > max_distance)
+                continue;
             assign(ft, static_cast<size_t>(k), map_pts[candidates.indices[c]]);
             counts.accepted++;
         }
@@ -303,7 +302,8 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
     AF_REPORT_SCOPE();
 
     [[maybe_unused]] const std::map<FeatureType, GateMatchCounts> counts_by_type = match_points_in_gate(
-        frame.features, map_pts, projections,
+        frame.features, map_pts, projections, projection_match_scale_sigma2,
+        std::numeric_limits<Descriptor_Distance_Type>::max(),
         [&frame](const float x, const float y, const float radius, const FeatureType ft) {
             return frame.get_features_in_area(x, y, radius, ft);
         },
@@ -326,16 +326,23 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
 // The same search on a keyframe's keypoints of one feature type, writing into a vector the
 // caller owns: `matched_points` has one slot per keypoint of `feat_type`, a keypoint is free
 // when its slot is empty, and an accepted match fills it. The keyframe itself is not modified.
+// An all-empty `matched_points` makes every keypoint a target, occupied or not: what fusion
+// wants. `gate_scale_sigma2` is the gate (see match_points_in_gate); a mutual pair is also
+// dropped when its descriptor distance exceeds `max_descriptor_distance`, which only fusion sets.
 // Reports points.candidates, keypoints.unmatched, matches.raw and matches.accepted.
-// Used in: LoopClosing::search_loop_map_points
+// Used in: LoopClosing::search_loop_map_points, LoopClosing::search_and_fuse,
+//          LocalMapping::fuse_into_keyframe
 void FeatureMatcher::match_map_points_to_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_pts,
                                                   const std::vector<cv::Point2f>& projections,
-                                                  const FeatureType feat_type, std::vector<Pt>& matched_points)
+                                                  const FeatureType feat_type, std::vector<Pt>& matched_points,
+                                                  const float gate_scale_sigma2,
+                                                  const Descriptor_Distance_Type max_descriptor_distance)
 {
     AF_REPORT_SCOPE();
 
     [[maybe_unused]] const std::map<FeatureType, GateMatchCounts> counts_by_type = match_points_in_gate(
-        keyframe->features, map_pts, projections,
+        keyframe->features, map_pts, projections, gate_scale_sigma2,
+        max_descriptor_distance,
         [&keyframe](const float x, const float y, const float radius, const FeatureType ft) {
             return keyframe->get_features_in_area(x, y, radius, ft);
         },
@@ -541,237 +548,10 @@ std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::ma
     return matched_pairs;
 }
 
-// Projects each map point into the keyframe and attempts to fuse it with an existing keypoint.
-// For each map point, applies visibility checks (depth, image bounds, scale, viewing angle),
-// then finds the closest keypoint by descriptor distance within radius_th.
-// If a match is found: replaces the weaker map point if one already exists, or adds a new observation.
-// Returns the number of fused map points.
-// Used in: LocalMapping::SearchInNeighbors
-int FeatureMatcher::fuse_map_points_to_keyframe(const Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type)
-{
-    // One lock: successive get_Rcw()/get_tcw() each take and release pose_mutex_,
-    // so a set_pose landing between them hands back R and t from DIFFERENT poses.
-    const Pose pose = keyframe->get_pose();
-
-    const Descriptor_Distance_Type th_low = TH_LOW[feat_type];
-
-    int n_fused = 0;
-    const auto& kps_ft  = keyframe->features.at(feat_type).keypoints;
-    const auto& desc_ft = keyframe->features.at(feat_type).descriptors;
-
-    // Phase A (issue #13 P45): the per-point search — projection, visibility checks, and
-    // best-descriptor lookup — reads only immutable keyframe data (keypoints, descriptors,
-    // grid; pose snapshotted above) and the point's own state, so it parallelizes. All map
-    // MUTATION happens in phase B below, serially in the original order. One bounded
-    // deviation from strict serial order: a candidate's descriptor search sees its pre-call
-    // descriptor even if an earlier fuse in this same call updated it via replace() (rare
-    // shared-point corner — same information-freshness class as the concurrent cross-thread
-    // descriptor updates that already exist).
-    struct FuseCandidate { int best_idx{-1}; Descriptor_Distance_Type best_dist{}; };
-    std::vector<FuseCandidate> fuse_cand(map_pts.size());
-
-    #pragma omp parallel for schedule(dynamic, 64)
-    for (int iPt = 0; iPt < static_cast<int>(map_pts.size()); iPt++) {
-        const auto& pt = map_pts[iPt];
-        if (!pt)
-            continue;
-
-        if (pt->is_bad() || pt->is_in_keyframe(keyframe))
-            continue;
-
-        // Depth, image bounds, scale-invariance range and viewing angle
-        const std::optional<Projection> projection =
-            project_if_visible(pose, *keyframe->calibration, pt, cos_viewing_angle_th);
-        if (!projection)
-            continue;
-
-        const float u = projection->uv.x;
-        const float v = projection->uv.y;
-
-        // Search in a radius
-        const vector<size_t> area_indices = keyframe->get_features_in_area(u, v, radius_th, feat_type);
-        if (area_indices.empty())
-            continue;
-
-        // Match to the most similar keypoint in the radius
-        const cv::Mat ref_descriptor = pt->get_descriptor();
-        Descriptor_Distance_Type best_dist{highest_possible_distance};
-        int best_idx{-1};
-        for (const size_t idx : area_indices) {
-            // Skip reprojection outliers
-            const float ex = u - kps_ft[idx].pt.x;
-            const float ey = v - kps_ft[idx].pt.y;
-            const float e2 = ex * ex + ey * ey;
-
-            // e2 > chi2 * sigma2, the same shape as the other two chi-squared gates
-            // (LocalMapping.cc:310/318, Sim3Solver.cc:90). The old form multiplied by a stored
-            // 1/sigma2, rounded once at extraction and again here.
-            if (e2 > chi2_perc * keyframe->features.get_sigma2(KeypointIndex(idx), feat_type))
-                continue;
-
-            const cv::Mat &descriptor = desc_ft.row(idx);
-            const Descriptor_Distance_Type desc_dist = descriptor_distance(ref_descriptor, descriptor, pt->featureType);
-
-            // Keep only the closest descriptor match
-            if (desc_dist < best_dist) {
-                best_dist = desc_dist;
-                best_idx = idx;
-            }
-        }
-
-        if (best_dist <= th_low) {
-            fuse_cand[iPt].best_idx = best_idx;
-            fuse_cand[iPt].best_dist = best_dist;
-        }
-    }
-
-    // Phase B — serial fuse in original order. The is_bad/is_in_keyframe re-check is what
-    // makes this equivalent to the former single loop: a replace() earlier in THIS loop can
-    // turn a later candidate bad or add it to the keyframe (points shared between the two
-    // keyframes appear both as candidates and as existing points) — the serial version saw
-    // that through its iteration order, so the state checks must be evaluated here, not in
-    // phase A.
-    for (size_t iPt = 0; iPt < map_pts.size(); iPt++) {
-        const int best_idx = fuse_cand[iPt].best_idx;
-        if (best_idx < 0)
-            continue;
-        const auto& pt = map_pts[iPt];
-        if (pt->is_bad() || pt->is_in_keyframe(keyframe))
-            continue;
-
-        // Fuse: replace weaker map point or add new observation
-        Pt existing_pt = keyframe->get_map_point(best_idx, feat_type);
-        if (existing_pt) {
-            if (!existing_pt->is_bad()) {
-                if (existing_pt->number_of_observations() > pt->number_of_observations())
-                    pt->replace(existing_pt);
-                else
-                    existing_pt->replace(pt);
-            }
-        }
-        else {
-            // Publish first, observe only if we won the slot: get_map_point above released the
-            // lock, so another thread can fill best_idx in between. pt is an existing point
-            // with a descriptor, so publishing before observing is safe here (unlike a freshly
-            // created one -- see KeyFrame::make_map_point).
-            if (keyframe->add_map_point(pt, best_idx))
-                pt->add_observation(keyframe, best_idx);
-        }
-        n_fused++;
-    }
-
-    return n_fused;
-}
-
-// Sim3 overload: projects map points into a keyframe using a Sim3 transform and fuses them.
-// Used in: LoopClosing
-int FeatureMatcher::fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f& Scw,
-    const vector<Pt> &map_pts, const float& radius_th, vector<Pt> &replace_pts, const FeatureType& feat_type)
-{
-
-    // Scw is a Sim3; the visibility tests want the SE3 inside it, scale divided out.
-    const mat3f sRcw = Scw.block<3,3>(0,0);
-    const float scw = sqrt(sRcw.row(0).dot(sRcw.row(0)));
-    mat4f Tcw = mat4f::Identity();
-    Tcw.block<3,3>(0,0) = sRcw / scw;
-    Tcw.block<3,1>(0,3) = Scw.block<3,1>(0,3);
-
-    // A non-finite Sim3 used to reach the loop and fail every per-point test (NaN compares
-    // false), fusing nothing; this says so once instead.
-    Pose pose;
-    if(!pose.set(Tcw))
-        return 0;
-
-    // Set of MapPoints already found in the KeyFrame
-    const std::vector<Pt> spAlreadyFound = keyframe->get_good_map_points(feat_type);
-
-    int nFused=0;
-
-    const size_t nPoints = map_pts.size();
-
-    // For each candidate MapPoint project and match
-    for(size_t iMP=0; iMP<nPoints; iMP++)
-    {
-        const Pt pMP = map_pts[iMP];
-
-        // Discard Bad MapPoints and already found
-        if(pMP->is_bad() || contains_map_point(spAlreadyFound, pMP))
-            continue;
-
-        // Depth, image bounds, scale-invariance range and viewing angle
-        const std::optional<Projection> projection =
-            project_if_visible(pose, *keyframe->calibration, pMP, cos_viewing_angle_th);
-        if(!projection)
-            continue;
-
-        const float u = projection->uv.x;
-        const float v = projection->uv.y;
-        const float dist3D = projection->dist;
-
-        // Search in a radius
-        const float predictedSize = pMP->predict_size(dist3D);
-        const float radius = radiusScale * radius_th * predictedSize;
-
-        const vector<size_t> vIndices = keyframe->get_features_in_area(u,v,radius, feat_type);
-
-        if(vIndices.empty())
-            continue;
-
-        // Match to the most similar keypoint in the radius
-        const cv::Mat refDescriptor = pMP->get_descriptor();
-        Descriptor_Distance_Type bestDist{highest_possible_distance};
-        int bestIdx{-1};
-
-        for(const size_t idx : vIndices)
-        {
-            const cv::Mat &descriptor = keyframe->features.at(feat_type).descriptors.row(idx);
-            const Descriptor_Distance_Type descDist = descriptor_distance(refDescriptor,descriptor,pMP->featureType);
-
-            if(descDist < bestDist)
-            {
-                bestDist = descDist;
-                bestIdx = idx;
-            }
-        }
-
-        // If there is already a MapPoint replace otherwise add new measurement
-        if(bestDist <= TH_LOW[feat_type])
-        {
-            const Pt pMPinKF = keyframe->get_map_point(bestIdx, feat_type);
-            if(pMPinKF)
-            {
-                if(!pMPinKF->is_bad())
-                    replace_pts[iMP] = pMPinKF;
-            }
-            else
-            {
-                // Publish first, observe only on success -- see the note in the fuse above
-                if(keyframe->add_map_point(pMP, bestIdx))
-                    pMP->add_observation(keyframe, bestIdx);
-            }
-            nFused++;
-        }
-    }
-
-    return nFused;
-}
-
 Descriptor_Distance_Type FeatureMatcher::descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_)
 {
     const AF_VSLAM::Feature& ft = get_feature(featureType_);
     return ft.descriptor_distance(a,b);
-}
-
-void FeatureMatcher::setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType) {
-
-    AF_INFO("Loading Feature Matcher Settings from : " + feature_settings_yaml_file);
-    cv::FileStorage fSettings(feature_settings_yaml_file, cv::FileStorage::READ);
-
-    FeatureMatcher::TH_LOW[featureType] = fSettings["FeatureMatcher.TH_LOW"];
-
-    AF_CONFIG_BEGIN("feature_settings_yaml_file");
-        AF_CONFIG_FIELD("FeatureMatcher.TH_LOW", FeatureMatcher::TH_LOW[featureType]);
-    AF_CONFIG_END();
 }
 
 // The matches between the keypoints of two images, for one feature type, with the matcher that

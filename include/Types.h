@@ -12,7 +12,7 @@ namespace AF_VSLAM {
     using Seconds = double;
 
     // Chi-squared critical values. The 2-DOF 95% value was written out as a literal in SIX
-    // places under six names (LocalMapping::CHI2_2DOF, FeatureMatcher::chi2_perc,
+    // places under six names (LocalMapping::CHI2_2DOF, the former FeatureMatcher::chi2_perc,
     // Initializer::chiSquare_th and ::chiSquare_thScore_fund, Tracking::RANSAC_TH2,
     // OptimizerParameters::chi2_2dof) and the 99% one inline in Sim3Solver, unnamed. The local
     // names stay -- each says what its own gate is for -- but the NUMBER is defined once.

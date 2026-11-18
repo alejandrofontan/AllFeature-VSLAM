@@ -4,6 +4,3 @@
 
 # Feature Extractor
 FeatureExtractor.maxNumFeatures: 1000
-
-# Feature Matcher
-FeatureMatcher.TH_LOW: 81.0

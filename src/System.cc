@@ -258,11 +258,6 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         feature_settings_yaml_file[featureType] = ft.get_settings_yaml_file();
     }
 
-    // Initialize matching thresholds
-    for (const auto& featureType : feature_types){
-         FeatureMatcher::setDescriptorDistanceThresholds(feature_settings_yaml_file.at(featureType), featureType);
-    }
-
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
     tracker = make_shared<Tracking>(place_recognition, frameDrawer, mapDrawer,

@@ -83,7 +83,9 @@ struct LocalMappingParameters
     // search_in_neighbors()
     int search_in_neighbors_keyframes{20};       // covisible keyframes fused with the new keyframe
     int search_in_neighbors_second_keyframes{5}; // second-degree neighbors added per covisible keyframe
-    float search_in_neighbors_radius{5.0f};      // projection search radius (pixels) for fusion
+    // fusion accepts a match only if its descriptor distance is at most this quantile of the distances between map
+    // points' descriptors and their own observations (estimated at every keyframe; also used by Loop Closing)
+    float fuse_descriptor_quantile{0.5f};
 
     // cull_keyframes_heuristic()
     float keyframe_culling_redundancy_ratio{0.9f}; // cull when more than this fraction of a keyframe's points is redundant
@@ -163,6 +165,11 @@ protected:
     static constexpr float CHI2_2DOF = ChiSquared::dof2_95;
     static constexpr float HOMOGENEOUS_W_EPSILON{1e-12f};
 
+    // fuse_into_keyframe(): a point is projected only if the keyframe views it within this cosine of its
+    // mean viewing direction (60 deg); the match gate is the 2-DoF 95% quantile of the keypoint's own variance
+    static constexpr float FUSE_VIEWING_COS_LIMIT{0.5f};
+    static constexpr float FUSE_GATE_SCALE_SIGMA2 = ChiSquared::dof2_95;
+
     // One full mapping iteration for the keyframe at the head of the queue (see run())
     void process_keyframe();
     void process_new_keyframe();
@@ -174,6 +181,12 @@ protected:
     // create_new_map_points() helper: back-project unmatched keypoints with depth
     void create_depth_seeded_points();
     void search_in_neighbors();
+    // search_in_neighbors() helper: the fuse_descriptor_quantile quantile of the distances between the current
+    // keyframe's map points' descriptors and their other observations; stored in the map for both fusions
+    void estimate_fuse_max_descriptor_distance(FeatureType feature_type);
+    // search_in_neighbors() helper: fuses `map_points` into `keyframe`'s keypoints of `feature_type`
+    struct FuseCounts { int merged{0}; int observed{0}; };
+    FuseCounts fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points, FeatureType feature_type);
     // Optimizer::LocalBundleAdjustment on the current keyframe (skipped on a too-small map)
     void local_bundle_adjustment();
     // Keyframe culling: dispatches on params.keyframe_culling_method.

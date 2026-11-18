@@ -32,7 +32,6 @@ void LoopClosing::LoadParameters(const cv::FileStorage& fSettings)
     read_if_present("LoopClosing.Sim3MinMatches", params.sim3_min_matches);
     read_if_present("LoopClosing.Sim3MinInliers", params.sim3_min_inliers);
     read_if_present("LoopClosing.LoopMinMatches", params.loop_min_matches);
-    read_if_present("LoopClosing.FuseRadius", params.fuse_radius);
     read_if_present("LoopClosing.GbaIterations", params.gba_iterations);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

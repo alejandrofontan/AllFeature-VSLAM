@@ -60,8 +60,10 @@ struct LoopClosingParameters
     // search_loop_map_points()
     int loop_min_matches{40};   // loop-side map points matched into the current keyframe (RANSAC inliers + projection search) that accept the loop
 
-    // search_and_fuse()
-    float fuse_radius{4.0f};    // projection search radius (pixels) when fusing the loop-side points into the corrected keyframes
+    // search_and_fuse(): a loop point is projected only if the keyframe views it within this cosine of its mean
+    // viewing direction (60 deg). The match gate is FeatureMatcher's default, 8 sigmas: the corrected poses
+    // come from propagating one Sim3 through the essential graph and are only approximate.
+    float fuse_viewing_cos_limit{0.5f};
 
     // run_global_bundle_adjustment()
     int gba_iterations{10};

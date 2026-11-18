@@ -159,6 +159,21 @@ long unsigned int Map::get_max_keyframe_id()
 // Lifecycle
 // ============================================================================
 
+void Map::set_fuse_max_descriptor_distance(const FeatureType feature_type, const Descriptor_Distance_Type distance)
+{
+    unique_lock<mutex> lock(map_mutex_);
+    fuse_max_descriptor_distance_[feature_type] = distance;
+}
+
+std::optional<Descriptor_Distance_Type> Map::get_fuse_max_descriptor_distance(const FeatureType feature_type) const
+{
+    unique_lock<mutex> lock(map_mutex_);
+    const auto it = fuse_max_descriptor_distance_.find(feature_type);
+    if(it == fuse_max_descriptor_distance_.end())
+        return std::nullopt;
+    return it->second;
+}
+
 void Map::clear()
 {
     decltype(map_points_) released_points;
@@ -170,6 +185,7 @@ void Map::clear()
         released_keyframes.swap(keyframes_);
         released_origins.swap(keyframe_origins_);
         max_keyframe_id_ = 0;
+        fuse_max_descriptor_distance_.clear();
     }
 }
 
