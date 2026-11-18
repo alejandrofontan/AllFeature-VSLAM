@@ -251,19 +251,11 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     frameDrawer = make_shared<FrameDrawer>(mpMap,feature_types);
     mapDrawer = make_shared<MapDrawer>(mpMap, strSettingsFile,feature_types);
 
-    // Feature settings yaml file
-    std::map<FeatureType, string> feature_settings_yaml_file;
-    for (const auto& featureType : feature_types){
-        const AF_VSLAM::Feature& ft = get_feature(featureType);
-        feature_settings_yaml_file[featureType] = ft.get_settings_yaml_file();
-    }
-
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
     tracker = make_shared<Tracking>(place_recognition, frameDrawer, mapDrawer,
                              mpMap,
                              strCalibrationFile, strSettingsFile,
-                             feature_settings_yaml_file,
                              feature_types, fixImageSize);
 
     //Initialize the Local Mapping thread and launch

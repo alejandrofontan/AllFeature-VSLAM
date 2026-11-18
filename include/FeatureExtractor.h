@@ -34,15 +34,9 @@ class FeatureExtractorSettings
 {
 public:
 
-    int max_num_features;
+    int max_num_features;   // keypoints per frame: Tracking's share of the feature's get_max_features(); 0: none
 
-    FeatureExtractorSettings(const FeatureType& feature_type,
-                             const std::string &settings_yaml_file);
-
-    [[nodiscard]] int required_int(const std::string& key) const;
-    [[nodiscard]] float required_float(const std::string& key) const;
-
-    std::string settings_yaml_file;
+    FeatureExtractorSettings(const FeatureType& feature_type, int max_num_features);
 
     FeatureType feature_type;
 
@@ -59,6 +53,10 @@ public:
     std::shared_ptr<FeatureExtractorSettings> settings{};
 
     void operator()(const Image& img, KeypointData& data);
+
+    // Changes the keypoint budget (settings->max_num_features). An extractor that derives something from
+    // it at construction redoes that here (orb32: the per-level split; sift128: cv::SIFT's nfeatures).
+    virtual void set_budget(int max_num_features) { settings->max_num_features = max_num_features; }
 
 protected:
 

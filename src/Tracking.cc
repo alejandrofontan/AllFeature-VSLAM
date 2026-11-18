@@ -9,6 +9,7 @@
 #include "Tracking.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <limits>
 #include <iostream>
@@ -60,6 +61,9 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.InitMinTrackedPoints", params.init_min_tracked_points);
     read_if_present("Tracking.InitMinDepthSamples", params.init_min_depth_samples);
     read_if_present("Tracking.InitExtractorFeaturesScale", params.init_extractor_features_scale);
+    float features_fraction = params.features_fraction.load();
+    read_if_present("Tracking.FeaturesFraction", features_fraction);
+    params.features_fraction.store(features_fraction);
     read_if_present("Tracking.NominalImageArea", params.nominal_image_area);
     read_if_present("Tracking.ImageWidth", params.image_width);
     read_if_present("Tracking.ImageHeight", params.image_height);
@@ -104,7 +108,6 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
                    std::shared_ptr<FrameDrawer> frame_drawer, std::shared_ptr<MapDrawer> map_drawer,
                    std::shared_ptr<Map> map,
                    const std::string& calibration_yaml, const std::string& settings_yaml,
-                   const std::map<FeatureType, std::string>& feature_settings_yaml_file,
                    const std::vector<FeatureType>& feature_types,
                    const bool fix_image_size):
     feature_types_(feature_types), place_recognition_(std::move(place_recognition)),
@@ -115,10 +118,13 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
     // Frame window for the post-relocalization embargo/strictness (~1 s at the camera rate)
     max_frames_ = static_cast<size_t>(fps_);
 
-    // One extractor pair per feature type: normal, and a denser one for initialization
+    // One extractor pair per feature type: normal, and a denser one for initialization, with the budget
+    // of Tracking.FeaturesFraction (features_budget); apply_features_fraction updates it later
+    features_fraction_in_use_ = std::clamp(params.features_fraction.load(), 0.0f, 1.0f);
     for (const FeatureType ft : feature_types){
-        feature_extractor_left_[ft] = get_feature_extractor(1, feature_settings_yaml_file.at(ft), ft);
-        init_feature_extractor_[ft] = get_feature_extractor(params.init_extractor_features_scale, feature_settings_yaml_file.at(ft), ft);
+        const int max_num_features = features_budget(ft, features_fraction_in_use_);
+        feature_extractor_left_[ft] = get_feature_extractor(max_num_features, ft);
+        init_feature_extractor_[ft] = get_feature_extractor(params.init_extractor_features_scale * max_num_features, ft);
     }
 
     matcher_ = std::make_shared<FeatureMatcher>(feature_types, "Tracking");
@@ -136,6 +142,9 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     // (OrtSession, Threading). Set per frame rather than once: this is the thread's entry point,
     // and the flag is a thread-local bool.
     onnx::set_run_priority(true);
+
+    // A Features Fraction moved in the viewer takes effect from this frame
+    apply_features_fraction();
 
     GrabProfiler profiler{};
 

@@ -14,7 +14,7 @@ public:
     const std::string& get_feature_name() const override { return s_feature_name; }
     FeatureType get_type() const override { return FEAT_ORB32; }
     MatcherType get_matcher_type() const override { return BF_HAMMING; }
-    const std::string& get_settings_yaml_file() const override { return s_settings_yaml_file; }
+    int get_max_features() const override { return s_max_features; }
 
     const Eigen::Matrix<float,3,1>& get_color() const override { return s_color; }
     float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override;
@@ -22,7 +22,7 @@ public:
         std::shared_ptr<FeatureExtractorSettings> settings) const override;
 private:
     inline static const std::string s_feature_name = "orb32";
-    inline static const std::string s_settings_yaml_file = "settings/orb32_settings.yaml";
+    inline static constexpr int s_max_features{4000};   // keypoints per frame at Tracking.FeaturesFraction 1
     inline static const Eigen::Matrix<float,3,1> s_color = {129, 149, 251};
 };
 
@@ -33,8 +33,8 @@ public:
     const int PATCH_SIZE = 31;
     const int HALF_PATCH_SIZE = 15;
     const int EDGE_THRESHOLD = 19;
-    const int num_octaves;        // pyramid levels (FeatureExtractor.num_octaves)
-    const float scale_factor;   // scale between consecutive levels (FeatureExtractor.scale_factor)
+    const int num_octaves{8};        // pyramid levels
+    const float scale_factor{1.2f};  // scale between consecutive levels
     std::vector<float> scale_factors;
     std::vector<float> inv_scale_factors;
     std::vector<cv::Mat> image_pyramid;
@@ -42,7 +42,7 @@ public:
     // holds the inner (border-free) view. Kept between frames so a pyramid of an unchanged
     // frame size costs no allocation; see compute_pyramid.
     std::vector<cv::Mat> pyramid_buffers;
-    int initial_fast_threshold{20};
+    int initial_fast_threshold{20};   // FAST threshold; min_fast_threshold where a cell finds nothing
     int min_fast_threshold{7};
     std::vector<int> features_per_level;
     std::vector<int> u_max;
@@ -59,7 +59,11 @@ public:
     // extractor carried a `return 0;` override to satisfy an interface nothing used.
     [[nodiscard]] int get_keypoint_octave(const cv::KeyPoint &keypoint) const;
 
+    void set_budget(int max_num_features) override;
+
     void compute_pyramid(cv::Mat image);
+    // The budget split across the pyramid levels, geometrically by scale_factor
+    void compute_features_per_level();
     void compute_keypoints_oct_tree(std::vector<std::vector<cv::KeyPoint> >& all_keypoints);
 };
 

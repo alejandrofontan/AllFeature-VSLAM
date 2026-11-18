@@ -8,66 +8,31 @@
 #include <utility>
 #include <vector>
 
-#include <yaml-cpp/yaml.h>
 
 namespace
 {
 constexpr float min_keypoint_sigma{0.1f};
 }
 
-AF_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(
-        const FeatureType& feature_type,
-        const std::string &settings_yaml_file):
-        settings_yaml_file(settings_yaml_file), feature_type(feature_type){
+AF_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(const FeatureType& feature_type,
+                                                             const int max_num_features):
+        max_num_features(max_num_features), feature_type(feature_type){
 
-    max_num_features = required_int("FeatureExtractor.maxNumFeatures");
-
-    AF_INFO("Loading Feature Extractor Settings from : " + settings_yaml_file);
     AF_CONFIG_BEGIN("Feature Extractor Settings");
     AF_CONFIG_FIELD("maxNumFeatures:     ", max_num_features);
     AF_CONFIG_END();
 }
 
-namespace
-{
-template <typename T>
-T required_key(const std::string& settings_yaml, const std::string& key)
-{
-    YAML::Node settings;
-    try
-    {
-        settings = YAML::LoadFile(settings_yaml);
-    }
-    catch (const std::exception& e)
-    {
-        throw std::runtime_error("cannot read " + settings_yaml + ": " + e.what());
-    }
-    if (!settings[key])
-        throw std::runtime_error(settings_yaml + ": missing key '" + key + "'");
-    try
-    {
-        return settings[key].as<T>();
-    }
-    catch (const std::exception&)
-    {
-        throw std::runtime_error(settings_yaml + ": key '" + key + "' is not a number");
-    }
-}
-} // namespace
-
-int AF_VSLAM::FeatureExtractorSettings::required_int(const std::string& key) const
-{
-    return required_key<int>(settings_yaml_file, key);
-}
-
-float AF_VSLAM::FeatureExtractorSettings::required_float(const std::string& key) const
-{
-    return required_key<float>(settings_yaml_file, key);
-}
-
 void AF_VSLAM::FeatureExtractor::operator()(const Image& img, KeypointData& data)
 {
-    detect_and_compute(img, data.keypoints, data.descriptors);
+    // A budget of zero means no keypoints, not "no limit" (cv::SIFT and SuperPoint read 0 as unlimited)
+    if(settings->max_num_features <= 0)
+    {
+        data.keypoints.clear();
+        data.descriptors = cv::Mat();
+    }
+    else
+        detect_and_compute(img, data.keypoints, data.descriptors);
     compute_size(data);
     compute_sigma(data);
 }

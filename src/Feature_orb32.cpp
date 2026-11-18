@@ -367,13 +367,31 @@ float AF_VSLAM::Orb32::descriptor_distance(const cv::Mat &a, const cv::Mat &b) c
     return AF_VSLAM::DescriptorDistance_orb32(a, b);
 }
 
-AF_VSLAM::Orb32Extractor::Orb32Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_):
-        FeatureExtractor(settings_),
-        num_octaves(settings->required_int("FeatureExtractor.nOctaves")),
-        scale_factor(settings->required_float("FeatureExtractor.scaleFactor")){
+void AF_VSLAM::Orb32Extractor::compute_features_per_level()
+{
+    features_per_level.resize(num_octaves);
+    const float factor = 1.0f / scale_factor;
+    float desired_features_per_scale =
+        settings->max_num_features*(1 - factor)/(1 - (float)pow((double)factor, (double)num_octaves));
 
-    // ORB's own keys of settings/orb32_settings.yaml: the pyramid (levels, scale between them) and the FAST threshold
-    initial_fast_threshold = static_cast<int>(settings->required_float("FeatureExtractor.detectTh"));
+    int sum_features = 0;
+    for(int level = 0; level < num_octaves-1; level++)
+    {
+        features_per_level[level] = cvRound(desired_features_per_scale);
+        sum_features += features_per_level[level];
+        desired_features_per_scale *= factor;
+    }
+    features_per_level[num_octaves-1] = std::max(settings->max_num_features - sum_features, 0);
+}
+
+void AF_VSLAM::Orb32Extractor::set_budget(const int max_num_features)
+{
+    FeatureExtractor::set_budget(max_num_features);
+    compute_features_per_level();
+}
+
+AF_VSLAM::Orb32Extractor::Orb32Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_):
+        FeatureExtractor(settings_){
     AF_CONFIG_BEGIN("ORB Extractor Settings");
     AF_CONFIG_FIELD("nOctaves:           ", num_octaves);
     AF_CONFIG_FIELD("scaleFactor:        ", scale_factor);
@@ -399,18 +417,7 @@ AF_VSLAM::Orb32Extractor::Orb32Extractor(std::shared_ptr<FeatureExtractorSetting
     image_pyramid.resize(num_octaves);
     pyramid_buffers.resize(num_octaves);
 
-    features_per_level.resize(num_octaves);
-    float factor = 1.0f / scale_factor;
-    float desired_features_per_scale = settings->max_num_features*(1 - factor)/(1 - (float)pow((double)factor, (double)num_octaves));
-
-    int sum_features = 0;
-    for( int level = 0; level < num_octaves-1; level++ )
-    {
-        features_per_level[level] = cvRound(desired_features_per_scale);
-        sum_features += features_per_level[level];
-        desired_features_per_scale *= factor;
-    }
-    features_per_level[num_octaves-1] = std::max(settings->max_num_features - sum_features, 0);
+    compute_features_per_level();
 
     const int npoints = 512;
     const cv::Point* pattern0 = (const cv::Point*)bit_pattern_31_;

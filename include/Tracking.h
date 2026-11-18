@@ -22,6 +22,7 @@
 #ifndef AF_VSLAM_TRACKING_H
 #define AF_VSLAM_TRACKING_H
 
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <mutex>
@@ -88,6 +89,9 @@ struct TrackingParameters
 
     // grab_image()
     int init_extractor_features_scale{4}; // the init extractor keeps this x more keypoints
+    // keypoints per frame = this share (0..1) of each feature's get_max_features(). Editable online (the
+    // viewer's "Features Fraction" slider); Tracking applies a change before the next frame's extraction.
+    std::atomic<float> features_fraction{0.5f};
     float nominal_image_area{307200.0f};  // px (640x480): frames are resized to this area (aspect kept) and cropped
                                           // to a multiple of 32; every per-frame cost scales with it
     int image_width{0};                   // both > 0: resize to exactly this size instead (intrinsics scaled per
@@ -145,7 +149,6 @@ public:
     Tracking(std::shared_ptr<PlaceRecognition> place_recognition, std::shared_ptr<FrameDrawer> frame_drawer,
              std::shared_ptr<MapDrawer> map_drawer, std::shared_ptr<Map> map,
              const std::string& calibration_yaml, const std::string& settings_yaml,
-             const std::map<FeatureType, std::string>& feature_settings_yaml_file,
              const std::vector<FeatureType>& feature_types,
              const bool fix_image_size = false);
 
@@ -281,11 +284,15 @@ protected:
     // calibration yaml (hard error if the camera is missing); applies the
     // nominal-area rescale when fix_image_size_ is set.
     void load_camera_parameters(const std::string& calibration_yaml, const std::string& settings_yaml);
-    // Build a feature extractor from the per-feature settings yaml, with its
-    // max_num_features scaled by scale_num_features (initialization uses a denser set).
-    static std::shared_ptr<FeatureExtractor> get_feature_extractor(int scale_num_features,
-                                                                   const std::string& feature_settings_yaml,
-                                                                   FeatureType feature_type);
+    // Build a feature extractor that keeps at most max_num_features keypoints per frame
+    // (initialization uses a denser set).
+    static std::shared_ptr<FeatureExtractor> get_feature_extractor(int max_num_features, FeatureType feature_type);
+    // Keypoints per frame of a feature at a features fraction (share of its get_max_features())
+    static int features_budget(FeatureType feature_type, float features_fraction);
+    // Gives every extractor the budget of params.features_fraction if it changed since the last call
+    // (grab_image, before extraction)
+    void apply_features_fraction();
+    float features_fraction_in_use_{-1.0f};
 
     //Other Thread Pointers
     std::shared_ptr<LocalMapping> local_mapper_;

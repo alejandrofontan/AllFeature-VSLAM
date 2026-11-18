@@ -1,6 +1,0 @@
-%YAML:1.0
-
-# superpoint256 parameters
-
-# Feature Extractor
-FeatureExtractor.maxNumFeatures: 2048

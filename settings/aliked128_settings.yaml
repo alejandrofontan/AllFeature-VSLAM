@@ -1,6 +1,0 @@
-%YAML:1.0
-
-# aliked128 parameters
-
-# Feature Extractor
-FeatureExtractor.maxNumFeatures: 2048

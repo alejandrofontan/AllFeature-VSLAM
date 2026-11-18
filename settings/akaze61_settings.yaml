@@ -1,7 +1,0 @@
-%YAML:1.0
-
-# akaze61 parameters
-
-# Feature Extractor
-FeatureExtractor.detectTh: 0.0005
-FeatureExtractor.maxNumFeatures: 1000

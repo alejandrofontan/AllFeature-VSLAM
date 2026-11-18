@@ -17,13 +17,13 @@ public:
     FeatureType get_type() const override { return FEAT_KAZE64; }
     MatcherType get_matcher_type() const override { return BF_L2; }
     const Eigen::Matrix<float,3,1>& get_color() const override { return s_color; }
-    const std::string& get_settings_yaml_file() const override { return s_settings_yaml_file; }
+    int get_max_features() const override { return s_max_features; }
     float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override { return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2); }
     std::shared_ptr<FeatureExtractor> create_extractor(
         std::shared_ptr<FeatureExtractorSettings> settings) const override;
 private:
     inline static const std::string s_feature_name = "kaze64";
-    inline static const std::string s_settings_yaml_file = "settings/kaze64_settings.yaml";
+    inline static constexpr int s_max_features{2000};   // keypoints per frame at Tracking.FeaturesFraction 1
     inline static const Eigen::Matrix<float,3,1> s_color = {0, 255, 255};
 };
 

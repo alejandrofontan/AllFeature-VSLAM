@@ -109,6 +109,7 @@ Tracking.InitMinMedianDisparity: 10.0   # px; below this (static camera) skip th
 Tracking.InitGbaIterations: 20          # global-BA iterations on the initial map
 Tracking.InitMinTrackedPoints: 100      # min tracked points to accept the initial map
 Tracking.InitMinDepthSamples: 10        # min sensor-depth samples to prefer metric scale
+Tracking.FeaturesFraction: 0.5         # keypoints per frame: this share (0..1) of each feature's maximum (orb32 4000, aliked128/superpoint256 2048, others 2000)
 Tracking.InitExtractorFeaturesScale: 4  # init extractor keeps this x more keypoints
 Tracking.NominalImageArea: 307200       # px (640x480): frames are resized to this area (aspect ratio kept) and cropped to a multiple of 32,
                                         # e.g. 739x458 -> 672x416; the size the log reports is the one a static export (features_static_shapes) needs

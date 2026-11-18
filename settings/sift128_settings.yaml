@@ -1,6 +1,0 @@
-%YAML:1.0
-
-# sift128 parameters
-
-# Feature Extractor
-FeatureExtractor.maxNumFeatures: 1000

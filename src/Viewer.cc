@@ -260,6 +260,11 @@ void Viewer::Run()
     pangolin::Var<float> menuCullMaxUnexplained("menu.KF Max Unexplained",
                                                 LocalMapping::params.keyframe_culling_max_unexplained.load(), 0.0f, 1.0f);
 
+    // Keypoints per frame as a share of each feature's maximum (Tracking.FeaturesFraction), editable
+    // online like the slider above: Tracking applies a change before the next frame's extraction
+    pangolin::Var<float> menuFeaturesFraction("menu.Features Fraction",
+                                              Tracking::params.features_fraction.load(), 0.0f, 1.0f);
+
     pangolin::Var<std::string> headerVisualization("menu.VISUALIZATION", "");
 
     // View
@@ -433,6 +438,7 @@ void Viewer::Run()
 
         // Live parameters
         LocalMapping::params.keyframe_culling_max_unexplained.store(static_cast<float>(menuCullMaxUnexplained));
+        Tracking::params.features_fraction.store(static_cast<float>(menuFeaturesFraction));
 
         // Status panel (map-size query locks the map, so refresh it sparingly)
         if(menuPause.GuiChanged())

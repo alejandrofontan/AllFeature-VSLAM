@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -110,13 +111,36 @@ void Tracking::load_camera_parameters(const std::string& calibration_yaml, const
     AF_CONFIG_END();
 }
 
-std::shared_ptr<FeatureExtractor> Tracking::get_feature_extractor(const int scale_num_features,
-                                                                  const std::string& feature_settings_yaml,
-                                                                  const FeatureType feature_type)
+std::shared_ptr<FeatureExtractor> Tracking::get_feature_extractor(const int max_num_features, const FeatureType feature_type)
 {
-    auto settings = std::make_shared<FeatureExtractorSettings>(feature_type, feature_settings_yaml);
-    settings->max_num_features *= scale_num_features;
+    auto settings = std::make_shared<FeatureExtractorSettings>(feature_type, max_num_features);
     return get_feature(feature_type).create_extractor(settings);
+}
+
+// The keypoints per frame of `feature_type` at `features_fraction` of its own maximum: 1 gives the
+// maximum, 0 no keypoints
+int Tracking::features_budget(const FeatureType feature_type, const float features_fraction)
+{
+    return static_cast<int>(std::lround(features_fraction * get_feature(feature_type).get_max_features()));
+}
+
+// Gives every extractor the budget of Tracking.FeaturesFraction when it changed; the
+// initialization extractor keeps init_extractor_features_scale times as many.
+void Tracking::apply_features_fraction()
+{
+    const float features_fraction = std::clamp(params.features_fraction.load(), 0.0f, 1.0f);
+    if(features_fraction == features_fraction_in_use_)
+        return;
+    features_fraction_in_use_ = features_fraction;
+
+    for(const FeatureType ft : feature_types_)
+    {
+        const int max_num_features = features_budget(ft, features_fraction);
+        feature_extractor_left_.at(ft)->set_budget(max_num_features);
+        init_feature_extractor_.at(ft)->set_budget(params.init_extractor_features_scale * max_num_features);
+        AF_INFO("[Tracking] " << get_feature_name(ft) << ": " << max_num_features
+                << " keypoints per frame (features fraction " << features_fraction << ")");
+    }
 }
 
 bool Tracking::run_tracking_stage(const std::function<bool()>& stage)

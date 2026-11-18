@@ -1,6 +1,0 @@
-%YAML:1.0
-
-# kaze64 parameters
-
-# Feature Extractor
-FeatureExtractor.maxNumFeatures: 1000

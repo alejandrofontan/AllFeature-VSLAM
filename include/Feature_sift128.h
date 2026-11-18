@@ -34,14 +34,14 @@ public:
     FeatureType get_type() const override { return FEAT_SIFT128; }
     MatcherType get_matcher_type() const override { return LIGHTGLUE_SIFT; }
     const Eigen::Matrix<float,3,1>& get_color() const override { return s_color; }
-    const std::string& get_settings_yaml_file() const override { return s_settings_yaml_file; }
+    int get_max_features() const override { return s_max_features; }
     float descriptor_distance(const cv::Mat &a, const cv::Mat &b) const override { return (Descriptor_Distance_Type) cv::norm(a,b,cv::NORM_L2); }
     std::shared_ptr<FeatureExtractor> create_extractor(
         std::shared_ptr<FeatureExtractorSettings> settings) const override;
 
 private:
     inline static const std::string s_feature_name = "sift128";
-    inline static const std::string s_settings_yaml_file = "settings/sift128_settings.yaml";
+    inline static constexpr int s_max_features{2000};   // keypoints per frame at Tracking.FeaturesFraction 1
     inline static const Eigen::Matrix<float,3,1> s_color = {255, 0, 0};
 };
 
@@ -54,6 +54,9 @@ public:
     void detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override;
 
     [[nodiscard]] float get_keypoint_size(const cv::KeyPoint &keypoint) const override;
+
+    // cv::SIFT takes the budget at creation: a new one
+    void set_budget(int max_num_features) override;
 
 private:
     std::unique_ptr<SiftCpu> sift_;

@@ -1,9 +1,0 @@
-%YAML:1.0
-
-# orb32 parameters
-
-# Feature Extractor
-FeatureExtractor.nOctaves: 8
-FeatureExtractor.scaleFactor: 1.2
-FeatureExtractor.detectTh: 20.0
-FeatureExtractor.maxNumFeatures: 2000

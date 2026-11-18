@@ -340,6 +340,5 @@ install(TARGETS ${PROJECT_NAME} vslamlab_allfeature_mono vslamlab_allfeature_mon
 # Headers under include/AllFeature-VSLAM/: they have generic names (Frame.h, System.h, Types.h, ...)
 install(DIRECTORY include/ DESTINATION include/AllFeature-VSLAM)
 
-# Reference copies of the settings (VSLAM-LAB's allfeature environment copies them next to the models)
-install(DIRECTORY settings/ DESTINATION share/allfeature-vslamlab/settings FILES_MATCHING PATTERN "*.yaml")
+# Reference copy of the settings (VSLAM-LAB's allfeature environment copies it next to the models)
 install(FILES vslamlab_allfeature-dev_settings.yaml DESTINATION share/allfeature-vslamlab)

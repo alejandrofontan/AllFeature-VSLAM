@@ -4,8 +4,7 @@ AF_VSLAM::Akaze61Extractor::Akaze61Extractor(std::shared_ptr<FeatureExtractorSet
         FeatureExtractor(settings_){
 
     akaze_options_ = AKAZEOptions();
-    // AKAZE's own key of settings/akaze61_settings.yaml: the detector response threshold
-    akaze_options_.dthreshold = settings->required_float("FeatureExtractor.detectTh");
+    akaze_options_.dthreshold = detector_threshold;
 }
 
 libAKAZE::AKAZE& AF_VSLAM::Akaze61Extractor::evolution_for(const int width, const int height)

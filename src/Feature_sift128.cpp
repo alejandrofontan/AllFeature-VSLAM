@@ -15,9 +15,15 @@
 AF_VSLAM::Sift128Extractor::Sift128Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
     // cv::SIFT with the LightGlue repository's SIFT configuration (nOctaveLayers 4, contrast 0.0066667, edge 10,
-    // sigma 1.6 - the same values settings/sift128_settings.yaml has carried); the budget is cv::SIFT's nfeatures
+    // sigma 1.6); the budget is cv::SIFT's nfeatures
     sift_ = std::make_unique<SiftCpu>(settings->max_num_features);
     AF_INFO("SIFT128 ready: cv::SIFT (CPU) + RootSIFT, budget " << settings->max_num_features << " keypoints");
+}
+
+void AF_VSLAM::Sift128Extractor::set_budget(const int max_num_features)
+{
+    FeatureExtractor::set_budget(max_num_features);
+    sift_ = std::make_unique<SiftCpu>(max_num_features);
 }
 
 void AF_VSLAM::Sift128Extractor::detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
