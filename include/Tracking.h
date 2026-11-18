@@ -216,8 +216,9 @@ public:
 
 protected:
 
-    // Main tracking function. It is independent of the input sensor.
-    void track();
+    // Main tracking function. It is independent of the input sensor. Returns the frame's pose (Tcw):
+    // current_frame_ is moved into last_frame_ at the end, so the caller must not read it afterwards.
+    mat4f track();
 
     // Runs one tracking stage: a TrackingLostException fails the stage (logged
     // with its reason and statistics).

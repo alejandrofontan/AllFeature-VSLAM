@@ -174,7 +174,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     current_frame_ = Frame(im, timestamp, extractors, place_recognition_, calibration_);
     profiler.frame_created(frame_times_);
 
-    track();
+    const mat4f Tcw = track();
     profiler.tracking_done(tracking_times_, state_ == TrackingState::OK);
 
     // Median excludes the current frame (updated below), matching the original order.
@@ -186,10 +186,10 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     if(state_ == TrackingState::OK)
         grab_image_times_[profiler.total_ms()]++;
 
-    return current_frame_.get_Tcw();
+    return Tcw;
 }
 
-void Tracking::track()
+mat4f Tracking::track()
 {
     AF_REPORT_CONTEXT("tracking", current_frame_.frame_id);
 
@@ -224,7 +224,7 @@ void Tracking::track()
             lock.unlock();
             wait_for_idle_local_mapper();
         }
-        return;
+        return current_frame_.get_Tcw();
     }
 
     // System is initialized: track the frame.
@@ -275,9 +275,10 @@ void Tracking::track()
     if(!current_frame_.ref_keyframe)
         current_frame_.ref_keyframe = ref_keyframe_;
 
-    // Both read current_frame_, so they run before it is moved from
+    // All three read current_frame_, so they run before it is moved from
     store_relative_pose();
     const FrameId frame_id = current_frame_.frame_id;
+    const mat4f Tcw = current_frame_.get_Tcw();
 
     // Moved, not copied: grab_image rebuilds current_frame_ from scratch next frame, and nothing
     // reads it in between. The copy this replaced was ~250 KB plus one atomic refcount increment
@@ -307,6 +308,7 @@ void Tracking::track()
     }
 
     profiler.report(frame_id);
+    return Tcw;
 }
 
 void Tracking::store_relative_pose()
