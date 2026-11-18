@@ -21,7 +21,6 @@
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core/core.hpp>
-#include <opencv2/video/tracking.hpp>
 
 #include "Converter.h"
 #include "Initializer.h"
@@ -764,88 +763,15 @@ bool Tracking::track_with_optical_flow()
     if(last_grey_image_.empty() || last_grey_image_.size() != grey_image_.size())
         return fall_back("no previous frame of the same size", 0);
 
-    // 1. The last frame's tracked points: raw (distorted) positions, the flow runs on the image as it is
-    struct Track { FeatureType ft; int index; Pt map_point; };
-    std::vector<Track> tracks;
-    std::vector<cv::Point2f> prev_pts;
-    for (const auto& [ft, pts] : last_frame_.pts)
-    {
-        const auto& raw = last_frame_.raw_keypoints.at(ft);
-        const auto& outliers = last_frame_.outliers.at(ft);
-        for (size_t i = 0; i < pts.size(); i++)
-        {
-            if(!pts[i] || pts[i]->is_bad() || outliers[i])
-                continue;
-            tracks.push_back({ft, static_cast<int>(i), pts[i]});
-            prev_pts.push_back(raw[i].pt);
-        }
-    }
-    if(static_cast<int>(prev_pts.size()) < params.flow_min_matches)
-        return fall_back("too few tracked points in the last frame", static_cast<int>(prev_pts.size()));
-
-    // 2. KLT forward and backward; a track survives when both succeed and it returns to where it started
-    std::vector<cv::Point2f> next_pts, back_pts;
-    std::vector<uchar> status_fwd, status_bwd;
-    std::vector<float> err;
-    const cv::Size window(21, 21);
-    const int levels = 3;
-    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 30, 0.01);
-    cv::calcOpticalFlowPyrLK(last_grey_image_, grey_image_, prev_pts, next_pts, status_fwd, err, window, levels, criteria);
-    cv::calcOpticalFlowPyrLK(grey_image_, last_grey_image_, next_pts, back_pts, status_bwd, err, window, levels, criteria);
-    std::vector<int> kept;
-    std::vector<cv::Point2f> kept_pts;
-    const float max_err2 = params.flow_max_backward_error * params.flow_max_backward_error;
-    for (size_t t = 0; t < tracks.size(); t++)
-    {
-        if(!status_fwd[t] || !status_bwd[t])
-            continue;
-        const cv::Point2f d = back_pts[t] - prev_pts[t];
-        if(d.dot(d) > max_err2)
-            continue;
-        const cv::Point2f& p = next_pts[t];
-        if(p.x < 0.0f || p.y < 0.0f || p.x >= static_cast<float>(grey_image_.cols) || p.y >= static_cast<float>(grey_image_.rows))
-            continue;
-        kept.push_back(static_cast<int>(t));
-        kept_pts.push_back(p);
-    }
-    if(static_cast<int>(kept.size()) < params.flow_min_matches)
-        return fall_back("too few flow tracks survived the forward-backward check", static_cast<int>(kept.size()));
-
-    // 3. The frame's keypoints live in undistorted coordinates: undistort the flowed positions to look them up
-    const std::vector<cv::Point2f> lookup_pts = calibration_->undistort(kept_pts);
-
-    // 4. Snap each track to the nearest detected keypoint of its feature type; a keypoint claimed twice keeps
-    //    the closer track
-    std::map<FeatureType, std::vector<float>> best_dist2;
-    for (const auto& [ft, data] : current_frame_.features.per_type)
-        best_dist2[ft].assign(data.count(), std::numeric_limits<float>::max());
-    const float radius = params.flow_association_radius;
-    int num_matches = 0;
-    for (size_t k = 0; k < kept.size(); k++)
-    {
-        const Track& track = tracks[kept[k]];
-        const cv::Point2f& u = lookup_pts[k];
-        const std::vector<size_t> candidates = current_frame_.get_features_in_area(u.x, u.y, radius, track.ft);
-        int best = -1;
-        float best_d2 = radius * radius;
-        for (const size_t idx : candidates)
-        {
-            const cv::Point2f d = current_frame_.features.at(track.ft).keypoints[idx].pt - u;
-            const float d2 = d.dot(d);
-            if(d2 < best_d2)
-            {
-                best_d2 = d2;
-                best = static_cast<int>(idx);
-            }
-        }
-        if(best < 0 || best_d2 >= best_dist2[track.ft][best])
-            continue;
-        auto& pts = current_frame_.pts.at(track.ft);
-        if(!pts[best])
-            ++num_matches;                                  // a re-claim replaces, the count stays
-        pts[best] = track.map_point;
-        best_dist2[track.ft][best] = best_d2;
-    }
+    // 1-4. The last frame's tracked points flowed into this frame and snapped to its keypoints
+    const FeatureMatcher::FlowMatchCounts counts = matcher_->match_frame_to_frame_by_flow(
+        last_frame_, last_grey_image_, current_frame_, grey_image_,
+        params.flow_max_backward_error, params.flow_association_radius);
+    if(counts.tracked < params.flow_min_matches)
+        return fall_back("too few tracked points in the last frame", counts.tracked);
+    if(counts.survived < params.flow_min_matches)
+        return fall_back("too few flow tracks survived the forward-backward check", counts.survived);
+    const int num_matches = counts.matched;
     if(num_matches < params.flow_min_matches)
         return fall_back("too few flow tracks landed on a detected keypoint", num_matches);
     timer.record(track_ref_times_);

@@ -17,6 +17,7 @@
 #include "Report.h"
 
 #include <opencv2/core/utility.hpp>
+#include <opencv2/video/tracking.hpp>
 
 #include <PoseLib/robust.h>
 
@@ -362,6 +363,116 @@ void FeatureMatcher::match_map_points_to_keyframe(const Keyframe& keyframe, cons
               counts_it == counts_by_type.end() ? 0 : counts_it->second.with_keypoint);
     AF_REPORT("matches.accepted", get_feature_name(feat_type),
               counts_it == counts_by_type.end() ? 0 : counts_it->second.accepted);
+}
+
+// The last frame's tracked map points carried into `frame` by optical flow: pyramidal KLT from
+// `last_grey` to `grey` and back (a track whose round trip misses its start by more than
+// max_backward_error px is dropped), then each flowed point, undistorted, gives its map point to the
+// nearest detected keypoint of its feature type within association_radius px; a keypoint claimed by
+// two tracks keeps the closer one. No descriptors. Writes frame.pts; the counts say how far it got.
+// Used in: Tracking::track_with_optical_flow
+FeatureMatcher::FlowMatchCounts FeatureMatcher::match_frame_to_frame_by_flow(
+    const Frame& last_frame, const cv::Mat& last_grey, Frame& frame, const cv::Mat& grey,
+    const float max_backward_error, const float association_radius)
+{
+    AF_REPORT_SCOPE();
+
+    FlowMatchCounts counts{};
+
+    // 1. The last frame's tracked points: raw (distorted) positions, the flow runs on the image as it is
+    struct Track { FeatureType ft; int index; Pt map_point; };
+    std::vector<Track> tracks;
+    std::vector<cv::Point2f> prev_pts;
+    for (const auto& [ft, pts] : last_frame.pts)
+    {
+        const auto& raw = last_frame.raw_keypoints.at(ft);
+        const auto& outliers = last_frame.outliers.at(ft);
+        for (size_t i = 0; i < pts.size(); i++)
+        {
+            if(!pts[i] || pts[i]->is_bad() || outliers[i])
+                continue;
+            tracks.push_back({ft, static_cast<int>(i), pts[i]});
+            prev_pts.push_back(raw[i].pt);
+        }
+    }
+    counts.tracked = static_cast<int>(prev_pts.size());
+    if(prev_pts.empty())
+    {
+        AF_REPORT("flow.tracked", "", 0);
+        return counts;
+    }
+
+    // 2. KLT forward and backward; a track survives when both succeed and it returns to where it started
+    std::vector<cv::Point2f> next_pts, back_pts;
+    std::vector<uchar> status_fwd, status_bwd;
+    std::vector<float> err;
+    const cv::Size window(flow_window_px, flow_window_px);
+    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, flow_max_iterations, flow_epsilon);
+    cv::calcOpticalFlowPyrLK(last_grey, grey, prev_pts, next_pts, status_fwd, err, window, flow_pyramid_levels, criteria);
+    cv::calcOpticalFlowPyrLK(grey, last_grey, next_pts, back_pts, status_bwd, err, window, flow_pyramid_levels, criteria);
+    std::vector<int> kept;
+    std::vector<cv::Point2f> kept_pts;
+    const float max_err2 = max_backward_error * max_backward_error;
+    for (size_t t = 0; t < tracks.size(); t++)
+    {
+        if(!status_fwd[t] || !status_bwd[t])
+            continue;
+        const cv::Point2f d = back_pts[t] - prev_pts[t];
+        if(d.dot(d) > max_err2)
+            continue;
+        const cv::Point2f& p = next_pts[t];
+        if(p.x < 0.0f || p.y < 0.0f || p.x >= static_cast<float>(grey.cols) || p.y >= static_cast<float>(grey.rows))
+            continue;
+        kept.push_back(static_cast<int>(t));
+        kept_pts.push_back(p);
+    }
+    counts.survived = static_cast<int>(kept.size());
+    if(kept.empty())
+    {
+        AF_REPORT("flow.tracked", "", counts.tracked);
+        AF_REPORT("flow.survived", "", 0);
+        return counts;
+    }
+
+    // 3. The frame's keypoints live in undistorted coordinates: undistort the flowed positions to look them up
+    const std::vector<cv::Point2f> lookup_pts = frame.calibration->undistort(kept_pts);
+
+    // 4. Snap each track to the nearest detected keypoint of its feature type; a keypoint claimed twice keeps
+    //    the closer track
+    std::map<FeatureType, std::vector<float>> best_dist2;
+    for (const auto& [ft, data] : frame.features.per_type)
+        best_dist2[ft].assign(data.count(), std::numeric_limits<float>::max());
+    const float radius = association_radius;
+    for (size_t k = 0; k < kept.size(); k++)
+    {
+        const Track& track = tracks[kept[k]];
+        const cv::Point2f& u = lookup_pts[k];
+        const std::vector<size_t> candidates = frame.get_features_in_area(u.x, u.y, radius, track.ft);
+        int best = -1;
+        float best_d2 = radius * radius;
+        for (const size_t idx : candidates)
+        {
+            const cv::Point2f d = frame.features.at(track.ft).keypoints[idx].pt - u;
+            const float d2 = d.dot(d);
+            if(d2 < best_d2)
+            {
+                best_d2 = d2;
+                best = static_cast<int>(idx);
+            }
+        }
+        if(best < 0 || best_d2 >= best_dist2[track.ft][best])
+            continue;
+        auto& pts = frame.pts.at(track.ft);
+        if(!pts[best])
+            ++counts.matched;                               // a re-claim replaces, the count stays
+        pts[best] = track.map_point;
+        best_dist2[track.ft][best] = best_d2;
+    }
+
+    AF_REPORT("flow.tracked", "", counts.tracked);
+    AF_REPORT("flow.survived", "", counts.survived);
+    AF_REPORT("flow.matched", "", counts.matched);
+    return counts;
 }
 
 // Makes sure the matches between `keyframe` and each of `others` are in `keyframe`'s match

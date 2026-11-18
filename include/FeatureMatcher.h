@@ -90,6 +90,20 @@ public:
                                       Descriptor_Distance_Type max_descriptor_distance =
                                           std::numeric_limits<Descriptor_Distance_Type>::max());
 
+    // The last frame's tracked map points carried into `frame` by optical flow, without descriptors: KLT from
+    // `last_grey` to `grey` and back (round-trip error above max_backward_error px drops a track), then each
+    // flowed point gives its map point to the nearest keypoint of its type within association_radius px (a
+    // keypoint claimed twice keeps the closer track). Writes frame.pts. The counts: last-frame points tracked,
+    // tracks that survived the round trip, keypoints matched.
+    // Used in: Tracking::track_with_optical_flow
+    struct FlowMatchCounts { int tracked{0}; int survived{0}; int matched{0}; };
+    static constexpr int flow_window_px = 21;          // KLT window
+    static constexpr int flow_pyramid_levels = 3;      // KLT pyramid levels above the image
+    static constexpr int flow_max_iterations = 30;     // KLT stopping criteria
+    static constexpr double flow_epsilon = 0.01;
+    FlowMatchCounts match_frame_to_frame_by_flow(const Frame& last_frame, const cv::Mat& last_grey, Frame& frame,
+                                                 const cv::Mat& grey, float max_backward_error, float association_radius);
+
     // Makes sure the matches between `keyframe` and each of `others` are in `keyframe`'s match cache: pairs
     // already cached are skipped; the rest are matched (all pairs and feature types in parallel), filtered
     // geometrically per pair, jointly over the feature types, and stored in `keyframe` only. The only writer of
