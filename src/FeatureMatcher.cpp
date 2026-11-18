@@ -4,7 +4,10 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <sstream>
+#include <string>
 #include <vector>
 
 #include "afvslam_log.hpp"
@@ -25,20 +28,15 @@ using namespace std;
 namespace AF_VSLAM
 {
 
-VerbosityLevel FeatureMatcher::verbosity{MEDIUM};
-
 namespace
 {
 // The size of the image a view's keypoints were detected in: its calibration's (as resized and cropped)
-cv::Size image_size(const AF_VSLAM::Calibration& calibration)
+cv::Size image_size(const Calibration& calibration)
 {
     return {calibration.width, calibration.height};
 }
-} // namespace
 
-namespace
-{
-/// The LightGlue variant of a learned matcher type (nullptr for the brute-force ones).
+// The LightGlue variant of a learned matcher type (nullptr for the brute-force ones)
 const char* lightglue_variant(const MatcherType matcher_type)
 {
     switch (matcher_type)
@@ -46,21 +44,27 @@ const char* lightglue_variant(const MatcherType matcher_type)
         case LIGHTGLUE_SUPERPOINT: return "superpoint";
         case LIGHTGLUE_ALIKED: return "aliked";
         case LIGHTGLUE_SIFT: return "sift";
-        default: return nullptr;
+        case BF_L2:
+        case BF_HAMMING: return nullptr;
     }
+    return nullptr;   // not reached: a new MatcherType without a case is a compiler warning
 }
-} // namespace
+}
 
 // Loads (once per process, onnx::shared_lightglue) and warms up the LightGlue variant of every learned feature.
-FeatureMatcher::FeatureMatcher(const std::vector<FeatureType>& feature_types,
-    std::string name):
-    name(name),
-    feature_types(feature_types)
+FeatureMatcher::FeatureMatcher(const std::vector<FeatureType>& feature_types, const std::string& name)
 {
     AF_INFO("Initializing FeatureMatcher: " + name);
-    {
-        // Diagnostic (issue #13 P2): record which parallel backend this OpenCV build runs,
-        // since descriptor-matching cost depends on it and conda builds vary.
+
+    // The diagnostics below are the same for every matcher (the sessions are process-wide): logged once
+    static std::mutex logged_mutex;
+    static bool opencv_logged = false;
+    static std::set<std::string> variants_logged;
+    std::lock_guard<std::mutex> lock(logged_mutex);
+
+    if (!opencv_logged) {
+        // Which parallel backend this OpenCV build runs: descriptor-matching cost depends on it
+        opencv_logged = true;
         const std::string info = cv::getBuildInformation();
         const size_t p = info.find("Parallel framework");
         AF_INFO("OpenCV threading: getNumThreads=" << cv::getNumThreads() << " | "
@@ -72,612 +76,20 @@ FeatureMatcher::FeatureMatcher(const std::vector<FeatureType>& feature_types,
             // Every session now (dynamic + each padded export): a missing file fails here, and no session is created
             // on the tracking thread later (seconds on Core ML even from its cache)
             const std::vector<int> lengths = onnx::preload_lightglue(variant);
+            if (!variants_logged.insert(variant).second)
+                continue;
             const auto& lg = onnx::shared_lightglue(variant);
             std::ostringstream padded;
             for (const int length : lengths)
                 padded << " L" << length;
-            AF_INFO("LightGlue (" << variant << ") ready for " << name << ": " << lg.model_path() << " (" << lg.precision()
+            AF_INFO("LightGlue (" << variant << ") ready: " << lg.model_path() << " (" << lg.precision()
                     << " weights) on onnxruntime/" << lg.provider()
                     << (lengths.empty() ? std::string() : " + padded exports" + padded.str()));
         }
     }
 }
 
-// Used in: Tracking::track_reference_keyframe, Tracking::relocalize
-std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyframe& keyframe, Frame& frame,
-    std::map<FeatureType, std::vector<Pt>>& map_pts_matches, const std::vector<FeatureType>& feat_types)
-{
-    std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type;
-    std::map<FeatureType, std::vector<Pt>> map_pts_kf;   // keyframe's map points per type (snapshot)
-
-    map_pts_matches.clear();
-
-    AF_REPORT_SCOPE();
-    AF_REPORT("keyframe.frame_id", "", keyframe->frame_id);
-
-    // 1. Descriptor matching, per feature type
-    for (const auto& ft : feat_types) {
-        if (!keyframe->features.has(ft) || !frame.features.has(ft))
-            continue;
-
-        map_pts_kf[ft] = keyframe->get_map_point_matches(ft);
-
-        const KeypointData& keyframe_data = keyframe->features.at(ft);
-        const KeypointData& frame_data = frame.features.at(ft);
-        std::vector<cv::DMatch> matches = match_descriptors(
-            keyframe_data.descriptors, frame_data.descriptors,
-            keyframe_data.keypoints, frame_data.keypoints, ft,
-            image_size(*keyframe->calibration), image_size(*frame.calibration));
-        AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
-
-        if (!matches.empty())
-            matches_by_type[ft] = std::move(matches);
-
-        map_pts_matches[ft] = std::vector<Pt>(frame_data.count(), nullptr);
-    }
-
-    // 2. Geometric filter: one model for all feature types
-    const std::map<FeatureType, std::vector<cv::DMatch>> robust_by_type =
-        filter_matches_geometric_jointly(matches_by_type, keyframe->features, frame.features,
-                                         *keyframe->calibration, *frame.calibration);
-
-    // 3. Lift: a filtered pair gives the frame keypoint the keyframe's map point
-    std::map<FeatureType, std::vector<cv::DMatch>> frame_side;   // filtered pairs, frame index first (the cache)
-
-    std::map<FeatureType, int> matches_count;
-    for (const auto& ft : feat_types)
-        matches_count[ft] = 0;
-    for (const auto& [ft, robust_matches] : robust_by_type) {
-        std::vector<cv::DMatch>& frame_side_ft = frame_side[ft];
-        frame_side_ft.reserve(robust_matches.size());
-        const std::vector<Pt>& keyframe_pts = map_pts_kf.at(ft);
-        std::vector<Pt>& frame_pts = map_pts_matches.at(ft);
-        for (const cv::DMatch& match : robust_matches) {
-            const int keyframe_idx = match.queryIdx;
-            const int frame_idx = match.trainIdx;
-
-            frame_side_ft.emplace_back(frame_idx, keyframe_idx, match.distance);
-
-            const Pt& pt = keyframe_pts[keyframe_idx];
-            if (!pt || pt->is_bad())
-                continue;
-            frame_pts[frame_idx] = pt;
-            matches_count[ft]++;
-        }
-    }
-    for ([[maybe_unused]] const auto& ft : feat_types) {
-        AF_REPORT("matches.filtered", get_feature_name(ft),
-                  frame_side.count(ft) ? frame_side.at(ft).size() : 0);
-        AF_REPORT("matches.with_point", get_feature_name(ft), matches_count.at(ft));
-    }
-
-    // 4. Cache every filtered pair on the frame, keyed by the keyframe
-    frame.cache_matched_pairs_feat_type.insert_or_assign(keyframe->frame_id, std::move(frame_side));
-
-    return matches_count;
-}
-
-namespace
-{
-// What the pose-guided search found for one feature type; the callers report it.
-struct GateMatchCounts
-{
-    size_t candidates{0};          // candidate map points of this type
-    size_t free_keypoints{0};      // keypoints with no map point yet
-    size_t with_keypoint{0};       // candidates with at least one free keypoint in their gate
-    size_t accepted{0};            // pairs where each side is the other's best descriptor match
-};
-
-// The pose-guided search shared by match_map_points_to_frame and
-// match_map_points_to_keyframe: gives a map point to the free keypoints of `features`, from
-// candidate map points and where each projects (`projections[i]` belongs to `map_pts[i]`).
-//
-// Per feature type, a candidate and a free keypoint can be paired only if the keypoint lies
-// inside the gate around the candidate's projection: the squared offset, in units of the
-// keypoint's own position variance, below `gate`. Among the pairs the
-// gate allows, a pair is accepted when each side is the other's best descriptor match: the
-// candidate's nearest keypoint, and that keypoint's nearest candidate. So the search is local
-// -- a correct keypoint next to the projection is never lost to a better-looking one elsewhere
-// in the image -- and it needs no descriptor-distance threshold: mutual agreement is what
-// rejects a candidate whose window holds nothing right. `max_distance` drops a mutual pair whose
-// descriptor distance is larger (the type's maximum value: no limit).
-//
-// The three callables adapt it to where the keypoints live and where the result goes:
-//   keypoints_in_area(x, y, radius, feature_type) -> indices of the keypoints near (x, y)
-//   is_free(feature_type, keypoint_index)         -> whether that keypoint may take a point
-//   assign(feature_type, keypoint_index, point)   -> give it one
-template <typename KeypointsInArea, typename IsFree, typename Assign>
-std::map<FeatureType, GateMatchCounts> match_points_in_gate(
-    const AF_VSLAM::FeatureData& features,
-    const std::vector<AF_VSLAM::Pt>& map_pts, const std::vector<cv::Point2f>& projections, const float gate,
-    const Descriptor_Distance_Type max_distance,
-    const KeypointsInArea& keypoints_in_area, const IsFree& is_free, const Assign& assign)
-{
-    using AF_VSLAM::FeatureMatcher;
-    using AF_VSLAM::Pt;
-    constexpr Descriptor_Distance_Type no_distance = std::numeric_limits<Descriptor_Distance_Type>::max();
-
-    // The candidates grouped by feature type: their index in map_pts and their descriptor. One
-    // get_descriptor() per point -- it takes the point's lock -- and a point whose descriptor is
-    // still empty is skipped.
-    struct Candidates
-    {
-        std::vector<size_t> indices;
-        std::vector<cv::Mat> descriptors;
-    };
-    std::map<FeatureType, Candidates> candidates_by_type;
-    for (size_t idx = 0; idx < map_pts.size(); idx++) {
-        const Pt& pt = map_pts[idx];
-        if (!pt || pt->is_bad())
-            continue;
-
-        cv::Mat descriptor = pt->get_descriptor();
-        if (descriptor.empty())
-            continue;
-
-        Candidates& candidates = candidates_by_type[pt->featureType];
-        candidates.indices.push_back(idx);
-        candidates.descriptors.push_back(std::move(descriptor));
-    }
-
-    std::map<FeatureType, GateMatchCounts> counts_by_type;
-    for (const auto& [ft, data] : features.per_type) {
-        GateMatchCounts& counts = counts_by_type[ft];
-        const size_t num_keypoints = data.count();
-
-        // The free keypoints, and a bound on their position variance: the largest gate any of
-        // them can have decides how far to look.
-        std::vector<char> free_keypoint(num_keypoints, 0);
-        float max_variance = 0.0f;
-        for (size_t i = 0; i < num_keypoints; i++) {
-            if (!is_free(ft, i))
-                continue;
-            free_keypoint[i] = 1;
-            counts.free_keypoints++;
-            const mat2f& sigma2 = data.sigma2[i];
-            max_variance = std::max(max_variance,
-                                    std::max(sigma2(0, 0), sigma2(1, 1)) + std::abs(sigma2(0, 1)));
-        }
-
-        const auto candidates_it = candidates_by_type.find(ft);
-        if (candidates_it == candidates_by_type.end())
-            continue;
-        const Candidates& candidates = candidates_it->second;
-        const size_t num_candidates = candidates.indices.size();
-        counts.candidates = num_candidates;
-        if (counts.free_keypoints == 0)
-            continue;
-
-        const std::vector<cv::KeyPoint>& keypoints = data.keypoints;
-        const cv::Mat& descriptors = data.descriptors;
-
-        // Each side's best partner among the pairs the gate allows. Strict '<' keeps the first
-        // of equal distances, so the result does not depend on anything but the input order.
-        const float search_radius = std::sqrt(gate * max_variance);
-        std::vector<int> best_keypoint(num_candidates, -1);
-        std::vector<Descriptor_Distance_Type> best_keypoint_distance(num_candidates, no_distance);
-        std::vector<int> best_candidate(num_keypoints, -1);
-        std::vector<Descriptor_Distance_Type> best_candidate_distance(num_keypoints, no_distance);
-
-        for (size_t c = 0; c < num_candidates; c++) {
-            const cv::Point2f& projection = projections[candidates.indices[c]];
-            for (const size_t k : keypoints_in_area(projection.x, projection.y, search_radius, ft)) {
-                if (!free_keypoint[k])
-                    continue;
-
-                // The gate proper: the offset in units of this keypoint's own uncertainty
-                const vec2f offset(keypoints[k].pt.x - projection.x, keypoints[k].pt.y - projection.y);
-                if (offset.dot(data.information[k] * offset) >= gate)
-                    continue;
-
-                const Descriptor_Distance_Type distance = FeatureMatcher::descriptor_distance(
-                    candidates.descriptors[c], descriptors.row(static_cast<int>(k)), ft);
-                if (distance < best_keypoint_distance[c]) {
-                    best_keypoint_distance[c] = distance;
-                    best_keypoint[c] = static_cast<int>(k);
-                }
-                if (distance < best_candidate_distance[k]) {
-                    best_candidate_distance[k] = distance;
-                    best_candidate[k] = static_cast<int>(c);
-                }
-            }
-        }
-
-        // Accept the pairs where each side chose the other
-        for (size_t c = 0; c < num_candidates; c++) {
-            const int k = best_keypoint[c];
-            if (k < 0)
-                continue;
-            counts.with_keypoint++;
-            if (best_candidate[k] != static_cast<int>(c))
-                continue;
-            if (best_keypoint_distance[c] > max_distance)
-                continue;
-            assign(ft, static_cast<size_t>(k), map_pts[candidates.indices[c]]);
-            counts.accepted++;
-        }
-    }
-    return counts_by_type;
-}
-} // namespace
-
-// Gives a map point to the frame keypoints that have none yet, from candidate map points and
-// where each projects in the frame (`projections[i]` belongs to `map_pts[i]`): the
-// pose-guided search of match_points_in_gate above, on the frame's keypoints. A keypoint is
-// free when it has no map point, or one that nothing observes. Accepted matches are written to
-// frame.pts.
-// Reports, per feature type: points.candidates, keypoints.unmatched, matches.raw (candidates
-// with at least one free keypoint in their gate) and matches.accepted.
-// Used in: Tracking::search_local_points, Tracking::accept_relocalization_hypothesis
-void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
-                                               const std::vector<cv::Point2f>& projections)
-{
-    AF_REPORT_SCOPE();
-
-    [[maybe_unused]] const std::map<FeatureType, GateMatchCounts> counts_by_type = match_points_in_gate(
-        frame.features, map_pts, projections, projection_match_scale_sigma2,
-        std::numeric_limits<Descriptor_Distance_Type>::max(),
-        [&frame](const float x, const float y, const float radius, const FeatureType ft) {
-            return frame.get_features_in_area(x, y, radius, ft);
-        },
-        [&frame](const FeatureType ft, const size_t keypoint_idx) {
-            const Pt& pt = frame.pts.at(ft)[keypoint_idx];
-            return !(pt && pt->number_of_observations() > 0);
-        },
-        [&frame](const FeatureType ft, const size_t keypoint_idx, const Pt& pt) {
-            frame.pts.at(ft)[keypoint_idx] = pt;
-        });
-
-    for ([[maybe_unused]] const auto& [ft, counts] : counts_by_type) {
-        AF_REPORT("points.candidates", get_feature_name(ft), counts.candidates);
-        AF_REPORT("keypoints.unmatched", get_feature_name(ft), counts.free_keypoints);
-        AF_REPORT("matches.raw", get_feature_name(ft), counts.with_keypoint);
-        AF_REPORT("matches.accepted", get_feature_name(ft), counts.accepted);
-    }
-}
-
-// The same search on a keyframe's keypoints of one feature type, writing into a vector the
-// caller owns: `matched_points` has one slot per keypoint of `feat_type`, a keypoint is free
-// when its slot is empty, and an accepted match fills it. The keyframe itself is not modified.
-// An all-empty `matched_points` makes every keypoint a target, occupied or not: what fusion
-// wants. `gate_scale_sigma2` is the gate (see match_points_in_gate); a mutual pair is also
-// dropped when its descriptor distance exceeds `max_descriptor_distance`, which only fusion sets.
-// Reports points.candidates, keypoints.unmatched, matches.raw and matches.accepted.
-// Used in: LoopClosing::search_loop_map_points, LoopClosing::search_and_fuse,
-//          LocalMapping::fuse_into_keyframe
-void FeatureMatcher::match_map_points_to_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_pts,
-                                                  const std::vector<cv::Point2f>& projections,
-                                                  const FeatureType feat_type, std::vector<Pt>& matched_points,
-                                                  const float gate_scale_sigma2,
-                                                  const Descriptor_Distance_Type max_descriptor_distance)
-{
-    AF_REPORT_SCOPE();
-
-    [[maybe_unused]] const std::map<FeatureType, GateMatchCounts> counts_by_type = match_points_in_gate(
-        keyframe->features, map_pts, projections, gate_scale_sigma2,
-        max_descriptor_distance,
-        [&keyframe](const float x, const float y, const float radius, const FeatureType ft) {
-            return keyframe->get_features_in_area(x, y, radius, ft);
-        },
-        [&matched_points, feat_type](const FeatureType ft, const size_t keypoint_idx) {
-            return ft == feat_type && keypoint_idx < matched_points.size() && !matched_points[keypoint_idx];
-        },
-        [&matched_points](const FeatureType, const size_t keypoint_idx, const Pt& pt) {
-            matched_points[keypoint_idx] = pt;
-        });
-
-    [[maybe_unused]] const auto counts_it = counts_by_type.find(feat_type);
-    AF_REPORT("points.candidates", get_feature_name(feat_type),
-              counts_it == counts_by_type.end() ? 0 : counts_it->second.candidates);
-    AF_REPORT("keypoints.unmatched", get_feature_name(feat_type),
-              counts_it == counts_by_type.end() ? 0 : counts_it->second.free_keypoints);
-    AF_REPORT("matches.raw", get_feature_name(feat_type),
-              counts_it == counts_by_type.end() ? 0 : counts_it->second.with_keypoint);
-    AF_REPORT("matches.accepted", get_feature_name(feat_type),
-              counts_it == counts_by_type.end() ? 0 : counts_it->second.accepted);
-}
-
-// The last frame's tracked map points carried into `frame` by optical flow: pyramidal KLT from
-// `last_grey` to `grey` and back (a track whose round trip misses its start by more than
-// max_backward_error px is dropped), then each flowed point, undistorted, gives its map point to the
-// nearest detected keypoint of its feature type within association_radius px; a keypoint claimed by
-// two tracks keeps the closer one. No descriptors. Writes frame.pts; the counts say how far it got.
-// Used in: Tracking::track_with_optical_flow
-FeatureMatcher::FlowMatchCounts FeatureMatcher::match_frame_to_frame_by_flow(
-    const Frame& last_frame, const cv::Mat& last_grey, Frame& frame, const cv::Mat& grey,
-    const float max_backward_error, const float association_radius)
-{
-    AF_REPORT_SCOPE();
-
-    FlowMatchCounts counts{};
-
-    // 1. The last frame's tracked points: raw (distorted) positions, the flow runs on the image as it is
-    struct Track { FeatureType ft; int index; Pt map_point; };
-    std::vector<Track> tracks;
-    std::vector<cv::Point2f> prev_pts;
-    for (const auto& [ft, pts] : last_frame.pts)
-    {
-        const auto& raw = last_frame.raw_keypoints.at(ft);
-        const auto& outliers = last_frame.outliers.at(ft);
-        for (size_t i = 0; i < pts.size(); i++)
-        {
-            if(!pts[i] || pts[i]->is_bad() || outliers[i])
-                continue;
-            tracks.push_back({ft, static_cast<int>(i), pts[i]});
-            prev_pts.push_back(raw[i].pt);
-        }
-    }
-    counts.tracked = static_cast<int>(prev_pts.size());
-    if(prev_pts.empty())
-    {
-        AF_REPORT("flow.tracked", "", 0);
-        return counts;
-    }
-
-    // 2. KLT forward and backward; a track survives when both succeed and it returns to where it started
-    std::vector<cv::Point2f> next_pts, back_pts;
-    std::vector<uchar> status_fwd, status_bwd;
-    std::vector<float> err;
-    const cv::Size window(flow_window_px, flow_window_px);
-    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, flow_max_iterations, flow_epsilon);
-    cv::calcOpticalFlowPyrLK(last_grey, grey, prev_pts, next_pts, status_fwd, err, window, flow_pyramid_levels, criteria);
-    cv::calcOpticalFlowPyrLK(grey, last_grey, next_pts, back_pts, status_bwd, err, window, flow_pyramid_levels, criteria);
-    std::vector<int> kept;
-    std::vector<cv::Point2f> kept_pts;
-    const float max_err2 = max_backward_error * max_backward_error;
-    for (size_t t = 0; t < tracks.size(); t++)
-    {
-        if(!status_fwd[t] || !status_bwd[t])
-            continue;
-        const cv::Point2f d = back_pts[t] - prev_pts[t];
-        if(d.dot(d) > max_err2)
-            continue;
-        const cv::Point2f& p = next_pts[t];
-        if(p.x < 0.0f || p.y < 0.0f || p.x >= static_cast<float>(grey.cols) || p.y >= static_cast<float>(grey.rows))
-            continue;
-        kept.push_back(static_cast<int>(t));
-        kept_pts.push_back(p);
-    }
-    counts.survived = static_cast<int>(kept.size());
-    if(kept.empty())
-    {
-        AF_REPORT("flow.tracked", "", counts.tracked);
-        AF_REPORT("flow.survived", "", 0);
-        return counts;
-    }
-
-    // 3. The frame's keypoints live in undistorted coordinates: undistort the flowed positions to look them up
-    const std::vector<cv::Point2f> lookup_pts = frame.calibration->undistort(kept_pts);
-
-    // 4. Snap each track to the nearest detected keypoint of its feature type; a keypoint claimed twice keeps
-    //    the closer track
-    std::map<FeatureType, std::vector<float>> best_dist2;
-    for (const auto& [ft, data] : frame.features.per_type)
-        best_dist2[ft].assign(data.count(), std::numeric_limits<float>::max());
-    const float radius = association_radius;
-    for (size_t k = 0; k < kept.size(); k++)
-    {
-        const Track& track = tracks[kept[k]];
-        const cv::Point2f& u = lookup_pts[k];
-        const std::vector<size_t> candidates = frame.get_features_in_area(u.x, u.y, radius, track.ft);
-        int best = -1;
-        float best_d2 = radius * radius;
-        for (const size_t idx : candidates)
-        {
-            const cv::Point2f d = frame.features.at(track.ft).keypoints[idx].pt - u;
-            const float d2 = d.dot(d);
-            if(d2 < best_d2)
-            {
-                best_d2 = d2;
-                best = static_cast<int>(idx);
-            }
-        }
-        if(best < 0 || best_d2 >= best_dist2[track.ft][best])
-            continue;
-        auto& pts = frame.pts.at(track.ft);
-        if(!pts[best])
-            ++counts.matched;                               // a re-claim replaces, the count stays
-        pts[best] = track.map_point;
-        best_dist2[track.ft][best] = best_d2;
-    }
-
-    AF_REPORT("flow.tracked", "", counts.tracked);
-    AF_REPORT("flow.survived", "", counts.survived);
-    AF_REPORT("flow.matched", "", counts.matched);
-    return counts;
-}
-
-// Makes sure the matches between `keyframe` and each of `others` are in `keyframe`'s match
-// cache. Pairs already cached are skipped. For the rest: the descriptors of every feature type
-// are matched, all (other, feature type) combinations in parallel; then, per pair of keyframes,
-// the geometric filter runs on all its feature types jointly; the survivors are stored in
-// `keyframe`'s cache, keyed by the other keyframe, per feature type and in per-type keypoint
-// indices. Nothing is stored in the other keyframe: every reader looks the pair up from
-// `keyframe`'s side.
-//
-// The cache is a hand-off, not a store: the caller reads the pairs back and then releases them
-// with clear_keyframe_matches.
-//
-// This is the only writer of the cache for keyframe pairs. Its other writer is tracking
-// (match_keyframe_to_frame, for a frame against its reference keyframe), which filters the same
-// way, so a cached entry is always a geometrically filtered one.
-// Used in: LocalMapping::create_new_map_points, LoopClosing::compute_sim3 and
-// LoopClosing::search_loop_map_points. The pairs are read back with get_keyframe_matches.
-void FeatureMatcher::match_keyframe_to_keyframes(const Keyframe& keyframe, const std::vector<Keyframe>& others,
-    const std::vector<FeatureType>& feat_types)
-{
-    const int num_others = static_cast<int>(others.size());
-    const int num_feature_types = static_cast<int>(feat_types.size());
-
-    // The pairs still to match: no cache entry yet, or an empty one. The caches are shared
-    // between the three threads (KeyFrame::cache_mutex_).
-    std::vector<char> pending(num_others, 0);
-    bool any_pending = false;
-    {
-        std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
-        for (int k = 0; k < num_others; k++) {
-            if (others[k] == keyframe)
-                continue;
-            const auto it = keyframe->cache_matched_pairs_feat_type.find(others[k]->frame_id);
-            pending[k] = it == keyframe->cache_matched_pairs_feat_type.end() || it->second.empty();
-            any_pending = any_pending || pending[k];
-        }
-    }
-    if (!any_pending)
-        return;
-
-    AF_REPORT_SCOPE();
-
-    std::vector<std::vector<std::vector<cv::DMatch>>> matches(
-        num_others, std::vector<std::vector<cv::DMatch>>(num_feature_types));
-
-    #pragma omp parallel for collapse(2) schedule(dynamic)
-    for (int k = 0; k < num_others; k++) {
-        for (int f = 0; f < num_feature_types; f++) {
-            if (!pending[k])
-                continue;
-            const FeatureType ft = feat_types[f];
-            if (!keyframe->features.has(ft) || !others[k]->features.has(ft))
-                continue;
-            const KeypointData& data1 = keyframe->features.at(ft);
-            const KeypointData& data2 = others[k]->features.at(ft);
-            matches[k][f] = match_descriptors(data1.descriptors, data2.descriptors,
-                                              data1.keypoints, data2.keypoints, ft,
-                                              image_size(*keyframe->calibration), image_size(*others[k]->calibration));
-        }
-    }
-
-    // Filter and store, serially: the filter is a few milliseconds per pair, and this keeps the
-    // report entries on the calling thread.
-    [[maybe_unused]] std::vector<size_t> num_raw(num_feature_types, 0), num_filtered(num_feature_types, 0);
-    for (int k = 0; k < num_others; k++) {
-        if (!pending[k])
-            continue;
-        const Keyframe& other = others[k];
-
-        std::map<FeatureType, std::vector<cv::DMatch>> raw_by_type;
-        for (int f = 0; f < num_feature_types; f++) {
-            num_raw[f] += matches[k][f].size();
-            if (!matches[k][f].empty())
-                raw_by_type[feat_types[f]] = std::move(matches[k][f]);
-        }
-        std::map<FeatureType, std::vector<cv::DMatch>> forward_by_type =
-            filter_matches_geometric_jointly(raw_by_type, keyframe->features, other->features,
-                                             *keyframe->calibration, *other->calibration);
-
-        for (int f = 0; f < num_feature_types; f++) {
-            const auto it = forward_by_type.find(feat_types[f]);
-            if (it != forward_by_type.end())
-                num_filtered[f] += it->second.size();
-        }
-
-        std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
-        keyframe->cache_matched_pairs_feat_type.insert_or_assign(other->frame_id, std::move(forward_by_type));
-    }
-
-    // Totals over the pairs matched in this call, per feature type.
-    for (int f = 0; f < num_feature_types; f++) {
-        AF_REPORT("matches.raw", get_feature_name(feat_types[f]), num_raw[f]);
-        AF_REPORT("matches.filtered", get_feature_name(feat_types[f]), num_filtered[f]);
-    }
-}
-
-// Releases every match list `keyframe` holds. Called by the thread that filled them, once it has
-// read them back: Local Mapping after triangulating, Loop Closing when it is done with the
-// keyframe. The cache is otherwise never pruned, and a keyframe's matches against its
-// neighbors are a few hundred kilobytes. This includes the entry tracking left for the
-// reference keyframe, which Local Mapping has used by then.
-// Reports what was held: cache.entries (keyframes matched against) and cache.matches.
-void FeatureMatcher::clear_keyframe_matches(const Keyframe& keyframe)
-{
-    std::map<FrameId, std::map<FeatureType, std::vector<cv::DMatch>>> released;
-    {
-        std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
-        released.swap(keyframe->cache_matched_pairs_feat_type);
-    }
-
-#ifdef ALLFEATURE_REPORT
-    size_t num_matches = 0;
-    for (const auto& [frame_id, matches_by_type] : released)
-        for (const auto& [ft, matches] : matches_by_type)
-            num_matches += matches.size();
-    AF_REPORT("cache.entries", "", released.size());
-    AF_REPORT("cache.matches", "", num_matches);
-#endif
-}
-
-// The matched keypoint pairs (index in keyframe1, index in keyframe2) that keyframe1's match
-// cache holds for keyframe2, per feature type. A read only: it never matches. A pair of
-// keyframes that was not cached first (match_keyframe_to_keyframes) gives no pairs.
-// Used in: LocalMapping::create_new_map_points, LoopClosing::compute_sim3
-std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::get_keyframe_matches(const Keyframe& keyframe1, const Keyframe& keyframe2)
-{
-    // A copy: the cache is shared between threads (KeyFrame::cache_mutex_)
-    std::map<FeatureType, std::vector<cv::DMatch>> cached_by_type;
-    {
-        std::lock_guard<std::mutex> lock(keyframe1->cache_mutex_);
-        const auto cache_it = keyframe1->cache_matched_pairs_feat_type.find(keyframe2->frame_id);
-        if (cache_it != keyframe1->cache_matched_pairs_feat_type.end())
-            cached_by_type = cache_it->second;
-    }
-
-    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_pairs;
-    for (const auto& [ft, matches] : cached_by_type)
-        for (const cv::DMatch& match : matches)
-            matched_pairs[ft].emplace_back(size_t(match.queryIdx), size_t(match.trainIdx));
-    return matched_pairs;
-}
-
-
-// The matched keypoint pairs (index in frame1, index in frame2) of two frames, per feature
-// type, for monocular initialization: the descriptors of each feature type are matched, and the
-// geometric filter runs on all types jointly. The result has an entry for every requested
-// feature type, empty when none of its matches survive -- the caller reads them with .at(ft).
-// Reports matches.raw and matches.filtered per feature type.
-// Used in: Tracking::attempt_monocular_initialization
-std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::match_frames_for_initialization(const Frame& frame1, const Frame& frame2,
-    const std::vector<FeatureType>& feat_types)
-{
-    AF_REPORT_SCOPE();
-
-    // One feature type after the other, on the calling thread: with one learned feature the
-    // LightGlue match dominates and there is nothing to gain from a parallel loop, and on this
-    // thread the tracking thread's run priority applies to it (OrtSession, Threading).
-    std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type;
-    for (const auto& ft : feat_types) {
-        if (!frame1.features.has(ft) || !frame2.features.has(ft))
-            continue;
-        const KeypointData& data1 = frame1.features.at(ft);
-        const KeypointData& data2 = frame2.features.at(ft);
-        matches_by_type[ft] = match_descriptors(data1.descriptors, data2.descriptors,
-                                                data1.keypoints, data2.keypoints, ft,
-                                                image_size(*frame1.calibration), image_size(*frame2.calibration));
-        AF_REPORT("matches.raw", get_feature_name(ft), matches_by_type.at(ft).size());
-    }
-
-    // One model for all feature types: they all see the same two views
-    const std::map<FeatureType, std::vector<cv::DMatch>> filtered_by_type =
-        filter_matches_geometric_jointly(matches_by_type, frame1.features, frame2.features,
-                                         *frame1.calibration, *frame2.calibration);
-
-    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_pairs;
-    for (const auto& ft : feat_types)
-        matched_pairs[ft];
-    for (const auto& [ft, filtered] : filtered_by_type)
-        for (const cv::DMatch& match : filtered)
-            matched_pairs[ft].emplace_back(size_t(match.queryIdx), size_t(match.trainIdx));
-
-    for ([[maybe_unused]] const auto& ft : feat_types)
-        AF_REPORT("matches.filtered", get_feature_name(ft), matched_pairs.at(ft).size());
-
-    return matched_pairs;
-}
-
-Descriptor_Distance_Type FeatureMatcher::descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_)
-{
-    const AF_VSLAM::Feature& ft = get_feature(featureType_);
-    return ft.descriptor_distance(a,b);
-}
+// ==================== Image to Image ====================
 
 std::vector<cv::DMatch> FeatureMatcher::match_descriptors(
     const cv::Mat& desc1, const cv::Mat& desc2,
@@ -842,6 +254,518 @@ std::map<FeatureType, std::vector<cv::DMatch>> FeatureMatcher::filter_matches_ge
         filtered_by_type[origin.feat_type].emplace_back(origin.idx1, origin.idx2, match.distance);
     }
     return filtered_by_type;
+}
+
+// Used in: Tracking::track_reference_keyframe, Tracking::relocalize
+std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyframe& keyframe, Frame& frame,
+    std::map<FeatureType, std::vector<Pt>>& map_pts_matches, const std::vector<FeatureType>& feat_types)
+{
+    std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type;
+    std::map<FeatureType, std::vector<Pt>> map_pts_kf;   // keyframe's map points per type (snapshot)
+
+    map_pts_matches.clear();
+
+    AF_REPORT_SCOPE();
+    AF_REPORT("keyframe.frame_id", "", keyframe->frame_id);
+
+    // 1. Descriptor matching, per feature type
+    for (const auto& ft : feat_types) {
+        if (!keyframe->features.has(ft) || !frame.features.has(ft))
+            continue;
+
+        map_pts_kf[ft] = keyframe->get_map_point_matches(ft);
+
+        const KeypointData& keyframe_data = keyframe->features.at(ft);
+        const KeypointData& frame_data = frame.features.at(ft);
+        std::vector<cv::DMatch> matches = match_descriptors(
+            keyframe_data.descriptors, frame_data.descriptors,
+            keyframe_data.keypoints, frame_data.keypoints, ft,
+            image_size(*keyframe->calibration), image_size(*frame.calibration));
+        AF_REPORT("matches.raw", get_feature_name(ft), matches.size());
+
+        if (!matches.empty())
+            matches_by_type[ft] = std::move(matches);
+
+        map_pts_matches[ft] = std::vector<Pt>(frame_data.count(), nullptr);
+    }
+
+    // 2. Geometric filter: one model for all feature types
+    const std::map<FeatureType, std::vector<cv::DMatch>> robust_by_type =
+        filter_matches_geometric_jointly(matches_by_type, keyframe->features, frame.features,
+                                         *keyframe->calibration, *frame.calibration);
+
+    // 3. Lift: a filtered pair gives the frame keypoint the keyframe's map point
+    std::map<FeatureType, std::vector<cv::DMatch>> frame_side;   // filtered pairs, frame index first (the cache)
+
+    std::map<FeatureType, int> matches_count;
+    for (const auto& ft : feat_types)
+        matches_count[ft] = 0;
+    for (const auto& [ft, robust_matches] : robust_by_type) {
+        std::vector<cv::DMatch>& frame_side_ft = frame_side[ft];
+        frame_side_ft.reserve(robust_matches.size());
+        const std::vector<Pt>& keyframe_pts = map_pts_kf.at(ft);
+        std::vector<Pt>& frame_pts = map_pts_matches.at(ft);
+        for (const cv::DMatch& match : robust_matches) {
+            const int keyframe_idx = match.queryIdx;
+            const int frame_idx = match.trainIdx;
+
+            frame_side_ft.emplace_back(frame_idx, keyframe_idx, match.distance);
+
+            const Pt& pt = keyframe_pts[keyframe_idx];
+            if (!pt || pt->is_bad())
+                continue;
+            frame_pts[frame_idx] = pt;
+            matches_count[ft]++;
+        }
+    }
+    for ([[maybe_unused]] const auto& ft : feat_types) {
+        AF_REPORT("matches.filtered", get_feature_name(ft),
+                  frame_side.count(ft) ? frame_side.at(ft).size() : 0);
+        AF_REPORT("matches.with_point", get_feature_name(ft), matches_count.at(ft));
+    }
+
+    // 4. Cache every filtered pair on the frame, keyed by the keyframe
+    frame.cache_matched_pairs_feat_type.insert_or_assign(keyframe->frame_id, std::move(frame_side));
+
+    return matches_count;
+}
+
+void FeatureMatcher::match_keyframe_to_keyframes(const Keyframe& keyframe, const std::vector<Keyframe>& others,
+    const std::vector<FeatureType>& feat_types)
+{
+    const int num_others = static_cast<int>(others.size());
+    const int num_feature_types = static_cast<int>(feat_types.size());
+
+    // 1. Pending pairs: no cache entry yet, or an empty one
+    std::vector<char> pending(num_others, 0);   // per other keyframe
+    bool any_pending = false;
+    {
+        std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);   // the cache is shared between threads
+        for (int k = 0; k < num_others; k++) {
+            if (others[k] == keyframe)
+                continue;
+            const auto it = keyframe->cache_matched_pairs_feat_type.find(others[k]->frame_id);
+            pending[k] = it == keyframe->cache_matched_pairs_feat_type.end() || it->second.empty();
+            any_pending = any_pending || pending[k];
+        }
+    }
+    if (!any_pending)
+        return;
+
+    AF_REPORT_SCOPE();
+
+    // 2. Descriptor matching: every pending pair x feature type in parallel
+    std::vector<std::vector<std::vector<cv::DMatch>>> matches(   // [other][feature type]
+        num_others, std::vector<std::vector<cv::DMatch>>(num_feature_types));
+
+    #pragma omp parallel for collapse(2) schedule(dynamic)
+    for (int k = 0; k < num_others; k++) {
+        for (int f = 0; f < num_feature_types; f++) {
+            if (!pending[k])
+                continue;
+            const FeatureType ft = feat_types[f];
+            if (!keyframe->features.has(ft) || !others[k]->features.has(ft))
+                continue;
+            const KeypointData& data1 = keyframe->features.at(ft);
+            const KeypointData& data2 = others[k]->features.at(ft);
+            matches[k][f] = match_descriptors(data1.descriptors, data2.descriptors,
+                                              data1.keypoints, data2.keypoints, ft,
+                                              image_size(*keyframe->calibration), image_size(*others[k]->calibration));
+        }
+    }
+
+    // 3. Geometric filter and store, pair by pair (serial: keeps the report on this thread)
+    [[maybe_unused]] std::vector<size_t> num_raw(num_feature_types, 0), num_filtered(num_feature_types, 0);
+    for (int k = 0; k < num_others; k++) {
+        if (!pending[k])
+            continue;
+        const Keyframe& other = others[k];
+
+        std::map<FeatureType, std::vector<cv::DMatch>> raw_by_type;
+        for (int f = 0; f < num_feature_types; f++) {
+            num_raw[f] += matches[k][f].size();
+            if (!matches[k][f].empty())
+                raw_by_type[feat_types[f]] = std::move(matches[k][f]);
+        }
+        std::map<FeatureType, std::vector<cv::DMatch>> forward_by_type =
+            filter_matches_geometric_jointly(raw_by_type, keyframe->features, other->features,
+                                             *keyframe->calibration, *other->calibration);
+
+        for (int f = 0; f < num_feature_types; f++) {
+            const auto it = forward_by_type.find(feat_types[f]);
+            if (it != forward_by_type.end())
+                num_filtered[f] += it->second.size();
+        }
+
+        std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
+        keyframe->cache_matched_pairs_feat_type.insert_or_assign(other->frame_id, std::move(forward_by_type));   // this keyframe only
+    }
+
+    // 4. Report: totals over the pairs matched in this call
+    for (int f = 0; f < num_feature_types; f++) {
+        AF_REPORT("matches.raw", get_feature_name(feat_types[f]), num_raw[f]);
+        AF_REPORT("matches.filtered", get_feature_name(feat_types[f]), num_filtered[f]);
+    }
+}
+
+std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::get_keyframe_matches(const Keyframe& keyframe1, const Keyframe& keyframe2)
+{
+    std::map<FeatureType, std::vector<cv::DMatch>> cached_by_type;
+    {
+        std::lock_guard<std::mutex> lock(keyframe1->cache_mutex_);
+        const auto cache_it = keyframe1->cache_matched_pairs_feat_type.find(keyframe2->frame_id);
+        if (cache_it != keyframe1->cache_matched_pairs_feat_type.end())
+            cached_by_type = cache_it->second;
+    }
+
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_pairs;
+    for (const auto& [ft, matches] : cached_by_type)
+        for (const cv::DMatch& match : matches)
+            matched_pairs[ft].emplace_back(size_t(match.queryIdx), size_t(match.trainIdx));
+    return matched_pairs;
+}
+
+void FeatureMatcher::clear_keyframe_matches(const Keyframe& keyframe)
+{
+    std::map<FrameId, std::map<FeatureType, std::vector<cv::DMatch>>> released;
+    {
+        std::lock_guard<std::mutex> lock(keyframe->cache_mutex_);
+        released.swap(keyframe->cache_matched_pairs_feat_type);
+    }
+}
+
+std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::match_frames_for_initialization(const Frame& frame1, const Frame& frame2,
+    const std::vector<FeatureType>& feat_types)
+{
+    AF_REPORT_SCOPE();
+
+    // 1. Descriptor matching, per feature type (serial: keeps the tracking thread's run priority)
+    std::map<FeatureType, std::vector<cv::DMatch>> matches_by_type;
+    for (const auto& ft : feat_types) {
+        if (!frame1.features.has(ft) || !frame2.features.has(ft))
+            continue;
+        const KeypointData& data1 = frame1.features.at(ft);
+        const KeypointData& data2 = frame2.features.at(ft);
+        matches_by_type[ft] = match_descriptors(data1.descriptors, data2.descriptors,
+                                                data1.keypoints, data2.keypoints, ft,
+                                                image_size(*frame1.calibration), image_size(*frame2.calibration));
+        AF_REPORT("matches.raw", get_feature_name(ft), matches_by_type.at(ft).size());
+    }
+
+    // 2. Geometric filter: one model for all feature types
+    const std::map<FeatureType, std::vector<cv::DMatch>> filtered_by_type =
+        filter_matches_geometric_jointly(matches_by_type, frame1.features, frame2.features,
+                                         *frame1.calibration, *frame2.calibration);
+
+    // 3. Survivors as (index in frame1, index in frame2) pairs
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_pairs;
+    for (const auto& ft : feat_types)
+        matched_pairs[ft];   // an entry for every requested type: the caller reads with .at(ft)
+    for (const auto& [ft, filtered] : filtered_by_type)
+        for (const cv::DMatch& match : filtered)
+            matched_pairs[ft].emplace_back(size_t(match.queryIdx), size_t(match.trainIdx));
+
+    for ([[maybe_unused]] const auto& ft : feat_types)
+        AF_REPORT("matches.filtered", get_feature_name(ft), matched_pairs.at(ft).size());
+
+    return matched_pairs;
+}
+
+// ==================== Map to Image ====================
+
+Descriptor_Distance_Type FeatureMatcher::descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_)
+{
+    const AF_VSLAM::Feature& ft = get_feature(featureType_);
+    return ft.descriptor_distance(a,b);
+}
+
+namespace
+{
+// What the pose-guided search found for one feature type; the callers report it.
+struct GateMatchCounts
+{
+    size_t candidates{0};          // candidate map points of this type
+    size_t free_keypoints{0};      // keypoints with no map point yet
+    size_t with_keypoint{0};       // candidates with at least one free keypoint in their gate
+    size_t accepted{0};            // pairs where each side is the other's best descriptor match
+};
+
+template <typename KeypointsInArea, typename IsFree, typename Assign>
+std::map<FeatureType, GateMatchCounts> match_points_in_gate(
+    const AF_VSLAM::FeatureData& features,
+    const std::vector<AF_VSLAM::Pt>& map_pts, const std::vector<cv::Point2f>& projections,   // projections[i] is map_pts[i]'s
+    const float gate,                                   // max offset^T * information * offset (squared sigmas)
+    const Descriptor_Distance_Type max_distance,        // the type's max(): no limit
+    const KeypointsInArea& keypoints_in_area,           // (x, y, radius, type) -> keypoint indices near (x, y)
+    const IsFree& is_free,                              // (type, keypoint) -> may it take a point
+    const Assign& assign)                               // (type, keypoint, point): apply an accepted pair
+{
+    using AF_VSLAM::FeatureMatcher;
+    using AF_VSLAM::Pt;
+    constexpr Descriptor_Distance_Type no_distance = std::numeric_limits<Descriptor_Distance_Type>::max();
+
+    // 1. Candidates by feature type: one descriptor read per point (it takes the point's lock)
+    struct Candidates
+    {
+        std::vector<size_t> indices;          // into map_pts
+        std::vector<cv::Mat> descriptors;
+    };
+    std::map<FeatureType, Candidates> candidates_by_type;
+    for (size_t idx = 0; idx < map_pts.size(); idx++) {
+        const Pt& pt = map_pts[idx];
+        if (!pt || pt->is_bad())
+            continue;
+
+        cv::Mat descriptor = pt->get_descriptor();
+        if (descriptor.empty())
+            continue;
+
+        Candidates& candidates = candidates_by_type[pt->featureType];
+        candidates.indices.push_back(idx);
+        candidates.descriptors.push_back(std::move(descriptor));
+    }
+
+    std::map<FeatureType, GateMatchCounts> counts_by_type;
+    for (const auto& [ft, data] : features.per_type) {
+        GateMatchCounts& counts = counts_by_type[ft];
+        const size_t num_keypoints = data.count();
+
+        // 2. Free keypoints, and the largest variance among them (it sets how far to search)
+        std::vector<char> free_keypoint(num_keypoints, 0);
+        float max_variance = 0.0f;   // bound on any free keypoint's variance along any direction
+        for (size_t i = 0; i < num_keypoints; i++) {
+            if (!is_free(ft, i))
+                continue;
+            free_keypoint[i] = 1;
+            counts.free_keypoints++;
+            const mat2f& sigma2 = data.sigma2[i];
+            max_variance = std::max(max_variance,
+                                    std::max(sigma2(0, 0), sigma2(1, 1)) + std::abs(sigma2(0, 1)));
+        }
+
+        const auto candidates_it = candidates_by_type.find(ft);
+        if (candidates_it == candidates_by_type.end())
+            continue;
+        const Candidates& candidates = candidates_it->second;
+        const size_t num_candidates = candidates.indices.size();
+        counts.candidates = num_candidates;
+        if (counts.free_keypoints == 0)
+            continue;
+
+        const std::vector<cv::KeyPoint>& keypoints = data.keypoints;
+        const cv::Mat& descriptors = data.descriptors;
+
+        // 3. Gate, then each side's best descriptor match among the pairs it allows
+        const float search_radius = std::sqrt(gate * max_variance);   // covers the widest keypoint's gate
+        std::vector<int> best_keypoint(num_candidates, -1);
+        std::vector<Descriptor_Distance_Type> best_keypoint_distance(num_candidates, no_distance);
+        std::vector<int> best_candidate(num_keypoints, -1);
+        std::vector<Descriptor_Distance_Type> best_candidate_distance(num_keypoints, no_distance);
+
+        for (size_t c = 0; c < num_candidates; c++) {
+            const cv::Point2f& projection = projections[candidates.indices[c]];
+            for (const size_t k : keypoints_in_area(projection.x, projection.y, search_radius, ft)) {
+                if (!free_keypoint[k])
+                    continue;
+
+                const vec2f offset(keypoints[k].pt.x - projection.x, keypoints[k].pt.y - projection.y);
+                if (offset.dot(data.information[k] * offset) >= gate)   // outside this keypoint's own gate
+                    continue;
+
+                const Descriptor_Distance_Type distance = FeatureMatcher::descriptor_distance(
+                    candidates.descriptors[c], descriptors.row(static_cast<int>(k)), ft);
+                if (distance < best_keypoint_distance[c]) {   // strict '<': the first of equal distances wins
+                    best_keypoint_distance[c] = distance;
+                    best_keypoint[c] = static_cast<int>(k);
+                }
+                if (distance < best_candidate_distance[k]) {
+                    best_candidate_distance[k] = distance;
+                    best_candidate[k] = static_cast<int>(c);
+                }
+            }
+        }
+
+        // 4. Accept the pairs where each side chose the other
+        for (size_t c = 0; c < num_candidates; c++) {
+            const int k = best_keypoint[c];
+            if (k < 0)
+                continue;
+            counts.with_keypoint++;
+            if (best_candidate[k] != static_cast<int>(c))   // not mutual
+                continue;
+            if (best_keypoint_distance[c] > max_distance)
+                continue;
+            assign(ft, static_cast<size_t>(k), map_pts[candidates.indices[c]]);
+            counts.accepted++;
+        }
+    }
+    return counts_by_type;
+}
+}
+
+void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
+                                               const std::vector<cv::Point2f>& projections)
+{
+    AF_REPORT_SCOPE();
+
+    [[maybe_unused]] const std::map<FeatureType, GateMatchCounts> counts_by_type = match_points_in_gate(
+        frame.features, map_pts, projections, projection_match_scale_sigma2,
+        std::numeric_limits<Descriptor_Distance_Type>::max(),
+        [&frame](const float x, const float y, const float radius, const FeatureType ft) {
+            return frame.get_features_in_area(x, y, radius, ft);
+        },
+        [&frame](const FeatureType ft, const size_t keypoint_idx) {
+            const Pt& pt = frame.pts.at(ft)[keypoint_idx];
+            return !(pt && pt->number_of_observations() > 0);
+        },
+        [&frame](const FeatureType ft, const size_t keypoint_idx, const Pt& pt) {
+            frame.pts.at(ft)[keypoint_idx] = pt;
+        });
+
+    for ([[maybe_unused]] const auto& [ft, counts] : counts_by_type) {
+        AF_REPORT("points.candidates", get_feature_name(ft), counts.candidates);
+        AF_REPORT("keypoints.unmatched", get_feature_name(ft), counts.free_keypoints);
+        AF_REPORT("matches.raw", get_feature_name(ft), counts.with_keypoint);
+        AF_REPORT("matches.accepted", get_feature_name(ft), counts.accepted);
+    }
+}
+
+void FeatureMatcher::match_map_points_to_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_pts,
+                                                  const std::vector<cv::Point2f>& projections,
+                                                  const FeatureType feat_type, std::vector<Pt>& matched_points,
+                                                  const float gate_scale_sigma2,
+                                                  const Descriptor_Distance_Type max_descriptor_distance)
+{
+    AF_REPORT_SCOPE();
+
+    [[maybe_unused]] const std::map<FeatureType, GateMatchCounts> counts_by_type = match_points_in_gate(
+        keyframe->features, map_pts, projections, gate_scale_sigma2,
+        max_descriptor_distance,
+        [&keyframe](const float x, const float y, const float radius, const FeatureType ft) {
+            return keyframe->get_features_in_area(x, y, radius, ft);
+        },
+        [&matched_points, feat_type](const FeatureType ft, const size_t keypoint_idx) {
+            return ft == feat_type && keypoint_idx < matched_points.size() && !matched_points[keypoint_idx];
+        },
+        [&matched_points](const FeatureType, const size_t keypoint_idx, const Pt& pt) {
+            matched_points[keypoint_idx] = pt;
+        });
+
+    [[maybe_unused]] const auto counts_it = counts_by_type.find(feat_type);
+    AF_REPORT("points.candidates", get_feature_name(feat_type),
+              counts_it == counts_by_type.end() ? 0 : counts_it->second.candidates);
+    AF_REPORT("keypoints.unmatched", get_feature_name(feat_type),
+              counts_it == counts_by_type.end() ? 0 : counts_it->second.free_keypoints);
+    AF_REPORT("matches.raw", get_feature_name(feat_type),
+              counts_it == counts_by_type.end() ? 0 : counts_it->second.with_keypoint);
+    AF_REPORT("matches.accepted", get_feature_name(feat_type),
+              counts_it == counts_by_type.end() ? 0 : counts_it->second.accepted);
+}
+
+// ==================== Optical Flow ====================
+
+FeatureMatcher::FlowMatchCounts FeatureMatcher::match_frame_to_frame_by_flow(
+    const Frame& last_frame, const cv::Mat& last_grey, Frame& frame, const cv::Mat& grey,
+    const float max_backward_error, const float association_radius)
+{
+    AF_REPORT_SCOPE();
+
+    FlowMatchCounts counts{};
+
+    // 1. The last frame's tracked points: raw (distorted) positions, the flow runs on the image as it is
+    struct Track { FeatureType ft; int index; Pt map_point; };
+    std::vector<Track> tracks;
+    std::vector<cv::Point2f> prev_pts;
+    for (const auto& [ft, pts] : last_frame.pts)
+    {
+        const auto& raw = last_frame.raw_keypoints.at(ft);
+        const auto& outliers = last_frame.outliers.at(ft);
+        for (size_t i = 0; i < pts.size(); i++)
+        {
+            if(!pts[i] || pts[i]->is_bad() || outliers[i])
+                continue;
+            tracks.push_back({ft, static_cast<int>(i), pts[i]});
+            prev_pts.push_back(raw[i].pt);
+        }
+    }
+    counts.tracked = static_cast<int>(prev_pts.size());
+    if(prev_pts.empty())
+    {
+        AF_REPORT("flow.tracked", "", 0);
+        return counts;
+    }
+
+    // 2. KLT forward and backward; a track survives when both succeed and it returns to where it started
+    std::vector<cv::Point2f> next_pts, back_pts;
+    std::vector<uchar> status_fwd, status_bwd;
+    std::vector<float> err;
+    const cv::Size window(flow_window_px, flow_window_px);
+    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, flow_max_iterations, flow_epsilon);
+    cv::calcOpticalFlowPyrLK(last_grey, grey, prev_pts, next_pts, status_fwd, err, window, flow_pyramid_levels, criteria);
+    cv::calcOpticalFlowPyrLK(grey, last_grey, next_pts, back_pts, status_bwd, err, window, flow_pyramid_levels, criteria);
+    std::vector<int> kept;
+    std::vector<cv::Point2f> kept_pts;
+    const float max_err2 = max_backward_error * max_backward_error;
+    for (size_t t = 0; t < tracks.size(); t++)
+    {
+        if(!status_fwd[t] || !status_bwd[t])
+            continue;
+        const cv::Point2f d = back_pts[t] - prev_pts[t];
+        if(d.dot(d) > max_err2)
+            continue;
+        const cv::Point2f& p = next_pts[t];
+        if(p.x < 0.0f || p.y < 0.0f || p.x >= static_cast<float>(grey.cols) || p.y >= static_cast<float>(grey.rows))
+            continue;
+        kept.push_back(static_cast<int>(t));
+        kept_pts.push_back(p);
+    }
+    counts.survived = static_cast<int>(kept.size());
+    if(kept.empty())
+    {
+        AF_REPORT("flow.tracked", "", counts.tracked);
+        AF_REPORT("flow.survived", "", 0);
+        return counts;
+    }
+
+    // 3. The frame's keypoints live in undistorted coordinates: undistort the flowed positions to look them up
+    const std::vector<cv::Point2f> lookup_pts = frame.calibration->undistort(kept_pts);
+
+    // 4. Snap each track to the nearest detected keypoint of its feature type; a keypoint claimed twice keeps
+    //    the closer track
+    std::map<FeatureType, std::vector<float>> best_dist2;
+    for (const auto& [ft, data] : frame.features.per_type)
+        best_dist2[ft].assign(data.count(), std::numeric_limits<float>::max());
+    const float radius = association_radius;
+    for (size_t k = 0; k < kept.size(); k++)
+    {
+        const Track& track = tracks[kept[k]];
+        const cv::Point2f& u = lookup_pts[k];
+        const std::vector<size_t> candidates = frame.get_features_in_area(u.x, u.y, radius, track.ft);
+        int best = -1;
+        float best_d2 = radius * radius;
+        for (const size_t idx : candidates)
+        {
+            const cv::Point2f d = frame.features.at(track.ft).keypoints[idx].pt - u;
+            const float d2 = d.dot(d);
+            if(d2 < best_d2)
+            {
+                best_d2 = d2;
+                best = static_cast<int>(idx);
+            }
+        }
+        if(best < 0 || best_d2 >= best_dist2[track.ft][best])
+            continue;
+        auto& pts = frame.pts.at(track.ft);
+        if(!pts[best])
+            ++counts.matched;                               // a re-claim replaces, the count stays
+        pts[best] = track.map_point;
+        best_dist2[track.ft][best] = best_d2;
+    }
+
+    AF_REPORT("flow.tracked", "", counts.tracked);
+    AF_REPORT("flow.survived", "", counts.survived);
+    AF_REPORT("flow.matched", "", counts.matched);
+    return counts;
 }
 
 }
