@@ -45,11 +45,18 @@ int main(int argc, char** argv) {
     bool debug = (bool)settings["debug"].as<bool>();
     std::cout << "[vslamlab_allfeature_mono_stream.cpp] Debug mode = " << debug << std::endl;
 
+    // An unknown name, or a feature this build does not include: one error line and a clean exit
     std::vector<FeatureType> feature_types{};
-    for(const auto& feat : features) {
-        auto featureType = get_feature_type(feat);
-        feature_types.push_back(featureType);
-        std::cout << "[vslamlab_allfeature_mono_stream.cpp] Loaded feature from settings YAML: " << feat << std::endl;
+    try {
+        for(const auto& feat : features) {
+            const FeatureType feature_type = get_feature_type(feat);
+            get_feature(feature_type);
+            feature_types.push_back(feature_type);
+            std::cout << "[vslamlab_allfeature_mono_stream.cpp] Loaded feature from settings YAML: " << feat << std::endl;
+        }
+    } catch (const std::runtime_error& e) {
+        AF_ERROR(e.what());
+        return 1;
     }
 
     segmentation::SegmentationSettings segmentationSettings{};

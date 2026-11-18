@@ -19,7 +19,7 @@
 // The learned features run on ONNX Runtime on every platform, SIFT on
 // OpenCV's CPU implementation: no CMake option gates them any more. A feature compiled out (brisk / akaze without
 // their conda package) keeps its FeatureType value (Types.h) but has no Feature instance, so requesting it in the
-// settings is an error at startup (feature_compiled_out below) instead of a link error.
+// settings is an error at startup (feature_compiled_out below throws) instead of a link error.
 #include "Feature_sift128.h"
 #include "Feature_aliked128.h"
 #include "Feature_superpoint256.h"
@@ -28,10 +28,10 @@
 // Previously returned a fresh unique_ptr per call — a heap allocation inside every
 // descriptor_distance/match dispatch, i.e. per descriptor comparison in the fuse and
 // compute_distinctive_descriptors inner loops (issue #13 addendum, factory-singletons item).
+// @throws std::runtime_error: the entry points catch it with the unknown-name error of get_feature_type.
 [[noreturn]] inline void feature_compiled_out(const std::string& feature, const std::string& cmake_option) {
-AF_ERROR("Feature '" << feature << "' is not available in this build: it needs " << cmake_option
-         << ". Remove it from `features:` in the settings yaml or rebuild with it.");
-std::terminate();
+throw std::runtime_error("feature '" + feature + "' is not available in this build: it needs " + cmake_option
+                         + ". Remove it from `features:` in the settings yaml or rebuild with it.");
 }
 
 inline const AF_VSLAM::Feature& get_feature(const FeatureType& feature_type) {
