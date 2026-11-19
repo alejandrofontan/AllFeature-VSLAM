@@ -624,8 +624,14 @@ void Viewer::Run()
     // the drawer's GL objects can be freed before the placecell window and then the main one go.
     mapDrawer->ReleaseGL();
 
-    // System::Shutdown binds back to the main window's context afterwards
-    closePlaceCellWindow();
+    closePlaceCellWindow();   // leaves the main window's context current
+
+    // The main window goes here, on the thread that owns its context and while that context is
+    // current. Left alive, it was destroyed by Pangolin's static destructors at process exit, after
+    // the context was gone: GlFont::~GlFont then freed its texture through a dead GL pointer and
+    // every viewer run ended in a segmentation fault (issues #42, #70).
+    imageTexture.Delete();
+    pangolin::DestroyWindow(windowTitle);
 
     SetFinish();
 }

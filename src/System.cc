@@ -478,9 +478,6 @@ void System::Shutdown()
         if(thread && thread->joinable())
             thread->join();
 
-    if(viewer && mptViewer)   // the Viewer ran in its own thread: make its context current here for the exit path
-        pangolin::BindToContext(viewer->GetWindowTitle());
-
     // Every thread has stopped, so these are stable. "alive" counts objects still owned by
     // SOMETHING; "in map" counts those the map still holds. The difference is what outlived
     // being erased from the map -- retention by another owner, not a leak (all ownership is
