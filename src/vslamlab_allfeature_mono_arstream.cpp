@@ -39,6 +39,7 @@
 #include <FrameDrawer.h>
 #include "afvslam_log.hpp"
 #include "SegmentationSettings.h"
+#include "Report.h"
 
 // An uncaught exception on any thread ends the process; name it and print the throwing thread's stack first
 // (symbolised by the dynamic linker: `atos -o <binary> <addr>` resolves what it leaves as offsets)
@@ -303,6 +304,7 @@ int main(int argc, char** argv) {
         }
 
         // Save camera trajectory
+        AF_REPORT_WRITE(resultsPath_expId + "_" + "Report.csv");
         SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
         SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply");
 

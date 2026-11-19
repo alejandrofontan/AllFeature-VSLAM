@@ -12,6 +12,7 @@
 #include <FrameDrawer.h>
 #include "afvslam_log.hpp"
 #include "SegmentationSettings.h"
+#include "Report.h"
 
 #include "DebugKeyStepper.h"
 #include "FramePacer.h"
@@ -291,6 +292,7 @@ int main(int argc, char **argv)
         pacer.printSummary();
 
         // Save camera trajectory
+        AF_REPORT_WRITE(resultsPath_expId + "_" + "Report.csv");
         SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
         SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply");
 
