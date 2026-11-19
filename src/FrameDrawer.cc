@@ -40,7 +40,8 @@ FrameDrawer::FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& featur
     mpMap(pMap), feature_types(feature_types)
 {
     mState=TrackingState::SYSTEM_NOT_READY;
-    mIm = cv::Mat(480,640,CV_8UC3, cv::Scalar(0,0,0));
+    // mIm stays empty until update() copies the first frame in: no placeholder with a made-up size
+    // (a 640x480 one once sized the viewer's texture wrongly, issue #7)
 }
 
 cv::Mat FrameDrawer::DrawFrame()
@@ -82,6 +83,10 @@ cv::Mat FrameDrawer::DrawFrame()
             vCurrentKeys = mvCurrentKeys;
         }
     } // destroy scoped mutex -> release mutex
+
+    // No frame yet: nothing to draw on. The viewer skips an empty image.
+    if(im.empty())
+        return {};
 
     // The viewer uploads this buffer as GL_RGB. The loaded image is BGR (cv::imread order,
     // same assumption as MapDrawer's point colors) or gray.
