@@ -137,17 +137,29 @@ public:
     // Image color (OpenCV-native BGR) of the reference keypoint at creation.
     const cv::Vec3b color;
 
-    // Variables used by the tracking
+    // ------------------------------------------------------------------------
+    // Scratch marks of the algorithms. Each holds the id of the frame or keyframe an algorithm is
+    // working for, so a point is handled once per pass ("already in this local BA").
+    //
+    // Contract: every mark has ONE owning thread, which is the only one that reads or writes it,
+    // so none of them is locked. Code on another thread must not touch a mark it does not own.
+    // ------------------------------------------------------------------------
+
+    // Owned by the tracking thread (Tracking::search_local_points)
     FrameId last_frame_seen{0};
 
-    // Variables used by local mapping
+    // Owned by the local mapping thread (Optimizer's local BA; LocalMapping::search_in_neighbors)
     long unsigned int ba_local_for_keyframe;
     long unsigned int fuse_candidate_for_keyframe;
 
-    // Variables used by loop closing
+    // Owned by the loop closing thread (LoopClosing; Optimizer's essential-graph optimization)
     long unsigned int loop_point_for_keyframe;
     long unsigned int corrected_by_keyframe;
     long unsigned int corrected_reference;
+
+    // Owned by whichever thread runs the global BA (Optimizer::global_bundle_adjustment, then
+    // LoopClosing::apply_gba_correction). Two can exist: Loop Closing's BA thread and the final
+    // System::GBA() on the main thread; nothing keeps them apart yet.
     vec3f position_gba{vec3f::Zero()};
     long unsigned int ba_global_for_keyframe;
 
