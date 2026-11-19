@@ -228,6 +228,18 @@ protected:
     // Locks
     // ========================================================================
 
+    // position_mutex_ guards the geometry: position_, normal_, ref_distance_, ref_size_, min_distance_,
+    //                 max_distance_.
+    // features_mutex_ guards everything else that changes: observations_, num_observations_,
+    //                 ref_keyframe_, descriptor_, bad_, replaced_, num_visible_, num_found_.
+    // (KeyFrame has a features_mutex_ of its own: a different lock.)
+    //
+    // Rules:
+    //  - A method takes one of the two. The one that needs both (update_normal_and_depth) takes them
+    //    with a single std::scoped_lock; anywhere else that ever needs both must do the same, or take
+    //    features_mutex_ first.
+    //  - Neither is held across a call into a keyframe or the map that takes a lock: set_bad_flag and
+    //    replace copy what they need, release, and only then touch the keyframes and the map.
     mutable std::mutex position_mutex_;
     mutable std::mutex features_mutex_;
 };

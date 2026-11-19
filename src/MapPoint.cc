@@ -270,8 +270,7 @@ void MapPoint::update_normal_and_depth()
     Keyframe ref_keyframe;
     vec3f world_pos;
     {
-        std::unique_lock<std::mutex> lock1(features_mutex_);
-        std::unique_lock<std::mutex> lock2(position_mutex_);
+        std::scoped_lock lock(features_mutex_, position_mutex_);   // both at once: see the Locks contract
         if(bad_)
             return;
 
