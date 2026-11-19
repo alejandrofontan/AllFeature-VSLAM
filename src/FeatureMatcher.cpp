@@ -106,16 +106,20 @@ std::vector<cv::DMatch> FeatureMatcher::match_descriptors(
         case LIGHTGLUE_ALIKED:
         case LIGHTGLUE_SUPERPOINT:
         {
-            try   // a failed run costs this pair's matches, not the process
+            try
             {
                 return onnx::shared_lightglue(lightglue_variant(matcher_type),
                                               static_cast<int>(std::max(kps1.size(), kps2.size())))   // picks the export that fits
                            .match(kps1, desc1, kps2, desc2, image_size1, image_size2);
             }
+            // A failed run is fatal: it means the GPU, the model or the inputs are wrong, and a run that
+            // carried on without these matches would give results that look valid and are not. Caught
+            // here because this also runs on worker threads and inside OpenMP regions, where an
+            // escaping exception ends the process without saying why.
             catch(const std::exception& e)
             {
-                AF_WARN("LightGlue match failed, no matches for this pair: " << e.what());
-                return {};
+                AF_FATAL("LightGlue match failed (" << get_feature(feat_type).get_feature_name() << ", "
+                         << kps1.size() << " x " << kps2.size() << " keypoints): " << e.what());
             }
         }
         case BF_L2:
