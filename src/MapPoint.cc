@@ -110,7 +110,7 @@ void MapPoint::erase_observation(const Keyframe& keyframe)
             if((!ref_keyframe_ || ref_keyframe_->keyId == keyframe->keyId) && !observations_.empty())
                 ref_keyframe_ = observations_.begin()->second.keyframe;
 
-            removePoint = (static_cast<int>(observations_.size()) <= min_observing_keyframes);
+            removePoint = (static_cast<int>(observations_.size()) < min_observing_keyframes);
         }
     }
 

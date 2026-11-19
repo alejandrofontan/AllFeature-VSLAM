@@ -65,6 +65,10 @@ public:
 
     Keyframe get_reference_keyframe() const;
 
+    // WEIGHTED count: an observation with depth counts depth_observation_weight (2), one without counts 1,
+    // as ORB-SLAM2 counts stereo observations twice. Compared against thresholds by map-point culling,
+    // keyframe culling (as a pre-filter) and KeyFrame::count_tracked_map_points; "is it observed at all" is
+    // number_of_observations() > 0. For the plain number of keyframes use num_observing_keyframes().
     int number_of_observations() const;
     int num_observing_keyframes() const;
 
@@ -161,7 +165,9 @@ protected:
     // ========================================================================
 
     static inline int depth_observation_weight{2};
-    static inline int min_observing_keyframes{2};
+    // A point needs at least this many observing keyframes to survive losing one: erase_observation
+    // removes it when fewer are left (ORB-SLAM2's `nObs <= 2`). MapPoint.MinObservingKeyframes.
+    static inline int min_observing_keyframes{3};
 
     [[nodiscard]] int observation_weight(const Keyframe& keyframe, const KeypointIndex& index) const;
 
