@@ -221,18 +221,22 @@ cv::Mat PnPsolver::iterate(int nIterations, bool &bNoMore, vector<bool> &vbInlie
                 mBestTcw = cv::Mat::eye(4,4,CV_32F);
                 Rcw.copyTo(mBestTcw.rowRange(0,3).colRange(0,3));
                 tcw.copyTo(mBestTcw.rowRange(0,3).col(3));
-            }
 
-            if(Refine())
-            {
-                nInliers = mnRefinedInliers;
-                vbInliers = vector<bool>(mvpMapPointMatches.size(),false);
-                for(int i=0; i<N; i++)
+                // Refine and hand back the hypothesis only when the best set has just improved.
+                // Refine() works from the best set, so doing it for every sample with enough
+                // inliers (as ORB-SLAM2 does) returned the same pose again and again, and the
+                // caller re-evaluated it each time (issue #68).
+                if(Refine())
                 {
-                    if(mvbRefinedInliers[i])
-                        vbInliers[mvKeyPointIndices[i]] = true;
+                    nInliers = mnRefinedInliers;
+                    vbInliers = vector<bool>(mvpMapPointMatches.size(),false);
+                    for(int i=0; i<N; i++)
+                    {
+                        if(mvbRefinedInliers[i])
+                            vbInliers[mvKeyPointIndices[i]] = true;
+                    }
+                    return mRefinedTcw.clone();
                 }
-                return mRefinedTcw.clone();
             }
 
         }
