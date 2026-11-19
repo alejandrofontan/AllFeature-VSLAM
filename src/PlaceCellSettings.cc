@@ -8,6 +8,7 @@
  */
 
 #include "PlaceCellSettings.h"
+#include "SettingsReader.h"
 
 namespace AF_VSLAM
 {
@@ -18,9 +19,7 @@ PlaceCellSettings PlaceCellSettings::Load(const cv::FileStorage& fSettings)
 
     auto read_if_present = [&fSettings](const char* key, auto& field)
     {
-        const cv::FileNode node = fSettings[key];
-        if(!node.empty())
-            node >> field;
+        read_setting_if_present(fSettings, key, field);
     };
     // cv::FileStorage has no bool reader: 0/1 integers
     auto read_flag_if_present = [&read_if_present](const char* key, bool& field)
@@ -31,17 +30,6 @@ PlaceCellSettings PlaceCellSettings::Load(const cv::FileStorage& fSettings)
     };
 
     read_if_present("PlaceCell.Verbosity", settings.verbosity);
-    // cv::FileStorage hands back an UNQUOTED scalar together with any trailing
-    // "# comment" on its line (seen on LocalMapping.KeyframeCullingScope in run logs):
-    // keep the first token only, so `Verbosity: warn   # ...` reads as "warn".
-    {
-        const size_t hash = settings.verbosity.find('#');
-        if(hash != std::string::npos)
-            settings.verbosity.erase(hash);
-        const size_t first = settings.verbosity.find_first_not_of(" \t\r\n");
-        const size_t last = settings.verbosity.find_last_not_of(" \t\r\n");
-        settings.verbosity = (first == std::string::npos) ? std::string{} : settings.verbosity.substr(first, last - first + 1);
-    }
     read_flag_if_present("PlaceCell.LogElapsed", settings.log_elapsed);
 
     read_flag_if_present("PlaceCell.Profile", settings.profile);

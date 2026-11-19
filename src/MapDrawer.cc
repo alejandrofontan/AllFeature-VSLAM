@@ -24,6 +24,7 @@
 #include "Converter.h"
 #include "Utils.h"
 #include "afvslam_log.hpp"
+#include "SettingsReader.h"
 
 #include <pangolin/pangolin.h>
 #include <algorithm>
@@ -98,14 +99,8 @@ MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const v
         mDefaultStyle.trajectoryLineWidth = fSettings["Viewer.TrajectoryLineWidth"];
     if (!fSettings["Viewer.PointColorMode"].empty())
     {
-        // cv::FileStorage returns an UNQUOTED scalar together with any trailing "# comment" on
-        // its line (same workaround as PlaceCellSettings): keep the first token only.
-        std::string name = static_cast<std::string>(fSettings["Viewer.PointColorMode"]);
-        if (const size_t hash = name.find('#'); hash != std::string::npos)
-            name.erase(hash);
-        const size_t first = name.find_first_not_of(" \t\r\n");
-        const size_t last = name.find_last_not_of(" \t\r\n");
-        name = (first == std::string::npos) ? std::string{} : name.substr(first, last - first + 1);
+        std::string name;
+        read_setting_if_present(fSettings, "Viewer.PointColorMode", name);
         if (!parsePointColorMode(name, mDefaultStyle.pointColorMode))
             AF_WARN("MapDrawer: unknown Viewer.PointColorMode '" << name << "' (expected feature | rgb), keeping feature");
     }

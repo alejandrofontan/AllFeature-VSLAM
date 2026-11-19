@@ -32,6 +32,7 @@
 #include "Utils.h"
 #include "afvslam_log.hpp"
 #include "onnx/OrtSession.h"
+#include "SettingsReader.h"
 
 namespace AF_VSLAM
 {
@@ -42,9 +43,7 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
 {
     auto read_if_present = [&fSettings](const char* key, auto& field)
     {
-        const cv::FileNode node = fSettings[key];
-        if(!node.empty())
-            node >> field;
+        read_setting_if_present(fSettings, key, field);
     };
 
     int sequential = params.sequential ? 1 : 0;   // cv::FileStorage has no bool reader

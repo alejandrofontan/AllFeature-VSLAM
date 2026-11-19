@@ -6,6 +6,7 @@
  * LoopClosing.h).
  */
 #include "LoopClosing.h"
+#include "SettingsReader.h"
 
 #include <chrono>
 #include <mutex>
@@ -22,9 +23,7 @@ void LoopClosing::LoadParameters(const cv::FileStorage& fSettings)
 {
     auto read_if_present = [&fSettings](const char* key, auto& field)
     {
-        const cv::FileNode node = fSettings[key];
-        if(!node.empty())
-            node >> field;
+        read_setting_if_present(fSettings, key, field);
     };
 
     read_if_present("LoopClosing.CovisibilityConsistencyThreshold", params.covisibility_consistency_threshold);
