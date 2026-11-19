@@ -306,9 +306,6 @@ void MapPoint::update_normal_and_depth()
     {
         std::unique_lock<std::mutex> lock3(position_mutex_);
 
-        ref_distance_ = dist;
-        ref_size_  = reference_keypoint_size;
-
         max_distance_ = dist * depth_invariance_ratio;
         min_distance_ = dist / depth_invariance_ratio;
 
@@ -334,11 +331,6 @@ float MapPoint::get_max_distance_invariance() const
     return max_distance_;
 }
 
-float MapPoint::predict_size(const float &currentDist) const
-{
-    std::unique_lock<std::mutex> lock(position_mutex_);
-    return ref_size_ * ref_distance_ / currentDist;
-}
 
 // ============================================================================
 // Tracking statistics

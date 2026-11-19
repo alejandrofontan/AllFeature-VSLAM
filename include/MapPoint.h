@@ -98,8 +98,6 @@ public:
     float get_min_distance_invariance() const;
     float get_max_distance_invariance() const;
 
-    float predict_size(const float &currentDist) const;
-
     // ========================================================================
     // Tracking statistics
     // ========================================================================
@@ -207,12 +205,11 @@ protected:
     // Mean viewing direction
     vec3f normal_;
 
-    float ref_distance_{0.0f};
-    float ref_size_{0.0f};
+    // The distance range the point is expected to be seen from: its distance to the reference
+    // keyframe divided / multiplied by depth_invariance_ratio (project_if_visible tests it)
     float min_distance_{0.0f};
     float max_distance_{0.0f};
 
-    static constexpr float reference_keypoint_size{1.5f};
     static inline float depth_invariance_ratio{1.2f};
 
     // ========================================================================
@@ -240,8 +237,7 @@ protected:
     // Locks
     // ========================================================================
 
-    // position_mutex_ guards the geometry: position_, normal_, ref_distance_, ref_size_, min_distance_,
-    //                 max_distance_.
+    // position_mutex_ guards the geometry: position_, normal_, min_distance_, max_distance_.
     // features_mutex_ guards everything else that changes: observations_, num_observations_,
     //                 ref_keyframe_, descriptor_, bad_, replaced_, num_visible_, num_found_.
     // (KeyFrame has a features_mutex_ of its own: a different lock.)
