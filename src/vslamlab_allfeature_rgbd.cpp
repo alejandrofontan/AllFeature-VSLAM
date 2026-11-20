@@ -270,14 +270,15 @@ int main(int argc, char **argv)
             if (keyThread.joinable()) keyThread.join();
         }
 
+        // Stop all threads first: Shutdown lets the workers finish what is queued, and the final
+        // bundle adjustment below must have the map to itself
+        SLAM.Shutdown();
+
         std::string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
         SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory_beforeGBA.csv");
 
         // Perform Global Bundle Adjustment
         SLAM.GBA();
-
-        // Stop all threads
-        SLAM.Shutdown();
 
         // Tracking time statistics
         std::sort(vTimesTrack.begin(),vTimesTrack.end());

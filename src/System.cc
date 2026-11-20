@@ -457,6 +457,25 @@ void System::reset()
 
 void System::Shutdown()
 {
+    // Let the workers finish what is queued first: a finish request makes each stop after the
+    // keyframe it is on and drop the rest. Loop Closing is busy while it has keyframes or a global
+    // BA is running. Local Mapping is busy while it has keyframes or is in the middle of one; when it
+    // is stopped, that is Loop Closing correcting a loop or applying a BA (the only one that stops
+    // it, and it always releases it), so it is waited for as long as that thread is alive.
+    const auto workers_busy = [this]
+    {
+        const bool loop_closing_alive = !loopCloser->is_finished();
+        if(loop_closing_alive && (loopCloser->has_new_keyframes() || loopCloser->is_gba_running()))
+            return true;
+        if(localMapper->is_finished())
+            return false;
+        if(localMapper->is_stopped())
+            return loop_closing_alive;
+        return localMapper->has_new_keyframes() || !localMapper->accepts_keyframes();
+    };
+    while(workers_busy())
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
     localMapper->request_finish();
     loopCloser->request_finish();
     if(viewer)
@@ -783,6 +802,8 @@ void System::setImageSize(const int width, const int height){
     image_height = height;
 }
 
+// The final bundle adjustment over the whole map. Call it after Shutdown(): it writes every pose
+// and position without a lock, so no worker thread may be alive (issue #83).
 void System::GBA(){
     AF_INFO("Starting Global Bundle Adjustment...");
     Optimizer::global_bundle_adjustment(mpMap, 100);

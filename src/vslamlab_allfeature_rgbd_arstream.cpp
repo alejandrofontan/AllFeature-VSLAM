@@ -313,14 +313,15 @@ int main(int argc, char** argv) {
         }
         AF_INFO((subscriber.ended() ? "End of stream" : "Stopped") << " after " << received << " frames");
 
+        // Stop all threads first: Shutdown lets the workers finish what is queued, and the final
+        // bundle adjustment below must have the map to itself
+        SLAM.Shutdown();
+
         std::string resultsPath_expId = exp_folder + "/" + padding_zeros(exp_id);
         SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory_beforeGBA.csv");
 
         // Perform Global Bundle Adjustment
         SLAM.GBA();
-
-        // Stop all threads
-        SLAM.Shutdown();
 
         // Tracking time statistics
         if (!vTimesTrack.empty()) {
