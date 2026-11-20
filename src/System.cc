@@ -4,6 +4,7 @@
 #include "KeyframeInformation.h"
 #include "Optimizer.h"
 #include "PlaceRecognitionMegaLoc.h"   // header is backend-free (placecell pimpl); the backend itself needs ALLFEATURE_WITH_MEGALOC
+#include "onnx/FeatureModels.h"
 
 #include <placecell/viz.h>
 
@@ -26,9 +27,9 @@ namespace AF_VSLAM
 System::System(const string &strCalibrationFile, const string &strSettingsFile,
                const eSensor sensor,
                const bool activateVisualization,
-               const vector<FeatureType>& featureTypes,
+               const vector<FeatureType>& feature_types,
                const bool& fixImageSize):
-               featureTypes(featureTypes), mSensor(sensor), viewer(static_cast<shared_ptr<Viewer>>(nullptr)), mbReset(false)
+               feature_types(feature_types), mSensor(sensor), viewer(static_cast<shared_ptr<Viewer>>(nullptr)), mbReset(false)
 {
     // Output welcome message
 
@@ -55,6 +56,8 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     }
 
     Optimizer::LoadParameters(fsSettings);
+    KeyFrame::LoadParameters(fsSettings);
+    MapPoint::LoadParameters(fsSettings);
     Tracking::LoadParameters(fsSettings);
     LocalMapping::LoadParameters(fsSettings);
     LoopClosing::LoadParameters(fsSettings);
@@ -77,6 +80,15 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //   megaloc_threads:   4 (default) — ONNX Runtime CPU-provider threads (never the core
     //                      count: tracking and mapping need the rest)
     //   megaloc_coreml_units: "ALL" (default) | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
+    //   features_models_dir: "feature_models" (default) — the learned feature models on ONNX
+    //                      Runtime (superpoint256, aliked128, the LightGlue matchers of
+    //                      superpoint256 / aliked128 / sift128; onnx/FeatureModels.h)
+    //   features_provider, features_threads, features_coreml_units: their ONNX Runtime
+    //                      execution provider / CPU threads / Core ML units (same semantics
+    //                      as the megaloc_* keys; "auto", 4, "ALL" by default)
+    //   features_static_shapes: false (default) — load the fixed-shape exports instead
+    //                      (detectors '<stem>_<W>x<H>.onnx' for the frame size, matchers
+    //                      'lightglue_<f>_L<L>.onnx' padded to L): the Core ML path
     //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:
     //                      see PlaceRecognitionMegaLocParameters
     //   PlaceCell.*:       placecell's print manager / profiler / recorder / visualizer
@@ -100,6 +112,12 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         if(settingsNode["megaloc_provider"]) megaloc_settings.provider = settingsNode["megaloc_provider"].as<std::string>();
         if(settingsNode["megaloc_threads"]) megaloc_settings.threads = settingsNode["megaloc_threads"].as<int>();
         if(settingsNode["megaloc_coreml_units"]) megaloc_settings.coreml_compute_units = settingsNode["megaloc_coreml_units"].as<std::string>();
+        onnx::FeatureModelsConfig& feature_models = onnx::feature_models_config();
+        if(settingsNode["features_models_dir"]) feature_models.models_dir = settingsNode["features_models_dir"].as<std::string>();
+        if(settingsNode["features_provider"]) feature_models.ort.provider = settingsNode["features_provider"].as<std::string>();
+        if(settingsNode["features_threads"]) feature_models.ort.threads = settingsNode["features_threads"].as<int>();
+        if(settingsNode["features_coreml_units"]) feature_models.ort.coreml_compute_units = settingsNode["features_coreml_units"].as<std::string>();
+        if(settingsNode["features_static_shapes"]) feature_models.static_shapes = settingsNode["features_static_shapes"].as<bool>();
         if(settingsNode["PlaceRecognition.MegaLocMinSimilarity"])
             megaloc_params.min_similarity = settingsNode["PlaceRecognition.MegaLocMinSimilarity"].as<float>();
         if(settingsNode["PlaceRecognition.MaxCandidates"])
@@ -110,14 +128,14 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     }
 
     std::string feature_list{};
-    for (const auto& ft : featureTypes)
+    for (const auto& ft : feature_types)
         feature_list += (feature_list.empty() ? "" : ", ") + feature_name(ft);
 
     // Explicit feature_vpr must name a configured feature — hard error otherwise
-    FeatureType vpr_feature{featureTypes[0]};
+    FeatureType vpr_feature{feature_types[0]};
     if(!feature_vpr_name.empty()){
         bool found{false};
-        for (const auto& ft : featureTypes)
+        for (const auto& ft : feature_types)
             if(feature_name(ft) == feature_vpr_name){ vpr_feature = ft; found = true; break; }
         if(!found){
             AF_ERROR("[System] feature_vpr '" + feature_vpr_name + "' is not in features: [" + feature_list + "]");
@@ -148,7 +166,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
 #ifndef ALLFEATURE_WITH_MEGALOC
         (void)megaloc_params; (void)megaloc_settings;
         AF_ERROR("[System] vpr: megaloc is not available in this build: it needs the CMake option "
-                 "ALLFEATURE_WITH_MEGALOC=ON (docs/plans/mac_port.md). Set vpr: none or rebuild with that backend.");
+                 "ALLFEATURE_WITH_MEGALOC=ON. Set vpr: none or rebuild with that backend.");
         exit(-1);
 #else
         if(!std::ifstream(megaloc_onnx).good()){
@@ -230,31 +248,18 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     mpMap = make_shared<Map>();
 
     //Create Drawers. These are used by the Viewer
-    frameDrawer = make_shared<FrameDrawer>(mpMap,featureTypes);
-    mapDrawer = make_shared<MapDrawer>(mpMap, strSettingsFile,featureTypes);
-
-    // Feature settings yaml file
-    std::map<FeatureType, string> feature_settings_yaml_file;
-    for (const auto& featureType : featureTypes){
-        const AF_VSLAM::Feature& ft = get_feature(featureType);
-        feature_settings_yaml_file[featureType] = ft.getSettingsYamlFile();
-    }
-
-    // Initialize matching thresholds
-    for (const auto& featureType : featureTypes){
-         FeatureMatcher::setDescriptorDistanceThresholds(feature_settings_yaml_file.at(featureType), featureType);
-    }
+    frameDrawer = make_shared<FrameDrawer>(mpMap,feature_types);
+    mapDrawer = make_shared<MapDrawer>(mpMap, strSettingsFile,feature_types);
 
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
     tracker = make_shared<Tracking>(place_recognition, frameDrawer, mapDrawer,
                              mpMap,
                              strCalibrationFile, strSettingsFile,
-                             feature_settings_yaml_file,
-                             featureTypes, fixImageSize);
+                             feature_types, fixImageSize);
 
     //Initialize the Local Mapping thread and launch
-    localMapper = make_shared<LocalMapping>(mpMap, featureTypes, tracker->get_image_width(), tracker->get_image_height());
+    localMapper = make_shared<LocalMapping>(mpMap, feature_types);
     mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::run, localMapper);
 
     //Initialize the Loop Closing thread and launch. Without an active VPR backend the object
@@ -262,8 +267,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //thread never starts: LoopClosing starts with finished_ = true, so Shutdown()'s
     //is_finished()/is_gba_running() waits pass immediately.
     loopCloser =  make_shared<LoopClosing>(mpMap, place_recognition, localMapper, mapDrawer,
-        mSensor!=MONOCULAR, featureTypes,
-        tracker->get_image_width(), tracker->get_image_height());
+        mSensor!=MONOCULAR, feature_types);
     if(place_recognition->is_active())
         mptLoopClosing = make_shared<thread>(&AF_VSLAM::LoopClosing::run, loopCloser);
 
@@ -272,7 +276,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     {
         viewer = make_shared<Viewer>(this, frameDrawer,mapDrawer,tracker,
                                     strCalibrationFile, strSettingsFile,
-                                    featureTypes);
+                                    feature_types);
 #ifndef __APPLE__
         mptViewer = make_shared<thread>(&Viewer::Run, viewer);
 #endif  // on macOS Cocoa needs Pangolin on the main thread: System::Run drives the Viewer there
@@ -437,27 +441,12 @@ mat4f System::Track(Image &im, const double &timestamp)
 
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = static_cast<int>(tracker->state_);
-    mTrackedMapPoints = tracker->current_frame_.pts;
-    mTrackedKeyPointsUn = tracker->current_frame_.keypoints;
 
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
     trackingTime.push_back(t_duration);
 
     return Tcw;
-}
-
-bool System::MapChanged()
-{
-    static int n=0;
-    int curn = mpMap->GetLastBigChangeIdx();
-    if(n<curn)
-    {
-        n=curn;
-        return true;
-    }
-    else
-        return false;
 }
 
 void System::reset()
@@ -468,6 +457,25 @@ void System::reset()
 
 void System::Shutdown()
 {
+    // Let the workers finish what is queued first: a finish request makes each stop after the
+    // keyframe it is on and drop the rest. Loop Closing is busy while it has keyframes or a global
+    // BA is running. Local Mapping is busy while it has keyframes or is in the middle of one; when it
+    // is stopped, that is Loop Closing correcting a loop or applying a BA (the only one that stops
+    // it, and it always releases it), so it is waited for as long as that thread is alive.
+    const auto workers_busy = [this]
+    {
+        const bool loop_closing_alive = !loopCloser->is_finished();
+        if(loop_closing_alive && (loopCloser->has_new_keyframes() || loopCloser->is_gba_running()))
+            return true;
+        if(localMapper->is_finished())
+            return false;
+        if(localMapper->is_stopped())
+            return loop_closing_alive;
+        return localMapper->has_new_keyframes() || !localMapper->accepts_keyframes();
+    };
+    while(workers_busy())
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
     localMapper->request_finish();
     loopCloser->request_finish();
     if(viewer)
@@ -489,8 +497,23 @@ void System::Shutdown()
         if(thread && thread->joinable())
             thread->join();
 
-    if(viewer && mptViewer)   // the Viewer ran in its own thread: make its context current here for the exit path
-        pangolin::BindToContext(viewer->GetWindowTitle());
+    // Every thread has stopped, so these are stable. "alive" counts objects still owned by
+    // SOMETHING; "in map" counts those the map still holds. The difference is what outlived
+    // being erased from the map -- retention by another owner, not a leak (all ownership is
+    // shared_ptr). Keyframes are the expensive case: each retained one keeps its image, its
+    // descriptors and its grid.
+    {
+        const long points_in_map = static_cast<long>(mpMap->map_points_in_map());
+        const long keyframes_in_map = static_cast<long>(mpMap->keyframes_in_map());
+        AF_INFO("[lifetime] map points: " << points_in_map << " in map, "
+                << MapPoint::live_count.load() << " alive, "
+                << MapPoint::live_count.load() - points_in_map << " retained after erase"
+                << "  (" << MapPoint::next_id << " created)");
+        AF_INFO("[lifetime] keyframes:  " << keyframes_in_map << " in map, "
+                << KeyFrame::live_count.load() << " alive, "
+                << KeyFrame::live_count.load() - keyframes_in_map << " retained after erase"
+                << "  (" << KeyFrame::next_id << " created)");
+    }
 
     // Every placecell caller has stopped: the profile tables are complete (one per store;
     // with InformationKernel: megaloc the information store IS the retrieval store)
@@ -596,12 +619,12 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 {
     AF_INFO("Saving keyframe trajectory to " << filename << " ...");
 
-    vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
+    vector<Keyframe> vpKFs = mpMap->get_all_keyframes();
     sort(vpKFs.begin(),vpKFs.end(),KeyFrame::less_by_id);
 
     // Transform all keyframes so that the first keyframe is at the origin.
     // After a loop closure the first keyframe might not be at the origin.
-    //cv::Mat Two = vpKFs[0]->get_pose_inverse();
+    //cv::Mat Two = vpKFs[0]->get_Twc();
 
     std::ofstream f(filename.c_str());
     f.imbue(std::locale::classic());
@@ -614,14 +637,17 @@ void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
 
         Keyframe pKF = vpKFs[i];
 
-       // pKF->set_pose(pKF->get_pose()*Two);
+       // pKF->set_pose(pKF->get_Tcw()*Two);
 
         if(pKF->is_bad())
             continue;
 
-        mat3f R = pKF->get_rotation().transpose();
+        // One lock: Rwc is the cached transpose of Rcw and twc the camera centre, both from
+        // the same pose -- the two getters took pose_mutex_ separately
+        const Pose pose = pKF->get_pose();
+        const mat3f& R = pose.Rwc;
         Eigen::Quaternionf q(R);
-        vec3f t = pKF->get_camera_center();
+        const vec3f& t = pose.twc;
 
         long long ts_ns = static_cast<long long>(std::round(pKF->timestamp * 1e9));
         f << std::fixed << std::setprecision(9) << ts_ns << ','
@@ -703,20 +729,8 @@ int System::GetTrackingState()
     return mTrackingState;
 }
 
-std::map<FeatureType,std::vector<Pt>> System::GetTrackedMapPoints()
-{
-    unique_lock<mutex> lock(mMutexState);
-    return mTrackedMapPoints;
-}
-
-std::map<FeatureType, std::vector<cv::KeyPoint>> System::GetTrackedKeyPointsUn()
-{
-    unique_lock<mutex> lock(mMutexState);
-    return mTrackedKeyPointsUn;
-}
-
 void System::SaveStatistics(const std::string &filename){
-    // auto keyframes = mpMap->GetAllKeyFrames();
+    // auto keyframes = mpMap->get_all_keyframes();
     // auto pts = mpMap->get_all_map_points();
 
     // size_t numKeyframes{0};
@@ -788,6 +802,8 @@ void System::setImageSize(const int width, const int height){
     image_height = height;
 }
 
+// The final bundle adjustment over the whole map. Call it after Shutdown(): it writes every pose
+// and position without a lock, so no worker thread may be alive (issue #83).
 void System::GBA(){
     AF_INFO("Starting Global Bundle Adjustment...");
     Optimizer::global_bundle_adjustment(mpMap, 100);

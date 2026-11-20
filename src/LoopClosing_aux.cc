@@ -6,6 +6,7 @@
  * LoopClosing.h).
  */
 #include "LoopClosing.h"
+#include "SettingsReader.h"
 
 #include <chrono>
 #include <mutex>
@@ -22,9 +23,7 @@ void LoopClosing::LoadParameters(const cv::FileStorage& fSettings)
 {
     auto read_if_present = [&fSettings](const char* key, auto& field)
     {
-        const cv::FileNode node = fSettings[key];
-        if(!node.empty())
-            node >> field;
+        read_setting_if_present(fSettings, key, field);
     };
 
     read_if_present("LoopClosing.CovisibilityConsistencyThreshold", params.covisibility_consistency_threshold);
@@ -32,7 +31,6 @@ void LoopClosing::LoadParameters(const cv::FileStorage& fSettings)
     read_if_present("LoopClosing.Sim3MinMatches", params.sim3_min_matches);
     read_if_present("LoopClosing.Sim3MinInliers", params.sim3_min_inliers);
     read_if_present("LoopClosing.LoopMinMatches", params.loop_min_matches);
-    read_if_present("LoopClosing.FuseRadius", params.fuse_radius);
     read_if_present("LoopClosing.GbaIterations", params.gba_iterations);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -95,6 +93,10 @@ void LoopClosing::reset_if_requested()
     std::lock_guard<std::mutex> lock(reset_mutex_);
     if(!reset_requested_)
         return;
+
+    // A global BA of the wiped map must not run on (or apply to) the new one: Tracking::reset clears the map as
+    // soon as this returns
+    abort_global_bundle_adjustment();
 
     {
         std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);

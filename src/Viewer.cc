@@ -48,10 +48,10 @@ namespace AF_VSLAM
 Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
                std::shared_ptr<MapDrawer> mapDrawer, std::shared_ptr<Tracking> tracker,
                const string &strCalibrationPath, const string &strSettingPath,
-               const vector<FeatureType>& featureTypes):
+               const vector<FeatureType>& feature_types):
         system(system), frameDrawer(frameDrawer),mapDrawer(mapDrawer), tracker(tracker),
     mbFinishRequested(false), mbFinished(true), mbStopped(true), mbStopRequested(false),
-    featureTypes(featureTypes)
+    feature_types(feature_types)
 {
 
     YAML::Node settings = YAML::LoadFile(strSettingPath);
@@ -102,9 +102,9 @@ Viewer::Viewer(System* system, std::shared_ptr<FrameDrawer> frameDrawer,
     AF_CONFIG_END();
 
     windowTitle = "VSLAM-LAB | AllFeature-VSLAM (";
-    for(size_t i=0; i<featureTypes.size(); i++){
-        windowTitle += " " + feature_name(featureTypes[i]);
-        if (i != featureTypes.size() - 1){
+    for(size_t i=0; i<feature_types.size(); i++){
+        windowTitle += " " + feature_name(feature_types[i]);
+        if (i != feature_types.size() - 1){
             windowTitle += ",";
         }
     }
@@ -259,6 +259,11 @@ void Viewer::Run()
     // unexplained by the local map. 0 = never cull / insert everything, 1 = cull anything / never insert for novelty.
     pangolin::Var<float> menuCullMaxUnexplained("menu.KF Max Unexplained",
                                                 LocalMapping::params.keyframe_culling_max_unexplained.load(), 0.0f, 1.0f);
+
+    // Keypoints per frame as a share of each feature's maximum (Tracking.FeaturesFraction), editable
+    // online like the slider above: Tracking applies a change before the next frame's extraction
+    pangolin::Var<float> menuFeaturesFraction("menu.Features Fraction",
+                                              Tracking::params.features_fraction.load(), 0.0f, 1.0f);
 
     pangolin::Var<std::string> headerVisualization("menu.VISUALIZATION", "");
 
@@ -433,10 +438,13 @@ void Viewer::Run()
 
         // Live parameters
         LocalMapping::params.keyframe_culling_max_unexplained.store(static_cast<float>(menuCullMaxUnexplained));
+        Tracking::params.features_fraction.store(static_cast<float>(menuFeaturesFraction));
 
         // Status panel (map-size query locks the map, so refresh it sparingly)
         if(menuPause.GuiChanged())
             system->set_paused(menuPause);
+        else if(menuPause != system->is_paused())
+            menuPause = system->is_paused();  // paused or resumed from code (Viewer.StartPaused, a stop signal)
         menuState = system->is_paused() ? std::string("PAUSED") : trackingStateName(tracker->state_);
         {
             const size_t nTotal = system->GetSequenceImageCount();
@@ -616,8 +624,14 @@ void Viewer::Run()
     // the drawer's GL objects can be freed before the placecell window and then the main one go.
     mapDrawer->ReleaseGL();
 
-    // System::Shutdown binds back to the main window's context afterwards
-    closePlaceCellWindow();
+    closePlaceCellWindow();   // leaves the main window's context current
+
+    // The main window goes here, on the thread that owns its context and while that context is
+    // current. Left alive, it was destroyed by Pangolin's static destructors at process exit, after
+    // the context was gone: GlFont::~GlFont then freed its texture through a dead GL pointer and
+    // every viewer run ended in a segmentation fault (issues #42, #70).
+    imageTexture.Delete();
+    pangolin::DestroyWindow(windowTitle);
 
     SetFinish();
 }

@@ -10,6 +10,21 @@
 
 namespace AF_VSLAM {
     using Seconds = double;
+
+    // Chi-squared critical values. The 2-DOF 95% value was written out as a literal in SIX
+    // places under six names (LocalMapping::CHI2_2DOF, the former FeatureMatcher::chi2_perc,
+    // Initializer::chiSquare_th and ::chiSquare_thScore_fund, Tracking::RANSAC_TH2,
+    // OptimizerParameters::chi2_2dof) and the 99% one inline in Sim3Solver, unnamed. The local
+    // names stay -- each says what its own gate is for -- but the NUMBER is defined once.
+    //
+    // double, matching the literals they replace: the float members below initialize from these
+    // and get the same float, while Sim3Solver's double arithmetic is unchanged.
+    namespace ChiSquared {
+        inline constexpr double dof1_95{3.841};
+        inline constexpr double dof2_95{5.991};
+        inline constexpr double dof2_99{9.210};
+        inline constexpr double dof3_95{7.815};
+    }
 }
 
 enum FeatureType {
@@ -17,7 +32,6 @@ enum FeatureType {
     FEAT_ALIKED128 = 6,
     FEAT_SIFT128 = 5,
     FEAT_KAZE64 = 4,
-    FEAT_SURF64 = 3,
     FEAT_BRISK48 = 2,
     FEAT_AKAZE61 = 1,
     FEAT_ORB32 = 0,

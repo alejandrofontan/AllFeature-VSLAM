@@ -1,86 +1,126 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
+#pragma once
 
-#ifndef MAP_H
-#define MAP_H
-
-#include "MapPoint.h"
-#include "KeyFrame.h"
-#include <set>
-
+#include <map>
+#include <memory>
 #include <mutex>
+#include <optional>
+#include <set>
+#include <vector>
 
-
+#include "KeyFrame.h"
 
 namespace AF_VSLAM
 {
 
-class MapPoint;
-class KeyFrame;
-
-class Map
+class Map : public std::enable_shared_from_this<Map>
 {
 public:
+
+    // ========================================================================
+    // Construction
+    // ========================================================================
+
     Map();
 
-    void add_keyframe(Keyframe pKF);
-    void add_map_point(Pt pMP);
-    void EraseMapPoint(Pt pMP);
-    void EraseKeyFrame(Keyframe pKF);
-    void set_reference_map_points(const std::vector<Pt> &vpMPs);
-    void InformNewBigChange();
-    int GetLastBigChangeIdx();
+    std::shared_ptr<Map> this_map() {
+        return shared_from_this();
+    }
 
-    std::vector<Keyframe> GetAllKeyFrames();
+    // ========================================================================
+    // Map points
+    // ========================================================================
+
+    Pt create_monocular_map_point(const vec3f& world_pos,
+                                  const Keyframe& ref_keyframe, KeypointIndex ref_index,
+                                  const Keyframe& proj_keyframe, KeypointIndex proj_index,
+                                  FeatureType feature_type);
+    Pt create_map_point(const vec3f& world_pos,
+                        const Keyframe& ref_keyframe, KeypointIndex ref_index,
+                        FeatureType feature_type);
+
+    void add_map_point(const Pt& pt);
+    void erase_map_point(const Pt& pt);
+
     std::vector<Pt> get_all_map_points();
-    std::vector<Pt> GetReferenceMapPoints();
 
     size_t map_points_in_map();
+
+    // ========================================================================
+    // Keyframes
+    // ========================================================================
+
+    void add_keyframe(const Keyframe& keyframe);
+    void erase_keyframe(const Keyframe& keyframe);
+
+    std::vector<Keyframe> get_all_keyframes();
+
     size_t keyframes_in_map();
 
-    long unsigned int GetMaxKFid();
+    long unsigned int get_max_keyframe_id();
+
+    // ========================================================================
+    // Fusion's descriptor distance
+    // ========================================================================
+
+    // The largest descriptor distance at which fusion still accepts a match, per feature type.
+    // Estimated by Local Mapping at every keyframe (a quantile of the distances between map points'
+    // descriptors and their own observations) and read by both fusions, Local Mapping's and Loop
+    // Closing's. Empty for a type until its first estimate.
+    void set_fuse_max_descriptor_distance(FeatureType feature_type, Descriptor_Distance_Type distance);
+    [[nodiscard]] std::optional<Descriptor_Distance_Type> get_fuse_max_descriptor_distance(FeatureType feature_type) const;
+
+    // ========================================================================
+    // Lifecycle
+    // ========================================================================
 
     void clear();
-    float NormalizeMap();
 
-    vector<Keyframe> keyframe_origins_;
+    // ========================================================================
+    // Data
+    // ========================================================================
+
+    std::vector<Keyframe> keyframe_origins_;
+
+    // ========================================================================
+    // Locks
+    // ========================================================================
 
     std::mutex map_update_mutex_;
 
     // This avoid that two points are created simultaneously in separate threads (id conflict)
-    std::mutex mMutexPointCreation;
+    std::mutex point_creation_mutex_;
 
 protected:
-    std::set<Pt> mspMapPoints;
-    std::set<Keyframe> mspKeyFrames;
 
-    std::vector<Pt> mvpReferenceMapPoints;
+    // ========================================================================
+    // Map points
+    // ========================================================================
 
-    long unsigned int mnMaxKFid;
+    Pt make_map_point(const vec3f& world_pos, const Keyframe& ref_keyframe, KeypointIndex ref_index,
+                      FeatureType feature_type,
+                      const Keyframe& proj_keyframe, KeypointIndex proj_index);
 
-    // Index related to a big change in the map (loop closure, global BA)
-    int mnBigChangeIdx;
+    std::set<Pt, PtIdLess> map_points_;
 
-    std::mutex mMutexMap;
+    // ========================================================================
+    // Keyframes
+    // ========================================================================
+
+    KeyframeIdSet keyframes_;
+
+    // Highest keyId ever added, NOT the highest currently in the map: erase_keyframe deliberately
+    // does not lower it. Optimizer::OptimizeEssentialGraph sizes three vectors as
+    // get_max_keyframe_id()+1 and indexes them by keyId, so a value that shrank after a cull would
+    // index past the end. Only clear() resets it, and only because every keyId restarts with it.
+    long unsigned int max_keyframe_id_;
+
+    // ========================================================================
+    // Locks
+    // ========================================================================
+
+    std::map<FeatureType, Descriptor_Distance_Type> fuse_max_descriptor_distance_;
+
+    mutable std::mutex map_mutex_;
 };
 
-} //namespace ORB_SLAM
-
-#endif // MAP_H
+}

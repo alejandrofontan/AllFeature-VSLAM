@@ -1,83 +1,61 @@
+/**
+ * Module: AllFeature-VSLAM - Feature_superpoint256.cpp
+ * - Author: Alejandro Fontan Villacampa
+ * - Assisted by: Claude (Fable 5.1)
+ * - Version: 2.0 (ONNX Runtime)
+ * - Created: 2024-06-07
+ * - Updated: 2026-10-16
+ * - License: GPLv3 License
+ */
+
 #include "Feature_superpoint256.h"
+
 #include "afvslam_log.hpp"
+#include "onnx/FeatureModels.h"
 
-#include <opencv2/opencv.hpp>
-
-AF_VSLAM::FeatureExtractor_superpoint256::FeatureExtractor_superpoint256(std::shared_ptr<FeatureExtractorSettings> &settings_):
+AF_VSLAM::Superpoint256Extractor::Superpoint256Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
-
-        AF_INFO("Initializing SuperPoint256 feature extractor...");
-        AF_INFO("Building SuperPoint inference engine...");
-
-        const std::string& config_path = Superpoint256::getConfigYaml();
-        const std::string& model_dir = Superpoint256::getModelsDir();
-        Configs configs(config_path, model_dir);
-        AF_INFO("SuperPoint256 config loaded.");
-        extractor = std::make_shared<SuperPoint>(configs.superpoint_config);
-        if (!extractor->build()) {
-            throw std::runtime_error(
-                "SuperPoint: failed to build/load TensorRT engine.\n"
-                "  config: " + config_path + "\n"
-                "  weights: " + model_dir);
-        }
-        AF_INFO("SuperPoint engine loaded from: " + model_dir);
-        AF_INFO("Engine ready.");
+    AF_INFO("Initializing SuperPoint256 feature extractor (ONNX Runtime)...");
+    if (onnx::feature_models_config().static_shapes)
+        AF_INFO("SuperPoint256: features_static_shapes is on - the fixed-size export for the frame size loads on the first frame");
+    else
+        load(onnx::feature_model_path(Superpoint256::s_model_file), 640, 480);
 }
 
+void AF_VSLAM::Superpoint256Extractor::load(const std::string& path, const int width, const int height)
+{
+    extractor_ = std::make_unique<onnx::SuperPointOnnx>(path, onnx::feature_models_config().ort);
+    // Warm-up on a frame-sized blank: the first Run pays allocation and (CUDA / Core ML) kernel selection
+    std::vector<cv::KeyPoint> kps;
+    cv::Mat desc;
+    extractor_->detect(cv::Mat::zeros(height, width, CV_8UC1), 1, kps, desc);
+    AF_INFO("SuperPoint256 ready: " << extractor_->model_path() << " (" << extractor_->precision()
+            << " weights) on onnxruntime/" << extractor_->provider() << ", budget " << settings->max_num_features
+            << " keypoints, threshold " << extractor_->detection_threshold() << ", warm-up "
+            << extractor_->last_graph_ms() << " ms");
+}
 
-void AF_VSLAM::FeatureExtractor_superpoint256::detectAndCompute(
+AF_VSLAM::onnx::SuperPointOnnx& AF_VSLAM::Superpoint256Extractor::extractor_for(const int width, const int height)
+{
+    if (onnx::feature_models_config().static_shapes && (!extractor_ || width != loaded_width_ || height != loaded_height_))
+    {
+        if (extractor_)
+            AF_WARN("SuperPoint256: frame size changed to " << width << "x" << height << " - loading its static export");
+        load(onnx::static_model_path(Superpoint256::s_model_file, width, height, "superpoint"), width, height);
+        loaded_width_ = width;
+        loaded_height_ = height;
+    }
+    return *extractor_;
+}
+
+void AF_VSLAM::Superpoint256Extractor::detect_and_compute(
     const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors)
 {
-
-    Eigen::Matrix<double, 258, Eigen::Dynamic> features;
-    Eigen::Matrix<double, 1, Eigen::Dynamic> features_score;
-    extractor->infer(img.grayImg, features, features_score);
-
-    int N = (int)features.cols();
-
-    if (N == 0) {
-        keypoints.clear();
-        descriptors = cv::Mat();
-        return;
-    }
-
-    // --- Build keypoints and descriptors ---
-    // New API: features row 0=x, row 1=y, rows 2..257=descriptor; separate features_score row 0=score
-    std::vector<cv::KeyPoint> keypoints_;
-    keypoints_.reserve(N);
-
-    cv::Mat descriptors_(N, 256, CV_32F);
-    for (int i = 0; i < N; ++i) {
-        cv::KeyPoint kp;
-        kp.pt.x     = (float)features(0, i);
-        kp.pt.y     = (float)features(1, i);
-        kp.response = (float)features_score(0, i);
-        kp.size     = 1.f;
-        kp.angle    = 0.f;
-        kp.octave   = 0;
-        kp.class_id = i;
-        keypoints_.push_back(kp);
-        for (int d = 0; d < 256; ++d)
-            descriptors_.at<float>(i, d) = (float)features(2 + d, i);
-    }
-
-    // Discard keypoints outside the mask (if one was loaded for this frame)
-    FilterKeypointsByMask(keypoints_, descriptors_, img.mask);
-
-    keypoints = keypoints_;
-    descriptors.create((int)keypoints.size(), 256, CV_32F);
-    for (int i = 0; i < (int)keypoints.size(); ++i)
-        descriptors_.row(keypoints[i].class_id).copyTo(descriptors.row(i));
+    // The dense graph + the C++ tail (threshold, best max_num_features, descriptor sampling, L2); then the mask
+    extractor_for(img.grayImg.cols, img.grayImg.rows).detect(img.grayImg, settings->max_num_features, keypoints, descriptors);
+    filter_keypoints_by_mask(keypoints, descriptors, img.mask);
 }
 
-int AF_VSLAM::FeatureExtractor_superpoint256::GetKeypointOctave(const cv::KeyPoint&) const{
-    return 0;
-}
-
-float AF_VSLAM::FeatureExtractor_superpoint256::GetKeypointSize(const cv::KeyPoint&) const{
+float AF_VSLAM::Superpoint256Extractor::get_keypoint_size(const cv::KeyPoint&) const{
     return 1.0f;
-}
-
-float AF_VSLAM::DescriptorDistance_superpoint256(const cv::Mat &a, const cv::Mat &b){
-    return (Descriptor_Distance_Type) cv::norm(a, b, cv::NORM_L2);
 }

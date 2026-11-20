@@ -9,7 +9,9 @@
 #include "Tracking.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
+#include <limits>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -17,6 +19,7 @@
 #include <string>
 #include <utility>
 
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core/core.hpp>
 
 #include "Converter.h"
@@ -24,9 +27,12 @@
 #include "Map.h"
 #include "Optimizer.h"
 #include "PnPsolver.h"
+#include "Report.h"
 #include "Tracking_aux.h"
 #include "Utils.h"
 #include "afvslam_log.hpp"
+#include "onnx/OrtSession.h"
+#include "SettingsReader.h"
 
 namespace AF_VSLAM
 {
@@ -37,9 +43,7 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
 {
     auto read_if_present = [&fSettings](const char* key, auto& field)
     {
-        const cv::FileNode node = fSettings[key];
-        if(!node.empty())
-            node >> field;
+        read_setting_if_present(fSettings, key, field);
     };
 
     int sequential = params.sequential ? 1 : 0;   // cv::FileStorage has no bool reader
@@ -55,6 +59,22 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.InitMinTrackedPoints", params.init_min_tracked_points);
     read_if_present("Tracking.InitMinDepthSamples", params.init_min_depth_samples);
     read_if_present("Tracking.InitExtractorFeaturesScale", params.init_extractor_features_scale);
+    float features_fraction = params.features_fraction.load();
+    read_if_present("Tracking.FeaturesFraction", features_fraction);
+    params.features_fraction.store(features_fraction);
+    read_if_present("Tracking.NominalImageArea", params.nominal_image_area);
+    read_if_present("Tracking.ImageWidth", params.image_width);
+    read_if_present("Tracking.ImageHeight", params.image_height);
+    read_if_present("Tracking.FrameTracking", params.frame_tracking);
+    read_if_present("Tracking.FlowAssociationRadius", params.flow_association_radius);
+    read_if_present("Tracking.FlowMaxBackwardError", params.flow_max_backward_error);
+    read_if_present("Tracking.FlowMinMatches", params.flow_min_matches);
+    if(params.frame_tracking != "reference_keyframe" && params.frame_tracking != "optical_flow")
+    {
+        AF_ERROR("[Tracking] Tracking.FrameTracking must be \"reference_keyframe\" or \"optical_flow\", got \""
+                 << params.frame_tracking << "\"");
+        exit(-1);
+    }
     read_if_present("Tracking.TrackRefMinMatches", params.track_ref_min_matches);
     read_if_present("Tracking.TrackRefMinInliers", params.track_ref_min_inliers);
     read_if_present("Tracking.TrackLocalMapMinInliers", params.track_local_map_min_inliers);
@@ -66,12 +86,9 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     int log_keyframe_information = params.log_keyframe_information ? 1 : 0;   // cv::FileStorage has no bool reader
     read_if_present("Tracking.LogKeyframeInformation", log_keyframe_information);
     params.log_keyframe_information = (log_keyframe_information != 0);
-    read_if_present("Tracking.RefMatchesRatio", params.ref_matches_ratio);
-    read_if_present("Tracking.MinInliersForKeyframe", params.min_inliers_for_keyframe);
     read_if_present("Tracking.MinObservationsHigh", params.min_observations_high);
     read_if_present("Tracking.MinObservationsLow", params.min_observations_low);
     read_if_present("Tracking.YoungMapKeyframes", params.young_map_keyframes);
-    read_if_present("Tracking.MinRefOverlap", params.min_ref_overlap);
     read_if_present("Tracking.EmergencyInlierDropRatio", params.emergency_inlier_drop_ratio);
     read_if_present("Tracking.InliersHistorySize", params.inliers_history_size);
     read_if_present("Tracking.EmergencyKeyframeCooldown", params.emergency_keyframe_cooldown);
@@ -79,8 +96,6 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.RelocInliersHigh", params.reloc_inliers_high);
     read_if_present("Tracking.RelocInliersMedium", params.reloc_inliers_medium);
     read_if_present("Tracking.RelocInliersLow", params.reloc_inliers_low);
-    read_if_present("Tracking.RelocSearchRadiusCoarse", params.reloc_search_radius_coarse);
-    read_if_present("Tracking.RelocSearchRadiusNarrow", params.reloc_search_radius_narrow);
     read_if_present("Tracking.RelocRansacProbability", params.reloc_ransac_probability);
     read_if_present("Tracking.RelocRansacMinInliers", params.reloc_ransac_min_inliers);
     read_if_present("Tracking.RelocRansacMaxIterations", params.reloc_ransac_max_iterations);
@@ -91,7 +106,6 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
                    std::shared_ptr<FrameDrawer> frame_drawer, std::shared_ptr<MapDrawer> map_drawer,
                    std::shared_ptr<Map> map,
                    const std::string& calibration_yaml, const std::string& settings_yaml,
-                   const std::map<FeatureType, std::string>& feature_settings_yaml_file,
                    const std::vector<FeatureType>& feature_types,
                    const bool fix_image_size):
     feature_types_(feature_types), place_recognition_(std::move(place_recognition)),
@@ -102,17 +116,34 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
     // Frame window for the post-relocalization embargo/strictness (~1 s at the camera rate)
     max_frames_ = static_cast<size_t>(fps_);
 
-    // One extractor pair per feature type: normal, and a denser one for initialization
+    // One extractor pair per feature type: normal, and a denser one for initialization, with the budget
+    // of Tracking.FeaturesFraction (features_budget); apply_features_fraction updates it later
+    features_fraction_in_use_ = std::clamp(params.features_fraction.load(), 0.0f, 1.0f);
     for (const FeatureType ft : feature_types){
-        feature_extractor_left_[ft] = get_feature_extractor(1, feature_settings_yaml_file.at(ft), ft);
-        init_feature_extractor_[ft] = get_feature_extractor(params.init_extractor_features_scale, feature_settings_yaml_file.at(ft), ft);
+        const int max_num_features = features_budget(ft, features_fraction_in_use_);
+        feature_extractor_left_[ft] = get_feature_extractor(max_num_features, ft);
+        init_feature_extractor_[ft] = get_feature_extractor(params.init_extractor_features_scale * max_num_features, ft);
     }
 
-    matcher_ = std::make_shared<FeatureMatcher>(image_width_, image_height_, feature_types, "Tracking");
+    matcher_ = std::make_shared<FeatureMatcher>(feature_types, "Tracking");
+    if(params.frame_tracking == "optical_flow")
+        AF_INFO("[Tracking] frame-to-frame stage: optical_flow (KLT on the last frame's tracked points, association radius "
+                << params.flow_association_radius << " px, min " << params.flow_min_matches
+                << " matches; fallback: the reference-keyframe match)");
+    else
+        AF_INFO("[Tracking] frame-to-frame stage: reference_keyframe (a descriptor match per frame)");
 }
 
 mat4f Tracking::grab_image(Image &im, const double timestamp)
 {
+    // This thread's model runs go ahead of Local Mapping's and Loop Closing's on a shared session
+    // (OrtSession, Threading). Set per frame rather than once: this is the thread's entry point,
+    // and the flag is a thread-local bool.
+    onnx::set_run_priority(true);
+
+    // A Features Fraction moved in the viewer takes effect from this frame
+    apply_features_fraction();
+
     GrabProfiler profiler{};
 
     // Convert image to grayscale and resize
@@ -120,18 +151,28 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     if(fix_image_size_)
         im.fix_image_size(image_width_, image_height_);
 
+    // The calibration is derived from the image AS RESIZED/CROPPED above: image_width_ and
+    // image_height_ are the requested size and can be larger (Image::fix_image_size crops to
+    // multiples of 32), so the dimensions have to come from the image itself.
+    if(!calibration_)
+        calibration_ = std::make_shared<const Calibration>(K, distortion_coefficients,
+                                                           im.grayImg.cols, im.grayImg.rows,
+                                                           FRAME_GRID_COLS, FRAME_GRID_ROWS,
+                                                           depth_noise_coeff_);
+
+    last_grey_image_ = grey_image_;                   // the previous frame's grey, for optical-flow tracking
+    grey_image_ = im.grayImg.clone();                 // the caller may reuse its Image
     color_image_ = im.img;
     mask_image_ = im.mask;
-    image_name_ = im.imageName;
     profiler.resize_done(resize_times_);
 
     // Create the frame (feature extraction); initialization uses the denser extractor set
     const auto& extractors = (state_ == TrackingState::NOT_INITIALIZED || state_ == TrackingState::NO_IMAGES_YET)
                            ? init_feature_extractor_ : feature_extractor_left_;
-    current_frame_ = Frame(im, timestamp, extractors, place_recognition_, mK, mDistCoef, mbf, mThDepth);
+    current_frame_ = Frame(im, timestamp, extractors, place_recognition_, calibration_);
     profiler.frame_created(frame_times_);
 
-    track();
+    const mat4f Tcw = track();
     profiler.tracking_done(tracking_times_, state_ == TrackingState::OK);
 
     // Median excludes the current frame (updated below), matching the original order.
@@ -143,11 +184,22 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     if(state_ == TrackingState::OK)
         grab_image_times_[profiler.total_ms()]++;
 
-    return current_frame_.Tcw;
+    return Tcw;
 }
 
-void Tracking::track()
+mat4f Tracking::track()
 {
+    AF_REPORT_CONTEXT("tracking", current_frame_.frame_id);
+
+    // A degenerate initialization asked for a reset (create_initial_map): run it here, before the map lock is
+    // taken. reset() waits for Local Mapping and Loop Closing, and a global-BA correction holding Local Mapping
+    // stopped while it waits for map_update_mutex_ deadlocked against a reset run under that lock.
+    if(reset_after_failed_initialization_)
+    {
+        reset_after_failed_initialization_ = false;
+        reset();
+    }
+
     if(state_ == TrackingState::NO_IMAGES_YET)
         state_ = TrackingState::NOT_INITIALIZED;
 
@@ -170,7 +222,7 @@ void Tracking::track()
             lock.unlock();
             wait_for_idle_local_mapper();
         }
-        return;
+        return current_frame_.get_Tcw();
     }
 
     // System is initialized: track the frame.
@@ -179,10 +231,13 @@ void Tracking::track()
     {
         // Local Mapping might have changed some MapPoints tracked in last frame
         check_replaced_in_last_frame();
-        ok = run_tracking_stage([this] { return track_reference_keyframe(); });
+        if(params.frame_tracking == "optical_flow")             // false: not lost, fall back to the descriptor match
+            ok = run_tracking_stage([this] { return track_with_optical_flow(); });
+        if(!ok)
+            ok = run_tracking_stage([this] { return track_reference_keyframe(); });
     }
     else
-        ok = relocalize();
+        ok = run_tracking_stage([this] { return relocalize(); });
 
     current_frame_.ref_keyframe = ref_keyframe_;
     profiler.track_ref_done();
@@ -202,10 +257,7 @@ void Tracking::track()
         ++num_tracked_frames_;
         log_heartbeat();
 
-        map_drawer_->set_current_camera_pose(current_frame_.Tcw);
-
-        // Clean VO matches: drop points no map observation backs
-        current_frame_.drop_unobserved_points();
+        map_drawer_->set_current_camera_pose(current_frame_.get_Tcw());
 
         // Check if we need to insert a new keyframe
         if(need_new_keyframe())
@@ -221,9 +273,15 @@ void Tracking::track()
     if(!current_frame_.ref_keyframe)
         current_frame_.ref_keyframe = ref_keyframe_;
 
-    last_frame_ = Frame(current_frame_);
-
+    // All three read current_frame_, so they run before it is moved from
     store_relative_pose();
+    const FrameId frame_id = current_frame_.frame_id;
+    const mat4f Tcw = current_frame_.get_Tcw();
+
+    // Moved, not copied: grab_image rebuilds current_frame_ from scratch next frame, and nothing
+    // reads it in between. The copy this replaced was ~250 KB plus one atomic refcount increment
+    // per matched map point, every frame.
+    last_frame_ = std::move(current_frame_);
 
     // Sequential (deterministic) mode: every frame ends with Local Mapping idle and the
     // map fully updated, so the next frame always sees the same map state (issue #16).
@@ -239,19 +297,23 @@ void Tracking::track()
     {
         profiler.emergency_wait_begin();
         lock.unlock();
-        while(!local_mapper_->accepts_keyframes())
+        // ... or until it is stopped (a loop correction: accepts_keyframes stays false for the whole correction)
+        // or finished, which no longer process anything this frame could wait for
+        while(!local_mapper_->accepts_keyframes() && !local_mapper_->is_stopped() && !local_mapper_->is_finished())
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         emergency_keyframe_ = false;
         profiler.emergency_wait_end();
     }
 
-    profiler.report(current_frame_.frame_id);
+    profiler.report(frame_id);
+    return Tcw;
 }
 
 void Tracking::store_relative_pose()
 {
-    if(current_frame_.Tcw(3,3) == 1.0f)
-        last_frame_relative_pose_ = current_frame_.Tcw * current_frame_.ref_keyframe->get_pose_inverse();
+    const mat4f& Tcw = current_frame_.get_Tcw();
+    if(Tcw(3,3) == 1.0f)
+        last_frame_relative_pose_ = Tcw * current_frame_.ref_keyframe->get_Twc();
 }
 
 void Tracking::monocular_initialization()
@@ -268,9 +330,14 @@ void Tracking::attempt_monocular_initialization()
     const auto total_keypoints = [this](const Frame& frame) {
         size_t n = 0;
         for (const auto& ft : feature_types_)
-            n += frame.keypoints.at(ft).size();
+            n += frame.features.at(ft).keypoints.size();
         return n;
     };
+
+    // The previous attempt's matches index the previous reference / current frames: never let them reach the
+    // FrameDrawer with this frame's keypoints (it draws matches_per_feature_ while NOT_INITIALIZED). They are
+    // refilled below when this attempt matches.
+    matches_per_feature_.clear();
 
     if(!initializer_)
     {
@@ -301,14 +368,14 @@ void Tracking::attempt_monocular_initialization()
         size_t offset2 = 0;
         for (const auto& ft : feature_types_) {
             const size_t offset1 = init_matches_.size();
-            init_matches_.resize(offset1 + initial_frame_.keypoints.at(ft).size(), -1);
+            init_matches_.resize(offset1 + initial_frame_.features.at(ft).keypoints.size(), -1);
             auto& matches_ft = matches_per_feature_[ft];
-            matches_ft.assign(initial_frame_.keypoints.at(ft).size(), -1);
+            matches_ft.assign(initial_frame_.features.at(ft).keypoints.size(), -1);
             for (const auto& m : matched_pairs.at(ft)) {
                 matches_ft[m.first] = m.second;
                 init_matches_[offset1 + m.first] = m.second + offset2;
             }
-            offset2 += current_frame_.keypoints.at(ft).size();
+            offset2 += current_frame_.features.at(ft).keypoints.size();
         }
 
         // Check if there are enough correspondences (pooled over all feature types)
@@ -328,8 +395,8 @@ void Tracking::attempt_monocular_initialization()
             std::vector<float> disparities;
             disparities.reserve(num_matches);
             for (const auto& ft : feature_types_) {
-                const auto& keypoints1 = initial_frame_.keypoints.at(ft);
-                const auto& keypoints2 = current_frame_.keypoints.at(ft);
+                const auto& keypoints1 = initial_frame_.features.at(ft).keypoints;
+                const auto& keypoints2 = current_frame_.features.at(ft).keypoints;
                 for (const auto& m : matched_pairs.at(ft))
                     disparities.push_back(static_cast<float>(cv::norm(keypoints2[m.second].pt - keypoints1[m.first].pt)));
             }
@@ -366,9 +433,6 @@ void Tracking::create_initial_map()
     Keyframe keyframe_ini = std::make_shared<KeyFrame>(initial_frame_, map_, place_recognition_);
     Keyframe keyframe_cur = std::make_shared<KeyFrame>(current_frame_, map_, place_recognition_);
 
-    keyframe_ini->compute_global_descriptor();
-    keyframe_cur->compute_global_descriptor();
-
     map_->add_keyframe(keyframe_ini);
     map_->add_keyframe(keyframe_cur);
 
@@ -382,8 +446,11 @@ void Tracking::create_initial_map()
             if (init_matches_[flat_index] < 0)
                 continue;
 
-            Pt map_point = keyframe_cur->create_monocular_map_point(init_points3d_[flat_index], KeypointIndex(matches[i]),
-                                                                 keyframe_ini, KeypointIndex(i), ft);
+            Pt map_point = map_->create_monocular_map_point(init_points3d_[flat_index], keyframe_cur,
+                                                            KeypointIndex(matches[i]),
+                                                            keyframe_ini, KeypointIndex(i), ft);
+            if (!map_point)
+                continue;   // a slot was taken between the emptiness check and the write
             current_frame_.pts.at(ft)[matches[i]] = map_point;
             current_frame_.outliers.at(ft)[matches[i]] = false;
             num_triangulated++;
@@ -398,7 +465,7 @@ void Tracking::create_initial_map()
     // scale during the optimization itself.
     std::vector<float> depth_ratios;
     for (const auto& ft : feature_types_) {
-        const auto& inv_depth_kf = keyframe_ini->inv_depth.at(ft);
+        const auto& inv_depth_kf = keyframe_ini->features.at(ft).inv_depth;
         const std::vector<Pt> map_points = keyframe_ini->get_map_point_matches(ft);
         for (size_t i = 0; i < map_points.size(); i++)
         {
@@ -424,7 +491,7 @@ void Tracking::create_initial_map()
 
         // Rescale the baseline and the triangulated points to metric now, so that
         // metric depth back-projections below are scale-consistent with them
-        mat4f Tc2w = keyframe_cur->get_pose();
+        mat4f Tc2w = keyframe_cur->get_Tcw();
         Tc2w.block<3,1>(0,3) *= scale;
         keyframe_cur->set_pose(Tc2w);
         for (const auto& ft : feature_types_)
@@ -437,20 +504,19 @@ void Tracking::create_initial_map()
         // preferred (origin), current frame as fallback — and keep BOTH
         // observations, exactly like a triangulated point. Added before BA, so
         // they are refined together with everything else.
-        const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
-        const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
-        const float invfx = 1.0f / fx, invfy = 1.0f / fy;
-        const mat4f Twc_cur = keyframe_cur->get_pose_inverse();
+        const float cx = calibration_->cx, cy = calibration_->cy;
+        const float invfx = calibration_->invfx, invfy = calibration_->invfy;
+        const mat4f Twc_cur = keyframe_cur->get_Twc();
         const mat3f Rwc_cur = Twc_cur.block<3,3>(0,0);
         const vec3f twc_cur = Twc_cur.block<3,1>(0,3);
 
         flat_index = 0;
         for (const auto& ft : feature_types_) {
             const auto& matches = matches_per_feature_.at(ft);
-            const auto& inv_depth_ini = keyframe_ini->inv_depth.at(ft);
-            const auto& inv_depth_cur = keyframe_cur->inv_depth.at(ft);
-            const auto& keypoints_ini = keyframe_ini->keypoints.at(ft);
-            const auto& keypoints_cur = keyframe_cur->keypoints.at(ft);
+            const auto& inv_depth_ini = keyframe_ini->features.at(ft).inv_depth;
+            const auto& inv_depth_cur = keyframe_cur->features.at(ft).inv_depth;
+            const auto& keypoints_ini = keyframe_ini->features.at(ft).keypoints;
+            const auto& keypoints_cur = keyframe_cur->features.at(ft).keypoints;
             for (size_t i = 0; i < matches.size(); i++, flat_index++) {
                 if (matches[i] < 0 || init_matches_[flat_index] >= 0)
                     continue; // no match, or already triangulated
@@ -471,8 +537,10 @@ void Tracking::create_initial_map()
                 else
                     continue; // matched, but neither frame has depth here
 
-                Pt map_point = keyframe_cur->create_monocular_map_point(world_pos, KeypointIndex(j),
-                                                                        keyframe_ini, KeypointIndex(i), ft);
+                Pt map_point = map_->create_monocular_map_point(world_pos, keyframe_cur, KeypointIndex(j),
+                                                                keyframe_ini, KeypointIndex(i), ft);
+                if (!map_point)
+                    continue;   // a slot was taken between the emptiness check and the write
                 current_frame_.pts.at(ft)[j] = map_point;
                 current_frame_.outliers.at(ft)[j] = false;
                 num_depth_completed++;
@@ -485,15 +553,15 @@ void Tracking::create_initial_map()
 
     Optimizer::global_bundle_adjustment(map_, params.init_gba_iterations);
 
-    const float median_depth = keyframe_ini->compute_scene_median_depth(2);
-    const int tracked_map_points = keyframe_cur->tracked_map_points(1);
+    const std::optional<float> median_depth = keyframe_ini->compute_scene_median_depth();
+    const int tracked_map_points = keyframe_cur->count_tracked_map_points(1);
 
-    if (median_depth < 0 || tracked_map_points < params.init_min_tracked_points)
+    if (!median_depth || *median_depth < 0 || tracked_map_points < params.init_min_tracked_points)
     {
-        AF_WARN("create_initial_map: degenerate initialization (median_depth=" << median_depth
+        AF_WARN("create_initial_map: degenerate initialization (median_depth=" << median_depth.value_or(-1.0f)
                 << ", tracked map points=" << tracked_map_points << " < " << params.init_min_tracked_points
                 << ") — resetting...");
-        reset();
+        reset_after_failed_initialization_ = true;   // run at the start of the next frame, outside the map lock
         return;
     }
 
@@ -501,8 +569,8 @@ void Tracking::create_initial_map()
     // "median scene depth = 1" convention, from the BA-refined map as before
     if (!metric_scale)
     {
-        const float inv_median_depth = 1.0f / median_depth;
-        mat4f Tc2w = keyframe_cur->get_pose();
+        const float inv_median_depth = 1.0f / *median_depth;
+        mat4f Tc2w = keyframe_cur->get_Tcw();
         Tc2w.block<3,1>(0,3) *= inv_median_depth;
         keyframe_cur->set_pose(Tc2w);
         for (const auto& ft : feature_types_)
@@ -519,23 +587,24 @@ void Tracking::create_initial_map()
     int num_depth_only = 0;
     if (metric_scale)
     {
-        const float fx = mK.at<float>(0,0), fy = mK.at<float>(1,1);
-        const float cx = mK.at<float>(0,2), cy = mK.at<float>(1,2);
-        const float invfx = 1.0f / fx, invfy = 1.0f / fy;
-        const mat4f Twc_cur = keyframe_cur->get_pose_inverse();
+        const float cx = calibration_->cx, cy = calibration_->cy;
+        const float invfx = calibration_->invfx, invfy = calibration_->invfy;
+        const mat4f Twc_cur = keyframe_cur->get_Twc();
         const mat3f Rwc_cur = Twc_cur.block<3,3>(0,0);
         const vec3f twc_cur = Twc_cur.block<3,1>(0,3);
 
         for (const auto& ft : feature_types_) {
-            const auto& inv_depth_cur = keyframe_cur->inv_depth.at(ft);
-            const auto& keypoints_cur = keyframe_cur->keypoints.at(ft);
+            const auto& inv_depth_cur = keyframe_cur->features.at(ft).inv_depth;
+            const auto& keypoints_cur = keyframe_cur->features.at(ft).keypoints;
             for (size_t j = 0; j < inv_depth_cur.size(); j++) {
                 if (inv_depth_cur[j] <= 0.0f || keyframe_cur->get_map_point(j, ft))
                     continue;
                 const cv::KeyPoint& kp = keypoints_cur[j];
                 const vec3f xn{(kp.pt.x - cx) * invfx, (kp.pt.y - cy) * invfy, 1.0f};
-                Pt map_point = keyframe_cur->create_map_point(Rwc_cur * (xn / inv_depth_cur[j]) + twc_cur,
-                                                              KeypointIndex(j), ft);
+                Pt map_point = map_->create_map_point(Rwc_cur * (xn / inv_depth_cur[j]) + twc_cur,
+                                                      keyframe_cur, KeypointIndex(j), ft);
+                if (!map_point)
+                    continue;   // a slot was taken between the emptiness check and the write
                 current_frame_.pts.at(ft)[j] = map_point;
                 current_frame_.outliers.at(ft)[j] = false;
                 num_depth_only++;
@@ -551,9 +620,7 @@ void Tracking::create_initial_map()
     local_mapper_->insert_keyframe(keyframe_ini);
     local_mapper_->insert_keyframe(keyframe_cur);
 
-    current_frame_.set_pose(keyframe_cur->get_pose());
-    last_keyframe_id_ = current_frame_.frame_id;
-    last_keyframe_ = keyframe_cur;
+    current_frame_.set_pose(keyframe_cur->get_Tcw());
 
     local_keyframes_.push_back(keyframe_cur);
     local_keyframes_.push_back(keyframe_ini);
@@ -563,8 +630,7 @@ void Tracking::create_initial_map()
 
     last_frame_ = Frame(current_frame_);
 
-    map_->set_reference_map_points(local_points_);
-    map_drawer_->set_current_camera_pose(keyframe_cur->get_pose());
+    map_drawer_->set_current_camera_pose(keyframe_cur->get_Tcw());
     map_->keyframe_origins_.push_back(keyframe_ini);
 
     state_ = TrackingState::OK;
@@ -587,7 +653,7 @@ bool Tracking::track_reference_keyframe()
     // Feature matching against the reference keyframe (global descriptor matching)
     std::map<FeatureType, std::vector<Pt>> map_point_matches;
     const std::map<FeatureType, int> num_matches_per_feature =
-        matcher_->match_keyframe_to_frame(ref_keyframe_, current_frame_, map_point_matches, current_frame_.featureTypes);
+        matcher_->match_keyframe_to_frame(ref_keyframe_, current_frame_, map_point_matches, current_frame_.feature_types);
 
     int num_matches = 0;
     for (auto& [ft, matches] : map_point_matches)
@@ -607,6 +673,21 @@ bool Tracking::track_reference_keyframe()
     }
     timer.record(track_ref_times_);
 
+    const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_reference_keyframe", timer);
+    if(num_map_inliers < params.track_ref_min_inliers)
+    {
+        std::ostringstream reason;
+        reason << "track_reference_keyframe: insufficient inlier matches after pose optimization (num_map_inliers="
+               << num_map_inliers << " < " << params.track_ref_min_inliers << ")"
+               << " | frame=" << current_frame_.frame_id << " raw_matches=" << num_matches;
+        throw TrackingLostException(reason.str());
+    }
+
+    return true;
+}
+
+int Tracking::optimize_pose_from_last_frame(const int num_matches, const char* stage, StageTimer& timer)
+{
     // Optimize pose — seeded from the last frame's pose, recomputed on the fly from its
     // stored RELATIVE pose and the reference keyframe's CURRENT pose, so BA/loop-closure
     // corrections since last frame are absorbed into the seed by construction (no stale
@@ -617,7 +698,7 @@ bool Tracking::track_reference_keyframe()
     // the depth-free rescue below.
     // Invariant: last_frame_relative_pose_ belongs to last_frame_ — every path here
     // had state_ == OK last frame, which stored it.
-    const mat4f seed_pose = last_frame_relative_pose_ * last_frame_.ref_keyframe->get_pose();
+    const mat4f seed_pose = last_frame_relative_pose_ * last_frame_.ref_keyframe->get_Tcw();
     current_frame_.set_pose(seed_pose);
     Optimizer::pose_optimization(&current_frame_);
     int num_map_inliers = current_frame_.count_inlier_map_points();
@@ -629,7 +710,7 @@ bool Tracking::track_reference_keyframe()
     if(num_map_inliers < params.track_ref_min_inliers
        && num_matches >= 3 * params.track_ref_min_matches)
     {
-        AF_WARN("track_reference_keyframe: pose optimization collapsed (" << num_map_inliers
+        AF_WARN(stage << ": pose optimization collapsed (" << num_map_inliers
                 << " inliers of " << num_matches << " raw matches) — retrying without depth channel"
                 << " | frame=" << current_frame_.frame_id);
 
@@ -642,14 +723,19 @@ bool Tracking::track_reference_keyframe()
 
     // Discard outliers: remove the match, and mark the map point so search_local_points
     // neither revisits nor double-counts it this frame.
-    for (auto& [ft, num_keypoints] : current_frame_.N)
+    //
+    // The flag MUST be cleared here, not just the match: track_local_map still runs on this
+    // frame, and search_local_points/match_map_points_to_frame can bind a different map point
+    // to the same keypoint slot. A flag left set would mark that fresh match an outlier before
+    // it was ever evaluated — excluding it from the second pose optimization's edges, from
+    // increase_found, and from count_inlier_map_points.
+    for (const auto& [ft, data] : current_frame_.features.per_type)
     {
-        for(int i = 0; i < num_keypoints; i++)
+        for(std::size_t i = 0; i < data.count(); i++)
         {
             const Pt& map_point = current_frame_.pts.at(ft)[i];
             if(map_point && current_frame_.outliers.at(ft)[i])
             {
-                map_point->track_in_view = false;
                 map_point->last_frame_seen = current_frame_.frame_id;
                 current_frame_.outliers.at(ft)[i] = false;
                 current_frame_.pts.at(ft)[i] = nullptr;
@@ -657,16 +743,43 @@ bool Tracking::track_reference_keyframe()
         }
     }
     timer.record(pose_opt_times_);
+    return num_map_inliers;
+}
 
-    if(num_map_inliers < params.track_ref_min_inliers)
+bool Tracking::track_with_optical_flow()
+{
+    StageTimer timer{};
+    const auto fall_back = [this](const char* why, const int count)
     {
-        std::ostringstream reason;
-        reason << "track_reference_keyframe: insufficient inlier matches after pose optimization (num_map_inliers="
-               << num_map_inliers << " < " << params.track_ref_min_inliers << ")"
-               << " | frame=" << current_frame_.frame_id << " raw_matches=" << num_matches;
-        throw TrackingLostException(reason.str());
-    }
+        for (auto& [ft, pts] : current_frame_.pts)
+        {
+            std::fill(pts.begin(), pts.end(), nullptr);
+            std::fill(current_frame_.outliers.at(ft).begin(), current_frame_.outliers.at(ft).end(), false);
+        }
+        AF_INFO("track_with_optical_flow: " << why << " (" << count << ") - falling back to the reference-keyframe match"
+                << " | frame=" << current_frame_.frame_id);
+        return false;
+    };
+    if(last_grey_image_.empty() || last_grey_image_.size() != grey_image_.size())
+        return fall_back("no previous frame of the same size", 0);
 
+    // 1-4. The last frame's tracked points flowed into this frame and snapped to its keypoints
+    const FeatureMatcher::FlowMatchCounts counts = matcher_->match_frame_to_frame_by_flow(
+        last_frame_, last_grey_image_, current_frame_, grey_image_,
+        params.flow_max_backward_error, params.flow_association_radius);
+    if(counts.tracked < params.flow_min_matches)
+        return fall_back("too few tracked points in the last frame", counts.tracked);
+    if(counts.survived < params.flow_min_matches)
+        return fall_back("too few flow tracks survived the forward-backward check", counts.survived);
+    const int num_matches = counts.matched;
+    if(num_matches < params.flow_min_matches)
+        return fall_back("too few flow tracks landed on a detected keypoint", num_matches);
+    timer.record(track_ref_times_);
+
+    // 5. The shared pose optimization; too few inliers is a fallback here, not a loss
+    const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_with_optical_flow", timer);
+    if(num_map_inliers < params.track_ref_min_inliers)
+        return fall_back("too few inliers after pose optimization", num_map_inliers);
     return true;
 }
 
@@ -715,9 +828,6 @@ bool Tracking::track_local_map()
 
 void Tracking::update_local_map()
 {
-    // Publish the current local points to the map for visualization
-    map_->set_reference_map_points(local_points_);
-
     update_local_keyframes();
     update_local_points();
 }
@@ -736,11 +846,11 @@ void Tracking::update_local_keyframes()
                 pt = nullptr;
                 continue;
             }
-            // By-value snapshot: get_observations copies under the point's mutex
-            const std::map<KeyframeId, Obs> observations = pt->get_observations();
-            for (const auto& [key_id, obs] : observations) {
+            // By-value snapshot: get_observers copies the observing keyframes under the point's
+            // mutex. The Observation itself is not needed -- only who observes.
+            for (const auto& [key_id, observer] : pt->get_observers()) {
                 shared_points_per_keyframe[key_id]++;
-                keyframe_by_id[key_id] = obs->projKeyframe;
+                keyframe_by_id[key_id] = observer;
             }
         }
     }
@@ -837,30 +947,35 @@ void Tracking::search_local_points()
             if(pt && !pt->is_bad()){
                 pt->increase_visible();
                 pt->last_frame_seen = current_frame_.frame_id;
-                pt->track_in_view = false;
             }
             else
                 pt = nullptr;
         }
     }
 
-    // Project the local points into the frame and check their visibility
-    // (is_in_frustum fills the MapPoint variables the matcher reads)
-    int num_to_match = 0;
+    // Project the local points into the frame and keep the visible ones with their projections:
+    // the matcher is handed exactly the candidates it should consider, each with a projection
+    // computed from THIS frame's pose, so it neither re-projects nor reads stale scratch.
+    // Points already matched this frame are skipped — they are not search candidates.
+    std::vector<Pt> visible_points;
+    std::vector<cv::Point2f> projections;
+    visible_points.reserve(local_points_.size());
+    projections.reserve(local_points_.size());
     for(const Pt& pt : local_points_){
         if(pt->last_frame_seen == current_frame_.frame_id)
             continue;
         if(pt->is_bad())
             continue;
 
-        if(current_frame_.is_in_frustum(pt, params.viewing_cos_limit)){
+        if(const std::optional<cv::Point2f> uv = current_frame_.project_if_visible(pt, params.viewing_cos_limit)){
             pt->increase_visible();
-            num_to_match++;
+            visible_points.push_back(pt);
+            projections.push_back(*uv);
         }
     }
 
-    if(num_to_match > 0)
-        matcher_->match_map_points_to_frame(current_frame_, local_points_);
+    if(!visible_points.empty())
+        matcher_->match_map_points_to_frame(current_frame_, visible_points, projections);
 }
 
 bool Tracking::need_new_keyframe()
@@ -881,25 +996,16 @@ bool Tracking::need_new_keyframe()
        && num_inlier_matches_ < 2 * params.track_local_map_min_inliers_after_reloc)
         return false;
 
-    // Tracked map points in the reference keyframe (observation bar relaxed while the map is young)
-    const int min_observations = (num_keyframes_in_map <= static_cast<size_t>(params.young_map_keyframes)) ? params.min_observations_low
-                                                                               : params.min_observations_high;
-    const int num_ref_matches = ref_keyframe_->tracked_map_points(min_observations);
-
-    // Tracking-health triggers. (A close-point condition — insert when too few nearby
-    // RGB-D points are tracked but many could be created — belongs here once depth
-    // populates per-point close/far classification; see CLAUDE.md depth table row 8.)
-    const bool weak_tracking = num_inlier_matches_ < num_ref_matches * params.ref_matches_ratio
-                               && num_inlier_matches_ > params.min_inliers_for_keyframe;
-
-    bool forced_by_cadence{false};
-#ifdef ALLFEATURE_MAX_KEYFRAMES
-    forced_by_cadence = (current_frame_.frame_id % ALLFEATURE_MAX_KEYFRAMES) == 0;
-#endif
-
-    const float overlap = current_frame_.get_overlap();
-    const bool low_overlap = overlap < params.min_ref_overlap;
-    const bool forced = forced_by_cadence;
+    // Tracked map points in the reference keyframe (observation bar relaxed while the map is young).
+    // Diagnostic only since the weak-tracking trigger went: count_tracked_map_points walks the keyframe's
+    // whole map-point set under its lock, so it is not computed when the line is off.
+    int num_ref_matches = -1;
+    if(params.log_keyframe_information)
+    {
+        const int min_observations = (num_keyframes_in_map <= static_cast<size_t>(params.young_map_keyframes))
+                                     ? params.min_observations_low : params.min_observations_high;
+        num_ref_matches = ref_keyframe_->count_tracked_map_points(min_observations);
+    }
 
     // Median inlier count over the recent tracked frames (reference for the
     // emergency trigger below) — computed before pushing the current frame's
@@ -920,20 +1026,23 @@ bool Tracking::need_new_keyframe()
     // keyframe culling marginalises (KeyframeInformation.h, LocalMapping.InformationKernel:
     // megaloc = one MegaLoc embedding per tracked frame, cached in current_frame_ so a
     // keyframe made from it is not embedded twice; covisibility = the frame's tracked map
-    // points against the keyframes' point sets, no embedding). Three bands, sharing the
-    // culler's budget tau (LocalMapping.KeyframeCullingMaxUnexplained):
-    //   v <  keyframe_min_information : redundant — the local map already explains the view;
-    //                                   no keyframe (replaces the pixel-flow stationarity gate:
-    //                                   a static camera is the extreme case of this band)
-    //   v >  tau                      : novel — insert even if tracking is fine, so the alive
-    //                                   keyframes keep every view seen within tau (the same
-    //                                   invariant the culler maintains from the other end;
-    //                                   by the Schur identity a keyframe inserted here has
-    //                                   unique information v > tau, so it is not a cull
-    //                                   candidate on its own account)
-    //   in between                    : the tracking-health triggers above decide.
-    // Without an information measure (no keyframe_information_) only the tracking
-    // triggers decide.
+    // points against the keyframes' point sets, no embedding). The information measure is now
+    // the ONLY authority on insertion — the tracking-health triggers (weak tracking, frame /
+    // reference-keyframe overlap, the ALLFEATURE_MAX_KEYFRAMES cadence) are gone — and it
+    // shares the culler's budget tau (LocalMapping.KeyframeCullingMaxUnexplained):
+    //   v > tau : novel — insert, so the alive keyframes keep every view seen within tau (the
+    //             same invariant the culler maintains from the other end; by the Schur identity
+    //             a keyframe inserted here has unique information v > tau, so it is not a cull
+    //             candidate on its own account)
+    //   else    : no keyframe. The v < keyframe_min_information band is still reported as
+    //             "redundant" to the decision history, but with the default ordering
+    //             (minInfo 0.05 < tau 0.3) that is a label, not a decision: those frames are
+    //             not novel either. It only becomes a veto if minInfo is configured ABOVE tau,
+    //             where tau < v < minInfo is both novel and redundant and redundant wins.
+    // WITHOUT AN INFORMATION MEASURE (keyframe_information_ null: InformationKernel is not
+    // covisibility and there is no MegaLoc store, e.g. vpr: none) BOTH BANDS ARE FALSE AND
+    // THIS RETURNS false ON EVERY FRAME — no keyframe is ever inserted after the initial map.
+    // See System.cc, which still announces the (now removed) tracking triggers in that case.
     const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load();
     const std::optional<KeyframeInformationValue> information = keyframe_information_
         ? keyframe_information_->information(current_frame_, local_keyframes_, LocalMapping::params.keyframe_culling_centred)
@@ -976,9 +1085,7 @@ bool Tracking::need_new_keyframe()
             {
                 line << " inliers=" << num_inlier_matches_ << " refMatches=" << num_ref_matches
                      << " medianRecentInliers=" << median_recent_inliers
-                     << std::setprecision(2) << " overlap=" << overlap
-                     << " weak=" << weak_tracking << " lowOverlap=" << low_overlap
-                     << " novel=" << novel << " redundant=" << redundant << " forced=" << forced
+                     << " novel=" << novel << " redundant=" << redundant
                      << " KFs=" << num_keyframes_in_map;
             }
             AF_INFO(line.str());
@@ -986,18 +1093,15 @@ bool Tracking::need_new_keyframe()
         return insert;
     };
 
-    // Redundancy band. Forced keyframes bypass it.
-    if(!forced && redundant)
+    // Redundancy band: reported separately for the decision history, but subsumed by the
+    // novelty test below at the default threshold ordering (see above).
+    if(redundant)
         return decide(false, "redundant");
 
-    if(!(weak_tracking || forced || low_overlap || novel))
+    if(!novel)
         return decide(false, "no trigger");
 
-    std::string reason;
-    for(const auto& [active, name] : {std::pair{forced, "forced"}, std::pair{novel, "novel"},
-                                      std::pair{weak_tracking, "weak_tracking"}, std::pair{low_overlap, "low_overlap"}})
-        if(active)
-            reason += (reason.empty() ? "" : "+") + std::string(name);
+    const std::string reason = "novel";
 
     // Sequential mode: the end-of-frame wait guarantees Local Mapping is idle, so do
     // not consult the live busy flag — run() toggles it once per idle cycle, and
@@ -1008,8 +1112,9 @@ bool Tracking::need_new_keyframe()
     if(local_mapper_->accepts_keyframes())
         return decide(true, reason);
 
-    // Local Mapping is busy. Emergency keyframe: only on a genuine drop against the
-    // *recent frames'* own inlier level (not ref_keyframe_->tracked_map_points(),
+    // Local Mapping is busy. Emergency keyframe: reached only for an already-novel view
+    // (the sole trigger left), and then only on a genuine drop against the
+    // *recent frames'* own inlier level (not ref_keyframe_->count_tracked_map_points(),
     // which inflates after every insertion as LocalMapping triangulates new points
     // into the keyframe, re-arming the trigger indefinitely), and with a refire
     // cooldown so a persistent low-inlier state can't chain insertions.
@@ -1033,7 +1138,10 @@ void Tracking::create_new_keyframe()
     // Lock Local Mapping against stopping while the keyframe is inserted;
     // fails (and skips insertion) if a loop closure already stopped it.
     if(!local_mapper_->set_insertion_lock(true))
+    {
+        emergency_keyframe_ = false;   // nothing inserted: nothing to wait for
         return;
+    }
 
     const Keyframe keyframe = std::make_shared<KeyFrame>(current_frame_, map_, place_recognition_);
 
@@ -1042,9 +1150,6 @@ void Tracking::create_new_keyframe()
 
     local_mapper_->insert_keyframe(keyframe);
     local_mapper_->set_insertion_lock(false);
-
-    last_keyframe_ = keyframe;
-    last_keyframe_id_ = current_frame_.frame_id;
 }
 
 void Tracking::wait_for_idle_local_mapper() const
@@ -1060,12 +1165,18 @@ bool Tracking::relocalize()
     if(!place_recognition_->is_active())
         return false;
 
+    AF_REPORT_SCOPE();
+
     const FeatureType feature_type = place_recognition_->verification_feature();
     current_frame_.compute_global_descriptor();
 
     const std::vector<Keyframe> candidates = place_recognition_->detect_relocalization_candidates(current_frame_);
+    AF_REPORT("reloc.candidates", "", candidates.size());
     if(candidates.empty())
+    {
+        AF_REPORT("reloc.success", "", 0);
         return false;
+    }
     const size_t num_candidates = candidates.size();
 
     // Match each candidate against the frame; enough matches arm a PnP solver for it
@@ -1094,6 +1205,7 @@ bool Tracking::relocalize()
                                         RANSAC_MIN_SET, params.reloc_ransac_epsilon, RANSAC_TH2);
         num_active++;
     }
+    AF_REPORT("reloc.candidates_armed", "", num_active);   // enough matches for a PnP solver
 
     // Round-robin P4P RANSAC over the surviving candidates until one pose
     // hypothesis is supported by enough inliers
@@ -1117,22 +1229,30 @@ bool Tracking::relocalize()
 
             if(Tcw.empty())
                 continue;
-            current_frame_.Tcw = Converter::to_matrix4f(Tcw);
+            current_frame_.set_pose(Converter::to_matrix4f(Tcw));
 
             if(accept_relocalization_hypothesis(candidates[i], matches_per_candidate[i].at(feature_type),
                                                 inliers, feature_type))
             {
                 last_reloc_frame_id_ = current_frame_.frame_id;
+                AF_REPORT("reloc.success", "", 1);
                 return true;
             }
         }
     }
+    AF_REPORT("reloc.success", "", 0);
     return false;
 }
 
 bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,
                                                 const std::vector<bool>& inliers, const FeatureType feature_type)
 {
+    // One report scope per pose hypothesis: which candidate, the inliers at each step, what
+    // each projection search added, and whether it was accepted
+    AF_REPORT_SCOPE();
+    AF_REPORT("reloc.keyframe_frame_id", "", candidate->frame_id);
+    AF_REPORT("reloc.pnp_inliers", "", std::count(inliers.begin(), inliers.end(), true));
+
     // Seed the frame with the hypothesis' inlier matches
     std::set<Pt> found;
     for(size_t j = 0; j < inliers.size(); j++)
@@ -1147,36 +1267,73 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
     }
 
     int num_good = Optimizer::pose_optimization(&current_frame_);
+    AF_REPORT("reloc.inliers_optimized", "", num_good);
     if(num_good < params.reloc_inliers_low)
+    {
+        AF_REPORT("reloc.accepted", "", 0);
         return false;
+    }
 
-    for(int j = 0; j < current_frame_.N.at(feature_type); j++)
+    for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
         if(current_frame_.outliers.at(feature_type)[j])
             current_frame_.pts.at(feature_type)[j] = nullptr;
 
-    // Few inliers: search by projection in a coarse window and optimize again
+    // More matches for the hypothesis, now that it has a pose: project the candidate keyframe's
+    // map points that are not matched yet into the frame, and match them to the frame's free
+    // keypoints -- the same pose-guided step normal tracking uses for the local map
+    // (search_local_points). The viewing-angle test is disabled (-1): relocalization must accept
+    // a point seen from any direction. Returns the number of keypoints that gained a map point.
+    const auto match_more_points = [&](const std::set<Pt>& already_found)
+    {
+        std::vector<Pt> points;
+        std::vector<cv::Point2f> projections;
+        for(const Pt& pt : candidate->get_map_point_matches(feature_type))
+        {
+            if(!pt || pt->is_bad() || already_found.count(pt))
+                continue;
+            if(const std::optional<cv::Point2f> uv = current_frame_.project_if_visible(pt, -1.0f))
+            {
+                points.push_back(pt);
+                projections.push_back(*uv);
+            }
+        }
+        if(points.empty())
+            return 0;
+
+        const std::vector<Pt>& frame_points = current_frame_.pts.at(feature_type);
+        const auto num_matched = [&frame_points] {
+            return std::count_if(frame_points.begin(), frame_points.end(), [](const Pt& pt) { return bool(pt); });
+        };
+        const auto before = num_matched();
+        matcher_->match_map_points_to_frame(current_frame_, points, projections);
+        return static_cast<int>(num_matched() - before);
+    };
+
+    // Few inliers: look for more matches with the hypothesis pose and optimize again
     if(num_good < params.reloc_inliers_high)
     {
-        const int additional = matcher_->search_by_projection(current_frame_, candidate, found,
-                                                            params.reloc_search_radius_coarse, true, feature_type);
+        const int additional = match_more_points(found);
+        AF_REPORT("reloc.first_search_added", "", additional);
         if(additional + num_good >= params.reloc_inliers_high)
         {
             num_good = Optimizer::pose_optimization(&current_frame_);
+            AF_REPORT("reloc.inliers_after_first_search", "", num_good);
 
-            // Many inliers but still not enough: the pose is already close, so search
-            // once more in a narrower window and run a final optimization
+            // Many inliers but still not enough: the pose has moved, so the projections have
+            // too -- search once more and run a final optimization
             if(num_good > params.reloc_inliers_medium && num_good < params.reloc_inliers_high)
             {
                 found.clear();
-                for(int j = 0; j < current_frame_.N.at(feature_type); j++)
+                for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
                     if(current_frame_.pts.at(feature_type)[j])
                         found.insert(current_frame_.pts.at(feature_type)[j]);
-                const int narrow_additional = matcher_->search_by_projection(current_frame_, candidate, found,
-                                                                           params.reloc_search_radius_narrow, false, feature_type);
-                if(num_good + narrow_additional >= params.reloc_inliers_high)
+                const int second_additional = match_more_points(found);
+                AF_REPORT("reloc.second_search_added", "", second_additional);
+                if(num_good + second_additional >= params.reloc_inliers_high)
                 {
                     num_good = Optimizer::pose_optimization(&current_frame_);
-                    for(int j = 0; j < current_frame_.N.at(feature_type); j++)
+                    AF_REPORT("reloc.inliers_after_second_search", "", num_good);
+                    for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
                         if(current_frame_.outliers.at(feature_type)[j])
                             current_frame_.pts.at(feature_type)[j] = nullptr;
                 }
@@ -1184,6 +1341,7 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
         }
     }
 
+    AF_REPORT("reloc.accepted", "", num_good >= params.reloc_inliers_high);
     if(num_good < params.reloc_inliers_high)
         return false;
 
@@ -1211,7 +1369,8 @@ void Tracking::reset()
     if(viewer_)
     {
         viewer_->request_stop();
-        while(!viewer_->is_stopped())
+        // A finished viewer never stops (Viewer::Stop refuses once finish is requested): do not wait for it
+        while(!viewer_->is_stopped() && !viewer_->isFinished())
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
     }
 
@@ -1232,8 +1391,20 @@ void Tracking::reset()
 
     KeyFrame::next_id = 0;
     Frame::next_id = 0;
+    MapPoint::next_id = 0;
     state_ = TrackingState::NO_IMAGES_YET;
     initializer_ = nullptr;
+
+    // Everything that points into the wiped map: ids restart at 0, so a stale keyframe here would alias the new
+    // map's ones (local_keyframes_ also used to keep growing: create_initial_map appends to it)
+    ref_keyframe_.reset();
+    local_keyframes_.clear();
+    local_points_.clear();
+    last_frame_ = Frame();
+    initial_frame_ = Frame();
+    matches_per_feature_.clear();
+    init_matches_.clear();
+    last_grey_image_.release();
 
     // Per-run tracking state: frame ids restart at 0, so id-anchored state from
     // the previous run (reloc embargo, emergency cooldown) must not leak into the

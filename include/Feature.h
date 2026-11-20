@@ -1,5 +1,4 @@
-#ifndef AF_VSLAM_FEATURE_H
-#define AF_VSLAM_FEATURE_H
+#pragma once
 
 #include <iostream>
 #include <memory>
@@ -8,24 +7,26 @@
 
 #include "Types.h"
 
-namespace AF_VSLAM {
+namespace AF_VSLAM
+{
 
-    class FeatureExtractor;
-    class FeatureExtractorSettings;
+class FeatureExtractor;
+class FeatureExtractorSettings;
 
-    class Feature {
-    public:
-        virtual ~Feature() = default;
+class Feature
+{
+public:
+    virtual ~Feature() = default;
 
-        virtual const std::string& getFeatureName()    const = 0;
-        virtual FeatureType  getType()           const = 0;
-        virtual MatcherType getMatcherType()     const = 0;
-        virtual const std::string& getSettingsYamlFile()   const = 0;
-        virtual const Eigen::Matrix<float,3,1>& getColor() const = 0;
-        virtual float descriptor_distance(const cv::Mat &, const cv::Mat &) const { return 0.0f; };
-        virtual std::shared_ptr<FeatureExtractor> createExtractor(
-            std::shared_ptr<FeatureExtractorSettings>) const { return nullptr; };
-    };
+    virtual const std::string& get_feature_name() const = 0;
+    virtual FeatureType get_type() const = 0;
+    virtual MatcherType get_matcher_type() const = 0;
+    // The most keypoints this feature extracts per frame; Tracking.FeaturesFraction takes a share of it
+    virtual int get_max_features() const = 0;
+    virtual const Eigen::Matrix<float,3,1>& get_color() const = 0;
+    virtual float descriptor_distance(const cv::Mat &, const cv::Mat &) const = 0;
+    virtual std::shared_ptr<FeatureExtractor> create_extractor(
+        std::shared_ptr<FeatureExtractorSettings>) const = 0;
+};
+
 }
-
-#endif //AF_VSLAM_FEATURE_H

@@ -27,16 +27,16 @@
 #include "FeatureMatcher.h"
 #include "LoopClosing.h"
 #include "Optimizer.h"
+#include "Report.h"
 #include "Utils.h"
 #include "afvslam_log.hpp"
 
 namespace AF_VSLAM
 {
 
-LocalMapping::LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureType>& feature_types,
-                           const int image_width, const int image_height):
+LocalMapping::LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureType>& feature_types):
     map_(std::move(map)),
-    matcher_(std::make_shared<FeatureMatcher>(image_width, image_height, feature_types, "LocalMapping"))
+    matcher_(std::make_shared<FeatureMatcher>(feature_types, "LocalMapping"))
 {
 }
 
@@ -95,10 +95,40 @@ void LocalMapping::process_keyframe()
 
     create_new_map_points();
 
+    // The matches against the neighbors have been triangulated from; nothing reads them again
+    FeatureMatcher::clear_keyframe_matches(current_keyframe_);
+
     // Find more matches in neighbor keyframes and fuse point duplications
     search_in_neighbors();
 
     local_bundle_adjustment();
+
+#ifdef ALLFEATURE_REPORT
+    // Report the keyframe's place in the covisibility graph once it has been fused with its
+    // neighbors and adjusted, and how many map points it observes. Inside the #ifdef because it
+    // copies the connection list and the map-point vectors only to count them.
+    {
+        const std::vector<Connection> connections = current_keyframe_->get_covisible_connections();
+        long weight_total = 0;
+        int weight_max = 0;
+        for(const Connection& connection : connections)
+        {
+            weight_total += connection.weight;
+            weight_max = std::max(weight_max, connection.weight);
+        }
+        AF_REPORT("connections.count", "", connections.size());
+        AF_REPORT("connections.weight_total", "", weight_total);
+        AF_REPORT("connections.weight_max", "", weight_max);
+        for(const FeatureType feature_type : current_keyframe_->feature_types)
+        {
+            size_t num_points = 0;
+            for(const Pt& point : current_keyframe_->get_map_point_matches(feature_type))
+                if(point && !point->is_bad())
+                    num_points++;
+            AF_REPORT("keyframe.map_points", get_feature(feature_type).get_feature_name(), num_points);
+        }
+    }
+#endif
 
     cull_keyframes();
 
@@ -118,6 +148,7 @@ void LocalMapping::process_new_keyframe()
         current_keyframe_ = new_keyframes_.front();
         new_keyframes_.pop_front();
     }
+    AF_REPORT_CONTEXT("local_mapping", current_keyframe_->frame_id);
 
     // Global descriptor (VPR image embedding, backend-dependent)
     current_keyframe_->compute_global_descriptor();
@@ -126,7 +157,7 @@ void LocalMapping::process_new_keyframe()
     // (add_observation also refreshes the point's descriptor and normal/depth). Points
     // that already observe this keyframe -- created WITH it by the initializer -- enter
     // the probation list instead (cull_map_points).
-    for(const FeatureType feature_type : current_keyframe_->featureTypes)
+    for(const FeatureType feature_type : current_keyframe_->feature_types)
     {
         // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
         const std::vector<Pt> map_points = current_keyframe_->get_map_point_matches(feature_type);
@@ -168,7 +199,7 @@ void LocalMapping::cull_map_points()
 
         // Visible (in frustum) often but actually matched rarely: unreliable point.
         // Applies to every feature type uniformly (issue #11: an earlier version
-        // exempted all but featureTypes[0]).
+        // exempted all but feature_types[0]).
         if(map_point->get_found_ratio() < params.map_point_culling_min_found_ratio)
         {
             map_point->set_bad_flag();
@@ -189,49 +220,104 @@ void LocalMapping::cull_map_points()
     });
 }
 
+// The covisible keyframes to triangulate against: the create_new_map_points_keyframes most
+// covisible ones THAT HAVE ENOUGH BASELINE to the current keyframe, relative to their scene
+// depth -- a near-zero-parallax pair only yields ill-conditioned triangulations. The covisible
+// keyframes are walked from most to least covisible until that many pass, so a neighbor that is
+// too close is replaced by the next one down the list rather than just dropped. Selected before
+// any matching, so no neighbor is matched and filtered only to be skipped.
+std::vector<Keyframe> LocalMapping::select_triangulation_neighbors() const
+{
+    const std::vector<Keyframe> covisible = current_keyframe_->get_covisible_keyframes();   // most covisible first
+    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose();
+
+    const size_t num_wanted = static_cast<size_t>(std::max(params.create_new_map_points_keyframes, 0));
+    std::vector<Keyframe> neighbors;
+    neighbors.reserve(num_wanted);
+    [[maybe_unused]] size_t num_examined = 0;
+    for(const Keyframe& candidate : covisible)
+    {
+        if(neighbors.size() >= num_wanted)
+            break;
+        num_examined++;
+
+        const auto [Tcw2, Twc2, Rcw2, Rwc2, tcw2, twc2] = candidate->get_pose();
+        const float baseline = (twc2 - twc1).norm();
+        // No map points, or a scene sitting on the camera plane: nothing to measure the
+        // baseline against. The old form divided by the -1 sentinel and skipped because the
+        // result came out negative -- and divided by a legitimate 0 to get inf, which did NOT
+        // skip.
+        const std::optional<float> scene_depth = candidate->compute_scene_median_depth();
+        if(!scene_depth || *scene_depth <= 0.0f
+           || baseline / *scene_depth < params.create_new_map_points_min_baseline_depth_ratio)
+            continue;
+        neighbors.push_back(candidate);
+    }
+
+    // How far down the covisibility list the selection had to go, and how many it found
+    AF_REPORT("neighbors.covisible", "", covisible.size());
+    AF_REPORT("neighbors.examined", "", num_examined);
+    AF_REPORT("neighbors.enough_baseline", "", neighbors.size());
+    return neighbors;
+}
+
 void LocalMapping::create_new_map_points()
 {
     StageTimer timer{};
+    AF_REPORT_SCOPE();
 
-    const std::vector<Keyframe> neighbors =
-        current_keyframe_->get_best_covisibility_keyframes(params.create_new_map_points_keyframes);
+    const std::vector<Keyframe> neighbors = select_triangulation_neighbors();
 
-    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose_matrices();
-    const float fx1 = current_keyframe_->fx, fy1 = current_keyframe_->fy;
-    const float cx1 = current_keyframe_->cx, cy1 = current_keyframe_->cy;
-    const float invfx1 = current_keyframe_->invfx, invfy1 = current_keyframe_->invfy;
+    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose();
+    const float fx1 = current_keyframe_->calibration->fx, fy1 = current_keyframe_->calibration->fy;
+    const float cx1 = current_keyframe_->calibration->cx, cy1 = current_keyframe_->calibration->cy;
+    const float invfx1 = current_keyframe_->calibration->invfx, invfy1 = current_keyframe_->calibration->invfy;
 
-    cache_neighbor_matches(neighbors);
+    // Match the new keyframe against all its neighbors at once; the loop below reads the pairs back
+    matcher_->match_keyframe_to_keyframes(current_keyframe_, neighbors, current_keyframe_->feature_types);
 
-    // For each neighbor with enough baseline, place each matched keypoint pair in 3D:
-    // from sensor depth when either view has it (cross-validated by the reprojection
-    // gates below), by two-view triangulation otherwise.
+    // What becomes of the matched pairs, per feature type; reported at the end
+    struct TriangulationCounts
+    {
+        size_t pairs{0};          // matched pairs read back
+        size_t candidates{0};     // neither keypoint has a map point yet
+        size_t no_parallax{0};    // no depth and too little parallax, or a degenerate solve
+        size_t behind_camera{0};
+        size_t reprojection{0};   // rejected by the reprojection gate in either view
+        size_t slot_taken{0};     // a keypoint got a map point between the check and the write
+        size_t created{0};
+    };
+    std::map<FeatureType, TriangulationCounts> triangulation_counts;
+
+    // For each neighbor, place each matched keypoint pair in 3D: from sensor depth when either
+    // view has it (cross-validated by the reprojection gates below), by two-view triangulation
+    // otherwise.
     for(const Keyframe& neighbor : neighbors)
     {
-        const auto [Tcw2, Twc2, Rcw2, Rwc2, tcw2, twc2] = neighbor->get_pose_matrices();
-        const float fx2 = neighbor->fx, fy2 = neighbor->fy;
-        const float cx2 = neighbor->cx, cy2 = neighbor->cy;
-        const float invfx2 = neighbor->invfx, invfy2 = neighbor->invfy;
+        const auto [Tcw2, Twc2, Rcw2, Rwc2, tcw2, twc2] = neighbor->get_pose();
+        const float fx2 = neighbor->calibration->fx, fy2 = neighbor->calibration->fy;
+        const float cx2 = neighbor->calibration->cx, cy2 = neighbor->calibration->cy;
+        const float invfx2 = neighbor->calibration->invfx, invfy2 = neighbor->calibration->invfy;
 
-        // Discard neighbors whose baseline is too short relative to their scene depth:
-        // a near-zero-parallax pair only yields ill-conditioned triangulations
-        const float baseline = (twc2 - twc1).norm();
-        if(baseline / neighbor->compute_scene_median_depth(2) < params.create_new_map_points_min_baseline_depth_ratio)
-            continue;
-
-        std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_indices;
-        matcher_->match_keyframes_for_triangulation(current_keyframe_, neighbor, matched_indices,
-                                                    current_keyframe_->featureTypes);
+        const std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_indices =
+            FeatureMatcher::get_keyframe_matches(current_keyframe_, neighbor);
 
         for(const auto& [feature_type, pairs] : matched_indices)
         {
-            const auto& inv_depth1_ft = current_keyframe_->inv_depth.at(feature_type);
-            const auto& inv_depth2_ft = neighbor->inv_depth.at(feature_type);
-            const auto& keypoints1_ft = current_keyframe_->keypoints.at(feature_type);
-            const auto& keypoints2_ft = neighbor->keypoints.at(feature_type);
+            const auto& inv_depth1_ft = current_keyframe_->features.at(feature_type).inv_depth;
+            const auto& inv_depth2_ft = neighbor->features.at(feature_type).inv_depth;
+            const auto& keypoints1_ft = current_keyframe_->features.at(feature_type).keypoints;
+            const auto& keypoints2_ft = neighbor->features.at(feature_type).keypoints;
+            TriangulationCounts& counts = triangulation_counts[feature_type];
+            counts.pairs += pairs.size();
 
             for(const auto& [idx1, idx2] : pairs)
             {
+                // Only a pair where neither keypoint has a map point yet is a candidate to triangulate
+                if(current_keyframe_->get_map_point(idx1, feature_type) || neighbor->get_map_point(idx2, feature_type))
+                    continue;
+                counts.candidates++;
+
                 const cv::KeyPoint& kp1 = keypoints1_ft[idx1];
                 const cv::KeyPoint& kp2 = keypoints2_ft[idx2];
 
@@ -282,119 +368,76 @@ void LocalMapping::create_new_map_points()
                     const Eigen::JacobiSVD<Eigen::Matrix<float, 4, 4>> svd(A, Eigen::ComputeFullV);
                     const Eigen::Vector4f x_h = svd.matrixV().col(3);
                     if(std::abs(x_h(3)) < HOMOGENEOUS_W_EPSILON)
+                    {
+                        counts.no_parallax++;
                         continue;
+                    }
                     x3D = x_h.head<3>() / x_h(3);
                 }
                 else
+                {
+                    counts.no_parallax++;
                     continue; // no depth, and too little parallax to triangulate
+                }
 
                 // The point must lie in front of both cameras
                 const float z1 = Rcw1.row(2).dot(x3D) + tcw1(2);
-                if(z1 <= 0)
-                    continue;
                 const float z2 = Rcw2.row(2).dot(x3D) + tcw2(2);
-                if(z2 <= 0)
+                if(z1 <= 0 || z2 <= 0)
+                {
+                    counts.behind_camera++;
                     continue;
+                }
 
                 // Reprojection gate in this keyframe
                 const float u1 = fx1 * (Rcw1.row(0).dot(x3D) + tcw1(0)) / z1 + cx1;
                 const float v1 = fy1 * (Rcw1.row(1).dot(x3D) + tcw1(1)) / z1 + cy1;
                 const float err_x1 = u1 - kp1.pt.x;
                 const float err_y1 = v1 - kp1.pt.y;
-                if(err_x1 * err_x1 + err_y1 * err_y1 > CHI2_2DOF * current_keyframe_->get_keypoint_sigma2(idx1, feature_type))
+                if(err_x1 * err_x1 + err_y1 * err_y1 > CHI2_2DOF * current_keyframe_->features.get_sigma2(idx1, feature_type))
+                {
+                    counts.reprojection++;
                     continue;
+                }
 
                 // Reprojection gate in the neighbor
                 const float u2 = fx2 * (Rcw2.row(0).dot(x3D) + tcw2(0)) / z2 + cx2;
                 const float v2 = fy2 * (Rcw2.row(1).dot(x3D) + tcw2(1)) / z2 + cy2;
                 const float err_x2 = u2 - kp2.pt.x;
                 const float err_y2 = v2 - kp2.pt.y;
-                if(err_x2 * err_x2 + err_y2 * err_y2 > CHI2_2DOF * neighbor->get_keypoint_sigma2(idx2, feature_type))
+                if(err_x2 * err_x2 + err_y2 * err_y2 > CHI2_2DOF * neighbor->features.get_sigma2(idx2, feature_type))
+                {
+                    counts.reprojection++;
                     continue;
+                }
 
-                const Pt map_point = current_keyframe_->create_monocular_map_point(
-                    x3D, KeypointIndex(idx1), neighbor, KeypointIndex(idx2), feature_type);
+                const Pt map_point = map_->create_monocular_map_point(
+                    x3D, current_keyframe_, KeypointIndex(idx1), neighbor, KeypointIndex(idx2), feature_type);
+                if(!map_point)
+                {
+                    counts.slot_taken++;
+                    continue;   // a slot was taken between the emptiness check and the write
+                }
                 recent_map_points_.push_back(map_point);
+                counts.created++;
             }
         }
+    }
+
+    for([[maybe_unused]] const auto& [feature_type, counts] : triangulation_counts)
+    {
+        AF_REPORT("triangulation.pairs", get_feature(feature_type).get_feature_name(), counts.pairs);
+        AF_REPORT("triangulation.candidates", get_feature(feature_type).get_feature_name(), counts.candidates);
+        AF_REPORT("triangulation.no_parallax", get_feature(feature_type).get_feature_name(), counts.no_parallax);
+        AF_REPORT("triangulation.behind_camera", get_feature(feature_type).get_feature_name(), counts.behind_camera);
+        AF_REPORT("triangulation.reprojection", get_feature(feature_type).get_feature_name(), counts.reprojection);
+        AF_REPORT("triangulation.slot_taken", get_feature(feature_type).get_feature_name(), counts.slot_taken);
+        AF_REPORT("triangulation.created", get_feature(feature_type).get_feature_name(), counts.created);
     }
 
     create_depth_seeded_points();
 
     timer.record(create_new_map_points_times_);
-}
-
-void LocalMapping::cache_neighbor_matches(const std::vector<Keyframe>& neighbors)
-{
-    // Brute-force descriptor matching of the new keyframe against every neighbor it has no
-    // cached matches with yet, all (neighbor, feature type) pairs in parallel. Results are
-    // stored symmetrically in both keyframes' caches, per feature type and stacked (with
-    // keypoint-index offsets) over all feature types.
-    const auto& feature_types = current_keyframe_->featureTypes;
-    const int num_neighbors = int(neighbors.size());
-    const int num_feature_types = int(feature_types.size());
-
-    std::vector<char> cached(num_neighbors, 0);
-    for(int k = 0; k < num_neighbors; k++)
-    {
-        const auto it = current_keyframe_->cache_matched_pairs.find(neighbors[k]->frame_id);
-        cached[k] = it != current_keyframe_->cache_matched_pairs.end() && !it->second.empty();
-    }
-
-    std::vector<std::vector<std::vector<cv::DMatch>>> matches(
-        num_neighbors, std::vector<std::vector<cv::DMatch>>(num_feature_types));
-
-    #pragma omp parallel for collapse(2) schedule(dynamic)
-    for(int k = 0; k < num_neighbors; k++)
-    {
-        for(int f = 0; f < num_feature_types; f++)
-        {
-            if(cached[k])
-                continue;
-            const Keyframe& neighbor = neighbors[k];
-            const FeatureType feature_type = feature_types[f];
-            matches[k][f] = matcher_->serialFeatureMatching(
-                current_keyframe_->descriptors.at(feature_type), neighbor->descriptors.at(feature_type),
-                current_keyframe_->keypoints.at(feature_type), neighbor->keypoints.at(feature_type),
-                feature_type);
-        }
-    }
-
-    // Store (serial): per-feature-type caches in both directions, plus the stacked list
-    for(int k = 0; k < num_neighbors; k++)
-    {
-        if(cached[k])
-            continue;
-        const Keyframe& neighbor = neighbors[k];
-
-        auto& forward_by_type = current_keyframe_->cache_matched_pairs_feat_type[neighbor->frame_id];
-        auto& backward_by_type = neighbor->cache_matched_pairs_feat_type[current_keyframe_->frame_id];
-
-        std::vector<cv::DMatch> stacked;
-        int query_offset = 0;
-        int train_offset = 0;
-        for(int f = 0; f < num_feature_types; f++)
-        {
-            const FeatureType feature_type = feature_types[f];
-            stacked.reserve(stacked.size() + matches[k][f].size());
-            for(const cv::DMatch& match : matches[k][f])
-            {
-                forward_by_type[feature_type].push_back(match);
-                backward_by_type[feature_type].push_back(cv::DMatch(match.trainIdx, match.queryIdx, match.distance));
-
-                cv::DMatch stacked_match = match;
-                stacked_match.queryIdx += query_offset;
-                stacked_match.trainIdx += train_offset;
-                stacked.push_back(stacked_match);
-            }
-            query_offset += int(current_keyframe_->keypoints.at(feature_type).size());
-            train_offset += int(neighbor->keypoints.at(feature_type).size());
-        }
-
-        neighbor->cache_matched_pairs.insert_or_assign(current_keyframe_->frame_id,
-                                                       FeatureMatcher::swap_match_direction(stacked));
-        current_keyframe_->cache_matched_pairs.insert_or_assign(neighbor->frame_id, std::move(stacked));
-    }
 }
 
 void LocalMapping::create_depth_seeded_points()
@@ -404,14 +447,14 @@ void LocalMapping::create_depth_seeded_points()
     // neighbor -- a keypoint with a valid depth reading but no such match (textureless
     // region, repeated pattern, fast motion) is exactly where sensor depth helps most.
     // Same trust policy as the triangulation depth branches: any inv_depth > 0, no range gate.
-    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose_matrices();
-    const float cx1 = current_keyframe_->cx, cy1 = current_keyframe_->cy;
-    const float invfx1 = current_keyframe_->invfx, invfy1 = current_keyframe_->invfy;
+    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose();
+    const float cx1 = current_keyframe_->calibration->cx, cy1 = current_keyframe_->calibration->cy;
+    const float invfx1 = current_keyframe_->calibration->invfx, invfy1 = current_keyframe_->calibration->invfy;
 
-    for(const FeatureType feature_type : current_keyframe_->featureTypes)
+    for(const FeatureType feature_type : current_keyframe_->feature_types)
     {
-        const auto& inv_depth = current_keyframe_->inv_depth.at(feature_type);
-        const auto& keypoints = current_keyframe_->keypoints.at(feature_type);
+        const auto& inv_depth = current_keyframe_->features.at(feature_type).inv_depth;
+        const auto& keypoints = current_keyframe_->features.at(feature_type).keypoints;
         for(size_t idx = 0; idx < inv_depth.size(); idx++)
         {
             if(inv_depth[idx] <= 0.0f)
@@ -421,8 +464,10 @@ void LocalMapping::create_depth_seeded_points()
 
             const cv::KeyPoint& kp = keypoints[idx];
             const vec3f xn{(kp.pt.x - cx1) * invfx1, (kp.pt.y - cy1) * invfy1, 1.0f};
-            const Pt map_point = current_keyframe_->create_map_point(Rwc1 * (xn / inv_depth[idx]) + twc1,
-                                                                     KeypointIndex(idx), feature_type);
+            const Pt map_point = map_->create_map_point(Rwc1 * (xn / inv_depth[idx]) + twc1,
+                                                        current_keyframe_, KeypointIndex(idx), feature_type);
+            if(!map_point)
+                continue;   // a slot was taken between the emptiness check and the write
             recent_map_points_.push_back(map_point);
         }
     }
@@ -430,6 +475,7 @@ void LocalMapping::create_depth_seeded_points()
 
 void LocalMapping::search_in_neighbors()
 {
+    AF_REPORT_SCOPE();
     StageTimer timer{};
 
     // Fuse target set: the best covisible keyframes plus a few of THEIR best covisible
@@ -456,13 +502,22 @@ void LocalMapping::search_in_neighbors()
         }
     }
 
-    for(const FeatureType feature_type : current_keyframe_->featureTypes)
+    AF_REPORT("fuse.targets", "", targets.size());
+
+    for(const FeatureType feature_type : current_keyframe_->feature_types)
     {
+        estimate_fuse_max_descriptor_distance(feature_type);
+
         // Project this keyframe's map points into each target and fuse duplicates.
         // By-value snapshot: get_map_point_matches copies under the keyframe's mutex.
         const std::vector<Pt> map_points = current_keyframe_->get_map_point_matches(feature_type);
+        [[maybe_unused]] FuseCounts into_targets{};
         for(const Keyframe& target : targets)
-            matcher_->fuse_map_points_to_keyframe(target, map_points, params.search_in_neighbors_radius, feature_type);
+        {
+            const FuseCounts counts = fuse_into_keyframe(target, map_points, feature_type);
+            into_targets.merged += counts.merged;
+            into_targets.observed += counts.observed;
+        }
 
         // Project the targets' map points into this keyframe and fuse duplicates
         std::vector<Pt> candidates;
@@ -478,7 +533,15 @@ void LocalMapping::search_in_neighbors()
                 candidates.push_back(candidate);
             }
         }
-        matcher_->fuse_map_points_to_keyframe(current_keyframe_, candidates, params.search_in_neighbors_radius, feature_type);
+        [[maybe_unused]] const FuseCounts into_current = fuse_into_keyframe(current_keyframe_, candidates, feature_type);
+
+        AF_REPORT("fuse.points", get_feature(feature_type).get_feature_name(),
+                  std::count_if(map_points.begin(), map_points.end(), [](const Pt& pt) { return pt != nullptr; }));
+        AF_REPORT("fuse.into_targets", get_feature(feature_type).get_feature_name(), into_targets.merged + into_targets.observed);
+        AF_REPORT("fuse.into_targets_merged", get_feature(feature_type).get_feature_name(), into_targets.merged);
+        AF_REPORT("fuse.candidates", get_feature(feature_type).get_feature_name(), candidates.size());
+        AF_REPORT("fuse.into_current", get_feature(feature_type).get_feature_name(), into_current.merged + into_current.observed);
+        AF_REPORT("fuse.into_current_merged", get_feature(feature_type).get_feature_name(), into_current.merged);
 
         // Refresh the surviving matches (fusion may have replaced points)
         for(const Pt& map_point : current_keyframe_->get_map_point_matches(feature_type))
@@ -489,12 +552,122 @@ void LocalMapping::search_in_neighbors()
                 map_point->update_normal_and_depth();
             }
         }
+
     }
 
     // Update links in the covisibility graph
     current_keyframe_->update_connections();
 
     timer.record(search_in_neighbors_times_);
+}
+
+// Fuses `map_points` into `keyframe`'s keypoints of `feature_type`. Each point the keyframe does
+// not already observe is projected with the keyframe's pose (project_if_visible: depth, image,
+// scale range, viewing angle) and matched by FeatureMatcher's gated mutual search, every keypoint
+// a target whether it holds a point or not, at most the map's fuse descriptor distance apart. A match on an empty keypoint adds the observation; a
+// match on a keypoint holding another point merges the two, the one with more observations
+// surviving. A point or keyframe slot changed by an earlier merge of this call is re-checked.
+// How far apart in descriptor space a correct match lies, for one feature type: for each map
+// point of the current keyframe, the distance from its distinctive descriptor to the descriptor
+// of every other observation (the observation it was chosen from, at distance 0, is skipped once).
+// The fuse_descriptor_quantile quantile of these becomes the map's fuse descriptor distance; a
+// keyframe whose points have no second observation leaves the previous estimate in place.
+// Reports descdist.count and descdist.fuse_max.
+void LocalMapping::estimate_fuse_max_descriptor_distance(const FeatureType feature_type)
+{
+    std::vector<Descriptor_Distance_Type> distances;
+    for(const Pt& map_point : current_keyframe_->get_map_point_matches(feature_type))
+    {
+        if(!map_point || map_point->is_bad())
+            continue;
+        const cv::Mat descriptor = map_point->get_descriptor();
+        if(descriptor.empty())
+            continue;
+        bool self_skipped = false;
+        for(const auto& [id, observation] : map_point->get_observations())
+        {
+            if(!observation.keyframe || observation.keyframe->is_bad())
+                continue;
+            const Descriptor_Distance_Type distance = FeatureMatcher::descriptor_distance(descriptor,
+                observation.keyframe->features.at(feature_type).descriptors.row(observation.index), feature_type);
+            if(!self_skipped && distance == Descriptor_Distance_Type(0))
+            {
+                self_skipped = true;
+                continue;
+            }
+            distances.push_back(distance);
+        }
+    }
+
+    AF_REPORT("descdist.count", get_feature(feature_type).get_feature_name(), distances.size());
+    if(distances.empty())
+        return;
+
+    const float quantile = std::clamp(params.fuse_descriptor_quantile, 0.0f, 1.0f);
+    const size_t index = std::min(distances.size() - 1, static_cast<size_t>(quantile * distances.size()));
+    std::nth_element(distances.begin(), distances.begin() + static_cast<std::ptrdiff_t>(index), distances.end());
+    map_->set_fuse_max_descriptor_distance(feature_type, distances[index]);
+    AF_REPORT("descdist.fuse_max", get_feature(feature_type).get_feature_name(), distances[index]);
+}
+
+LocalMapping::FuseCounts LocalMapping::fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points,
+                                                          const FeatureType feature_type)
+{
+    // No estimate yet for this type (no point with two observations): nothing is fused
+    const std::optional<Descriptor_Distance_Type> max_descriptor_distance =
+        map_->get_fuse_max_descriptor_distance(feature_type);
+    if(!max_descriptor_distance)
+        return {};
+
+    // One pose for all points: get_pose() takes the keyframe's pose lock once
+    const Pose pose = keyframe->get_pose();
+
+    std::vector<Pt> candidates;
+    std::vector<cv::Point2f> projections;
+    for(const Pt& pt : map_points)
+    {
+        if(!pt || pt->is_bad() || pt->featureType != feature_type || pt->is_in_keyframe(keyframe))
+            continue;
+        const std::optional<Projection> projection =
+            project_if_visible(pose, *keyframe->calibration, pt, FUSE_VIEWING_COS_LIMIT);
+        if(!projection)
+            continue;
+        candidates.push_back(pt);
+        projections.push_back(projection->uv);
+    }
+
+    std::vector<Pt> matches(keyframe->features.at(feature_type).count());
+    matcher_->match_map_points_to_keyframe(keyframe, candidates, projections, feature_type, matches,
+                                           FUSE_GATE_SCALE_SIGMA2, *max_descriptor_distance);
+
+    FuseCounts counts{};
+    for(size_t idx = 0; idx < matches.size(); idx++)
+    {
+        const Pt& pt = matches[idx];
+        if(!pt || pt->is_bad() || pt->is_in_keyframe(keyframe))
+            continue;
+
+        const KeypointIndex index = static_cast<KeypointIndex>(idx);
+        const Pt existing = keyframe->get_map_point(index, feature_type);
+        if(existing)
+        {
+            if(existing->is_bad())
+                continue;
+            if(existing->number_of_observations() > pt->number_of_observations())
+                pt->replace(existing);
+            else
+                existing->replace(pt);
+            counts.merged++;
+        }
+        // Publish first, observe only if the slot was won: another thread can fill it after
+        // get_map_point. pt already has a descriptor, so publishing before observing is safe.
+        else if(keyframe->add_map_point(pt, index))
+        {
+            pt->add_observation(keyframe, index);
+            counts.observed++;
+        }
+    }
+    return counts;
 }
 
 void LocalMapping::local_bundle_adjustment()
@@ -542,10 +715,10 @@ void LocalMapping::cull_keyframes_heuristic()
     // By-value snapshot: get_covisible_keyframes copies under the keyframe's mutex
     const std::vector<Keyframe> local_keyframes = current_keyframe_->get_covisible_keyframes();
     for(const Keyframe& keyframe : local_keyframes){
-        if(keyframe->keyId == 0)
+        if(keyframe->is_origin())
             continue; // the first keyframe anchors the map and is never culled
 
-        for(const FeatureType ft : keyframe->featureTypes){
+        for(const FeatureType ft : keyframe->feature_types){
             // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
             const std::vector<Pt> map_points = keyframe->get_map_point_matches(ft);
 
@@ -560,11 +733,11 @@ void LocalMapping::cull_keyframes_heuristic()
                 if(pt->number_of_observations() <= params.keyframe_culling_min_observations)
                     continue;
 
-                // By-value snapshot: get_observations copies under the point's mutex
-                const std::map<KeyframeId, Obs> observations = pt->get_observations();
+                // By-value snapshot: get_observers copies the observing keyframes under the
+                // point's mutex. The Observation itself is not needed -- only who observes.
                 int num_other_observers = 0;
-                for(const auto& [key_id, obs] : observations){
-                    if(key_id == keyframe->keyId || obs->projKeyframe->is_bad())
+                for(const auto& [key_id, observer] : pt->get_observers()){
+                    if(key_id == keyframe->keyId || observer->is_bad())
                         continue;
                     if(++num_other_observers >= params.keyframe_culling_min_observations)
                         break;
@@ -599,7 +772,7 @@ void LocalMapping::cull_keyframes_information()
     // heuristic method) -- tell placecell so it becomes culling history there too.
     std::unordered_map<FrameId, Keyframe> keyframe_by_frame_id;
     std::vector<Keyframe> alive_keyframes;
-    for(const Keyframe& keyframe : map_->GetAllKeyFrames())
+    for(const Keyframe& keyframe : map_->get_all_keyframes())
     {
         keyframe_by_frame_id.emplace(keyframe->frame_id, keyframe);
         if(!keyframe->is_bad())
@@ -643,7 +816,7 @@ void LocalMapping::cull_keyframes_information()
         if(it == keyframe_by_frame_id.end())
             return false;
         it->second->set_bad_flag();
-        // Deferred by set_not_erase (loop closing holds it): leave it alive; placecell
+        // Deferred by pin() (loop closing holds it): leave it alive; placecell
         // never retries a refused candidate within the same call
         return it->second->is_bad();
     };

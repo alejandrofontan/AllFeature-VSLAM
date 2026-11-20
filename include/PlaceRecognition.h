@@ -8,8 +8,8 @@
  *
  * Visual place recognition (VPR) backend interface (issue #17, stage 2). One object
  * owns everything retrieval-related: computing a frame's/keyframe's global
- * descriptor, a similarity score, and the two candidate queries (relocalization,
- * loop detection). Keyframe information (insertion bands, information culling) lives
+ * descriptor and the two candidate queries (relocalization, loop detection) --
+ * similarity is computed inside the backend's retrieval, not exposed pairwise. Keyframe information (insertion bands, information culling) lives
  * in KeyframeInformation.h since the covisibility kernel. The downstream geometric verification (feature matching, PnP,
  * Sim3) is backend-agnostic and uses the local feature named by
  * verification_feature() (settings key `feature_vpr`). A new backend (another
@@ -71,10 +71,6 @@ public:
     virtual void erase(const Keyframe& keyframe) = 0;
     virtual void clear() = 0;
 
-    // Similarity between two keyframes' global descriptors (backend-specific scale:
-    // cosine in [-1,1] for MegaLoc). 0 if either is missing.
-    virtual float score(const KeyFrame& a, const KeyFrame& b) const = 0;
-
     // Loop candidates for a keyframe: not covisible with it, similar enough (the
     // backend's own floor), accumulated over covisibility groups and pruned to the best
     // ones. The keyframe is queried BEFORE LoopClosing adds it to the database.
@@ -105,7 +101,6 @@ public:
     void add(const Keyframe&) override {}
     void erase(const Keyframe&) override {}
     void clear() override {}
-    float score(const KeyFrame&, const KeyFrame&) const override { return 0.0f; }
     std::vector<Keyframe> detect_loop_candidates(const Keyframe&) override { return {}; }
     std::vector<Keyframe> detect_relocalization_candidates(Frame&) override { return {}; }
 };

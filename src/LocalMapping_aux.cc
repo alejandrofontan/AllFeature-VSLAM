@@ -16,8 +16,10 @@
 #include <sstream>
 #include <thread>
 
+#include "Profiling_aux.h"   // PROFILING_EXHAUSTIVE, which log_profile() below is gated on
 #include "Utils.h"
 #include "afvslam_log.hpp"
+#include "SettingsReader.h"
 
 namespace AF_VSLAM
 {
@@ -28,9 +30,7 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
 {
     auto read_if_present = [&fSettings](const char* key, auto& field)
     {
-        const cv::FileNode node = fSettings[key];
-        if(!node.empty())
-            node >> field;
+        read_setting_if_present(fSettings, key, field);
     };
 
     read_if_present("LocalMapping.KeyframeCullingMethod", params.keyframe_culling_method);
@@ -60,7 +60,7 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
 
     read_if_present("LocalMapping.SearchInNeighborsKeyframes", params.search_in_neighbors_keyframes);
     read_if_present("LocalMapping.SearchInNeighborsSecondKeyframes", params.search_in_neighbors_second_keyframes);
-    read_if_present("LocalMapping.SearchInNeighborsRadius", params.search_in_neighbors_radius);
+    read_if_present("LocalMapping.FuseDescriptorQuantile", params.fuse_descriptor_quantile);
 
     read_if_present("LocalMapping.KeyframeCullingRedundancyRatio", params.keyframe_culling_redundancy_ratio);
     read_if_present("LocalMapping.KeyframeCullingMinObservations", params.keyframe_culling_min_observations);

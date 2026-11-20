@@ -1,7 +1,6 @@
-#ifndef AF_VSLAM_FEATURE_MATCHER_H
-#define AF_VSLAM_FEATURE_MATCHER_H
+#pragma once
 
-#include <mutex>
+#include <string>
 #include <vector>
 
 #include <opencv2/core/core.hpp>
@@ -10,22 +9,9 @@
 #include "KeyFrame.h"
 #include "MapPoint.h"
 
-// Learned / GPU matching backends follow the CMake backend options (CMakeLists.txt): SiftMatchGPU with
-// ALLFEATURE_WITH_SIFTGPU, LightGlue (libtorch) with ALLFEATURE_WITH_TORCH, SuperPoint-LightGlue (TensorRT)
-// with ALLFEATURE_WITH_TENSORRT. Features that need a compiled-out backend never reach this class
-// (FeatureFactory.h refuses them at startup), so the dispatch below only has to compile without them.
-#ifdef ALLFEATURE_WITH_SIFTGPU
-#include "Feature_sift128.h"
-#endif
-#ifdef ALLFEATURE_WITH_TORCH
-#include "matcher/lightglue/matcher.hpp"
-#endif
-#ifdef ALLFEATURE_WITH_TENSORRT
-#ifdef CHECK
-#undef CHECK
-#endif
-#include "light_glue.h"
-#endif
+// Learned matching: the three LightGlue variants (superpoint / aliked / sift) run on ONNX Runtime through the
+// process-wide sessions of onnx/FeatureModels.h; classical descriptors go through the brute-force matcher
+// (BruteForceMatcher.h).
 
 namespace AF_VSLAM
 {
@@ -34,185 +20,67 @@ class FeatureMatcher
 {
 public:
 
-    // Initializes all feature matching backends: SiftMatchGPU, LightGlue, and SuperPoint-LightGlue (TensorRT).
-    const int max_supported = 4000;
-    FeatureMatcher(const int& image_width, const int& image_height,
-        const std::vector<FeatureType>& feature_types,
-        std::string name = "Extractor", float nnratio=0.6, bool checkOri=true);
+    // Loads (once per process) and warms up the LightGlue variant of every learned feature in `feature_types`.
+    FeatureMatcher(const std::vector<FeatureType>& feature_types, const std::string& name);
 
-    // Computes the Hamming distance between two ORB descriptors
+    // ==================== Image to Image ====================
+    std::vector<cv::DMatch> match_descriptors(const cv::Mat& desc1, const cv::Mat& desc2,
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type,
+        cv::Size image_size1, cv::Size image_size2);
+
+    static constexpr double filter_inlier_threshold_px = 3.0;  // RANSAC's Sampson error and refinement loss, pixels
+    static constexpr size_t filter_min_inliers = 8;            // fewer: the model is rejected
+    static constexpr size_t filter_min_iterations = 100;       // RANSAC rounds, lower and upper bound
+    static constexpr size_t filter_max_iterations = 1000;
+    static std::vector<cv::DMatch> filter_matches_geometric(const std::vector<cv::DMatch>& matches,
+        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
+        const std::vector<mat2f>& sigma2_1, const std::vector<mat2f>& sigma2_2,
+        const Calibration& calibration1, const Calibration& calibration2);
+
+    std::map<FeatureType, int> match_keyframe_to_frame(const Keyframe& keyframe, Frame& frame,
+        std::map<FeatureType, std::vector<Pt>>& map_pts_matches,
+        const std::vector<FeatureType>& feat_types);
+
+    void match_keyframe_to_keyframes(const Keyframe& keyframe, const std::vector<Keyframe>& others,
+        const std::vector<FeatureType>& feat_types);
+
+    static std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> get_keyframe_matches(
+        const Keyframe& keyframe1, const Keyframe& keyframe2);
+
+    static void clear_keyframe_matches(const Keyframe& keyframe);
+
+    std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> match_frames_for_initialization(const Frame& frame1,
+        const Frame& frame2, const std::vector<FeatureType>& feat_types);
+
+    // ==================== Map to Image ====================
     static Descriptor_Distance_Type descriptor_distance(const cv::Mat &a, const cv::Mat &b, const FeatureType& featureType_);
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    std::vector<cv::DMatch> match_descriptors(const cv::Mat& desc1, const cv::Mat& desc2,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2, const FeatureType& feat_type);
-    std::vector<cv::DMatch> match_descriptors_only(const cv::Mat& desc1, const cv::Mat& desc2,  const FeatureType& feat_type);
+    static constexpr float projection_match_scale_sigma2 = 64.0f;
+    void match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
+                                   const std::vector<cv::Point2f>& projections);
 
-    std::vector<cv::DMatch> lightglueMatching(
-            const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
-            const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
-            float min_score = 0.0f);
+    void match_map_points_to_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_pts,
+                                      const std::vector<cv::Point2f>& projections,
+                                      FeatureType feat_type, std::vector<Pt>& matched_points,
+                                      float gate_scale_sigma2 = projection_match_scale_sigma2,
+                                      Descriptor_Distance_Type max_descriptor_distance =
+                                          std::numeric_limits<Descriptor_Distance_Type>::max());
 
-    std::vector<cv::DMatch> matcherLightglueSuperpoint(
-            const std::vector<cv::KeyPoint>& kps1, const cv::Mat& desc1,
-            const std::vector<cv::KeyPoint>& kps2, const cv::Mat& desc2,
-            float min_score = 0.0f);
-
-    // Robust geometric match filtering via PoseLib LO-RANSAC (replaced OpenCV's
-    // findFundamentalMat/USAC, which both threw on degenerate inputs and ground for
-    // seconds per call at zero-baseline frames — see CLAUDE.md, Stop-Induced Keyframe
-    // Runaway Investigation).
-    std::vector<cv::DMatch> filter_matches_by_fundamental(std::vector<cv::DMatch>& matches, const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-        const int maxForRansac = 2000);
-
-    std::map<FeatureType, std::vector<cv::DMatch>> match_descriptors_parallel(const std::vector<FeatureType>& featureTypes,
-        const std::map<FeatureType, cv::Mat> &desc1, const std::map<FeatureType, cv::Mat> &desc2,
-        const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps1, const std::map<FeatureType, std::vector<cv::KeyPoint>> &kps2);
-
-    std::vector<cv::DMatch> serialFeatureMatching(
-        const cv::Mat& desc1, const cv::Mat& desc2,
-        const std::vector<cv::KeyPoint>& kps1, const std::vector<cv::KeyPoint>& kps2,
-        const FeatureType& ft);
-
-    static std::vector<cv::DMatch> swap_match_direction(const std::vector<cv::DMatch>& in);
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    // Matches features from a keyframe to a frame across all requested feature types.
-    // Runs brute-force NN matching, filters outliers with MAGSAC, and associates
-    // inlier matches to map points. Mutates both keyframe and frame (match cache).
-    // Returns the number of valid map point matches per feature type.
-    map<FeatureType, int> match_keyframe_to_frame(Keyframe& keyframe, Frame& frame,
-        map<FeatureType, vector<Pt>>& map_pts_matches,
-        const vector<FeatureType>& feat_types);
-
-    // Matches a set of map points to frame keypoints via descriptor matching + projection check.
-    // Returns the number of new map point assignments made to the frame.
-    // Used in: Tracking::track_local_map
-    const float projection_match_radius_th = 20.0f;
-    int match_map_points_to_frame(Frame& Frame, const vector<Pt>& map_pts);
-
-    // Matches two keyframes across all feature types to find candidate pairs for triangulation.
-    // Reuses cached matches if available; otherwise runs parallel descriptor matching + LMEDS filtering.
-    // Used in: LocalMapping::CreateNewMapPoints
-    const size_t min_match_keyframes = 10;
-    map<FeatureType, vector<pair<size_t,size_t>>> match_keyframes(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                const vector<FeatureType>& feat_types);
-    void match_keyframes_for_triangulation(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
-                                const vector<FeatureType>& feat_types);
-    void match_keyframes_for_compute_sim3(const Keyframe& keyframe1, const Keyframe& keyframe2,
-                                map<FeatureType, vector<pair<size_t,size_t>>>& matched_pairs,
-                                const vector<FeatureType>& feat_types);
-
-    // Matches keypoints between two frames across all feature types for monocular initialization.
-    // Runs parallel descriptor matching, filters outliers jointly with LMEDS fundamental matrix
-    // estimation, and populates matched_pairs per feature type.
-    // Used in: Tracking::monocular_initialization
-    map<FeatureType, vector<pair<size_t, size_t>>> match_frames_for_initialization(const Frame& F1, const Frame& F2,
-        const vector<FeatureType>& feat_types);
-
-    // Projects map points into a keyframe and fuses them with existing keypoints.
-    // Applies visibility checks (depth, image bounds, scale, viewing angle), then matches by descriptor distance within radius_th.
-    // Replaces the weaker map point if one already exists, or adds a new observation.
-    // Used in: LocalMapping::SearchInNeighbors
-    const float cos_viewing_angle_th = 0.5f;
-    const float chi2_perc = 5.991f;
-    int fuse_map_points_to_keyframe(const Keyframe& keyframe, const vector<Pt>& map_pts, const float& radius_th, const FeatureType& feat_type);
-
-    /// Projects candidate map points into a keyframe using a Sim3 and validates projections
-    /// against cached matches. Writes accepted matches into @p pts_matched.
-    /// @return Number of new map point assignments. Used in: LoopClosing::search_loop_map_points
-    const float radiusTh_factor = 12.0f;
-    int search_by_projection_for_compute_sim3(const Keyframe& keyframe, const mat4f& Scw,
-        const vector<Pt>& pts, vector<Pt>& pts_matched,
-        const map<PtId, Keyframe>& pt_to_keyframe_id);
-
-    int fuse_map_points_to_keyframe(Keyframe& keyframe, const mat4f& Scw,
-        const std::vector<Pt> &map_pts, const float& radius_th, vector<Pt> &replace_pts, const FeatureType& feat_type);
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    // Project MapPoints seen in KeyFrame into the Frame and search matches.
-    // Used in relocalisation (Tracking)
-    int search_by_projection(Frame &CurrentFrame, Keyframe pKF, const std::set<Pt> &sAlreadyFound, const float& radiusTh, const bool& useHighMatchingThreshold, const FeatureType& featureType);
-    static void setDescriptorDistanceThresholds(const string &feature_settings_yaml_file, const FeatureType& featureType);
-
-public:
-
-    static VerbosityLevel verbosity;
-    static std::map<FeatureType, Descriptor_Distance_Type> TH_LOW;
-    static std::map<FeatureType, Descriptor_Distance_Type> descDistTh_high_reloc;
-    static std::map<FeatureType, Descriptor_Distance_Type> descDistTh_low_reloc;
-
-    static constexpr int HISTO_LENGTH = 30;
-    static float radiusScale;
+    // ==================== Optical Flow ====================
+    struct FlowMatchCounts { int tracked{0}; int survived{0}; int matched{0}; };
+    static constexpr int flow_window_px = 21;          // KLT window
+    static constexpr int flow_pyramid_levels = 3;      // KLT pyramid levels above the image
+    static constexpr int flow_max_iterations = 30;     // KLT stopping criteria
+    static constexpr double flow_epsilon = 0.01;
+    FlowMatchCounts match_frame_to_frame_by_flow(const Frame& last_frame, const cv::Mat& last_grey, Frame& frame,
+                                                 const cv::Mat& grey, float max_backward_error, float association_radius);
 
 protected:
 
-    string name{};
-    // Returns a reused thread-local buffer, cleared per call — do not hold across calls.
-    static vector<vector<int>>& initRotationHistogram(float& rotFactor, const int& histLength);
-    static void updateRotationHistogram(vector<vector<int>>& rotHist,
-                                        const KeypointIndex& idx,
-                                        const cv::KeyPoint& keyPt, const cv::KeyPoint& refKeyPt,
-                                        const float& rotFactor, const int& histLength);
-    static void computeThreeMaxima(vector<vector<int>>& rotHist, int &ind1, int &ind2, int &ind3);
-    static void filterMatchesWithOrientation(vector<vector<int>>& rotHist, vector<Pt>& points, int& nMatches);
-    static void filterMatchesWithOrientation(vector<vector<int>>& rotHist, vector<int>& matches, int& nMatches);
-
-    float mfNNratio;
-    bool mbCheckOrientation;
-
-    const Descriptor_Distance_Type highest_possible_distance{std::numeric_limits<Descriptor_Distance_Type>::max()};
-
-    // Brute-force matching now goes through BruteForceMatcher.h (issue #13 P2), which
-    // replicates the cv::BFMatcher(<norm>, crossCheck=true) semantics these members had.
-#ifdef ALLFEATURE_WITH_SIFTGPU
-    SiftMatchGPU sift_match_gpu_{};
-#endif
-#ifdef ALLFEATURE_WITH_TORCH
-    std::shared_ptr<matcher::LightGlue> matcher_lightglue;
-    std::shared_ptr<torch::Device> torch_device;
-#endif
-#ifdef ALLFEATURE_WITH_TENSORRT
-    std::shared_ptr<SuperPointLightGlue> matcher_lightglue_superpoint;
-#endif
-    int image_width;
-    int image_height;
-
-
-    // Matching options
-    std::vector<FeatureType> feature_types;
-
-    // match_keyframe_to_frame Keyframe-Frame
-    // Tracking::match_keyframe_to_frame & Tracking::relocalize
-    static constexpr bool sBF_kf_lightglue = true;
-
-    // match_keyframes_for_triangulation Keyframe-Keyframe
-    // LocalMapping::CreateNewMapPoints
-    static constexpr bool sFT_kk_lightglue = true;
-
-    // SearchForInitialization Frame-Frame
-    // Tracking::monocular_initialization
-    static constexpr int sFI_ff_outlierMethod = cv::FM_RANSAC;
-
-    std::mutex lightglue_superpoint_mutex_;
+    static std::map<FeatureType, std::vector<cv::DMatch>> filter_matches_geometric_jointly(
+        const std::map<FeatureType, std::vector<cv::DMatch>>& matches_by_type,
+        const FeatureData& features1, const FeatureData& features2,
+        const Calibration& calibration1, const Calibration& calibration2);
 };
 
 }
-
-#endif // AF_VSLAM_FEATURE_MATCHER_H

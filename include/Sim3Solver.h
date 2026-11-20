@@ -121,7 +121,8 @@ protected:
     // RANSAC max iterations
     int mRansacMaxIts;
 
-    // Threshold inlier/outlier. e = dist(Pi,T_ij*Pj)^2 < 5.991*mSigma2
+    // Threshold inlier/outlier. e = dist(Pi,T_ij*Pj)^2 < ChiSquared::dof2_99 * mSigma2
+    // (the 99% value, not the 95% one the rest of the pipeline uses -- set in set_ransac_parameters)
     float mTh;
     float mSigma2;
 

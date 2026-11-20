@@ -79,8 +79,6 @@ public:
     void erase(const Keyframe& keyframe) override;
     void clear() override;
 
-    float score(const KeyFrame& a, const KeyFrame& b) const override;
-
     std::vector<Keyframe> detect_loop_candidates(const Keyframe& keyframe) override;
     std::vector<Keyframe> detect_relocalization_candidates(Frame& frame) override;
 

@@ -1,105 +1,80 @@
-#ifndef AF_VSLAM_FEATUREEXTRACTOR_H
-#define AF_VSLAM_FEATUREEXTRACTOR_H
+#pragma once
+
+#include <list>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <opencv2/core.hpp>
 
 #include "Types.h"
-#include "Definitions.h"
 #include "Image.h"
+#include "KeypointData.h"
 
-#include <opencv2/opencv.hpp>
+namespace AF_VSLAM
+{
 
-namespace AF_VSLAM {
+class FeatureExtractor;
+class ExtractorNode;
 
-    class FeatureExtractor;
-    class ExtractorNode;
+class ExtractorNode
+{
+public:
+    ExtractorNode():no_more(false){}
 
-    enum CovarianceMethod {
-        SIZE = 1,
-        NONE = 0,
-    };
+    void divide_node(ExtractorNode &top_left, ExtractorNode &top_right, ExtractorNode &lower_left, ExtractorNode &lower_right);
 
-    class ExtractorNode
-    {
-    public:
-        ExtractorNode():bNoMore(false){}
+    std::vector<cv::KeyPoint> keys;
+    cv::Point2i upper_left, upper_right, bottom_left, bottom_right;
+    std::list<ExtractorNode>::iterator self_in_list;  
+    bool no_more;
+};
 
-        void DivideNode(ExtractorNode &n1, ExtractorNode &n2, ExtractorNode &n3, ExtractorNode &n4);
+class FeatureExtractorSettings
+{
+public:
 
-        std::vector<cv::KeyPoint> vKeys;
-        cv::Point2i UL, UR, BL, BR;
-        std::list<ExtractorNode>::iterator lit;
-        bool bNoMore;
-    };
+    int max_num_features;   // keypoints per frame: Tracking's share of the feature's get_max_features(); 0: none
 
-    class FeatureExtractorSettings
-    {
-    public:
+    FeatureExtractorSettings(const FeatureType& feature_type, int max_num_features);
 
-        float scaleFactor;
-        int nOctaves;
-        float detectTh;
-        int maxNumFeatures;
+    FeatureType feature_type;
 
-        FeatureExtractorSettings(const FeatureType& featureType__,
-                                 const std::string &settingsYamlFile);
+    const float oversize_keypoint_factor{1.05f};
+};
 
-        float GetDetectorScaleFactor() const {return scaleFactor;};
-        int GetDetectorNumOctaves()  {return nOctaves;};
-        float GetDetectorThreshold()  {return detectTh;};
+class FeatureExtractor
+{
+public:
 
-        VerbosityLevel verbosity{LOW};
+    FeatureExtractor(std::shared_ptr<FeatureExtractorSettings>& settings_): settings(settings_){}
+    virtual ~FeatureExtractor() = default;
 
-        FeatureType featureType;
+    std::shared_ptr<FeatureExtractorSettings> settings{};
 
-        float maxKeyPtSize{0.0};
-        float minKeyPtSize{std::numeric_limits<float>::max()};
+    void operator()(const Image& img, KeypointData& data);
 
-        float maxKeyPtSize0{};
-        float maxKeyPtSigma0{};
-        const float scaleFactorOrb{1.2f};
-        const int nOctavesOrb{8};
+    // Changes the keypoint budget (settings->max_num_features). An extractor that derives something from
+    // it at construction redoes that here (orb32: the per-level split; sift128: cv::SIFT's nfeatures).
+    virtual void set_budget(int max_num_features) { settings->max_num_features = max_num_features; }
 
-        const float OVERSIZE_KEYPOINT_FACTOR{1.05f};
+protected:
 
-    };
+    void compute_size(KeypointData& data);
+    void compute_sigma(KeypointData& data);
 
-    class FeatureExtractor {
+    [[nodiscard]] virtual float get_keypoint_size(const cv::KeyPoint& keypoint) const = 0;
 
-    public:
+    virtual void detect_and_compute(const Image&, std::vector<cv::KeyPoint>&, cv::Mat&){}
+    std::vector<cv::KeyPoint> distribute_oct_tree(std::vector<cv::KeyPoint>& keys_to_distribute, const int &min_x,
+        const int &max_x, const int &min_y, const int &max_y, const int &max_keypoints);
+    void filter_keypoints_by_mask(std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors, const cv::Mat& mask) const;
 
-        FeatureExtractor(std::shared_ptr<FeatureExtractorSettings>& settings_): settings(settings_){};
-        virtual ~FeatureExtractor() = default;
+    static void flatten_keypoint_scale(std::vector<cv::KeyPoint>& keypoints);
 
-        std::shared_ptr<FeatureExtractorSettings> settings{};
-        std::vector<double> extractorTime{};
+    void select_keypoints(const Image& img,
+                          std::vector<cv::KeyPoint>& detected, cv::Mat& detected_descriptors,
+                          std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors);
+};
 
-        void operator()( const Image & img,
-                         std::vector<cv::KeyPoint>& keypoints,
-                         cv::Mat& descriptors,
-                         std::vector<mat2f>& keyPtsSigma2,
-                         std::vector<mat2f>& keyPtsInf,
-                         std::vector<float>& keyPtsSize);
-
-        int inline GetLevels(){return settings->nOctaves;}
-        float inline GetScaleFactor(){return settings->scaleFactor;}
-        [[nodiscard]] float inline GetMaxKeyPtSize() const{return settings->maxKeyPtSize0;}
-        [[nodiscard]] float inline GetMaxKeyPtSigma() const{return settings->maxKeyPtSigma0;}
-
-    protected:
-        void computeSize(std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints);
-        void computeSigma(std::vector<mat2f>& keyPtsSigma2, std::vector<mat2f>& keyPtsInf,
-                          const std::vector<float>& keyPtsSize, const std::vector<cv::KeyPoint>& keypoints,
-                          const Image& img, const CovarianceMethod& method);
-
-        virtual void setupImage(const Image&){};
-
-    protected:
-        [[nodiscard]] virtual int GetKeypointOctave(const cv::KeyPoint& keypoint) const = 0;
-        [[nodiscard]] virtual float GetKeypointSize(const cv::KeyPoint& keypoint) const = 0;
-
-        virtual void detectAndCompute(const Image&, std::vector<cv::KeyPoint>&, cv::Mat&){};
-        std::vector<cv::KeyPoint> DistributeOctTree(std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
-            const int &maxX, const int &minY, const int &maxY, const int &N, const int &level);
-        void FilterKeypointsByMask(std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors, const cv::Mat& mask) const;
-    };
 }
-#endif //AF_VSLAM_FEATUREEXTRACTOR_H

@@ -22,6 +22,7 @@
 #ifndef AF_VSLAM_TRACKING_H
 #define AF_VSLAM_TRACKING_H
 
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <mutex>
@@ -29,6 +30,7 @@
 
 #include <opencv2/core/core.hpp>
 
+#include "Calibration.h"
 #include "FeatureExtractor.h"
 #include "FeatureMatcher.h"
 #include "Frame.h"
@@ -36,6 +38,7 @@
 #include "Initializer.h"
 #include "KeyframeInformation.h"
 #include "PlaceRecognition.h"
+#include "Profiling_aux.h"
 #include "LocalMapping.h"
 #include "LoopClosing.h"
 #include "Map.h"
@@ -86,6 +89,22 @@ struct TrackingParameters
 
     // grab_image()
     int init_extractor_features_scale{4}; // the init extractor keeps this x more keypoints
+    // keypoints per frame = this share (0..1) of each feature's get_max_features(). Editable online (the
+    // viewer's "Features Fraction" slider); Tracking applies a change before the next frame's extraction.
+    std::atomic<float> features_fraction{0.5f};
+    float nominal_image_area{307200.0f};  // px (640x480): frames are resized to this area (aspect kept) and cropped
+                                          // to a multiple of 32; every per-frame cost scales with it
+    int image_width{0};                   // both > 0: resize to exactly this size instead (intrinsics scaled per
+    int image_height{0};                  // axis); multiples of 32, or the crop trims the remainder
+
+    // Frame-to-frame stage: "reference_keyframe" = a LightGlue (or brute-force) match against the reference
+    // keyframe on every frame (track_reference_keyframe); "optical_flow" = KLT on the last frame's tracked
+    // points, snapped to the current frame's detected keypoints (track_with_optical_flow), with the
+    // reference-keyframe match as the fallback when the flow finds too few matches or inliers
+    std::string frame_tracking{"reference_keyframe"};
+    float flow_association_radius{2.0f};  // px: a flowed point takes the nearest detected keypoint within this
+    float flow_max_backward_error{1.0f};  // px: forward-backward KLT disagreement above this drops the track
+    int flow_min_matches{30};             // map points matched by flow below this -> fall back to the reference match
 
     // track_reference_keyframe()
     int track_ref_min_matches{15}; // raw matches to the reference keyframe below this -> lost
@@ -105,12 +124,9 @@ struct TrackingParameters
     // need_new_keyframe()
     float keyframe_min_information{0.05f}; // unexplained information (placecell, [0,1]) below which the local map already explains the view: no keyframe
     bool log_keyframe_information{false};  // one diagnostic line per tracked frame with the information, the flow, the triggers, and the decision
-    float ref_matches_ratio{0.9f};      // weak tracking: inliers < ratio x reference-KF tracked points...
-    int min_inliers_for_keyframe{15};   // ...but above this floor (below it suggests loss, not a keyframe)
     int min_observations_high{3};       // reference-KF match counting: min observations per point
     int min_observations_low{2};        //   relaxed bar while the map is young
     int young_map_keyframes{2};         //   map considered young at <= this many keyframes
-    float min_ref_overlap{0.7f};        // insert when frame/reference-keyframe overlap drops below this
     float emergency_inlier_drop_ratio{0.5f}; // emergency keyframe: inliers < ratio x recent median
     int inliers_history_size{30};       // recent-inlier reference window (frames)
     int emergency_keyframe_cooldown{10}; // min frames between emergency keyframes
@@ -118,10 +134,8 @@ struct TrackingParameters
     // relocalize()
     int reloc_min_matches{15};    // per-candidate matching gate
     int reloc_inliers_high{50};   // inliers to accept a pose hypothesis
-    int reloc_inliers_medium{30}; // enter the narrow-window escalation
+    int reloc_inliers_medium{30}; // above this (and below high) after the first search: search once more
     int reloc_inliers_low{10};    // below this, abandon the hypothesis
-    float reloc_search_radius_coarse{10.0f}; // first projection-search window
-    float reloc_search_radius_narrow{3.0f};  // second, near-converged window
     float reloc_ransac_probability{0.99f};   // P4P RANSAC (PnPsolver)
     int reloc_ransac_min_inliers{10};
     int reloc_ransac_max_iterations{3000};
@@ -135,7 +149,6 @@ public:
     Tracking(std::shared_ptr<PlaceRecognition> place_recognition, std::shared_ptr<FrameDrawer> frame_drawer,
              std::shared_ptr<MapDrawer> map_drawer, std::shared_ptr<Map> map,
              const std::string& calibration_yaml, const std::string& settings_yaml,
-             const std::map<FeatureType, std::string>& feature_settings_yaml_file,
              const std::vector<FeatureType>& feature_types,
              const bool fix_image_size = false);
 
@@ -164,8 +177,9 @@ public:
     // Current Frame
     Frame current_frame_;
     cv::Mat color_image_; // current image as loaded (BGR/BGRA, or gray), after resize/crop; drawn by the viewer
+    cv::Mat grey_image_;      // current grey frame after resize/crop (optical-flow tracking)
+    cv::Mat last_grey_image_; // the previous frame's, whatever its tracking state
     cv::Mat mask_image_; // segmentation mask of the current image (1 = static, 0 = dynamic); empty when segmentation is off
-    std::string image_name_;
 
     // Initialization Variables (mono)
     std::vector<int> init_matches_;
@@ -184,8 +198,6 @@ public:
 
     std::vector<FeatureType> feature_types_{};
 
-    int get_image_width() const {return image_width_;};
-    int get_image_height() const {return image_height_;};
 
     ////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////
@@ -203,8 +215,9 @@ public:
 
 protected:
 
-    // Main tracking function. It is independent of the input sensor.
-    void track();
+    // Main tracking function. It is independent of the input sensor. Returns the frame's pose (Tcw):
+    // current_frame_ is moved into last_frame_ at the end, so the caller must not read it afterwards.
+    mat4f track();
 
     // Runs one tracking stage: a TrackingLostException fails the stage (logged
     // with its reason and statistics).
@@ -234,11 +247,20 @@ protected:
 
     void check_replaced_in_last_frame();
     bool track_reference_keyframe();
+    // Frame-to-frame tracking by KLT optical flow of the last frame's tracked points into the current grey frame
+    // (forward-backward checked), each snapped to the nearest detected keypoint of its feature type within
+    // params.flow_association_radius, then the shared pose optimization. false = fall back to
+    // track_reference_keyframe (never "lost" by itself; the frame's matches are cleared first).
+    bool track_with_optical_flow();
+    // The tail both stages share: seed the pose from the last frame's relative pose, optimize, the depth-free
+    // rescue, discard the outlier matches. Returns the inlier count; the caller decides what too few means.
+    int optimize_pose_from_last_frame(int num_matches, const char* stage, StageTimer& timer);
 
     bool relocalize();
     // One RANSAC pose hypothesis for a relocalization candidate: seed the frame
-    // with the hypothesis' inlier matches, optimize, escalate through coarse and
-    // narrow projection searches; true when params.reloc_inliers_high inliers support it.
+    // with the hypothesis' inlier matches, optimize, and while too few inliers support it look
+    // for more matches with the new pose (FeatureMatcher::match_map_points_to_frame, up to
+    // twice); true when params.reloc_inliers_high inliers support it.
     // (candidate by value: the legacy matcher APIs take non-const Keyframe&)
     bool accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,
                                           const std::vector<bool>& inliers, FeatureType feature_type);
@@ -262,11 +284,15 @@ protected:
     // calibration yaml (hard error if the camera is missing); applies the
     // nominal-area rescale when fix_image_size_ is set.
     void load_camera_parameters(const std::string& calibration_yaml, const std::string& settings_yaml);
-    // Build a feature extractor from the per-feature settings yaml, with its
-    // maxNumFeatures scaled by scale_num_features (initialization uses a denser set).
-    static std::shared_ptr<FeatureExtractor> get_feature_extractor(int scale_num_features,
-                                                                   const std::string& feature_settings_yaml,
-                                                                   FeatureType feature_type);
+    // Build a feature extractor that keeps at most max_num_features keypoints per frame
+    // (initialization uses a denser set).
+    static std::shared_ptr<FeatureExtractor> get_feature_extractor(int max_num_features, FeatureType feature_type);
+    // Keypoints per frame of a feature at a features fraction (share of its get_max_features())
+    static int features_budget(FeatureType feature_type, float features_fraction);
+    // Gives every extractor the budget of params.features_fraction if it changed since the last call
+    // (grab_image, before extraction)
+    void apply_features_fraction();
+    float features_fraction_in_use_{-1.0f};
 
     //Other Thread Pointers
     std::shared_ptr<LocalMapping> local_mapper_;
@@ -303,22 +329,27 @@ protected:
 
     std::shared_ptr<FeatureMatcher> matcher_;
 
-    //Calibration matrix
-    cv::Mat mK;
-    cv::Mat mDistCoef;
+    // The camera as the calibration yaml declares it, scaled for any resize. These are the
+    // INPUTS to the Calibration below, which owns everything derived from them; nothing but
+    // load_camera_parameters and that construction should read them.
+    cv::Mat K;
+    cv::Mat distortion_coefficients;
+    // The camera and everything derived from it (Calibration.h), built on the first frame from
+    // the image as the tracker actually sees it. One instance serves the run; per-frame
+    // intrinsics would build one per frame here.
+    std::shared_ptr<const Calibration> calibration_;
     // Stereo baseline x fx. Nothing sets it yet (its only writer was the dead
     // ChangeCalibration); zero-initialized so Frame gets a defined value.
-    float mbf{0.0f};
     int image_width_{};
     int image_height_{};
+
+    // sigma_depth(z) = k*z^2, from calibration.yaml's optional depth_noise_coeff. The default is
+    // the uncalibrated Kinect-era estimate this used to hardcode in Frame (issue #3).
+    float depth_noise_coeff_{0.0028f};
 
     // New KeyFrame rules (according to fps)
     size_t max_frames_{0};
     float fps_{0.0f};
-
-    // Close/far point threshold (depth units). Nothing sets it yet; zero-initialized
-    // so Frame gets a defined value.
-    float mThDepth{0.0f};
 
     //Current matches in frame
     int num_inlier_matches_{0};
@@ -327,7 +358,7 @@ protected:
 
     // Rolling inlier history (last params.inliers_history_size tracked frames) — reference for the
     // emergency-keyframe trigger in need_new_keyframe(). Comparing against recent frames
-    // instead of ref_keyframe_->tracked_map_points() avoids the self-inflating feedback loop
+    // instead of ref_keyframe_->count_tracked_map_points() avoids the self-inflating feedback loop
     // where every inserted keyframe grows the reference stat via post-hoc triangulation
     // (see CLAUDE.md, Stop-Induced Keyframe Runaway Investigation).
     std::deque<int> recent_inliers_history_;
@@ -337,11 +368,12 @@ protected:
     // need_new_keyframe); nullopt when the system has no information measure.
     std::optional<float> last_keyframe_information_{};
 
-    // Last Frame, KeyFrame and Relocalisation Info
-    Keyframe last_keyframe_;
+    // Set by a degenerate initialization (create_initial_map): track() resets on the next frame, outside the map lock
+    bool reset_after_failed_initialization_{false};
+
+    // Last Frame and Relocalisation Info
     Frame last_frame_;
     mat4f last_frame_relative_pose_; // Tlr of last_frame_ (see store_relative_pose)
-    KeyframeId last_keyframe_id_{0};
     FrameId last_reloc_frame_id_{0};
 
     //Color order (true RGB, false BGR, ignored if grayscale)
@@ -360,12 +392,11 @@ protected:
 
     // relocalize(): P4P protocol size, chi2(0.95, 2 dof), RANSAC round scheduling
     static constexpr int RANSAC_MIN_SET{4};
-    static constexpr float RANSAC_TH2{5.991f};
+    static constexpr float RANSAC_TH2 = ChiSquared::dof2_95;
     static constexpr int RANSAC_ITERATIONS_PER_ROUND{5};
 
     // load_camera_parameters()
     static constexpr float DEFAULT_FPS{30.0f};
-    static constexpr float NOMINAL_IMAGE_AREA{307200.0f}; // ~640x480, fix_image_size_ target
 };
 
 } // namespace AF_VSLAM

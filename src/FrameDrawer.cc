@@ -32,15 +32,12 @@
 namespace AF_VSLAM
 {
 
-// Defined here (not per-executable) so every binary linking the library gets
-// it; entry points that want collapse dumps assign it from their exp_folder.
-std::string FrameDrawer::exp_folder{};
-
-FrameDrawer::FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& featureTypes):
-    mpMap(pMap), featureTypes(featureTypes)
+FrameDrawer::FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& feature_types):
+    mpMap(pMap), feature_types(feature_types)
 {
     mState=TrackingState::SYSTEM_NOT_READY;
-    mIm = cv::Mat(480,640,CV_8UC3, cv::Scalar(0,0,0));
+    // mIm stays empty until update() copies the first frame in: no placeholder with a made-up size
+    // (a 640x480 one once sized the viewer's texture wrongly, issue #7)
 }
 
 cv::Mat FrameDrawer::DrawFrame()
@@ -83,6 +80,10 @@ cv::Mat FrameDrawer::DrawFrame()
         }
     } // destroy scoped mutex -> release mutex
 
+    // No frame yet: nothing to draw on. The viewer skips an empty image.
+    if(im.empty())
+        return {};
+
     // The viewer uploads this buffer as GL_RGB. The loaded image is BGR (cv::imread order,
     // same assumption as MapDrawer's point colors) or gray.
     if(im.depth() != CV_8U)
@@ -107,13 +108,16 @@ cv::Mat FrameDrawer::DrawFrame()
     if(state==TrackingState::NOT_INITIALIZED) //INITIALIZING
     {
 
-        for (auto const& [featType, N_] : N) {
-            cv::Scalar color = getFeatureColor(featType, 0);
-            for(unsigned int i=0; i<vMatches[featType].size(); i++)
+        for (auto const& [feature_type, N_] : N) {
+            cv::Scalar color = getFeatureColor(feature_type, 0);
+            const auto& ini = vIniKeys[feature_type];
+            const auto& cur = vCurrentKeys[feature_type];
+            for(unsigned int i=0; i<vMatches[feature_type].size(); i++)
             {
-                if(vMatches[featType][i]>=0)
+                // The matches must index this snapshot's two keypoint sets; skip any that do not
+                if(vMatches[feature_type][i]>=0 && i < ini.size() && size_t(vMatches[feature_type][i]) < cur.size())
                 {
-                    cv::line(im,vIniKeys[featType][i].pt,vCurrentKeys[featType][vMatches[featType][i]].pt,
+                    cv::line(im,vIniKeys[feature_type][i].pt,vCurrentKeys[feature_type][vMatches[feature_type][i]].pt,
                             cv::Scalar(color));
                 }
             }
@@ -124,30 +128,30 @@ cv::Mat FrameDrawer::DrawFrame()
         mnTracked=0;
         mnTrackedVO=0;
         const float r = 5;
-        for (auto const& [featType, N_] : N) {
-            const int n = vCurrentKeys[featType].size();
-            cv::Scalar color = getFeatureColor(featType, 0);
+        for (auto const& [feature_type, N_] : N) {
+            const int n = vCurrentKeys[feature_type].size();
+            cv::Scalar color = getFeatureColor(feature_type, 0);
             for(int i=0;i<n;i++)
             {
-                if(vbVO.at(featType)[i] || vbMap.at(featType)[i])
+                if(vbVO.at(feature_type)[i] || vbMap.at(feature_type)[i])
                 {
                     cv::Point2f pt1,pt2;
-                    pt1.x=vCurrentKeys[featType][i].pt.x-r;
-                    pt1.y=vCurrentKeys[featType][i].pt.y-r;
-                    pt2.x=vCurrentKeys[featType][i].pt.x+r;
-                    pt2.y=vCurrentKeys[featType][i].pt.y+r;
+                    pt1.x=vCurrentKeys[feature_type][i].pt.x-r;
+                    pt1.y=vCurrentKeys[feature_type][i].pt.y-r;
+                    pt2.x=vCurrentKeys[feature_type][i].pt.x+r;
+                    pt2.y=vCurrentKeys[feature_type][i].pt.y+r;
 
                     // This is a match to a MapPoint in the map
-                    if(vbMap[featType][i])
+                    if(vbMap[feature_type][i])
                     {
                         cv::rectangle(im,pt1,pt2,color);
-                        cv::circle(im,vCurrentKeys[featType][i].pt,2,color,-1);
+                        cv::circle(im,vCurrentKeys[feature_type][i].pt,2,color,-1);
                         mnTracked++;
                     }
                     else // This is match to a "visual odometry" MapPoint created in the last frame
                     {
                         cv::rectangle(im,pt1,pt2,cv::Scalar(255,0,0));
-                        cv::circle(im,vCurrentKeys[featType][i].pt,2,cv::Scalar(255,0,0),-1);
+                        cv::circle(im,vCurrentKeys[feature_type][i].pt,2,cv::Scalar(255,0,0),-1);
                         mnTrackedVO++;
                     }
                 }
@@ -157,19 +161,6 @@ cv::Mat FrameDrawer::DrawFrame()
 
     cv::Mat imWithInfo;
     DrawTextInfo(im,state, imWithInfo);
-
-    // int compression = 9; // PNG compression 0..9
-    // std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, compression};
-    // static string lastSavedImage = "";
-    // if ((imName!="") && (imName != lastSavedImage)) {
-    //     std::cout << "Saving frame: " << imName << std::endl;
-    //     std::filesystem::path full = std::filesystem::path(AF_VSLAM::FrameDrawer::exp_folder) / imName;
-    //     std::string path = full.string();
-    //     cv::Mat out = im;
-    //     cv::cvtColor(out, out, cv::COLOR_RGB2BGR);
-    //     bool ok = cv::imwrite(path, out, params);
-    //     lastSavedImage = imName;
-    // }
 
     return imWithInfo;
 }
@@ -217,12 +208,11 @@ void FrameDrawer::update(Tracking *pTracker)
     unique_lock<mutex> lock(mMutex);
     pTracker->color_image_.copyTo(mIm);
     pTracker->mask_image_.copyTo(mMask);
-    imName = pTracker->image_name_;
     mvCurrentKeys = pTracker->current_frame_.raw_keypoints;
-    for (auto const& [featType, raw_keypoints] : mvCurrentKeys) {
-        N[featType] = raw_keypoints.size();
-        mvbVO[featType] = vector<bool>(N[featType],false);
-        mvbMap[featType] = vector<bool>(N[featType],false);
+    for (auto const& [feature_type, raw_keypoints] : mvCurrentKeys) {
+        N[feature_type] = raw_keypoints.size();
+        mvbVO[feature_type] = vector<bool>(N[feature_type],false);
+        mvbMap[feature_type] = vector<bool>(N[feature_type],false);
     }
 
 
@@ -233,18 +223,18 @@ void FrameDrawer::update(Tracking *pTracker)
     }
     else if(pTracker->last_processed_state_==TrackingState::OK)
     {
-        for (auto const& [featType, N_] : N) {
+        for (auto const& [feature_type, N_] : N) {
             for(int i = 0; i < N_; i++)
             {
-                Pt pMP = pTracker->current_frame_.pts.at(featType)[i];
+                Pt pMP = pTracker->current_frame_.pts.at(feature_type)[i];
                 if(pMP)
                 {
-                    if(!pTracker->current_frame_.outliers.at(featType)[i])
+                    if(!pTracker->current_frame_.outliers.at(feature_type)[i])
                     {
                         if(pMP->number_of_observations() > 0)
-                            mvbMap[featType][i] = true;
+                            mvbMap[feature_type][i] = true;
                         else
-                            mvbVO[featType][i] = true;
+                            mvbVO[feature_type][i] = true;
                     }
                 }
             }

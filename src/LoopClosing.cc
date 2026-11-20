@@ -33,6 +33,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 
 #include "Converter.h"
@@ -40,6 +41,7 @@
 #include "LocalMapping.h"
 #include "MapDrawer.h"
 #include "Optimizer.h"
+#include "Report.h"
 #include "Sim3Solver.h"
 #include "afvslam_log.hpp"
 
@@ -48,8 +50,7 @@ namespace AF_VSLAM
 
 LoopClosing::LoopClosing(std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognition> place_recognition,
                          std::shared_ptr<LocalMapping> local_mapper, std::shared_ptr<MapDrawer> map_drawer,
-                         const bool fix_scale, const std::vector<FeatureType>& feature_types,
-                         const int image_width, const int image_height):
+                         const bool fix_scale, const std::vector<FeatureType>& feature_types):
     verification_feature_(place_recognition->verification_feature()),
     feature_types_(feature_types),
     fix_scale_(fix_scale),
@@ -57,7 +58,7 @@ LoopClosing::LoopClosing(std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognit
     place_recognition_(std::move(place_recognition)),
     local_mapper_(std::move(local_mapper)),
     map_drawer_(std::move(map_drawer)),
-    matcher_(std::make_shared<FeatureMatcher>(image_width, image_height, feature_types, "LoopClosing", 0.8, true))
+    matcher_(std::make_shared<FeatureMatcher>(feature_types, "LoopClosing"))
 {
 }
 
@@ -81,15 +82,23 @@ void LoopClosing::run()
     while(true)
     {
         // One queued keyframe per iteration: candidates, geometric verification, correction
-        if(has_new_keyframes() && detect_loop() && compute_sim3() && search_loop_map_points())
+        if(has_new_keyframes())
         {
-            const auto t_start = std::chrono::steady_clock::now();
-            correct_loop();
-            map_drawer_->AddLoopClosureKeyframe(current_keyframe_->get_pose_inverse());
-            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
-            AF_INFO("[LoopClosing] loop closed: keyframes " << current_keyframe_->keyId << " <-> " << matched_keyframe_->keyId
-                    << " in " << seconds << " s (correction + essential graph; the global BA runs in its own thread)");
-            std::cout.flush();
+            if(detect_loop() && compute_sim3() && search_loop_map_points())
+            {
+                const auto t_start = std::chrono::steady_clock::now();
+                correct_loop();
+                map_drawer_->AddLoopClosureKeyframe(current_keyframe_->get_Twc());
+                const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
+                AF_INFO("[LoopClosing] loop closed: keyframes " << current_keyframe_->keyId << " <-> " << matched_keyframe_->keyId
+                        << " in " << seconds << " s (correction + essential graph; the global BA runs in its own thread)");
+                std::cout.flush();
+            }
+
+            // The matches against the loop candidates and loop keyframes have served their
+            // purpose, whatever the outcome; nothing reads them again (detect_loop always sets
+            // current_keyframe_)
+            FeatureMatcher::clear_keyframe_matches(current_keyframe_);
         }
 
         reset_if_requested();
@@ -100,7 +109,30 @@ void LoopClosing::run()
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
+    // A global BA still running completes (System::Shutdown waits for it, and its correction still applies:
+    // apply_gba_correction stops waiting for Local Mapping once that has finished); its thread must not outlive
+    // this one
+    if(gba_thread_.joinable())
+        gba_thread_.join();
+
     set_finished();
+}
+
+void LoopClosing::abort_global_bundle_adjustment()
+{
+    {
+        std::lock_guard<std::mutex> lock(gba_mutex_);
+        if(gba_running_)
+        {
+            gba_stop_ = true;        // g2o polls it between iterations
+            ++gba_generation_;       // the BA drops its result when it returns
+            gba_running_ = false;    // the caller starts the next one, or none (reset)
+        }
+    }
+    // No lock held here: the BA thread takes gba_mutex_ on its way out (and holds it in apply_gba_correction,
+    // which itself only waits for Local Mapping to stop)
+    if(gba_thread_.joinable())
+        gba_thread_.join();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -113,9 +145,18 @@ bool LoopClosing::detect_loop()
         current_keyframe_ = new_keyframes_.front();
         new_keyframes_.pop_front();
         // Keyframe culling must not delete the keyframe while this thread works on it.
-        // set_erase lifts the guard (a culling deferred meanwhile is applied then); on
+        // unpin() lifts the guard (a culling deferred meanwhile is applied then); on
         // success compute_sim3/correct_loop keep it until the loop is closed or rejected.
-        current_keyframe_->set_not_erase();
+        current_keyframe_->pin();
+    }
+    AF_REPORT_CONTEXT("loop_closing", current_keyframe_->frame_id);
+
+    // Culled while it waited in the queue: no loop detection for (and no place-recognition entry from) a keyframe
+    // that is no longer in the map; a loop accepted on it would re-link it into the graph (update_connections)
+    if(current_keyframe_->is_bad())
+    {
+        current_keyframe_->unpin();
+        return false;
     }
 
     // Candidates retrieved by the VPR backend (covisible keyframes excluded), kept only
@@ -133,7 +174,7 @@ bool LoopClosing::detect_loop()
 
     if(loop_candidates_.empty())
     {
-        current_keyframe_->set_erase();
+        current_keyframe_->unpin();
         return false;
     }
     return true;
@@ -238,26 +279,58 @@ bool LoopClosing::compute_sim3()
     candidates.reserve(loop_candidates_.size());
     int num_alive = 0;
 
-    const size_t num_current_keypoints = current_keyframe_->get_map_point_matches(verification_feature_).size();
+    AF_REPORT_SCOPE();
+    AF_REPORT("loop.candidates", "", loop_candidates_.size());
+
+    // Keyframe culling must not delete a candidate while it is being verified. Pinned first, so
+    // the candidates matched below are the ones the loop after it sees as not bad.
+    std::vector<Keyframe> live_candidates;
+    live_candidates.reserve(loop_candidates_.size());
     for(const Keyframe& keyframe : loop_candidates_)
     {
-        // Keyframe culling must not delete a candidate while it is being verified
-        keyframe->set_not_erase();
+        keyframe->pin();
+        if(!keyframe->is_bad())
+            live_candidates.push_back(keyframe);
+    }
 
+    // Match the current keyframe against all live candidates at once; the loop below reads the
+    // pairs back
+    matcher_->match_keyframe_to_keyframes(current_keyframe_, live_candidates, feature_types_);
+
+    // By-value snapshots: get_map_point_matches copies under the keyframe's mutex
+    const std::vector<Pt> current_points = current_keyframe_->get_map_point_matches(verification_feature_);
+    const size_t num_current_keypoints = current_points.size();
+    for(const Keyframe& keyframe : loop_candidates_)
+    {
         Candidate candidate{keyframe, {}, nullptr};
         if(!keyframe->is_bad())
         {
-            std::map<FeatureType, std::vector<std::pair<size_t,size_t>>> matched_pairs;
-            matcher_->match_keyframes_for_compute_sim3(current_keyframe_, keyframe, matched_pairs, feature_types_);
-            const std::vector<std::pair<size_t,size_t>>& pairs = matched_pairs[verification_feature_];
+            const std::map<FeatureType, std::vector<std::pair<size_t,size_t>>> matched_pairs =
+                FeatureMatcher::get_keyframe_matches(current_keyframe_, keyframe);
+            const auto pairs_it = matched_pairs.find(verification_feature_);
 
-            // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
+            // The 3D-3D correspondences for the Sim3 solver: the matched pairs where both
+            // keypoints have a map point and neither point is bad
             const std::vector<Pt> candidate_points = keyframe->get_map_point_matches(verification_feature_);
             candidate.matches.assign(num_current_keypoints, nullptr);
-            for(const auto& [current_index, candidate_index] : pairs)
-                candidate.matches[current_index] = candidate_points[candidate_index];
+            int num_correspondences = 0;
+            if(pairs_it != matched_pairs.end())
+            {
+                for(const auto& [current_index, candidate_index] : pairs_it->second)
+                {
+                    const Pt& current_point = current_points[current_index];
+                    const Pt& candidate_point = candidate_points[candidate_index];
+                    if(!current_point || !candidate_point || current_point->is_bad() || candidate_point->is_bad())
+                        continue;
+                    candidate.matches[current_index] = candidate_point;
+                    num_correspondences++;
+                }
+            }
 
-            if(static_cast<int>(pairs.size()) >= params.sim3_min_matches)
+            // Per candidate: the keyframe, and its 3D-3D correspondences against sim3_min_matches
+            AF_REPORT("loop.candidate_frame_id", "", keyframe->frame_id);
+            AF_REPORT("loop.correspondences", "", num_correspondences);
+            if(num_correspondences >= params.sim3_min_matches)
             {
                 candidate.solver = std::make_unique<Sim3Solver>(current_keyframe_, keyframe, candidate.matches,
                                                                 verification_feature_, fix_scale_);
@@ -268,6 +341,8 @@ bool LoopClosing::compute_sim3()
         }
         candidates.push_back(std::move(candidate));
     }
+
+    AF_REPORT("loop.candidates_armed", "", num_alive);   // enough correspondences for a Sim3 solver
 
     // Alternate RANSAC rounds over the surviving candidates until one Sim3 passes the
     // optimization or every candidate has exhausted its iteration budget
@@ -299,13 +374,19 @@ bool LoopClosing::compute_sim3()
                 const int num_optimized_inliers = Optimizer::OptimizeSim3(current_keyframe_, candidate.keyframe, inlier_matches,
                                                                           g2o_Scm, sim3_optimization_chi2, fix_scale_,
                                                                           verification_feature_);
+                // Per Sim3 hypothesis: RANSAC inliers, and inliers of the optimized Sim3
+                // against sim3_min_inliers
+                AF_REPORT("loop.sim3_ransac_inliers", "", num_inliers);
+                AF_REPORT("loop.sim3_optimized_inliers", "", num_optimized_inliers);
                 if(num_optimized_inliers >= params.sim3_min_inliers)
                 {
                     matched = true;
                     matched_keyframe_ = candidate.keyframe;
                     // World -> current keyframe through the loop side: Scm * Smw
-                    const g2o::Sim3 g2o_Smw(candidate.keyframe->get_rotation().cast<double>(),
-                                            candidate.keyframe->get_translation().cast<double>(), 1.0);
+                    // One lock: R and t must come from the same pose (LocalMapping's BA is
+                    // still running here -- correct_loop has not stopped it yet)
+                    const Pose pose = candidate.keyframe->get_pose();
+                    const g2o::Sim3 g2o_Smw(pose.Rcw.cast<double>(), pose.tcw.cast<double>(), 1.0);
                     g2o_Scw_ = g2o_Scm * g2o_Smw;
                     Scw_ = Converter::to_matrix4f(g2o_Scw_);
                     loop_matched_points_ = std::move(inlier_matches);
@@ -322,6 +403,7 @@ bool LoopClosing::compute_sim3()
         }
     }
 
+    AF_REPORT("loop.sim3_found", "", matched);
     if(!matched)
         release_loop_candidates(false);
     return matched;
@@ -333,32 +415,66 @@ bool LoopClosing::compute_sim3()
 // either way (matched keyframe excepted on acceptance).
 bool LoopClosing::search_loop_map_points()
 {
+    AF_REPORT_SCOPE();
+
     std::vector<Keyframe> loop_keyframes = matched_keyframe_->get_covisible_keyframes();
     loop_keyframes.push_back(matched_keyframe_);
+    AF_REPORT("loop.keyframes", "", loop_keyframes.size());
+    AF_REPORT("loop.matched_before_search", "",
+              std::count_if(loop_matched_points_.begin(), loop_matched_points_.end(),
+                            [](const Pt& point) { return point != nullptr; }));
 
     loop_map_points_.clear();
-    std::map<PtId, Keyframe> point_keyframe;   // the loop keyframe each point was collected from
     for(const Keyframe& keyframe : loop_keyframes)
     {
-        // Side effect only: fills the current keyframe's match cache for this keyframe,
-        // which search_by_projection_for_compute_sim3 reads (the pairs themselves are not needed)
-        matcher_->match_keyframes(current_keyframe_, keyframe, feature_types_);
-
         for(const Pt& point : keyframe->get_map_point_matches(verification_feature_))
         {
             if(!point || point->is_bad() || point->loop_point_for_keyframe == current_keyframe_->keyId)
                 continue;
             loop_map_points_.push_back(point);
             point->loop_point_for_keyframe = current_keyframe_->keyId;   // collected once per loop
-            point_keyframe[point->ptId] = keyframe;
         }
     }
 
-    matcher_->search_by_projection_for_compute_sim3(current_keyframe_, Scw_, loop_map_points_, loop_matched_points_, point_keyframe);
+    // The loop points not attached yet, and where each lands in the current keyframe through
+    // the loop Sim3 (Scw_ = [sR | t]: the scale cancels in the projection)
+    const std::unordered_set<Pt> already_matched(loop_matched_points_.begin(), loop_matched_points_.end());
+    const Calibration& calibration = *current_keyframe_->calibration;
+    const mat3f sRcw = Scw_.block<3,3>(0,0);
+    const vec3f tcw = Scw_.block<3,1>(0,3);
+    std::vector<Pt> candidates;
+    std::vector<cv::Point2f> projections;
+    candidates.reserve(loop_map_points_.size());
+    projections.reserve(loop_map_points_.size());
+    for(const Pt& point : loop_map_points_)
+    {
+        if(point->is_bad() || already_matched.count(point))
+            continue;
+        const vec3f in_camera = sRcw * point->get_world_pos() + tcw;
+        if(in_camera(2) <= 0.0f)
+            continue;
+        const float u = calibration.fx * in_camera(0) / in_camera(2) + calibration.cx;
+        const float v = calibration.fy * in_camera(1) / in_camera(2) + calibration.cy;
+        if(!calibration.is_in_image(u, v))
+            continue;
+        candidates.push_back(point);
+        projections.emplace_back(u, v);
+    }
+
+    // Attach them with the pose-guided search tracking uses for the local map: a point takes the
+    // free keypoint near its projection that is its best descriptor match, if that keypoint
+    // prefers it too
+    matcher_->match_map_points_to_keyframe(current_keyframe_, candidates, projections, verification_feature_,
+                                           loop_matched_points_);
 
     const long num_matches = std::count_if(loop_matched_points_.begin(), loop_matched_points_.end(),
                                            [](const Pt& point) { return point != nullptr; });
     const bool accepted = num_matches >= params.loop_min_matches;
+    // Loop-side points offered, points attached to the current keyframe (against
+    // loop_min_matches), and the verdict
+    AF_REPORT("loop.points_collected", "", loop_map_points_.size());
+    AF_REPORT("loop.points_matched", "", num_matches);
+    AF_REPORT("loop.accepted", "", accepted);
     release_loop_candidates(accepted);
     return accepted;
 }
@@ -370,9 +486,9 @@ void LoopClosing::release_loop_candidates(const bool loop_accepted)
 {
     for(const Keyframe& candidate : loop_candidates_)
         if(!loop_accepted || candidate != matched_keyframe_)
-            candidate->set_erase();
+            candidate->unpin();
     if(!loop_accepted)
-        current_keyframe_->set_erase();
+        current_keyframe_->unpin();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -383,24 +499,20 @@ void LoopClosing::correct_loop()
     AF_INFO("[LoopClosing] loop detected: keyframe " << current_keyframe_->keyId << " -> " << matched_keyframe_->keyId);
     std::cout.flush();
 
-    // Pause Local Mapping: no keyframe may be inserted while the map is corrected
+    // A running global BA belongs to a superseded loop: make it abort, drop its result, and wait for its thread
+    // (never detached: a detached BA kept writing the *_gba fields next to the new one once gba_stop_ was reset
+    // for it, and could outlive Shutdown)
+    abort_global_bundle_adjustment();
+
+    // Pause Local Mapping: no keyframe may be inserted while the map is corrected. The request is re-asserted
+    // while waiting: LocalMapping::release() (the end of a global BA's apply_gba_correction) clears it, and a
+    // lost request left this loop waiting forever.
     local_mapper_->request_stop();
-
-    // A running global BA belongs to a superseded loop: make it abort and drop its result
+    while(!local_mapper_->is_stopped() && !local_mapper_->is_finished())
     {
-        std::lock_guard<std::mutex> lock(gba_mutex_);
-        if(gba_running_)
-        {
-            gba_stop_ = true;
-            ++gba_generation_;
-            if(gba_thread_.joinable())
-                gba_thread_.detach();   // exits on its own once g2o sees gba_stop_ (or its generation check fails)
-        }
-    }
-
-    // Wait until Local Mapping has effectively stopped
-    while(!local_mapper_->is_stopped())
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        local_mapper_->request_stop();
+    }
 
     // Refresh the current keyframe's covisibility before propagating the correction
     current_keyframe_->update_connections();
@@ -412,14 +524,14 @@ void LoopClosing::correct_loop()
 
     KeyframePoses corrected_poses, uncorrected_poses;
     corrected_poses[current_keyframe_] = g2o_Scw_;
-    const mat4f Twc = current_keyframe_->get_pose_inverse();
+    const mat4f Twc = current_keyframe_->get_Twc();
 
     {
         std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
 
         for(const Keyframe& keyframe : connected_keyframes)
         {
-            const mat4f Tiw = keyframe->get_pose();
+            const mat4f Tiw = keyframe->get_Tcw();
             if(keyframe != current_keyframe_)
             {
                 // Corrected: relative pose to the current keyframe composed with Scw
@@ -442,7 +554,7 @@ void LoopClosing::correct_loop()
             const g2o::Sim3 g2o_corrected_Swi = g2o_corrected_Siw.inverse();
             const g2o::Sim3& g2o_Siw = uncorrected_poses[keyframe];
 
-            for(const FeatureType feature_type : keyframe->featureTypes)
+            for(const FeatureType feature_type : keyframe->feature_types)
             {
                 for(const Pt& point : keyframe->get_map_point_matches(feature_type))
                 {
@@ -475,8 +587,8 @@ void LoopClosing::correct_loop()
                 current_point->replace(loop_point);
             else
             {
-                current_keyframe_->add_map_point(loop_point, KeypointIndex(i));
-                loop_point->add_observation(current_keyframe_, KeypointIndex(i));
+                if(current_keyframe_->add_map_point(loop_point, KeypointIndex(i)))
+                    loop_point->add_observation(current_keyframe_, KeypointIndex(i));
             }
         }
     }
@@ -489,14 +601,12 @@ void LoopClosing::correct_loop()
     std::map<KeyframeId, LoopConnections> loop_connections = loop_connections_after_fusion(connected_keyframes);
     Optimizer::OptimizeEssentialGraph(map_, matched_keyframe_, current_keyframe_, uncorrected_poses, corrected_poses,
                                       loop_connections, fix_scale_);
-    map_->InformNewBigChange();
 
     // Loop edge (also pins both keyframes: never culled)
     matched_keyframe_->add_loop_edge(current_keyframe_);
     current_keyframe_->add_loop_edge(matched_keyframe_);
 
-    // Global BA in its own thread; Local Mapping resumes meanwhile. A previous BA has
-    // either finished (joinable, join returns at once) or was detached above.
+    // Global BA in its own thread; Local Mapping resumes meanwhile. A previous BA was aborted and joined above.
     if(gba_thread_.joinable())
         gba_thread_.join();
     {
@@ -532,24 +642,87 @@ std::map<KeyframeId, LoopConnections> LoopClosing::loop_connections_after_fusion
     return loop_connections;
 }
 
-// Projects the loop-side map points into every corrected keyframe (with its corrected
-// pose) and merges the duplicates found there into the loop-side points
+// Projects the loop-side map points into every corrected keyframe (with its corrected pose) and
+// fuses them there by FeatureMatcher's gated mutual search, every keypoint a target, at most the
+// map's fuse descriptor distance apart (Map::get_fuse_max_descriptor_distance): a match on
+// an empty keypoint adds the observation; a match on a keypoint holding another point merges that
+// point into the loop-side one, under the map update lock.
 void LoopClosing::search_and_fuse(const KeyframePoses& corrected_poses)
 {
-    for(const auto& [corrected_keyframe, g2o_Scw] : corrected_poses)
-    {
-        Keyframe keyframe = corrected_keyframe;   // fuse_map_points_to_keyframe takes a non-const reference
-        const mat4f Scw = Converter::to_matrix4f(g2o_Scw);
+    AF_REPORT_SCOPE();
+    [[maybe_unused]] int num_observed = 0;
+    [[maybe_unused]] int num_replaced = 0;
 
-        std::vector<Pt> replaced_points(loop_map_points_.size(), nullptr);
-        matcher_->fuse_map_points_to_keyframe(keyframe, Scw, loop_map_points_, params.fuse_radius, replaced_points,
-                                              verification_feature_);
+    // Local Mapping's estimate (LocalMapping::estimate_fuse_max_descriptor_distance); none yet: no fusion
+    const std::optional<Descriptor_Distance_Type> max_descriptor_distance =
+        map_->get_fuse_max_descriptor_distance(verification_feature_);
+    if(!max_descriptor_distance)
+        return;
+
+    for(const auto& [keyframe, g2o_Scw] : corrected_poses)
+    {
+        // Scw = [sR | t] is a Sim3; the visibility tests want the SE3 [R | t/s] that projects
+        // the same way, in the map's metric (the scale-range test compares distances)
+        const mat4f Scw = Converter::to_matrix4f(g2o_Scw);
+        const float scale = Scw.block<3,3>(0,0).row(0).norm();
+        mat4f Tcw = mat4f::Identity();
+        Tcw.block<3,3>(0,0) = Scw.block<3,3>(0,0) / scale;
+        Tcw.block<3,1>(0,3) = Scw.block<3,1>(0,3) / scale;
+        Pose pose;
+        if(!pose.set(Tcw))
+            continue;   // a non-finite corrected pose: nothing can be projected
+
+        std::vector<Pt> candidates;
+        std::vector<cv::Point2f> projections;
+        for(const Pt& pt : loop_map_points_)
+        {
+            if(!pt || pt->is_bad() || pt->featureType != verification_feature_ || pt->is_in_keyframe(keyframe))
+                continue;
+            const std::optional<Projection> projection =
+                project_if_visible(pose, *keyframe->calibration, pt, params.fuse_viewing_cos_limit);
+            if(!projection)
+                continue;
+            candidates.push_back(pt);
+            projections.push_back(projection->uv);
+        }
+
+        std::vector<Pt> matches(keyframe->features.at(verification_feature_).count());
+        matcher_->match_map_points_to_keyframe(keyframe, candidates, projections, verification_feature_, matches,
+                                               FeatureMatcher::projection_match_scale_sigma2, *max_descriptor_distance);
+
+        std::vector<std::pair<Pt, Pt>> replacements;   // (the keyframe's point, the loop point replacing it)
+        for(size_t idx = 0; idx < matches.size(); idx++)
+        {
+            const Pt& pt = matches[idx];
+            if(!pt)
+                continue;
+            const KeypointIndex index = static_cast<KeypointIndex>(idx);
+            const Pt existing = keyframe->get_map_point(index, verification_feature_);
+            if(existing)
+            {
+                if(!existing->is_bad())
+                    replacements.emplace_back(existing, pt);
+            }
+            // Publish first, observe only if the slot was won (see LocalMapping::fuse_into_keyframe)
+            else if(keyframe->add_map_point(pt, index))
+            {
+                pt->add_observation(keyframe, index);
+                num_observed++;
+            }
+        }
 
         std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
-        for(size_t i = 0; i < loop_map_points_.size(); i++)
-            if(replaced_points[i])
-                replaced_points[i]->replace(loop_map_points_[i]);
+        for(const auto& [existing, loop_point] : replacements)
+        {
+            existing->replace(loop_point);
+            num_replaced++;
+        }
     }
+
+    AF_REPORT("fuse.keyframes", "", corrected_poses.size());
+    AF_REPORT("fuse.loop_points", "", loop_map_points_.size());
+    AF_REPORT("fuse.fused", "", num_observed + num_replaced);   // as before: matches that changed the map
+    AF_REPORT("fuse.replaced", "", num_replaced);               // of those, a duplicate merged into the loop point
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -597,31 +770,47 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
 
     local_mapper_->request_stop();
     while(!local_mapper_->is_stopped() && !local_mapper_->is_finished())
+    {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        local_mapper_->request_stop();   // re-asserted: a release() elsewhere clears the request
+    }
 
     std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
 
-    // Keyframes, breadth-first from the map origins along the spanning tree
-    std::list<Keyframe> pending(map_->keyframe_origins_.begin(), map_->keyframe_origins_.end());
+    // Keyframes, breadth-first from the map origins along the spanning tree. Each keyframe once (the tree can hold
+    // a cycle after culling re-hangs children: without the visited set this loop never ended, under gba_mutex_ and
+    // map_update_mutex_), and only keyframes with a BA result (or one propagated from their parent) are moved.
+    std::unordered_set<KeyframeId> corrected;
+    std::unordered_set<KeyframeId> visited;
+    std::list<Keyframe> pending;
+    for(const Keyframe& origin : map_->keyframe_origins_)
+        if(origin && visited.insert(origin->keyId).second)
+            pending.push_back(origin);
     while(!pending.empty())
     {
         const Keyframe keyframe = pending.front();
         pending.pop_front();
+        const bool has_result = keyframe->ba_global_for_keyframe == loop_keyframe_id;
 
-        const mat4f Twc = keyframe->get_pose_inverse();
+        const mat4f Twc = keyframe->get_Twc();
         for(const Keyframe& child : keyframe->get_children())
         {
-            if(child->ba_global_for_keyframe != loop_keyframe_id)
+            if(!child || !visited.insert(child->keyId).second)
+                continue;
+            if(has_result && child->ba_global_for_keyframe != loop_keyframe_id)
             {
-                const mat4f Tchild_parent = child->get_pose() * Twc;
+                const mat4f Tchild_parent = child->get_Tcw() * Twc;
                 child->Tcw_gba = Tchild_parent * keyframe->Tcw_gba;
                 child->ba_global_for_keyframe = loop_keyframe_id;
             }
             pending.push_back(child);
         }
 
-        keyframe->Tcw_before_gba = keyframe->get_pose();
+        if(!has_result)
+            continue;
+        keyframe->Tcw_before_gba = keyframe->get_Tcw();
         keyframe->set_pose(keyframe->Tcw_gba);
+        corrected.insert(keyframe->keyId);
     }
 
     // Map points: optimized ones take their BA position, the others follow their reference keyframe
@@ -636,18 +825,19 @@ void LoopClosing::apply_gba_correction(const KeyframeId loop_keyframe_id)
             continue;
         }
 
+        // Only through a keyframe corrected above: its Tcw_before_gba is set (a keyframe tagged by the BA but not
+        // reached from the origins has none)
         const Keyframe reference = point->get_reference_keyframe();
-        if(reference->ba_global_for_keyframe != loop_keyframe_id)
+        if(!reference || !corrected.count(reference->keyId))
             continue;
 
         // Un-project with the reference's pose before the BA, re-project with the corrected one
         const mat4f& Tcw = reference->Tcw_before_gba;
         const vec3f Xc = Tcw.block<3,3>(0,0) * point->get_world_pos() + Tcw.block<3,1>(0,3);
-        const mat4f Twc = reference->get_pose_inverse();
+        const mat4f Twc = reference->get_Twc();
         point->set_world_pos(Twc.block<3,3>(0,0) * Xc + Twc.block<3,1>(0,3));
     }
 
-    map_->InformNewBigChange();
     local_mapper_->release();
 
     AF_INFO("[LoopClosing] map updated");

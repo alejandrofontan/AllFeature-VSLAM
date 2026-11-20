@@ -6,7 +6,7 @@
  * - Created: 2026-09-24
  * - License: GPLv3 License
  *
- * The keyframe INFORMATION kernel of the system (docs/plans/covisibility_kernel.md): one
+ * The keyframe INFORMATION kernel of the system: one
  * placecell::PlaceCell store over the keyframes whose similarity kernel answers two
  * questions —
  *   - Tracking::need_new_keyframe: how much of the current view is NOT explained by the

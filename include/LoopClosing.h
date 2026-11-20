@@ -60,8 +60,10 @@ struct LoopClosingParameters
     // search_loop_map_points()
     int loop_min_matches{40};   // loop-side map points matched into the current keyframe (RANSAC inliers + projection search) that accept the loop
 
-    // search_and_fuse()
-    float fuse_radius{4.0f};    // projection search radius (pixels) when fusing the loop-side points into the corrected keyframes
+    // search_and_fuse(): a loop point is projected only if the keyframe views it within this cosine of its mean
+    // viewing direction (60 deg). The match gate is FeatureMatcher's default, 8 sigmas: the corrected poses
+    // come from propagating one Sim3 through the essential graph and are only approximate.
+    float fuse_viewing_cos_limit{0.5f};
 
     // run_global_bundle_adjustment()
     int gba_iterations{10};
@@ -102,8 +104,7 @@ public:
     // this object (System's constructor). fix_scale: stereo/RGB-D (SE3 correction).
     LoopClosing(std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognition> place_recognition,
                 std::shared_ptr<LocalMapping> local_mapper, std::shared_ptr<MapDrawer> map_drawer,
-                bool fix_scale, const std::vector<FeatureType>& feature_types,
-                int image_width, int image_height);
+                bool fix_scale, const std::vector<FeatureType>& feature_types);
     // Joins a finished global BA thread (System::Shutdown waits for is_gba_running() first)
     ~LoopClosing();
 
@@ -168,6 +169,9 @@ protected:
     // writes the result and propagates it to what Local Mapping created meanwhile.
     void run_global_bundle_adjustment(KeyframeId loop_keyframe_id);
     void apply_gba_correction(KeyframeId loop_keyframe_id);
+    // Stops a running global BA (gba_stop_, new generation: it drops its result) and joins its thread. LoopClosing
+    // thread only, no lock held: correct_loop before a new BA, reset_if_requested before the map is cleared.
+    void abort_global_bundle_adjustment();
 
     // Called by run(): perform a pending reset
     void reset_if_requested();

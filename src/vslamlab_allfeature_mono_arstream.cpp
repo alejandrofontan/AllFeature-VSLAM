@@ -18,6 +18,7 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -26,6 +27,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <arstream/arstream.hpp>
@@ -37,6 +39,7 @@
 #include <FrameDrawer.h>
 #include "afvslam_log.hpp"
 #include "SegmentationSettings.h"
+#include "Report.h"
 
 // An uncaught exception on any thread ends the process; name it and print the throwing thread's stack first
 // (symbolised by the dynamic linker: `atos -o <binary> <addr>` resolves what it leaves as offsets)
@@ -70,6 +73,46 @@ static std::string padding_zeros(const std::string& number, const size_t numberO
         zeros += "0";
     return zeros + number;
 }
+
+#ifdef ARSTREAM_HAS_STATUS
+// Reports the SLAM state to the relay, which shows it as the phone app's banner (Viewer.StreamStatus). Its own
+// thread sends 10 times a second, so a pause (the tracking loop blocked in System::Track) still reports PAUSED, and
+// silence (the app turns the banner grey) means this process is gone or stuck.
+class StatusReporter {
+public:
+    explicit StatusReporter(AF_VSLAM::System& slam) : slam_(slam), thread_([this] { run(); }) {}
+    ~StatusReporter() {
+        stop_ = true;
+        thread_.join();
+    }
+
+private:
+    void run() {
+        arstream::StatusPublisher publisher;   // never blocks: dropped while the relay is not there
+        while (!stop_) {
+            publisher.send(state_name(), slam_.GetFramesProcessedCount());
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
+    std::string state_name() {
+        if (slam_.is_paused())
+            return "PAUSED";
+        switch (static_cast<TrackingState>(slam_.GetTrackingState())) {
+            case TrackingState::SYSTEM_NOT_READY: return "NOT READY";
+            case TrackingState::NO_IMAGES_YET:    return "WAITING";
+            case TrackingState::NOT_INITIALIZED:  return "INITIALIZING";
+            case TrackingState::OK:               return "OK";
+            case TrackingState::LOST:             return "LOST";
+        }
+        return "?";
+    }
+
+    AF_VSLAM::System& slam_;
+    std::atomic<bool> stop_{false};
+    std::thread thread_;   // last member: started once the others exist
+};
+#endif
 
 int main(int argc, char** argv) {
     std::set_terminate(on_terminate);
@@ -117,13 +160,32 @@ int main(int argc, char** argv) {
     const std::vector<std::string> features = settings["features"].as<std::vector<std::string>>();
     const bool debug = settings["debug"].as<bool>();
     AF_CONFIG_FIELD("Debug mode: ", debug);
+    // Viewer.StartPaused: track one black frame (loads every model session, starts no map), then pause until the
+    // Viewer's Pause is unticked, so the phone can wait on the table while Core ML warms up. Needs the viewer.
+    const bool start_paused = verbose && settings["Viewer.StartPaused"] && settings["Viewer.StartPaused"].as<int>() != 0;
+    AF_CONFIG_FIELD("Start paused: ", start_paused);
+    // Viewer.StreamStatus: report the SLAM state to the relay, which shows it as the phone app's banner
+    // (libarstream >= 0.3.0 and an app that shows it; off by default)
+    const bool stream_status = settings["Viewer.StreamStatus"] && settings["Viewer.StreamStatus"].as<int>() != 0;
+#ifdef ARSTREAM_HAS_STATUS
+    AF_CONFIG_FIELD("Stream status: ", stream_status);
+#else
+    if (stream_status)
+        AF_WARN("Viewer.StreamStatus needs libarstream >= 0.3.0 (status messages): ignored");
+#endif
 
-    AF_VSLAM::FrameDrawer::exp_folder = exp_folder;
-
-    std::vector<FeatureType> featureTypes{};
-    for (const auto& feat : features) {
-        featureTypes.push_back(get_feature_type(feat));  // an unknown name terminates the process (FeatureFactory.h)
-        AF_CONFIG_FIELD("Feature added: ", feat);
+    // An unknown name, or a feature this build does not include: one error line and a clean exit
+    std::vector<FeatureType> feature_types{};
+    try {
+        for (const auto& feat : features) {
+            const FeatureType feature_type = get_feature_type(feat);
+            get_feature(feature_type);
+            feature_types.push_back(feature_type);
+            AF_CONFIG_FIELD("Feature added: ", feat);
+        }
+    } catch (const std::runtime_error& e) {
+        AF_ERROR(e.what());
+        return 1;
     }
     segmentation::SegmentationSettings segmentationSettings{};
     try {
@@ -151,12 +213,18 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, on_signal);
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
-    AF_VSLAM::System SLAM(calibration_yaml, settings_yaml, AF_VSLAM::System::MONOCULAR, verbose, featureTypes, fixImageSize);
+    AF_VSLAM::System SLAM(calibration_yaml, settings_yaml, AF_VSLAM::System::MONOCULAR, verbose, feature_types, fixImageSize);
 
     g_system = &SLAM;
 
     // Stream length is unknown; 0 keeps the frame counter unset while still reporting whether masks are in use.
     SLAM.SetSequenceInfo(0, segmenter != nullptr);
+#ifdef ARSTREAM_HAS_STATUS
+    // Declared after SLAM, so it stops before SLAM is destroyed
+    std::unique_ptr<StatusReporter> statusReporter;
+    if (stream_status)
+        statusReporter = std::make_unique<StatusReporter>(SLAM);
+#endif
 
     // The whole run (tracking loop, GBA, Shutdown, saves) as one unit: on macOS with the viewer on, System::Run
     // executes it in a worker thread while the Pangolin viewer owns the main thread; elsewhere it runs inline.
@@ -169,8 +237,39 @@ int main(int argc, char** argv) {
 
         arstream::Frame frame;
         size_t received = 0;
-        while (subscriber.next(frame)) {
+        // A message the subscriber cannot decode (truncated JPEG, inconsistent lengths) is skipped instead of ending
+        // the run through an uncaught exception; only a persistent failure gives up.
+        int undecodable = 0;
+        const auto next_frame = [&]() -> bool {
+            while (true) {
+                try {
+                    const bool got = subscriber.next(frame);
+                    undecodable = 0;
+                    return got;
+                } catch (const std::exception& e) {
+                    AF_WARN("Skipping a stream message that cannot be decoded: " << e.what());
+                    if (++undecodable >= 50) {
+                        AF_ERROR("50 undecodable stream messages in a row: stopping");
+                        return false;
+                    }
+                }
+            }
+        };
+        while (next_frame()) {
             ++received;
+            if (received == 1 && start_paused) {
+                // Warm-up: a black frame of the stream's size runs every extractor (the fixed-shape exports load on
+                // the first frame) and has no keypoints, so no map starts; the real frame is dropped
+                const cv::Mat black = cv::Mat::zeros(frame.image.size(), frame.image.type());
+                AF_VSLAM::Image warm(black);
+                if (segmenter)
+                    warm.mask = segmenter->inferMask(warm.img);
+                SLAM.Track(warm, frame.timestamp);
+                SLAM.set_paused(true);
+                AF_INFO("Warm-up frame done: paused until the Viewer's Pause is unticked (Viewer.StartPaused)");
+                std::cout.flush();
+                continue;
+            }
             AF_VSLAM::Image im(frame.image);
             if (segmenter)
                 im.mask = segmenter->inferMask(im.img);
@@ -182,14 +281,15 @@ int main(int argc, char** argv) {
         }
         AF_INFO((subscriber.ended() ? "End of stream" : "Stopped") << " after " << received << " frames");
 
+        // Stop all threads first: Shutdown lets the workers finish what is queued, and the final
+        // bundle adjustment below must have the map to itself
+        SLAM.Shutdown();
+
         std::string resultsPath_expId = exp_folder + "/" + padding_zeros(exp_id);
         SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory_beforeGBA.csv");
 
         // Perform Global Bundle Adjustment
         SLAM.GBA();
-
-        // Stop all threads
-        SLAM.Shutdown();
 
         // Tracking time statistics
         if (!vTimesTrack.empty()) {
@@ -203,6 +303,7 @@ int main(int argc, char** argv) {
         }
 
         // Save camera trajectory
+        AF_REPORT_WRITE(resultsPath_expId + "_" + "Report.csv");
         SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
         SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply");
 

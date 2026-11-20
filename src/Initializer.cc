@@ -29,13 +29,13 @@ namespace AF_VSLAM
 
 Initializer::Initializer(const Frame &ReferenceFrame, float sigma_, int iterations)
 {
-    K = Converter::to_matrix3f(ReferenceFrame.mK.clone());
+    K = Converter::to_matrix3f(ReferenceFrame.calibration->K.clone());
 
     keypoints1.clear();
     invDepth1.clear();
-    for (const auto& [ft, keypoints]: ReferenceFrame.keypoints) {
-        keypoints1.insert(keypoints1.end(), keypoints.begin(), keypoints.end());
-        const auto& d = ReferenceFrame.inv_depth.at(ft);
+    for (const auto& [ft, data]: ReferenceFrame.features.per_type) {
+        keypoints1.insert(keypoints1.end(), data.keypoints.begin(), data.keypoints.end());
+        const auto& d = ReferenceFrame.features.at(ft).inv_depth;
         invDepth1.insert(invDepth1.end(), d.begin(), d.end());
     }
 
@@ -53,9 +53,9 @@ bool Initializer::initialize(const Frame &CurrentFrame, const vector<int> &match
     // Reference Frame: 1, Current Frame: 2
     keypoints2.clear();
     invDepth2.clear();
-    for (const auto& [ft, keypoints]: CurrentFrame.keypoints) {
-        keypoints2.insert(keypoints2.end(), keypoints.begin(), keypoints.end());
-        const auto& d = CurrentFrame.inv_depth.at(ft);
+    for (const auto& [ft, data]: CurrentFrame.features.per_type) {
+        keypoints2.insert(keypoints2.end(), data.keypoints.begin(), data.keypoints.end());
+        const auto& d = CurrentFrame.features.at(ft).inv_depth;
         invDepth2.insert(invDepth2.end(), d.begin(), d.end());
     }
 

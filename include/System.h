@@ -69,7 +69,7 @@ public:
     // Initialize the SLAM system. It launches the Local Mapping, Loop Closing and Viewer threads.
     System(const string &strCalibrationFile, const string &strSettingsFile,
            const eSensor sensor, const bool activateVisualization,
-           const vector<FeatureType>& featureTypes, const bool& fixImageSize = false);
+           const vector<FeatureType>& feature_types, const bool& fixImageSize = false);
 
     // Proccess the given stereo frame. Images must be synchronized and rectified.
     // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
@@ -86,10 +86,6 @@ public:
     // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
     // Returns the camera pose (empty if tracking fails).
     mat4f Track(Image &im, const double &timestamp);
-
-    // Returns true if there have been a big map change (loop closure, global BA)
-    // since last call to this function
-    bool MapChanged();
 
     // Reset the system (clear map)
     void reset();
@@ -143,15 +139,13 @@ public:
     // Information from most recent processed frame
     // You can call this right after Track (or stereo or RGBD)
     int GetTrackingState();
-    std::map<FeatureType,std::vector<Pt>> GetTrackedMapPoints();
-    std::map<FeatureType, std::vector<cv::KeyPoint>> GetTrackedKeyPointsUn();
 
     // AnyFeature-VSLAM statistics
     void SaveStatistics(const std::string &filename);
     std::vector<long long> virtualMemUsed{};
     vector<double> trackingTime{};
 
-    vector<FeatureType> featureTypes{};
+    vector<FeatureType> feature_types{};
 
     void setImageSize(const int width, const int height);
     int image_width{};
@@ -237,8 +231,6 @@ private:
 
     // Tracking state
     int mTrackingState;
-    std::map<FeatureType,std::vector<Pt>> mTrackedMapPoints;
-    std::map<FeatureType, std::vector<cv::KeyPoint>> mTrackedKeyPointsUn;
     std::mutex mMutexState;
 
     // Fix image size to nominal size 307200 pixels

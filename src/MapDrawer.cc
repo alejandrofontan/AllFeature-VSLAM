@@ -24,6 +24,7 @@
 #include "Converter.h"
 #include "Utils.h"
 #include "afvslam_log.hpp"
+#include "SettingsReader.h"
 
 #include <pangolin/pangolin.h>
 #include <algorithm>
@@ -77,8 +78,8 @@ void applyLineWidth(const float width)
 }
 }
 
-MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const vector<FeatureType>& featureTypes):
-    mpMap(pMap),featureTypes(featureTypes)
+MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const vector<FeatureType>& feature_types):
+    mpMap(pMap),feature_types(feature_types)
 {
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
 
@@ -98,14 +99,8 @@ MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const v
         mDefaultStyle.trajectoryLineWidth = fSettings["Viewer.TrajectoryLineWidth"];
     if (!fSettings["Viewer.PointColorMode"].empty())
     {
-        // cv::FileStorage returns an UNQUOTED scalar together with any trailing "# comment" on
-        // its line (same workaround as PlaceCellSettings): keep the first token only.
-        std::string name = static_cast<std::string>(fSettings["Viewer.PointColorMode"]);
-        if (const size_t hash = name.find('#'); hash != std::string::npos)
-            name.erase(hash);
-        const size_t first = name.find_first_not_of(" \t\r\n");
-        const size_t last = name.find_last_not_of(" \t\r\n");
-        name = (first == std::string::npos) ? std::string{} : name.substr(first, last - first + 1);
+        std::string name;
+        read_setting_if_present(fSettings, "Viewer.PointColorMode", name);
         if (!parsePointColorMode(name, mDefaultStyle.pointColorMode))
             AF_WARN("MapDrawer: unknown Viewer.PointColorMode '" << name << "' (expected feature | rgb), keeping feature");
     }
@@ -131,10 +126,10 @@ MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const v
         mDefaultStyle.fogEnd = 6.0f;
     }
 
-    for (size_t i = 0; i < featureTypes.size(); i++)
+    for (size_t i = 0; i < feature_types.size(); i++)
     {
-        const cv::Scalar c = getFeatureColor(featureTypes[i], 0, true);
-        featureColors[featureTypes[i]] = {float(c[0]), float(c[1]), float(c[2])};
+        const cv::Scalar c = getFeatureColor(feature_types[i], 0, true);
+        featureColors[feature_types[i]] = {float(c[0]), float(c[1]), float(c[2])};
     }
 }
 
@@ -304,14 +299,14 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
     const float h = w*0.75f;
     const float z = w*0.6f;
 
-    const vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
+    const vector<Keyframe> vpKFs = mpMap->get_all_keyframes();
 
     if(bDrawKF)
     {
         for(size_t i=0; i<vpKFs.size(); i++)
         {
             Keyframe pKF = vpKFs[i];
-            mat4f Twc_tmp = pKF->get_pose_inverse().transpose();
+            mat4f Twc_tmp = pKF->get_Twc().transpose();
             cv::Mat Twc = Converter::toCvMat(Twc_tmp);
 
             glPushMatrix();
@@ -361,14 +356,14 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
         {
             // Covisibility Graph
             const vector<Keyframe > vCovKFs = vpKFs[i]->get_covisibles_by_weight(100);
-            vec3f Ow = vpKFs[i]->get_camera_center();
+            vec3f Ow = vpKFs[i]->get_twc();
             if(!vCovKFs.empty())
             {
                 for(vector<Keyframe >::const_iterator vit=vCovKFs.begin(), vend=vCovKFs.end(); vit!=vend; vit++)
                 {
                     if((*vit)->keyId < vpKFs[i]->keyId)
                         continue;
-                    vec3f Ow2 = (*vit)->get_camera_center();
+                    vec3f Ow2 = (*vit)->get_twc();
                     glVertex3f(Ow(0),Ow(1),Ow(2));
                     glVertex3f(Ow2(0),Ow2(1),Ow2(2));
                 }
@@ -378,7 +373,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
             Keyframe pParent = vpKFs[i]->get_parent();
             if(pParent)
             {
-                vec3f Owp = pParent->get_camera_center();
+                vec3f Owp = pParent->get_twc();
                 glVertex3f(Ow(0),Ow(1),Ow(2));
                 glVertex3f(Owp(0),Owp(1),Owp(2));
             }
@@ -389,7 +384,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
             {
                 if((*sit)->keyId < vpKFs[i]->keyId)
                     continue;
-                vec3f Owl = (*sit)->get_camera_center();
+                vec3f Owl = (*sit)->get_twc();
                 glVertex3f(Ow(0),Ow(1),Ow(2));
                 glVertex3f(Owl(0),Owl(1),Owl(2));
             }
@@ -401,7 +396,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
 
 void MapDrawer::DrawTrajectory(const ViewerStyle& style)
 {
-    vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
+    vector<Keyframe> vpKFs = mpMap->get_all_keyframes();
     vpKFs.erase(std::remove_if(vpKFs.begin(), vpKFs.end(),
                                [](const Keyframe& kf){ return kf->is_bad(); }),
                 vpKFs.end());
@@ -418,7 +413,7 @@ void MapDrawer::DrawTrajectory(const ViewerStyle& style)
         float rgb[3];
         vslamlab_colors::gradientVivid(float(i) / denom, rgb);
         glColor4f(rgb[0], rgb[1], rgb[2], 1.0f);
-        const vec3f Ow = vpKFs[i]->get_camera_center();
+        const vec3f Ow = vpKFs[i]->get_twc();
         glVertex3f(Ow(0), Ow(1), Ow(2));
     }
     glEnd();
@@ -441,7 +436,7 @@ void MapDrawer::DrawTrajectory(const ViewerStyle& style)
 
 void MapDrawer::DrawTrajectoryTopView(const ViewerStyle& style)
 {
-    vector<Keyframe> vpKFs = mpMap->GetAllKeyFrames();
+    vector<Keyframe> vpKFs = mpMap->get_all_keyframes();
     vpKFs.erase(std::remove_if(vpKFs.begin(), vpKFs.end(),
                                [](const Keyframe& kf){ return kf->is_bad(); }),
                 vpKFs.end());
@@ -452,7 +447,7 @@ void MapDrawer::DrawTrajectoryTopView(const ViewerStyle& style)
     std::vector<vec3f> centers;
     centers.reserve(vpKFs.size());
     for (const auto& kf : vpKFs)
-        centers.push_back(kf->get_camera_center());
+        centers.push_back(kf->get_twc());
 
     bool hasCam = false;
     vec3f twc = vec3f::Zero();

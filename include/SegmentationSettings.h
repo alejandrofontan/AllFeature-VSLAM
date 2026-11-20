@@ -93,7 +93,7 @@ struct SegmentationSettings
         if (method_explicit || onnx_explicit)
             throw std::runtime_error(
                 "segmentation: " + method + " is not available in this build: it needs the CMake option "
-                "ALLFEATURE_WITH_TENSORRT=ON (docs/plans/mac_port.md). Set segmentation: none or rebuild with that backend.");
+                "ALLFEATURE_WITH_TENSORRT=ON. Set segmentation: none or rebuild with that backend.");
         AF_WARN("Online segmentation not compiled in (ALLFEATURE_WITH_TENSORRT=OFF) - running WITHOUT online segmentation");
         return nullptr;
 #else

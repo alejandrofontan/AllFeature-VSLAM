@@ -12,6 +12,7 @@
 #include <FrameDrawer.h>
 #include "afvslam_log.hpp"
 #include "SegmentationSettings.h"
+#include "Report.h"
 
 #include "DebugKeyStepper.h"
 #include "FramePacer.h"
@@ -120,13 +121,18 @@ int main(int argc, char **argv)
     else
         AF_CONFIG_FIELD("Max frame wait (s): ", "none");
 
-    AF_VSLAM::FrameDrawer::exp_folder = exp_folder;
-
-    std::vector<FeatureType> featureTypes{};
-    for(const auto& feat : features) {
-        auto featureType = get_feature_type(feat);
-        featureTypes.push_back(featureType);
-        AF_CONFIG_FIELD("Feature added: ", feat);
+    // An unknown name, or a feature this build does not include: one error line and a clean exit
+    std::vector<FeatureType> feature_types{};
+    try {
+        for(const auto& feat : features) {
+            const FeatureType feature_type = get_feature_type(feat);
+            get_feature(feature_type);
+            feature_types.push_back(feature_type);
+            AF_CONFIG_FIELD("Feature added: ", feat);
+        }
+    } catch (const std::runtime_error& e) {
+        AF_ERROR(e.what());
+        return 1;
     }
     segmentation::SegmentationSettings segmentationSettings{};
     try {
@@ -159,7 +165,7 @@ int main(int argc, char **argv)
     AF_VSLAM::System SLAM(calibration_yaml, settings_yaml,
                                   AF_VSLAM::System::MONOCULAR,
                                   verbose,
-                                  featureTypes,
+                                  feature_types,
                                   fixImageSize);
 
     SLAM.SetSequenceInfo(nImages, segmenter != nullptr);
@@ -233,14 +239,15 @@ int main(int argc, char **argv)
             if (keyThread.joinable()) keyThread.join();
         }
 
+        // Stop all threads first: Shutdown lets the workers finish what is queued, and the final
+        // bundle adjustment below must have the map to itself
+        SLAM.Shutdown();
+
         std::string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
         SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory_beforeGBA.csv");
 
         // Perform Global Bundle Adjustment
         SLAM.GBA();
-
-        // Stop all threads
-        SLAM.Shutdown();
 
         // Tracking time statistics
         std::sort(vTimesTrack.begin(),vTimesTrack.end());
@@ -255,6 +262,7 @@ int main(int argc, char **argv)
         pacer.printSummary();
 
         // Save camera trajectory
+        AF_REPORT_WRITE(resultsPath_expId + "_" + "Report.csv");
         SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
         SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply");
 

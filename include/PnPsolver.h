@@ -66,7 +66,7 @@ class PnPsolver {
   ~PnPsolver();
 
   void set_ransac_parameters(double probability = 0.99, int minInliers = 8 , int maxIterations = 300, int minSet = 4, float epsilon = 0.4,
-                           float th2 = 5.991);
+                           float th2 = ChiSquared::dof2_95);
 
   cv::Mat find(vector<bool> &vbInliers, int &nInliers);
 

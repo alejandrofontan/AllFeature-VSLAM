@@ -64,7 +64,7 @@ namespace AF_VSLAM
 {
 
 
-PnPsolver::PnPsolver(const Frame &F, const vector<Pt> &vpMapPointMatches, const FeatureType& featType):
+PnPsolver::PnPsolver(const Frame &F, const vector<Pt> &vpMapPointMatches, const FeatureType& feature_type):
     pws(0), us(0), alphas(0), pcs(0), maximum_number_of_correspondences(0), number_of_correspondences(0), mnInliersi(0),
     mnIterations(0), mnBestInliers(0), N(0)
 {
@@ -84,10 +84,10 @@ PnPsolver::PnPsolver(const Frame &F, const vector<Pt> &vpMapPointMatches, const 
         {
             if(!pMP->is_bad())
             {
-                const cv::KeyPoint &kp = F.keypoints.at(featType)[i];
+                const cv::KeyPoint &kp = F.features.at(feature_type).keypoints[i];
 
                 mvP2D.push_back(kp.pt);
-                mvSigma2.push_back(F.get_keypoint_sigma2(KeypointIndex(i), featType));
+                mvSigma2.push_back(F.features.get_sigma2(KeypointIndex(i), feature_type));
 
                 vec3f Pos = pMP->get_world_pos();
                 mvP3Dw.push_back(cv::Point3f(Pos(0),Pos(1), Pos(2)));
@@ -101,10 +101,10 @@ PnPsolver::PnPsolver(const Frame &F, const vector<Pt> &vpMapPointMatches, const 
     }
 
     // Set camera calibration parameters
-    fu = F.fx;
-    fv = F.fy;
-    uc = F.cx;
-    vc = F.cy;
+    fu = F.calibration->fx;
+    fv = F.calibration->fy;
+    uc = F.calibration->cx;
+    vc = F.calibration->cy;
 
     set_ransac_parameters();
 }
@@ -221,18 +221,22 @@ cv::Mat PnPsolver::iterate(int nIterations, bool &bNoMore, vector<bool> &vbInlie
                 mBestTcw = cv::Mat::eye(4,4,CV_32F);
                 Rcw.copyTo(mBestTcw.rowRange(0,3).colRange(0,3));
                 tcw.copyTo(mBestTcw.rowRange(0,3).col(3));
-            }
 
-            if(Refine())
-            {
-                nInliers = mnRefinedInliers;
-                vbInliers = vector<bool>(mvpMapPointMatches.size(),false);
-                for(int i=0; i<N; i++)
+                // Refine and hand back the hypothesis only when the best set has just improved.
+                // Refine() works from the best set, so doing it for every sample with enough
+                // inliers (as ORB-SLAM2 does) returned the same pose again and again, and the
+                // caller re-evaluated it each time (issue #68).
+                if(Refine())
                 {
-                    if(mvbRefinedInliers[i])
-                        vbInliers[mvKeyPointIndices[i]] = true;
+                    nInliers = mnRefinedInliers;
+                    vbInliers = vector<bool>(mvpMapPointMatches.size(),false);
+                    for(int i=0; i<N; i++)
+                    {
+                        if(mvbRefinedInliers[i])
+                            vbInliers[mvKeyPointIndices[i]] = true;
+                    }
+                    return mRefinedTcw.clone();
                 }
-                return mRefinedTcw.clone();
             }
 
         }

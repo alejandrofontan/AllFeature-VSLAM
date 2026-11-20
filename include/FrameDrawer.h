@@ -38,15 +38,13 @@ class Viewer;
 class FrameDrawer
 {
 public:
-    FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& featureTypes);
+    FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& feature_types);
 
     // Update info from the last processed frame.
     void update(Tracking *pTracker);
 
     // Draw last processed frame.
     cv::Mat DrawFrame();
-
-    static std::string exp_folder;
 
 protected:
 
@@ -55,7 +53,6 @@ protected:
     // Info of the frame to be drawn
     cv::Mat mIm;
     cv::Mat mMask; // segmentation mask (1 = static, 0 = dynamic); empty when segmentation is off
-    std::string imName;
     std::map<FeatureType, int> N;
     std::map<FeatureType, vector<cv::KeyPoint>> mvCurrentKeys;
     std::map<FeatureType, vector<bool>> mvbMap, mvbVO;
@@ -67,7 +64,7 @@ protected:
     shared_ptr<Map> mpMap;
 
     std::mutex mMutex;
-    vector<FeatureType> featureTypes{};
+    vector<FeatureType> feature_types{};
 };
 
 } //namespace ORB_SLAM
