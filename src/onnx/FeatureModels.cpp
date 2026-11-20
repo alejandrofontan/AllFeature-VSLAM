@@ -94,10 +94,17 @@ std::string static_model_path(const std::string& file, int width, int height, co
     const std::string stem = file.size() > 5 && file.compare(file.size() - 5, 5, ".onnx") == 0
                                  ? file.substr(0, file.size() - 5) : file;
     const std::string path = feature_model_path(stem + "_" + size + ".onnx");
-    if (!std::filesystem::exists(path))
-        throw std::runtime_error("features_static_shapes is on but " + path + " does not exist; export it with: "
-                                 "pixi run -e export-features export-features --only " + export_key + " --static " + size);
-    return path;
+    if (std::filesystem::exists(path))
+        return path;
+
+    // No export for this frame size: the dynamic file takes any size (issue #75). It used to be an
+    // exception on the tracking thread, which ended the run on its first frame.
+    const std::string dynamic_path = feature_model_path(file);
+    AF_WARN("features_static_shapes is on but " << path << " does not exist: using the dynamic file "
+            << dynamic_path << " for " << size << " frames. Export the fixed-size one with: "
+            "pixi run -e export-features export-features --only " << export_key << " --static " << size
+            << " (Core ML needs it; on CUDA the dynamic file is fine)");
+    return dynamic_path;
 }
 
 namespace

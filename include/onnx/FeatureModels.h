@@ -55,8 +55,8 @@ FeatureModelsConfig& feature_models_config();
 std::string feature_model_path(const std::string& file);
 
 /// `<models_dir>/<stem>_<W>x<H>.onnx` for `file` = '<stem>.onnx': a detector's static export for one frame size.
-/// @param export_key  the model's `--only` name in tools/export_features.py ("superpoint" | "aliked"), for the error
-/// @throws std::runtime_error naming the export command if the file does not exist.
+/// If that file does not exist: the dynamic file `<models_dir>/<file>`, with a warning naming the export command.
+/// @param export_key  the model's `--only` name in tools/export_features.py ("superpoint" | "aliked"), for the warning
 std::string static_model_path(const std::string& file, int width, int height, const std::string& export_key);
 
 /// The process-wide matcher for `features` ("superpoint" | "aliked" | "sift") for a pair with at most `n_max`
