@@ -4,9 +4,9 @@
 # Camera names
 #--------------------------------------------------------------------------------------------
 cam_mono: rgb_0
-features: ["orb32", "superpoint256"]
+features: ["orb32", "aliked128"]
 vpr: "megaloc"       # visual place recognition backend: "megaloc" (default) | "none"
-feature_vpr: "orb32" # local feature that verifies retrieved candidates (reloc PnP, loop Sim3);
+feature_vpr: "aliked128" # local feature that verifies retrieved candidates (reloc PnP, loop Sim3);
                      # must be in features; defaults to the first feature.
 megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # vpr: megaloc — the model file to load, exported by Thirdparty/placecell/tools/export_megaloc.py:
                                                      # this fp32 file (the reference, fastest on the CPU provider) or "megaloc_models/megaloc_322x322_fp16.onnx"
@@ -20,7 +20,7 @@ megaloc_threads: 4                                   # ONNX Runtime CPU-provider
 megaloc_coreml_units: "ALL"                          # CoreML compute units: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly". The Neural Engine
                                                      # loses accuracy (cos 0.982 vs the 0.9955 floor with the fp16 file on "ALL" / "CPUAndNeuralEngine");
                                                      # the GPU is exact: fp32 file + "ALL" (48 ms) or the fp16 file + "CPUAndGPU" (46 ms, half the download)
-features_models_dir: "feature_models"               # learned feature models on ONNX Runtime (superpoint256, aliked128 and the LightGlue matchers of
+features_models_dir: "feature_models"                # learned feature models on ONNX Runtime (superpoint256, aliked128 and the LightGlue matchers of
                                                      # superpoint256 / aliked128 / sift128): superpoint_v1.onnx, aliked_n16.onnx, lightglue_{superpoint,aliked,sift}.onnx
                                                      # + sidecars; `pixi run download-feature-models` + `pixi run -e export-features export-superpoint` (plan Q6).
                                                      # The fp32 exports by name; the _fp16 twins are approximate (docs/notes/2026-10-16_features_onnxruntime_host.md)
@@ -29,7 +29,7 @@ features_provider: "auto"                            # their ONNX Runtime execut
                                                      # 97 / 217 / 83-178 ms on 4 CPU threads; cv::SIFT 22 ms on the CPU either way
 features_threads: 4                                  # CPU-provider threads per model session (also the CPU-fallback nodes under CUDA / CoreML)
 features_coreml_units: "CPUAndGPU"                         # CoreML compute units for those models: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
-features_static_shapes: true                        # true: load the fixed-shape exports instead of the dynamic files - the detectors' <stem>_<W>x<H>.onnx for the
+features_static_shapes: true                         # true: load the fixed-shape exports instead of the dynamic files - the detectors' <stem>_<W>x<H>.onnx for the
                                                      # frame size (on the first frame) and the matchers' lightglue_<f>_L<L>.onnx padded to L keypoints per side
                                                      # (the smallest L that fits each pair; the dynamic file beyond). Core ML compiles only bounded shapes, so this
                                                      # is the Mac's GPU path (`export-features --static 672x416 --static-length 1024`; the size the tracker logs, not the raw frame size); a missing file is a hard error.
@@ -117,7 +117,7 @@ Tracking.ImageWidth: 0                  # both > 0: resize every frame to exactl
 Tracking.ImageHeight: 0                 # are scaled per axis). Use multiples of 32 (640x480 is), or the crop trims the remainder
 
 # Frame-to-frame tracking
-Tracking.FrameTracking: "optical_flow"          # "reference_keyframe": a descriptor match (LightGlue for the learned features) against the reference
+Tracking.FrameTracking: "reference_keyframe"    # "reference_keyframe": a descriptor match (LightGlue for the learned features) against the reference
                                                 # keyframe on every frame | "optical_flow": KLT of the last frame's tracked points, snapped to the
                                                 # current frame's detected keypoints; the reference-keyframe match only as the fallback. Saves the
                                                 # per-frame matcher call (41 ms on the M1 Pro GPU, 13 ms on CUDA); measured on the gym before it is the default
@@ -151,7 +151,7 @@ Tracking.EmergencyKeyframeCooldown: 10 # min frames between emergency keyframes
 
 # Relocalization
 Tracking.RelocMinMatches: 15          # per-candidate matching gate
-Tracking.RelocInliersHigh: 50         # inliers to accept a pose hypothesis
+Tracking.RelocInliersHigh: 70         # inliers to accept a pose hypothesis
 Tracking.RelocInliersMedium: 30       # above this after the first search: search once more
 Tracking.RelocInliersLow: 10          # below this, abandon the hypothesis
 Tracking.RelocRansacProbability: 0.99  # P4P RANSAC (PnPsolver)
