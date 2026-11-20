@@ -27,9 +27,9 @@ git-clone = "git clone https://github.com/alejandrofontan/AllFeature-VSLAM.git -
 download-megaloc-models = { cmd = "hf download vslamlab/megaloc-models --local-dir megaloc_models", outputs = ["megaloc_models/*.onnx"] }
 download-segmentation-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'efficientvit-seg*' --local-dir segmentation_models", outputs = ["segmentation_models/*.onnx"] }
 # Learned feature models on ONNX Runtime: the four redistributable
-# exports (ALIKED, BSD-3; the three LightGlue matchers, Apache-2.0) with their sidecars come from the HF repo's
+# exports (ALIKED, BSD-3; the three LightGlue matchers, Apache-2.0) with their sidecars are on the HF repo's
 # feature_models/ folder. SuperPoint's weights are Magic Leap's (non-commercial research, no redistribution: plan
-# Q6), so superpoint_v1.onnx is exported locally from the official file by `export-superpoint` (export-features env).
+# Q6), so SuperPoint is never there: it is always exported locally (`export-feature-models`, export-features env).
 # Not part of `setup` any more (export-feature-models makes the files locally). The files on the HF repo predate
 # the precision in the file name ('<stem>.onnx' is '<stem>_fp32.onnx' now): re-upload before relying on this task.
 download-feature-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'feature_models/*' --local-dir .", outputs = ["feature_models/lightglue_superpoint.onnx"] }
@@ -197,9 +197,6 @@ platforms = ["linux-64-cuda", "osx-arm64"]   # osx-arm64 too: every machine expo
 # PYTHONNOUSERSITE: keep ~/.local/lib/pythonX.Y/site-packages out of the env (a stale user-site package there, e.g.
 # an empty `triton` folder, shadows the real module and breaks torch's import) - the placecell export task's lesson
 export-features = { cmd = "python tools/export_features.py", env = { PYTHONNOUSERSITE = "1" } }
-# SuperPoint only (feature_models/superpoint_v1.onnx + fp16 twin + sidecars) - the one model that is not downloaded
-# inputs: a changed export tool invalidates the cached output (pixi skips the task while the output exists otherwise)
-export-superpoint = { cmd = "python tools/export_features.py --only superpoint", env = { PYTHONNOUSERSITE = "1" }, inputs = ["tools/export_features.py"], outputs = ["feature_models/superpoint_v1_fp32.onnx"] }
 # What the settings yaml asks for and nothing else (part of `setup`): the models of the learned features in `features:`,
 # fp32 or fp32 + fp16 twin (features_precision), the padded matchers with features_static_shapes. Files already present
 # are kept; add --force to re-export them (after a change to the export tool). No pixi cache on purpose: the outputs

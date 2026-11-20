@@ -127,7 +127,7 @@ LIGHTGLUE_FEATURES = {
 #     upstream's top-k mode (detection_threshold <= 0). On indoor frames about three quarters of them score below the
 #     old 0.2 threshold, and LightGlue still matches them correctly: 979 against 268 geometrically verified matches
 #     per pair on ETH table_3 (tools/feature_lab, 359 MegaLoc pairs) - at 9x the matching time when the host keeps
-#     all 2048, which is what its keypoint budget (settings/aliked128_settings.yaml maxNumFeatures) is for.
+#     all 2048, which is what its keypoint budget (Tracking.FeaturesFraction of the feature's maximum) is for.
 #   threshold: every NMS maximum above 0.2, a data-dependent number - the previous default. Exported under another
 #     name ('aliked_n16_threshold...'), so both can sit in feature_models/ and be compared.
 ALIKED_TRUE_TOPK = True
@@ -137,7 +137,7 @@ ALIKED_TOPK = 2048
 # SuperPoint's detection threshold, set by main from --superpoint-threshold. It is not in the graph (which ends at the
 # dense maps): the export writes it to the sidecar and the host tail applies it, so changing it needs no re-export.
 #   0 (the default since 2026-11-13): no threshold - every NMS maximum is a candidate and the host keeps the best
-#     FeatureExtractor.maxNumFeatures. As with ALIKED, the low-scoring keypoints match correctly: on ETH table_3
+#     of its keypoint budget (Tracking.FeaturesFraction). As with ALIKED, the low-scoring keypoints match correctly: on ETH table_3
 #     (tools/feature_lab, 1000 MegaLoc pairs) 532 geometrically verified matches per pair at a 1000 budget and 956 at
 #     2048, against 363 with the threshold (647 keypoints per image) - matching time grows with the budget.
 #   0.0005: upstream's default, the previous value.
@@ -251,7 +251,7 @@ def download_weights(name: str) -> Path:
 def load_models(max_keypoints: int) -> dict[str, nn.Module]:
     """The five upstream models in eval mode, built for export. Keys: superpoint, aliked, sift (the extractors; sift is
     OpenCV-based and only produces references) and lightglue_{superpoint,aliked,sift} (the matchers).
-    `max_keypoints` is the budget the C++ side applies (FeatureExtractor.maxNumFeatures): the upstream SuperPoint
+    `max_keypoints` is the budget the C++ side applies (FeatureExtractorSettings::max_num_features): the upstream SuperPoint
     and SIFT references keep the best `max_keypoints` so that the (a) column matches what C++ will output; ALIKED is
     threshold mode (no cap), as the host runs it today."""
     from lightglue import ALIKED, SIFT, LightGlue, SuperPoint  # noqa: E402  (from the pinned clone)
@@ -1127,7 +1127,7 @@ def superpoint_contract(sp: nn.Module) -> list[str]:
         "output_tensors: [scores, descriptors]",
         "# Tail (C++, tools/export_features.py superpoint_tail is the specification): NMS with nms_radius (upstream",
         "# simple_nms: 9x9 max-pool == scores, two suppression passes), border pixels within remove_borders set to -1,",
-        "# keep scores > detection_threshold, best max_keypoints (FeatureExtractor.maxNumFeatures) by score, sample the",
+        "# keep scores > detection_threshold, best max_keypoints (the host's keypoint budget) by score, sample the",
         "# descriptor map bilinearly at ((x,y) - 4 + 0.5) / (W8 - 4 - 0.5, H8 - 4 - 0.5) * 2 - 1 with align_corners=true,",
         "# then L2-normalise.",
         f"nms_radius: {c.nms_radius}   # host tail",
@@ -1198,8 +1198,8 @@ ALL_EXPORTS = ("superpoint", "aliked", "lightglue_superpoint", "lightglue_aliked
 def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None = None,
                static_size: tuple[int, int] | None = None, top_k: int = 2048,
                static_length: int | None = None, fp16: bool = True, skip_existing: bool = False) -> dict[str, Path]:
-    """The fp32 exports + fp16 twins + sidecars into feature_models/ (`only`: a subset of ALL_EXPORTS, e.g. the
-    `export-superpoint` pixi task - SuperPoint is the one model every machine exports itself).
+    """The fp32 exports + fp16 twins + sidecars into feature_models/ (`only`: a subset of ALL_EXPORTS; --settings
+    passes the exports the host's `features` need).
     `static_size` (W, H): export the two detectors with that fixed input size as '<stem>_<W>x<H>_fp32.onnx' instead of
     the dynamic-axis files - Core ML compiles only bounded shapes (with dynamic H, W every partition fell
     back to the CPU); ALIKED then also runs its detector in top-k mode (`top_k` keypoints, every shape static).
@@ -1467,7 +1467,7 @@ def main() -> None:
     parser.add_argument("--images", nargs="*", type=Path, default=[],
                         help="frames for the (a) vs (b) check (an even number; consecutive ones form the match pairs)")
     parser.add_argument("--max-keypoints", type=int, default=1000,
-                        help="keypoint budget of the SuperPoint / SIFT references (FeatureExtractor.maxNumFeatures)")
+                        help="keypoint budget of the SuperPoint / SIFT references (the host's budget for the feature)")
     parser.add_argument("--only", nargs="+", choices=ALL_EXPORTS, default=None,
                         help="export only these models (default: all five)")
     parser.add_argument("--static", metavar="WxH", default=None,
@@ -1480,7 +1480,7 @@ def main() -> None:
                              "aliked_n16_threshold*.onnx")
     parser.add_argument("--superpoint-threshold", type=float, default=0.0,
                         help="SuperPoint detection threshold written to the sidecar and applied by the host tail: 0 "
-                             "(default) none, the best maxNumFeatures maxima; 0.0005 is upstream's default")
+                             "(default) none, the best maxima up to the keypoint budget; 0.0005 is upstream's default")
     parser.add_argument("--static-length", metavar="L", type=int, default=None,
                         help="export the matchers padded to L keypoints per side as lightglue_<feat>_L<L>_fp32.onnx (Core ML); "
                              "with --static given too, only the static files are exported")

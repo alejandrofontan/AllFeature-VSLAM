@@ -31,7 +31,7 @@
  * Output: cv::DMatch with queryIdx in set 0, trainIdx in set 1 and distance = 1 - matching score (the host's
  * convention for learned matchers).
  *
- * Threading: per-call buffers only; OrtSession::run serialises the session's runs (concurrent CUDA runs returned zero
+ * Threading: per-call buffers only and no state written by match(); OrtSession::run serialises the session's runs (concurrent CUDA runs returned zero
  * matches to one caller, host note finding 7), so one instance serves the tracking and
  * the local-mapping threads.
  */
@@ -49,6 +49,13 @@
 namespace AF_VSLAM::onnx
 {
 
+/// Wall time of one match(): the graph alone, and graph + packing + match extraction.
+struct MatchTiming
+{
+    double graph_ms{0.0};
+    double total_ms{0.0};
+};
+
 class LightGlueOnnx
 {
   public:
@@ -58,10 +65,11 @@ class LightGlueOnnx
 
     /// Match set 0 against set 1. Descriptors: [N, input_dim] CV_32F, one row per keypoint, as the extractor
     /// produced them. `image_size0/1`: the size of the image each set was detected in (keypoint normalisation,
-    /// per side: the two may come from different cameras).
+    /// per side: the two may come from different cameras). `timing`, when given, receives this call's wall times:
+    /// they are returned per call, not kept in the object, because several threads match on one instance.
     std::vector<cv::DMatch> match(const std::vector<cv::KeyPoint>& keypoints0, const cv::Mat& descriptors0,
                                   const std::vector<cv::KeyPoint>& keypoints1, const cv::Mat& descriptors1,
-                                  cv::Size image_size0, cv::Size image_size1);
+                                  cv::Size image_size0, cv::Size image_size1, MatchTiming* timing = nullptr);
 
     [[nodiscard]] const std::string& features() const { return features_; }
     [[nodiscard]] int input_dim() const { return input_dim_; }
@@ -72,9 +80,6 @@ class LightGlueOnnx
     [[nodiscard]] const std::string& provider() const { return session_.provider(); }
     [[nodiscard]] const std::string& model_path() const { return session_.model_path(); }
     [[nodiscard]] const std::string& precision() const { return precision_; }
-    /// Wall time of the last match(): the graph alone, and graph + packing + match extraction.
-    [[nodiscard]] double last_graph_ms() const { return last_graph_ms_; }
-    [[nodiscard]] double last_total_ms() const { return last_total_ms_; }
 
   private:
     void read_sidecar(const std::string& path);
@@ -89,8 +94,6 @@ class LightGlueOnnx
     float mask_padded_value_{-1e9f};
     std::string precision_{"fp32"};
     std::string output_name_;
-    double last_graph_ms_{0.0};
-    double last_total_ms_{0.0};
 };
 
 } // namespace AF_VSLAM::onnx

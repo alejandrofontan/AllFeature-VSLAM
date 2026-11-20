@@ -12,6 +12,7 @@ namespace AF_VSLAM {
 
     class Image {
     public:
+        // Both leave `img` 8-bit: a 16-bit or floating-point image is converted (Image.cpp, to_8bit)
         explicit Image(const std::string& imagePath);
         explicit Image(const cv::Mat& image);
         cv::Mat img{};

@@ -10,6 +10,7 @@
 #include<System.h>
 #include<FrameDrawer.h>
 #include "SegmentationSettings.h"
+#include "TerminateHandler.h"
 
 static bool hasPrefix(const std::string& str, const std::string& prefix) {
     return str.rfind(prefix, 0) == 0;
@@ -19,6 +20,7 @@ static constexpr float kAssumedFps = 30.f;
 static constexpr int kWaitKeyMs = 30;
 
 int main(int argc, char** argv) {
+    AF_VSLAM::install_terminate_handler();   // what an uncaught exception does (TerminateHandler.h)
 
     // ALLFEATURE_VSLAM inputs (defaults are for local testing; override via CLI: key:value)
     std::string calibration_yaml{"/home/alejandro/Desktop/calibration.yaml"};

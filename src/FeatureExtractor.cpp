@@ -19,7 +19,7 @@ AF_VSLAM::FeatureExtractorSettings::FeatureExtractorSettings(const FeatureType& 
         max_num_features(max_num_features), feature_type(feature_type){
 
     AF_CONFIG_BEGIN("Feature Extractor Settings");
-    AF_CONFIG_FIELD("maxNumFeatures:     ", max_num_features);
+    AF_CONFIG_FIELD("max_num_features:   ", max_num_features);
     AF_CONFIG_END();
 }
 

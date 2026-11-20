@@ -9,6 +9,42 @@
 #include <opencv2/imgcodecs.hpp>
 #include <iostream>
 #include <filesystem>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+
+#include "afvslam_log.hpp"
+
+namespace
+{
+
+// The colour image is 8-bit everywhere downstream (the extractors, the viewer, the point colours). A file
+// read as stored can be deeper: 16-bit is scaled from its full range, floating point from [0, 1].
+void to_8bit(cv::Mat& image)
+{
+    if (image.empty() || image.depth() == CV_8U)
+        return;
+
+    double scale = 0.0;
+    switch (image.depth()) {
+        case CV_16U: scale = 255.0 / 65535.0; break;
+        case CV_32F:
+        case CV_64F: scale = 255.0; break;
+        default:
+            throw std::runtime_error("Image: unsupported pixel depth (OpenCV depth code " + std::to_string(image.depth())
+                                     + "); 8-bit, 16-bit unsigned and floating-point images are accepted");
+    }
+
+    static std::once_flag warned;
+    std::call_once(warned, [&image] {
+        AF_WARN("Image: " << (image.depth() == CV_16U ? "16-bit" : "floating-point") << " images are converted to 8-bit, "
+                << (image.depth() == CV_16U ? "taking 0..65535 as the full range" : "taking 0..1 as the full range")
+                << " (reported once)");
+    });
+    image.convertTo(image, CV_8U, scale);
+}
+
+}
 
 AF_VSLAM::Image::Image(const std::string &imagePath): imageFile{imagePath} {
 
@@ -16,6 +52,7 @@ AF_VSLAM::Image::Image(const std::string &imagePath): imageFile{imagePath} {
     if (img.empty()) {
         std::cerr << "Failed to load image: " << imageFile << std::endl;
     }
+    to_8bit(img);
 
     std::filesystem::path p(imagePath);
     imageName = p.filename().string();
@@ -23,6 +60,7 @@ AF_VSLAM::Image::Image(const std::string &imagePath): imageFile{imagePath} {
 
 AF_VSLAM::Image::Image(const cv::Mat& image){
     img = image.clone();
+    to_8bit(img);
 }
 
 void AF_VSLAM::Image::LoadDepth(const std::string &depthPath, const float& depthFactor) {

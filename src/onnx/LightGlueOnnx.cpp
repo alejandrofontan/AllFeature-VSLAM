@@ -132,15 +132,16 @@ void LightGlueOnnx::read_sidecar(const std::string& path)
 
 std::vector<cv::DMatch> LightGlueOnnx::match(const std::vector<cv::KeyPoint>& keypoints0, const cv::Mat& descriptors0,
                                              const std::vector<cv::KeyPoint>& keypoints1, const cv::Mat& descriptors1,
-                                             const cv::Size image_size0, const cv::Size image_size1)
+                                             const cv::Size image_size0, const cv::Size image_size1,
+                                             MatchTiming* const timing)
 {
     const auto t_start = Clock::now();
     std::vector<cv::DMatch> matches;
     const int n0 = static_cast<int>(keypoints0.size()), n1 = static_cast<int>(keypoints1.size());
     if (n0 < min_keypoints_ || n1 < min_keypoints_)
     {
-        last_graph_ms_ = 0.0;
-        last_total_ms_ = ms_since(t_start);
+        if (timing)
+            *timing = {0.0, ms_since(t_start)};
         return matches;
     }
     if (padded_length_ > 0 && (n0 > padded_length_ || n1 > padded_length_))
@@ -178,7 +179,7 @@ std::vector<cv::DMatch> LightGlueOnnx::match(const std::vector<cv::KeyPoint>& ke
     }
     const auto t_graph = Clock::now();
     const std::vector<Tensor> outputs = session_.run(inputs);
-    last_graph_ms_ = ms_since(t_graph);
+    const double graph_ms = ms_since(t_graph);
 
     // upstream filter_matches on the [N0, N1] block of the [R0+1, R1+1] log-assignment (dustbin row/column and, in a
     // padded file, the padded rows/columns excluded from the argmax)
@@ -216,7 +217,8 @@ std::vector<cv::DMatch> LightGlueOnnx::match(const std::vector<cv::KeyPoint>& ke
         if (score > filter_threshold_)
             matches.emplace_back(i, j, 1.0f - score);
     }
-    last_total_ms_ = ms_since(t_start);
+    if (timing)
+        *timing = {graph_ms, ms_since(t_start)};
     return matches;
 }
 

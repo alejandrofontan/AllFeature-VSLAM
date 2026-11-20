@@ -24,7 +24,6 @@
 #include <csignal>
 #include <cstdlib>
 #include <exception>
-#include <execinfo.h>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -41,20 +40,7 @@
 #include "afvslam_log.hpp"
 #include "SegmentationSettings.h"
 #include "Report.h"
-
-// An uncaught exception on any thread ends the process; name it and print the throwing thread's stack first
-// (symbolised by the dynamic linker: `atos -o <binary> <addr>` resolves what it leaves as offsets)
-static void on_terminate() {
-    if (auto current = std::current_exception()) {
-        try { std::rethrow_exception(current); }
-        catch (const std::exception& e) { std::cerr << "terminate: uncaught " << e.what() << std::endl; }
-        catch (...) { std::cerr << "terminate: uncaught non-standard exception" << std::endl; }
-    }
-    void* frames[64];
-    const int depth = backtrace(frames, 64);
-    backtrace_symbols_fd(frames, depth, 2);
-    std::abort();
-}
+#include "TerminateHandler.h"
 
 static arstream::Subscriber* g_subscriber = nullptr;
 static AF_VSLAM::System* g_system = nullptr;
@@ -116,7 +102,7 @@ private:
 #endif
 
 int main(int argc, char** argv) {
-    std::set_terminate(on_terminate);
+    AF_VSLAM::install_terminate_handler();   // what an uncaught exception does (TerminateHandler.h)
     af_print_banner();
 
     // AF_VSLAM inputs

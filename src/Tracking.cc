@@ -169,7 +169,9 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     mask_image_ = im.mask;
     profiler.resize_done(resize_times_);
 
-    // Create the frame (feature extraction)
+    // Create the frame (feature extraction). The report context is set first, with the id the frame is about
+    // to take, so that what the extraction reports is stamped with its own frame
+    AF_REPORT_CONTEXT("tracking", Frame::next_id);
     current_frame_ = Frame(im, timestamp, feature_extractor_left_, place_recognition_, calibration_);
     profiler.frame_created(frame_times_);
 

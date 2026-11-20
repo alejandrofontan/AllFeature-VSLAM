@@ -71,8 +71,9 @@ std::unique_ptr<LightGlueOnnx> load_matcher(const std::string& stem, const std::
     cv::randn(desc, 0.0, 1.0);
     for (int i = 0; i < desc.rows; ++i)
         cv::normalize(desc.row(i), desc.row(i));
-    matcher->match(kps, desc, kps, desc, cv::Size(640, 480), cv::Size(640, 480));
-    AF_INFO("LightGlue (" << features << ") warmed up: " << matcher->last_graph_ms() << " ms for 16x16 points on "
+    MatchTiming timing;
+    matcher->match(kps, desc, kps, desc, cv::Size(640, 480), cv::Size(640, 480), &timing);
+    AF_INFO("LightGlue (" << features << ") warmed up: " << timing.graph_ms << " ms for 16x16 points on "
                           << path);
     return matcher;
 }

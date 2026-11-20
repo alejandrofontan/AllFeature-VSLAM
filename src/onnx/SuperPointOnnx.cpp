@@ -165,13 +165,16 @@ void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector
             dst[c] = static_cast<float>(row[c]) * (1.0f / 255.0f);
     }
     const auto t_graph = Clock::now();
-    const std::vector<Tensor> outputs = session_.run({{input_name_, input.data(), {1, 1, H, W}}});
+    std::vector<Tensor> outputs = session_.run({{input_name_, input.data(), {1, 1, H, W}}});
     last_graph_ms_ = ms_since(t_graph);
 
-    const Tensor& scores = outputs[0];        // [1, 1, H8, W8] (rank 3 in older exports: the last two dims count)
+    Tensor& scores = outputs[0];              // [1, 1, H8, W8]; the NMS below works on it in place
     const Tensor& desc_map = outputs[1];      // [1, dim, H8/8, W8/8]
-    const int h8 = static_cast<int>(scores.shape[scores.shape.size() - 2]);
-    const int w8 = static_cast<int>(scores.shape[scores.shape.size() - 1]);
+    if (scores.shape.size() != 4 || desc_map.shape.size() != 4)
+        throw std::runtime_error("SuperPointOnnx: expected rank-4 scores and descriptors from " + session_.model_path() +
+                                 " - an old export? Re-export it");
+    const int h8 = static_cast<int>(scores.dim(2));
+    const int w8 = static_cast<int>(scores.dim(3));
     const int dim = static_cast<int>(desc_map.dim(1));
     const int map_h = static_cast<int>(desc_map.dim(2)), map_w = static_cast<int>(desc_map.dim(3));
     if (dim != descriptor_dim_)
@@ -180,7 +183,7 @@ void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector
 
     // Tail, upstream order: NMS -> border mask -> threshold (and the host's mask) -> best K by score -> (x, y) ->
     // sample -> L2
-    cv::Mat score_map(h8, w8, CV_32F, const_cast<float*>(scores.data.data()));
+    cv::Mat score_map(h8, w8, CV_32F, scores.data.data());
     simple_nms(score_map, nms_radius_);
     struct Candidate
     {

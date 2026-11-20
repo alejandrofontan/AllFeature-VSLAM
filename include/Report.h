@@ -59,9 +59,9 @@ private:
 // call's id is restored. Entries reported outside any scope have call id 0.
 //
 // On exit it also records the call's wall-clock duration as a `time_ms` entry. That is
-// inclusive time: everything the function calls, and any wait on a lock, counts. `time_ms` is
-// the one entry that differs between otherwise identical runs -- filter it out before comparing
-// two reports.
+// inclusive time: everything the function calls, and any wait on a lock, counts. The `time_ms`
+// entries (this one and any key ending in `.time_ms`, such as `extraction.time_ms`) are the ones
+// that differ between otherwise identical runs -- filter them out before comparing two reports.
 class ReportScope
 {
 public:

@@ -13,6 +13,7 @@
 #include "afvslam_log.hpp"
 #include "SegmentationSettings.h"
 #include "Report.h"
+#include "TerminateHandler.h"
 
 #include "DebugKeyStepper.h"
 #include "FramePacer.h"
@@ -38,6 +39,7 @@ bool hasPrefix(const std::string& str, const std::string& prefix) {
 
 int main(int argc, char **argv)
 {
+    AF_VSLAM::install_terminate_handler();   // what an uncaught exception does (TerminateHandler.h)
     af_print_banner();
 
     // AF_VSLAM inputs

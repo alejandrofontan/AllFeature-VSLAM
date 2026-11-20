@@ -254,9 +254,10 @@ int main(int argc, char** argv)
         std::vector<double> graph_ms, total_ms;
         for (int i = 0; i < iters; ++i)
         {
-            lg.match(kps0, desc0, kps1, desc1, cv::Size(ref0.width, ref0.height), cv::Size(ref1.width, ref1.height));
-            graph_ms.push_back(lg.last_graph_ms());
-            total_ms.push_back(lg.last_total_ms());
+            AF_VSLAM::onnx::MatchTiming timing;
+            lg.match(kps0, desc0, kps1, desc1, cv::Size(ref0.width, ref0.height), cv::Size(ref1.width, ref1.height), &timing);
+            graph_ms.push_back(timing.graph_ms);
+            total_ms.push_back(timing.total_ms);
         }
         // identical assignments: the (i0, i1) pairs present in both lists; score difference over those
         std::map<std::array<int, 2>, float> ref_map;

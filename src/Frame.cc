@@ -1,7 +1,10 @@
 #include "Frame.h"
+#include "FeatureFactory.h"
 #include "MapPoint.h"
+#include "Report.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <exception>
 #include <stdexcept>
@@ -49,11 +52,16 @@ void Frame::extract_features(const Image& img,
     std::vector<KeypointData> outs(jobs.size());
 
     std::vector<std::exception_ptr> errors(jobs.size());
+    [[maybe_unused]] std::vector<double> extraction_ms(jobs.size(), 0.0);   // per feature type, for the report
+
+    AF_REPORT_SCOPE();
 
     #pragma omp parallel for schedule(dynamic, 1)
     for(int i = 0; i < static_cast<int>(jobs.size()); ++i) {
         try {
+            const auto start = std::chrono::steady_clock::now();
             (*jobs[i].second)(img, outs[i]);
+            extraction_ms[i] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         } catch(...) {
             errors[i] = std::current_exception();
         }
@@ -62,6 +70,22 @@ void Frame::extract_features(const Image& img,
     for(const std::exception_ptr& error : errors)
         if(error)
             std::rethrow_exception(error);
+
+#ifdef ALLFEATURE_REPORT
+    // Reported here, on the calling thread: the workers above do not carry its report context
+    for(size_t i = 0; i < jobs.size(); ++i) {
+        const std::string& name = get_feature(jobs[i].first).get_feature_name();
+        const std::vector<cv::KeyPoint>& keypoints = outs[i].keypoints;
+        AF_REPORT("keypoints.extracted", name, keypoints.size());
+        AF_REPORT("extraction.time_ms", name, extraction_ms[i]);
+        if(keypoints.empty())
+            continue;
+        const auto [lowest, highest] = std::minmax_element(keypoints.begin(), keypoints.end(),
+            [](const cv::KeyPoint& a, const cv::KeyPoint& b) { return a.response < b.response; });
+        AF_REPORT("keypoints.response_min", name, lowest->response);   // the detector's own score: the units differ per feature
+        AF_REPORT("keypoints.response_max", name, highest->response);
+    }
+#endif
 
     feature_types.reserve(jobs.size());
     for(size_t i = 0; i < jobs.size(); ++i) {
