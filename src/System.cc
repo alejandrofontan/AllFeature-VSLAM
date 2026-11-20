@@ -86,9 +86,9 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //   features_provider, features_threads, features_coreml_units: their ONNX Runtime
     //                      execution provider / CPU threads / Core ML units (same semantics
     //                      as the megaloc_* keys; "auto", 4, "ALL" by default)
-    //   features_static_shapes: false (default) — load the fixed-shape exports instead
-    //                      (detectors '<stem>_<W>x<H>_<precision>.onnx' for the frame size, matchers
-    //                      'lightglue_<f>_L<L>_<precision>.onnx' padded to L): the Core ML path
+    //   features_static_shapes: false (default) — load the fixed-shape exports: matchers
+    //                      'lightglue_<f>_L<L>_<precision>.onnx' padded to L, and on the Core ML
+    //                      provider the detectors' '<stem>_<W>x<H>_<precision>.onnx'
     //   features_precision: "fp32" (default) | "fp16" — which export of every learned
     //                      feature model is loaded ('<stem>_fp32.onnx' or '<stem>_fp16.onnx')
     //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:

@@ -9,10 +9,12 @@
  *
  * superpoint256: SuperPoint keypoints + 256-d descriptors on ONNX Runtime (onnx/SuperPointOnnx.h), matched by
  * LightGlue-SuperPoint (LIGHTGLUE_SUPERPOINT -> onnx::shared_lightglue("superpoint") in FeatureMatcher). The model
- * file is `<features_models_dir>/superpoint_v1.onnx` (exported locally by `pixi run export-superpoint`: the Magic
- * Leap weights are not redistributable); the runtime provider comes from the features_* settings. With
- * `features_static_shapes` the fixed-size export `superpoint_v1_<W>x<H>_<precision>.onnx` for the frame size is loaded on the
- * first frame instead (Core ML compiles only bounded shapes; `export-features --only superpoint --static WxH`).
+ * file is `<features_models_dir>/superpoint_v1_<precision>.onnx` (exported locally by `pixi run setup`: the Magic
+ * Leap weights are not redistributable); the runtime provider comes from the features_* settings. The session is
+ * created and warmed up in prepare(), at the frame size, before the first frame. On the Core ML provider with
+ * `features_static_shapes` the fixed-size export `superpoint_v1_<W>x<H>_<precision>.onnx` for that size is loaded
+ * instead (Core ML compiles only bounded shapes; `export-features --only superpoint --static WxH`); the other
+ * providers always load the dynamic file.
  */
 
 #pragma once
@@ -58,16 +60,21 @@ public:
 
     void detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override;
 
+    // Creates the session for width x height frames and warms it up at that size
+    void prepare(int width, int height) override;
+
     [[nodiscard]] float get_keypoint_size(const cv::KeyPoint &keypoint) const override;
 
 private:
     /// Create the session on `path` and warm it up on a blank width x height frame.
     void load(const std::string& path, int width, int height);
-    /// The session for a width x height frame: the one loaded, or (static shapes) the export for that size.
+    /// The session for a width x height frame: the one loaded, or a new one when none is loaded yet or the loaded
+    /// file is a fixed-size export for another size.
     onnx::SuperPointOnnx& extractor_for(int width, int height);
 
     std::unique_ptr<onnx::SuperPointOnnx> extractor_;
-    int loaded_width_{0}, loaded_height_{0};   // the static export's size (static shapes only)
+    bool fixed_size_{false};                    // the loaded file is a fixed-size export (Core ML with static shapes)
+    int loaded_width_{0}, loaded_height_{0};   // the size the session was created and warmed up for
 };
 
 inline std::shared_ptr<FeatureExtractor> Superpoint256::create_extractor(

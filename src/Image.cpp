@@ -54,11 +54,11 @@ void AF_VSLAM::Image::LoadDepth(const std::string &depthPath, const float& depth
     }
 }
 
-void AF_VSLAM::Image::get_gray_image(const bool& rgb) {
+void AF_VSLAM::Image::get_gray_image() {
     if (img.channels() == 3) {
-        cvtColor(img, grayImg, rgb ? cv::COLOR_RGB2GRAY : cv::COLOR_BGR2GRAY);
+        cvtColor(img, grayImg, cv::COLOR_BGR2GRAY);
     } else if (img.channels() == 4) {
-        cvtColor(img, grayImg, rgb ? cv::COLOR_RGBA2GRAY : cv::COLOR_BGRA2GRAY);
+        cvtColor(img, grayImg, cv::COLOR_BGRA2GRAY);
     } else {
         grayImg = img;
     }

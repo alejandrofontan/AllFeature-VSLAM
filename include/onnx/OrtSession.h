@@ -82,6 +82,11 @@ struct Tensor
     [[nodiscard]] int64_t dim(size_t i) const { return shape.at(i); }
 };
 
+/// The provider a session asked for `requested` ("auto" | "cuda" | "coreml" | "cpu") gets in this ONNX Runtime build:
+/// "cuda", "coreml" or "cpu". An unavailable one falls back to auto (with a warning when `warn`).
+/// @throws std::runtime_error if `requested` is none of the four
+std::string resolve_provider(const std::string& requested, bool warn = true);
+
 /// Marks the calling thread's run() calls, on every session, as priority (true) or normal (false, the default):
 /// a waiting priority call is served before any waiting normal call. See the header comment, Threading.
 void set_run_priority(bool priority);

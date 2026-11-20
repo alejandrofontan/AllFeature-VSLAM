@@ -58,7 +58,6 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.InitGbaIterations", params.init_gba_iterations);
     read_if_present("Tracking.InitMinTrackedPoints", params.init_min_tracked_points);
     read_if_present("Tracking.InitMinDepthSamples", params.init_min_depth_samples);
-    read_if_present("Tracking.InitExtractorFeaturesScale", params.init_extractor_features_scale);
     float features_fraction = params.features_fraction.load();
     read_if_present("Tracking.FeaturesFraction", features_fraction);
     params.features_fraction.store(features_fraction);
@@ -116,14 +115,18 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
     // Frame window for the post-relocalization embargo/strictness (~1 s at the camera rate)
     max_frames_ = static_cast<size_t>(fps_);
 
-    // One extractor pair per feature type: normal, and a denser one for initialization, with the budget
-    // of Tracking.FeaturesFraction (features_budget); apply_features_fraction updates it later
+    // One extractor per feature type, used for initialization and tracking alike, with the budget of
+    // Tracking.FeaturesFraction (features_budget); apply_features_fraction updates it later
     features_fraction_in_use_ = std::clamp(params.features_fraction.load(), 0.0f, 1.0f);
-    for (const FeatureType ft : feature_types){
-        const int max_num_features = features_budget(ft, features_fraction_in_use_);
-        feature_extractor_left_[ft] = get_feature_extractor(max_num_features, ft);
-        init_feature_extractor_[ft] = get_feature_extractor(params.init_extractor_features_scale * max_num_features, ft);
-    }
+    for (const FeatureType ft : feature_types)
+        feature_extractor_left_[ft] = get_feature_extractor(features_budget(ft, features_fraction_in_use_), ft);
+
+    // Every model session is created and warmed up now, at the size the frames will have (Image::fix_image_size
+    // crops the resized frame to multiples of 32), so the first frame does not pay for it
+    const int frame_width = fix_image_size_ ? (image_width_ / 32) * 32 : image_width_;
+    const int frame_height = fix_image_size_ ? (image_height_ / 32) * 32 : image_height_;
+    for (const auto& [ft, extractor] : feature_extractor_left_)
+        extractor->prepare(frame_width, frame_height);
 
     matcher_ = std::make_shared<FeatureMatcher>(feature_types, "Tracking");
     if(params.frame_tracking == "optical_flow")
@@ -147,7 +150,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     GrabProfiler profiler{};
 
     // Convert image to grayscale and resize
-    im.get_gray_image(is_rgb_);
+    im.get_gray_image();
     if(fix_image_size_)
         im.fix_image_size(image_width_, image_height_);
 
@@ -166,10 +169,8 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     mask_image_ = im.mask;
     profiler.resize_done(resize_times_);
 
-    // Create the frame (feature extraction); initialization uses the denser extractor set
-    const auto& extractors = (state_ == TrackingState::NOT_INITIALIZED || state_ == TrackingState::NO_IMAGES_YET)
-                           ? init_feature_extractor_ : feature_extractor_left_;
-    current_frame_ = Frame(im, timestamp, extractors, place_recognition_, calibration_);
+    // Create the frame (feature extraction)
+    current_frame_ = Frame(im, timestamp, feature_extractor_left_, place_recognition_, calibration_);
     profiler.frame_created(frame_times_);
 
     const mat4f Tcw = track();

@@ -138,25 +138,34 @@ OrtSession::OrtSession(const std::string& onnx_path, const OrtSettings& settings
 
 OrtSession::~OrtSession() = default;
 
-std::string OrtSession::append_providers(Ort::SessionOptions& options, const OrtSettings& settings) const
+std::string resolve_provider(const std::string& requested, const bool warn)
 {
     const std::vector<std::string> available = Ort::GetAvailableProviders();
     const bool has_cuda = has_provider(available, "CUDAExecutionProvider");
     const bool has_coreml = has_provider(available, "CoreMLExecutionProvider");
-    std::string chosen = settings.provider;
+    std::string chosen = requested;
     if (chosen != "auto" && chosen != "cuda" && chosen != "coreml" && chosen != "cpu")
-        throw std::runtime_error("OrtSession: provider must be auto|cuda|coreml|cpu, got " + settings.provider);
+        throw std::runtime_error("OrtSession: provider must be auto|cuda|coreml|cpu, got " + requested);
     if ((chosen == "cuda" && !has_cuda) || (chosen == "coreml" && !has_coreml))
     {
-        std::ostringstream list;
-        for (const auto& p : available)
-            list << " " << p;
-        AF_WARN("OrtSession: provider '" << chosen << "' is not available in this ONNX Runtime (" << list.str()
-                << " ) - falling back to auto");
+        if (warn)
+        {
+            std::ostringstream list;
+            for (const auto& p : available)
+                list << " " << p;
+            AF_WARN("OrtSession: provider '" << chosen << "' is not available in this ONNX Runtime (" << list.str()
+                    << " ) - falling back to auto");
+        }
         chosen = "auto";
     }
     if (chosen == "auto")
         chosen = has_cuda ? "cuda" : has_coreml ? "coreml" : "cpu";
+    return chosen;
+}
+
+std::string OrtSession::append_providers(Ort::SessionOptions& options, const OrtSettings& settings) const
+{
+    const std::string chosen = resolve_provider(settings.provider);
     if (chosen == "cuda")
     {
         // use_tf32=0: the CUDA provider runs float32 convolutions in TF32 by default on Ampere+ GPUs (10-bit

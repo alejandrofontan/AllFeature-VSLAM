@@ -33,10 +33,11 @@ features_precision: "fp32"                            # which export of every le
                                                      # 739x458: LightGlue 2.3x faster (21 -> 9 ms at 1000x1000 keypoints) with ~1% of the matches different;
                                                      # SuperPoint / ALIKED 1.2x faster with 3.4% / 1.2% of the keypoints different. After changing this or
                                                      # `features`, `pixi run setup` (or `pixi run -e export-features export-feature-models`) exports what is missing
-features_static_shapes: true                         # true: load the fixed-shape exports instead of the dynamic files - the detectors' <stem>_<W>x<H>_<precision>.onnx for the
-                                                     # frame size (on the first frame) and the matchers' lightglue_<f>_L<L>_<precision>.onnx padded to L keypoints per side
-                                                     # (the smallest L that fits each pair; the dynamic file beyond). Core ML compiles only bounded shapes, so this
-                                                     # is the Mac's GPU path (`export-features --static 672x416 --static-length 1024`; the size the tracker logs, not the raw frame size); a missing file is a hard error.
+features_static_shapes: true                         # true: load the fixed-shape exports - the matchers' lightglue_<f>_L<L>_<precision>.onnx padded to L keypoints per side
+                                                     # (the smallest L that fits each pair; the dynamic file beyond) and, on the Core ML provider only, the detectors'
+                                                     # <stem>_<W>x<H>_<precision>.onnx for the frame size (`export-features --static 672x416`: the size the tracker logs,
+                                                     # not the raw frame size; a missing one falls back to the dynamic file with a warning). Core ML compiles only
+                                                     # bounded shapes, so this is the Mac's GPU path; on CUDA and the CPU the detectors always load the dynamic file.
 segmentation: "none" # online semantic segmentation: "efficientvit" | "none"
 debug: false
 max_frame_wait: 0.2  # s; the mono/rgbd executables replay the sequence at its own rate (sleep for the rest of the
@@ -114,7 +115,6 @@ Tracking.InitGbaIterations: 20          # global-BA iterations on the initial ma
 Tracking.InitMinTrackedPoints: 100      # min tracked points to accept the initial map
 Tracking.InitMinDepthSamples: 10        # min sensor-depth samples to prefer metric scale
 Tracking.FeaturesFraction: 0.5         # keypoints per frame: this share (0..1) of each feature's maximum (orb32 4000, aliked128/superpoint256 2048, others 2000)
-Tracking.InitExtractorFeaturesScale: 4  # init extractor keeps this x more keypoints
 Tracking.NominalImageArea: 307200       # px (640x480): frames are resized to this area (aspect ratio kept) and cropped to a multiple of 32,
                                         # e.g. 739x458 -> 672x416; the size the log reports is the one a static export (features_static_shapes) needs
 Tracking.ImageWidth: 0                  # both > 0: resize every frame to exactly this size instead (the aspect ratio may change; the intrinsics

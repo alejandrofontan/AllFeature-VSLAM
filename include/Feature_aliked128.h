@@ -9,12 +9,13 @@
  *
  * aliked128: ALIKED-n16 sub-pixel keypoints + 128-d descriptors on ONNX Runtime (onnx/AlikedOnnx.h), matched by
  * LightGlue-ALIKED (LIGHTGLUE_ALIKED -> onnx::shared_lightglue("aliked") in FeatureMatcher). The model file is
- * `<features_models_dir>/aliked_n16.onnx` (`pixi run download-feature-models`). The graph detects in top-k mode
+ * `<features_models_dir>/aliked_n16_<precision>.onnx` (`pixi run setup`). The graph detects in top-k mode
  * (its 2048 best keypoints whatever their score; a threshold-mode export, 'aliked_n16_threshold.onnx', exists for
  * comparison); the host's octree distribution brings them down to the keypoint budget (max_num_features), so the
- * budget is what sets the number of keypoints now. With `features_static_shapes` the fixed-size export
- * `aliked_n16_<W>x<H>_<precision>.onnx` for the frame size is loaded on the first frame instead (Core ML;
- * `export-features --only aliked --static WxH`).
+ * budget is what sets the number of keypoints now. The session is created and warmed up in prepare(), at the frame
+ * size, before the first frame. On the Core ML provider with `features_static_shapes` the fixed-size export
+ * `aliked_n16_<W>x<H>_<precision>.onnx` for that size is loaded instead (`export-features --only aliked --static
+ * WxH`); the other providers always load the dynamic file.
  */
 
 #pragma once
@@ -60,16 +61,21 @@ public:
 
     void detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors) override;
 
+    // Creates the session for width x height frames and warms it up at that size
+    void prepare(int width, int height) override;
+
     [[nodiscard]] float get_keypoint_size(const cv::KeyPoint &keypoint) const override;
 
 private:
     /// Create the session on `path` and warm it up on a blank width x height frame.
     void load(const std::string& path, int width, int height);
-    /// The session for a width x height frame: the one loaded, or (static shapes) the export for that size.
+    /// The session for a width x height frame: the one loaded, or a new one when none is loaded yet or the loaded
+    /// file is a fixed-size export for another size.
     onnx::AlikedOnnx& extractor_for(int width, int height);
 
     std::unique_ptr<onnx::AlikedOnnx> extractor_;
-    int loaded_width_{0}, loaded_height_{0};   // the static export's size (static shapes only)
+    bool fixed_size_{false};                    // the loaded file is a fixed-size export (Core ML with static shapes)
+    int loaded_width_{0}, loaded_height_{0};   // the size the session was created and warmed up for
 };
 
 inline std::shared_ptr<FeatureExtractor> Aliked128::create_extractor(

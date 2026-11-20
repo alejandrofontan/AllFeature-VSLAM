@@ -15,11 +15,12 @@
 
 AF_VSLAM::Superpoint256Extractor::Superpoint256Extractor(std::shared_ptr<FeatureExtractorSettings> &settings_):
         FeatureExtractor(settings_){
-    AF_INFO("Initializing SuperPoint256 feature extractor (ONNX Runtime)...");
-    if (onnx::feature_models_config().static_shapes)
-        AF_INFO("SuperPoint256: features_static_shapes is on - the fixed-size export for the frame size loads on the first frame");
-    else
-        load(onnx::feature_model_path(Superpoint256::s_model_stem), 640, 480);
+    AF_INFO("Initializing SuperPoint256 feature extractor (ONNX Runtime)...");   // the session is created in prepare()
+}
+
+void AF_VSLAM::Superpoint256Extractor::prepare(const int width, const int height)
+{
+    extractor_for(width, height);
 }
 
 void AF_VSLAM::Superpoint256Extractor::load(const std::string& path, const int width, const int height)
@@ -37,22 +38,33 @@ void AF_VSLAM::Superpoint256Extractor::load(const std::string& path, const int w
 
 AF_VSLAM::onnx::SuperPointOnnx& AF_VSLAM::Superpoint256Extractor::extractor_for(const int width, const int height)
 {
-    if (onnx::feature_models_config().static_shapes && (!extractor_ || width != loaded_width_ || height != loaded_height_))
-    {
-        if (extractor_)
-            AF_WARN("SuperPoint256: frame size changed to " << width << "x" << height << " - loading its static export");
-        load(onnx::static_model_path(Superpoint256::s_model_stem, width, height, "superpoint"), width, height);
-        loaded_width_ = width;
-        loaded_height_ = height;
-    }
+    // The dynamic file takes any size; a fixed-size export only its own
+    if (extractor_ && (!fixed_size_ || (width == loaded_width_ && height == loaded_height_)))
+        return *extractor_;
+    if (extractor_)
+        AF_WARN("SuperPoint256: frame size changed to " << width << "x" << height << " - loading its fixed-size export");
+
+    // Fixed-size exports are Core ML's need (it compiles only bounded shapes); the other providers gain nothing
+    // from them, so they load the dynamic file whatever features_static_shapes says
+    const onnx::FeatureModelsConfig& config = onnx::feature_models_config();
+    const std::string dynamic_path = onnx::feature_model_path(Superpoint256::s_model_stem);
+    const bool wants_fixed = config.static_shapes && onnx::resolve_provider(config.ort.provider, false) == "coreml";
+    const std::string path = wants_fixed ? onnx::static_model_path(Superpoint256::s_model_stem, width, height, "superpoint")
+                                         : dynamic_path;
+    load(path, width, height);
+    fixed_size_ = path != dynamic_path;   // false too when the fixed-size file is missing (static_model_path warned)
+    loaded_width_ = width;
+    loaded_height_ = height;
     return *extractor_;
 }
 
 void AF_VSLAM::Superpoint256Extractor::detect_and_compute(
     const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors)
 {
-    // The dense graph + the C++ tail (threshold, best max_num_features, descriptor sampling, L2); then the mask
-    extractor_for(img.grayImg.cols, img.grayImg.rows).detect(img.grayImg, settings->max_num_features, keypoints, descriptors);
+    // The dense graph + the C++ tail (threshold, mask, best max_num_features, descriptor sampling, L2). The mask goes
+    // in before the budget is taken; the filter after it only acts on a mask detect() could not use (type or size)
+    extractor_for(img.grayImg.cols, img.grayImg.rows).detect(img.grayImg, settings->max_num_features, keypoints, descriptors,
+                                                             img.mask);
     filter_keypoints_by_mask(keypoints, descriptors, img.mask);
 }
 

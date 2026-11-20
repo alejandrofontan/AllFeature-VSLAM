@@ -54,6 +54,10 @@ public:
 
     void operator()(const Image& img, KeypointData& data);
 
+    // Called once before the first frame with the size the frames will have: an extractor with a model
+    // session creates it and warms it up here, so the first frame does not pay for it
+    virtual void prepare(int /*width*/, int /*height*/) {}
+
     // Changes the keypoint budget (settings->max_num_features). An extractor that derives something from
     // it at construction redoes that here (orb32: the per-level split; sift128: cv::SIFT's nfeatures).
     virtual void set_budget(int max_num_features) { settings->max_num_features = max_num_features; }

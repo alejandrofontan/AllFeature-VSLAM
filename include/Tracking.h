@@ -88,7 +88,6 @@ struct TrackingParameters
     int init_min_depth_samples{10};   // min sensor-depth ratio samples to prefer depth-verified scale
 
     // grab_image()
-    int init_extractor_features_scale{4}; // the init extractor keeps this x more keypoints
     // keypoints per frame = this share (0..1) of each feature's get_max_features(). Editable online (the
     // viewer's "Features Fraction" slider); Tracking applies a change before the next frame's extraction.
     std::atomic<float> features_fraction{0.5f};
@@ -285,7 +284,6 @@ protected:
     // nominal-area rescale when fix_image_size_ is set.
     void load_camera_parameters(const std::string& calibration_yaml, const std::string& settings_yaml);
     // Build a feature extractor that keeps at most max_num_features keypoints per frame
-    // (initialization uses a denser set).
     static std::shared_ptr<FeatureExtractor> get_feature_extractor(int max_num_features, FeatureType feature_type);
     // Keypoints per frame of a feature at a features fraction (share of its get_max_features())
     static int features_budget(FeatureType feature_type, float features_fraction);
@@ -300,7 +298,6 @@ protected:
 
     // Features
     std::map<FeatureType, std::shared_ptr<FeatureExtractor>> feature_extractor_left_;
-    std::map<FeatureType, std::shared_ptr<FeatureExtractor>> init_feature_extractor_;
 
     // Visual place recognition backend (relocalization queries; keyframes register
     // themselves in its database)
@@ -375,9 +372,6 @@ protected:
     Frame last_frame_;
     mat4f last_frame_relative_pose_; // Tlr of last_frame_ (see store_relative_pose)
     FrameId last_reloc_frame_id_{0};
-
-    //Color order (true RGB, false BGR, ignored if grayscale)
-    bool is_rgb_{true};
 
     // Fix image size to nominal size 307200 pixels
     bool fix_image_size_{false};

@@ -45,8 +45,11 @@ class SuperPointOnnx
 
     /// Detect on a grey (CV_8UC1; BGR is converted) image. `max_keypoints` <= 0 keeps every point above the
     /// threshold. Descriptors: [N, 256] CV_32F, L2-normalised, one row per keypoint.
+    /// `mask` (CV_8UC1, at least the size of the score map; empty = none): a pixel at 0 cannot be a keypoint. It is
+    /// applied before the best `max_keypoints` are taken, so the budget is filled from the unmasked area. A mask of
+    /// another type or a smaller size is ignored.
     void detect(const cv::Mat& image, int max_keypoints, std::vector<cv::KeyPoint>& keypoints,
-                cv::Mat& descriptors);
+                cv::Mat& descriptors, const cv::Mat& mask = cv::Mat());
 
     [[nodiscard]] const std::string& provider() const { return session_.provider(); }
     [[nodiscard]] const std::string& model_path() const { return session_.model_path(); }

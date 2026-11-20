@@ -88,9 +88,6 @@ void Tracking::load_camera_parameters(const std::string& calibration_yaml, const
     if(fps_ <= 0.0f)
         fps_ = DEFAULT_FPS;
 
-    // Color order (assignment to the member — a local here once shadowed it, #14)
-    is_rgb_ = cam["cam_type"].as<std::string>() != "bgr";
-
     AF_CONFIG_BEGIN("Camera Parameters");
     AF_CONFIG_FIELD("cam_name:           ", cam["cam_name"].as<std::string>());
     AF_CONFIG_FIELD("cam_type:           ", cam["cam_type"].as<std::string>());
@@ -104,10 +101,6 @@ void Tracking::load_camera_parameters(const std::string& calibration_yaml, const
     if (cam["distortion_type"] && cam["distortion_coefficients"])
         AF_CONFIG_FIELD("distortion_coefficients: ", distortion_coefficients.t());
     AF_CONFIG_FIELD("fps:                ", fps_);
-    if(is_rgb_)
-        AF_CONFIG_FIELD("color order:        ", "RGB (ignored if grayscale)");
-    else
-        AF_CONFIG_FIELD("color order:        ", "BGR (ignored if grayscale)");
     AF_CONFIG_END();
 }
 
@@ -124,8 +117,7 @@ int Tracking::features_budget(const FeatureType feature_type, const float featur
     return static_cast<int>(std::lround(features_fraction * get_feature(feature_type).get_max_features()));
 }
 
-// Gives every extractor the budget of Tracking.FeaturesFraction when it changed; the
-// initialization extractor keeps init_extractor_features_scale times as many.
+// Gives every extractor the budget of Tracking.FeaturesFraction when it changed.
 void Tracking::apply_features_fraction()
 {
     const float features_fraction = std::clamp(params.features_fraction.load(), 0.0f, 1.0f);
@@ -137,7 +129,6 @@ void Tracking::apply_features_fraction()
     {
         const int max_num_features = features_budget(ft, features_fraction);
         feature_extractor_left_.at(ft)->set_budget(max_num_features);
-        init_feature_extractor_.at(ft)->set_budget(params.init_extractor_features_scale * max_num_features);
         AF_INFO("[Tracking] " << get_feature(ft).get_feature_name() << ": " << max_num_features
                 << " keypoints per frame (features fraction " << features_fraction << ")");
     }

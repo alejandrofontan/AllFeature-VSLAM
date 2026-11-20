@@ -143,7 +143,7 @@ void SuperPointOnnx::read_sidecar(const std::string& path)
 }
 
 void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector<cv::KeyPoint>& keypoints,
-                            cv::Mat& descriptors)
+                            cv::Mat& descriptors, const cv::Mat& mask)
 {
     const auto t_start = Clock::now();
     cv::Mat grey;
@@ -178,7 +178,8 @@ void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector
         throw std::runtime_error("SuperPointOnnx: descriptor map has " + std::to_string(dim) + " channels, sidecar says " +
                                  std::to_string(descriptor_dim_));
 
-    // Tail, upstream order: NMS -> border mask -> threshold -> best K by score -> (x, y) -> sample -> L2
+    // Tail, upstream order: NMS -> border mask -> threshold (and the host's mask) -> best K by score -> (x, y) ->
+    // sample -> L2
     cv::Mat score_map(h8, w8, CV_32F, const_cast<float*>(scores.data.data()));
     simple_nms(score_map, nms_radius_);
     struct Candidate
@@ -188,11 +189,13 @@ void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector
     };
     std::vector<Candidate> candidates;
     const int b = remove_borders_;
+    const bool use_mask = !mask.empty() && mask.type() == CV_8UC1 && mask.cols >= w8 && mask.rows >= h8;
     for (int y = b; y < h8 - b; ++y)                                   // border pixels are -1 upstream: never above threshold
     {
         const float* row = score_map.ptr<float>(y);
+        const uchar* mask_row = use_mask ? mask.ptr<uchar>(y) : nullptr;
         for (int x = b; x < w8 - b; ++x)
-            if (row[x] > detection_threshold_)
+            if (row[x] > detection_threshold_ && (!mask_row || mask_row[x] != 0))   // masked out: not a candidate
                 candidates.push_back({row[x], x, y});
     }
     if (max_keypoints > 0 && static_cast<int>(candidates.size()) > max_keypoints)

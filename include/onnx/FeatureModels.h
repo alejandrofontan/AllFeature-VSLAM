@@ -15,12 +15,13 @@
  *   features_provider      "auto"            ONNX Runtime execution provider for all of them: auto|cuda|coreml|cpu
  *   features_threads       4                 CPU-provider threads per session
  *   features_coreml_units  "ALL"             Core ML compute units
- *   features_static_shapes false             load the fixed-shape exports instead of the dynamic files: the detectors'
- *                                            '<stem>_<W>x<H>_<precision>.onnx' for the frame size (loaded on the first frame), the
- *                                            matchers' 'lightglue_<f>_L<L>_<precision>.onnx' padded to L keypoints per side (the
- *                                            smallest L that fits each pair; the dynamic file when none does). Core ML
- *                                            compiles only bounded shapes, so this is the Mac's GPU path (step 7);
- *                                            a missing file is a hard error naming the export command.
+ *   features_static_shapes false             load the fixed-shape exports: the matchers' 'lightglue_<f>_L<L>_<precision>.onnx'
+ *                                            padded to L keypoints per side (the smallest L that fits each pair; the
+ *                                            dynamic file when none does; no padded file at all is a hard error), and,
+ *                                            on the Core ML provider only, the detectors' '<stem>_<W>x<H>_<precision>.onnx'
+ *                                            for the frame size (a missing one falls back to the dynamic file with a
+ *                                            warning). Core ML compiles only bounded shapes, so this is the Mac's GPU
+ *                                            path (step 7); on CUDA and the CPU the detectors load the dynamic file.
  *   features_precision     "fp32"            which export of every model is loaded, named in the file:
  *                                            "fp32" ('<stem>_fp32.onnx', exact against the PyTorch reference) or
  *                                            "fp16" ('<stem>_fp16.onnx': weights and internal tensors in half precision,
