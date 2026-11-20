@@ -227,8 +227,8 @@ export-features = { features = ["export-features"], no-default-feature = true }
 # https://prefix.dev/vslamlab/vslamlab by CI on vX.Y.Z tags (.github/workflows/conda-package.yml).
 #   pixi publish --clean --target-dir output
 # The same CMake project as build.sh, with ALLFEATURE_NATIVE off: x86-64-v3 and a fixed GPU list for the
-# Light_Glue_CPP kernels ("90" also embeds PTX for newer GPUs). No model weights are shipped: the executables resolve
-# megaloc_models/, segmentation_models/, superpoint_models/ and lightglue_models/ against the cwd, and VSLAM-LAB's
+# CUDA kernels ("90" also embeds PTX for newer GPUs). No model weights are shipped: the executables resolve
+# megaloc_models/, segmentation_models/ and feature_models/ against the cwd, and VSLAM-LAB's
 # allfeature environment downloads them next to the settings.
 [package]
 name = "allfeature"

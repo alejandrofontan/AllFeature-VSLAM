@@ -3,7 +3,7 @@
 # The pixi/conda cuda-nvcc package's activation script unconditionally injects `-ccbin=${CXX}`
 # via NVCC_PREPEND_FLAGS, for the benefit of nvcc invocations outside CMake's control. Every CUDA
 # target built here goes through CMake's own native `LANGUAGES CUDA` support instead (see
-# Thirdparty/Light_Glue_CPP/CMakeLists.txt, Thirdparty/SuperPoint-LightGlue-TensorRT), which
+# Thirdparty/Segmentation-TensorRT), which
 # independently supplies its own `-ccbin` derived from CMAKE_CXX_COMPILER on every nvcc call --
 # same compiler, so it's a harmless but noisy duplicate ("incompatible redefinition for option
 # 'compiler-bindir'"). Clearing it here (scoped to this script's process only, not the conda
@@ -94,7 +94,7 @@ done
 LIBRARY_PATH=$(realpath "$0")
 LIBRARY_DIR=$(dirname "$LIBRARY_PATH")
 
-# Build AllFeature-VSLAM (Light_Glue_CPP and the other Thirdparty libraries are CMake subdirectories)
+# Build AllFeature-VSLAM (the Thirdparty libraries are CMake subdirectories)
 library_name="AllFeature-VSLAM"
 source_folder="${LIBRARY_DIR}"
 build_library ${library_name} ${source_folder} ${verbose} ${force_build}

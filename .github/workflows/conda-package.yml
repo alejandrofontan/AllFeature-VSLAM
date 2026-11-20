@@ -66,9 +66,6 @@ jobs:
               missing=$(ldd "$CONDA_PREFIX/bin/$b" | grep "not found" | grep -v "libcuda.so" || true)
               if [ -n "$missing" ]; then echo "$b: unresolved libraries:"; echo "$missing"; status=1; fi
             done
-            if grep -a -o -E "[[:print:]]{0,60}lightglue_models" "$CONDA_PREFIX/lib/libAllFeature-VSLAM.so" | grep -q "/lightglue_models"; then
-              echo "LIGHTGLUE_MODELS_DIR compiled in as an absolute path"; status=1
-            fi
             for f in share/allfeature-vslamlab/vslamlab_allfeature-dev_settings.yaml include/AllFeature-VSLAM/System.h; do
               [ -f "$CONDA_PREFIX/$f" ] || { echo "missing $f"; status=1; }
             done
