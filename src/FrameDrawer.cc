@@ -32,10 +32,6 @@
 namespace AF_VSLAM
 {
 
-// Defined here (not per-executable) so every binary linking the library gets
-// it; entry points that want collapse dumps assign it from their exp_folder.
-std::string FrameDrawer::exp_folder{};
-
 FrameDrawer::FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& feature_types):
     mpMap(pMap), feature_types(feature_types)
 {
@@ -166,19 +162,6 @@ cv::Mat FrameDrawer::DrawFrame()
     cv::Mat imWithInfo;
     DrawTextInfo(im,state, imWithInfo);
 
-    // int compression = 9; // PNG compression 0..9
-    // std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, compression};
-    // static string lastSavedImage = "";
-    // if ((imName!="") && (imName != lastSavedImage)) {
-    //     std::cout << "Saving frame: " << imName << std::endl;
-    //     std::filesystem::path full = std::filesystem::path(AF_VSLAM::FrameDrawer::exp_folder) / imName;
-    //     std::string path = full.string();
-    //     cv::Mat out = im;
-    //     cv::cvtColor(out, out, cv::COLOR_RGB2BGR);
-    //     bool ok = cv::imwrite(path, out, params);
-    //     lastSavedImage = imName;
-    // }
-
     return imWithInfo;
 }
 
@@ -225,7 +208,6 @@ void FrameDrawer::update(Tracking *pTracker)
     unique_lock<mutex> lock(mMutex);
     pTracker->color_image_.copyTo(mIm);
     pTracker->mask_image_.copyTo(mMask);
-    imName = pTracker->image_name_;
     mvCurrentKeys = pTracker->current_frame_.raw_keypoints;
     for (auto const& [feature_type, raw_keypoints] : mvCurrentKeys) {
         N[feature_type] = raw_keypoints.size();

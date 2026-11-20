@@ -180,7 +180,6 @@ public:
     cv::Mat grey_image_;      // current grey frame after resize/crop (optical-flow tracking)
     cv::Mat last_grey_image_; // the previous frame's, whatever its tracking state
     cv::Mat mask_image_; // segmentation mask of the current image (1 = static, 0 = dynamic); empty when segmentation is off
-    std::string image_name_;
 
     // Initialization Variables (mono)
     std::vector<int> init_matches_;

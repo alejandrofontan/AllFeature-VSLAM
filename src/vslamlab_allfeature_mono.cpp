@@ -121,8 +121,6 @@ int main(int argc, char **argv)
     else
         AF_CONFIG_FIELD("Max frame wait (s): ", "none");
 
-    AF_VSLAM::FrameDrawer::exp_folder = exp_folder;
-
     // An unknown name, or a feature this build does not include: one error line and a clean exit
     std::vector<FeatureType> feature_types{};
     try {

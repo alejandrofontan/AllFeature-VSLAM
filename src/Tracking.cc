@@ -164,7 +164,6 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     grey_image_ = im.grayImg.clone();                 // the caller may reuse its Image
     color_image_ = im.img;
     mask_image_ = im.mask;
-    image_name_ = im.imageName;
     profiler.resize_done(resize_times_);
 
     // Create the frame (feature extraction); initialization uses the denser extractor set
