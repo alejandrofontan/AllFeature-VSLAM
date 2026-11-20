@@ -87,8 +87,10 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //                      execution provider / CPU threads / Core ML units (same semantics
     //                      as the megaloc_* keys; "auto", 4, "ALL" by default)
     //   features_static_shapes: false (default) — load the fixed-shape exports instead
-    //                      (detectors '<stem>_<W>x<H>.onnx' for the frame size, matchers
-    //                      'lightglue_<f>_L<L>.onnx' padded to L): the Core ML path
+    //                      (detectors '<stem>_<W>x<H>_<precision>.onnx' for the frame size, matchers
+    //                      'lightglue_<f>_L<L>_<precision>.onnx' padded to L): the Core ML path
+    //   features_precision: "fp32" (default) | "fp16" — which export of every learned
+    //                      feature model is loaded ('<stem>_fp32.onnx' or '<stem>_fp16.onnx')
     //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:
     //                      see PlaceRecognitionMegaLocParameters
     //   PlaceCell.*:       placecell's print manager / profiler / recorder / visualizer
@@ -118,6 +120,9 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         if(settingsNode["features_threads"]) feature_models.ort.threads = settingsNode["features_threads"].as<int>();
         if(settingsNode["features_coreml_units"]) feature_models.ort.coreml_compute_units = settingsNode["features_coreml_units"].as<std::string>();
         if(settingsNode["features_static_shapes"]) feature_models.static_shapes = settingsNode["features_static_shapes"].as<bool>();
+        if(settingsNode["features_precision"]) feature_models.precision = settingsNode["features_precision"].as<std::string>();
+        if(feature_models.precision != "fp32" && feature_models.precision != "fp16")
+            throw std::runtime_error("features_precision must be \"fp32\" or \"fp16\", got \"" + feature_models.precision + "\"");
         if(settingsNode["PlaceRecognition.MegaLocMinSimilarity"])
             megaloc_params.min_similarity = settingsNode["PlaceRecognition.MegaLocMinSimilarity"].as<float>();
         if(settingsNode["PlaceRecognition.MaxCandidates"])

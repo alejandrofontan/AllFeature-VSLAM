@@ -19,7 +19,7 @@ AF_VSLAM::Aliked128Extractor::Aliked128Extractor(std::shared_ptr<FeatureExtracto
     if (onnx::feature_models_config().static_shapes)
         AF_INFO("ALIKED128: features_static_shapes is on - the fixed-size export for the frame size loads on the first frame");
     else
-        load(onnx::feature_model_path(Aliked128::s_model_file), 640, 480);
+        load(onnx::feature_model_path(Aliked128::s_model_stem), 640, 480);
 }
 
 void AF_VSLAM::Aliked128Extractor::load(const std::string& path, const int width, const int height)
@@ -40,7 +40,7 @@ AF_VSLAM::onnx::AlikedOnnx& AF_VSLAM::Aliked128Extractor::extractor_for(const in
     {
         if (extractor_)
             AF_WARN("ALIKED128: frame size changed to " << width << "x" << height << " - loading its static export");
-        load(onnx::static_model_path(Aliked128::s_model_file, width, height, "aliked"), width, height);
+        load(onnx::static_model_path(Aliked128::s_model_stem, width, height, "aliked"), width, height);
         loaded_width_ = width;
         loaded_height_ = height;
     }

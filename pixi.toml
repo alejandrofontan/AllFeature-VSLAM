@@ -30,6 +30,8 @@ download-segmentation-models = { cmd = "hf download vslamlab/allfeature-vslamlab
 # exports (ALIKED, BSD-3; the three LightGlue matchers, Apache-2.0) with their sidecars come from the HF repo's
 # feature_models/ folder. SuperPoint's weights are Magic Leap's (non-commercial research, no redistribution: plan
 # Q6), so superpoint_v1.onnx is exported locally from the official file by `export-superpoint` (export-features env).
+# Not part of `setup` any more (export-feature-models makes the files locally). The files on the HF repo predate
+# the precision in the file name ('<stem>.onnx' is '<stem>_fp32.onnx' now): re-upload before relying on this task.
 download-feature-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'feature_models/*' --local-dir .", outputs = ["feature_models/lightglue_superpoint.onnx"] }
 
 execute-mono = { cmd = "./bin/vslamlab_allfeature_mono" }
@@ -133,7 +135,9 @@ tensorrt-cxx-headers = "*"   # NvInfer.h etc. for compilation (the runtime libs 
 build = { cmd = "./build.sh -v" }
 build-cpu = { cmd = "./build.sh -c" }   # GPU-free build (build-cpu/, same bin/ and lib/): the Mac build, also testable on Linux
 # setup = everything a fresh clone needs to run: fetch the models, then compile
-setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", "download-feature-models", { task = "export-superpoint", environment = "export-features" }, "build"] }
+# The learned feature models are exported here, not downloaded: `export-feature-models` reads the settings yaml and
+# produces the files it asks for (features, features_precision, features_static_shapes), keeping the ones present.
+setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", { task = "export-feature-models", environment = "export-features" }, "build"] }
 
 # macOS: no GPU backend yet (mac_port.md phases 2-5), so setup skips the model downloads; CMake defaults every
 # ALLFEATURE_WITH_* option to OFF on Apple, hence plain `build` is already the GPU-free build there
@@ -195,7 +199,12 @@ platforms = ["linux-64-cuda", "osx-arm64"]   # osx-arm64 too: every machine expo
 export-features = { cmd = "python tools/export_features.py", env = { PYTHONNOUSERSITE = "1" } }
 # SuperPoint only (feature_models/superpoint_v1.onnx + fp16 twin + sidecars) - the one model that is not downloaded
 # inputs: a changed export tool invalidates the cached output (pixi skips the task while the output exists otherwise)
-export-superpoint = { cmd = "python tools/export_features.py --only superpoint", env = { PYTHONNOUSERSITE = "1" }, inputs = ["tools/export_features.py"], outputs = ["feature_models/superpoint_v1.onnx"] }
+export-superpoint = { cmd = "python tools/export_features.py --only superpoint", env = { PYTHONNOUSERSITE = "1" }, inputs = ["tools/export_features.py"], outputs = ["feature_models/superpoint_v1_fp32.onnx"] }
+# What the settings yaml asks for and nothing else (part of `setup`): the models of the learned features in `features:`,
+# fp32 or fp32 + fp16 twin (features_precision), the padded matchers with features_static_shapes. Files already present
+# are kept; add --force to re-export them (after a change to the export tool). No pixi cache on purpose: the outputs
+# depend on the settings, and a deleted model file must come back on the next run.
+export-feature-models = { cmd = "python tools/export_features.py --settings vslamlab_allfeature-dev_settings.yaml", env = { PYTHONNOUSERSITE = "1" } }
 # publish the four redistributable exports + sidecars (never SuperPoint, never the references / cache); needs `hf auth login`
 upload-feature-models = { cmd = "hf upload vslamlab/allfeature-vslamlab feature_models feature_models --include='aliked_*.onnx*' --include='lightglue_*.onnx*'" }
 

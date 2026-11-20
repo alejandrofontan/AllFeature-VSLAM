@@ -40,7 +40,7 @@ namespace AF_VSLAM::onnx
 class AlikedOnnx
 {
   public:
-    /// @param onnx_path  'feature_models/aliked_n16.onnx' or its '_fp16' twin
+    /// @param onnx_path  'feature_models/aliked_n16_fp32.onnx' or its '_fp16' twin
     /// @param sidecar_path  empty -> '<onnx_path>.yaml'
     AlikedOnnx(const std::string& onnx_path, const OrtSettings& settings, const std::string& sidecar_path = "");
 

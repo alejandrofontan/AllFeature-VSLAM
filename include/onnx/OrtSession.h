@@ -22,7 +22,7 @@
  *
  * A requested provider that is not available falls back to "auto" with a warning; the CPU provider is always
  * last, so any node a provider does not support still runs. Precision is a property of the file (the export
- * writes '<model>.onnx' in fp32 and '<model>_fp16.onnx' with fp16 weights; I/O float32 in both) and is read by
+ * writes '<model>_fp32.onnx' and '<model>_fp16.onnx' with fp16 weights; I/O float32 in both) and is read by
  * the model wrappers from the sidecar '<model>.onnx.yaml'.
  *
  * Threading: run() keeps no per-call state, but the calls on one session are SERIALISED by a mutex. ONNX Runtime

@@ -19,7 +19,7 @@ AF_VSLAM::Superpoint256Extractor::Superpoint256Extractor(std::shared_ptr<Feature
     if (onnx::feature_models_config().static_shapes)
         AF_INFO("SuperPoint256: features_static_shapes is on - the fixed-size export for the frame size loads on the first frame");
     else
-        load(onnx::feature_model_path(Superpoint256::s_model_file), 640, 480);
+        load(onnx::feature_model_path(Superpoint256::s_model_stem), 640, 480);
 }
 
 void AF_VSLAM::Superpoint256Extractor::load(const std::string& path, const int width, const int height)
@@ -41,7 +41,7 @@ AF_VSLAM::onnx::SuperPointOnnx& AF_VSLAM::Superpoint256Extractor::extractor_for(
     {
         if (extractor_)
             AF_WARN("SuperPoint256: frame size changed to " << width << "x" << height << " - loading its static export");
-        load(onnx::static_model_path(Superpoint256::s_model_file, width, height, "superpoint"), width, height);
+        load(onnx::static_model_path(Superpoint256::s_model_stem, width, height, "superpoint"), width, height);
         loaded_width_ = width;
         loaded_height_ = height;
     }

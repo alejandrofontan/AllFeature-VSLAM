@@ -21,7 +21,7 @@
  * `filter_matches`: mutual row/column argmax over the [N0, N1] block and exp(score) > filter_threshold. Fewer than
  * two keypoints on a side (sidecar `min_keypoints`) gives no matches: the graph has no empty-set branch.
  *
- * Padded files ('lightglue_<features>_L<L>.onnx', sidecar `padded_length` L; tools/export_features.py
+ * Padded files ('lightglue_<features>_L<L>_<precision>.onnx', sidecar `padded_length` L; tools/export_features.py
  * LightGluePaddedExport, the Core ML lever of step 7: Core ML compiles only bounded shapes): both sides are padded
  * to exactly L rows (zeros) and two more inputs, mask_0 / mask_1 [1,L], carry 0 for a real row and the sidecar's
  * `mask_padded_value` for a padded one - the additive attention bias that keeps real keypoints from attending to
@@ -52,7 +52,7 @@ namespace AF_VSLAM::onnx
 class LightGlueOnnx
 {
   public:
-    /// @param onnx_path  'feature_models/lightglue_<features>.onnx' or its '_fp16' twin
+    /// @param onnx_path  'feature_models/lightglue_<features>_fp32.onnx' or its '_fp16' twin
     /// @param sidecar_path  empty -> '<onnx_path>.yaml'
     LightGlueOnnx(const std::string& onnx_path, const OrtSettings& settings, const std::string& sidecar_path = "");
 

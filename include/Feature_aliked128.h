@@ -13,7 +13,7 @@
  * (its 2048 best keypoints whatever their score; a threshold-mode export, 'aliked_n16_threshold.onnx', exists for
  * comparison); the host's octree distribution brings them down to the keypoint budget (max_num_features), so the
  * budget is what sets the number of keypoints now. With `features_static_shapes` the fixed-size export
- * `aliked_n16_<W>x<H>.onnx` for the frame size is loaded on the first frame instead (Core ML;
+ * `aliked_n16_<W>x<H>_<precision>.onnx` for the frame size is loaded on the first frame instead (Core ML;
  * `export-features --only aliked --static WxH`).
  */
 
@@ -42,8 +42,9 @@ public:
     std::shared_ptr<FeatureExtractor> create_extractor(
         std::shared_ptr<FeatureExtractorSettings> settings) const override;
 
-    /// The model file inside features_models_dir (fp32 export of tools/export_features.py)
-    inline static const std::string s_model_file = "aliked_n16.onnx";
+    /// The model's file stem inside features_models_dir: 'aliked_n16_fp32.onnx' or 'aliked_n16_fp16.onnx', by
+    /// features_precision (onnx::feature_model_path)
+    inline static const std::string s_model_stem = "aliked_n16";
 
 private:
     inline static const std::string s_feature_name = "aliked128";

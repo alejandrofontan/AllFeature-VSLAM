@@ -11,7 +11,7 @@
  * LightGlue-SuperPoint (LIGHTGLUE_SUPERPOINT -> onnx::shared_lightglue("superpoint") in FeatureMatcher). The model
  * file is `<features_models_dir>/superpoint_v1.onnx` (exported locally by `pixi run export-superpoint`: the Magic
  * Leap weights are not redistributable); the runtime provider comes from the features_* settings. With
- * `features_static_shapes` the fixed-size export `superpoint_v1_<W>x<H>.onnx` for the frame size is loaded on the
+ * `features_static_shapes` the fixed-size export `superpoint_v1_<W>x<H>_<precision>.onnx` for the frame size is loaded on the
  * first frame instead (Core ML compiles only bounded shapes; `export-features --only superpoint --static WxH`).
  */
 
@@ -40,8 +40,9 @@ public:
     std::shared_ptr<FeatureExtractor> create_extractor(
         std::shared_ptr<FeatureExtractorSettings> settings) const override;
 
-    /// The model file inside features_models_dir (fp32 export of tools/export_features.py)
-    inline static const std::string s_model_file = "superpoint_v1.onnx";
+    /// The model's file stem inside features_models_dir: 'superpoint_v1_fp32.onnx' or 'superpoint_v1_fp16.onnx', by
+    /// features_precision (onnx::feature_model_path)
+    inline static const std::string s_model_stem = "superpoint_v1";
 
 private:
     inline static const std::string s_feature_name = "superpoint256";

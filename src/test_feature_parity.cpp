@@ -8,12 +8,12 @@
  * Exit code 0 = the T2 thresholds hold (--min-fraction, --min-cos; the Core ML provider is measured with
  * looser ones), 1 = they do not, 2 = usage / unsupported model.
  *
- *   detector:  ./bin/test_feature_parity --model feature_models/superpoint_v1.onnx \
+ *   detector:  ./bin/test_feature_parity --model feature_models/superpoint_v1_fp32.onnx \
  *                  --image <frame.png> --reference feature_models/reference/<frame>.superpoint.txt
- *              (same with feature_models/aliked_n16.onnx and <frame>.aliked.txt)
+ *              (same with feature_models/aliked_n16_fp32.onnx and <frame>.aliked.txt)
  *   sift:      ./bin/test_feature_parity --model sift --image <frame.png> --reference <frame>.sift.txt
  *              (cv::SIFT on the CPU, no ONNX file; the reference is cv2.SIFT through lightglue/sift.py)
- *   matcher:   ./bin/test_feature_parity --model feature_models/lightglue_superpoint.onnx \
+ *   matcher:   ./bin/test_feature_parity --model feature_models/lightglue_superpoint_fp32.onnx \
  *                  --reference0 <frame0>.superpoint.txt --reference1 <frame1>.superpoint.txt \
  *                  --matches <frame0>__<frame1>.lightglue_superpoint.txt
  *   common:    [--provider auto|cuda|coreml|cpu] [--threads 4] [--coreml-units ALL|CPUAndGPU|CPUAndNeuralEngine|CPUOnly]

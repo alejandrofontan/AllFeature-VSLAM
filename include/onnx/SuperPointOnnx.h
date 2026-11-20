@@ -39,7 +39,7 @@ namespace AF_VSLAM::onnx
 class SuperPointOnnx
 {
   public:
-    /// @param onnx_path  'feature_models/superpoint_v1.onnx' or its '_fp16' twin
+    /// @param onnx_path  'feature_models/superpoint_v1_fp32.onnx' or its '_fp16' twin
     /// @param sidecar_path  empty -> '<onnx_path>.yaml'
     SuperPointOnnx(const std::string& onnx_path, const OrtSettings& settings, const std::string& sidecar_path = "");
 

@@ -97,8 +97,8 @@ OrtSession::OrtSession(const std::string& onnx_path, const OrtSettings& settings
     shared_env();   // must exist before any provider API call: the CUDA provider options use the Env's logger
     if (!std::filesystem::exists(model_path_))
         throw std::runtime_error("OrtSession: model file not found: " + model_path_ +
-                                 " (export it with `pixi run -e export-features export-features` or run the "
-                                 "download task)");
+                                 " (export what the settings ask for with `pixi run -e export-features "
+                                 "export-feature-models`)");
     // A fixed small thread count, never the core count: the models share the machine with the SLAM threads.
     // Sequential execution: one graph at a time, no inter-op parallelism to reason about.
     options_.SetIntraOpNumThreads(settings.threads);
@@ -182,7 +182,7 @@ std::string OrtSession::append_providers(Ort::SessionOptions& options, const Ort
     else if (chosen == "coreml")
     {
         // MLProgram: the Core ML format with the widest operator coverage (macOS 12+). Dynamic input shapes are
-        // allowed here, but Core ML compiles only bounded ones: the static '<model>_<W>x<H>.onnx' exports are what
+        // allowed here, but Core ML compiles only bounded ones: the static '<model>_<W>x<H>_<precision>.onnx' exports are what
         // runs on the GPU (step 7). The compiled model is cached next to the ONNX, in a sub-folder named after the
         // file's content (see file_content_hash), so later sessions skip the compile and a re-export never meets a
         // stale compiled model.

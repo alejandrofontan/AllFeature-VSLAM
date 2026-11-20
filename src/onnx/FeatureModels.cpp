@@ -15,6 +15,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "afvslam_log.hpp"
@@ -25,11 +27,20 @@ namespace AF_VSLAM::onnx
 namespace
 {
 
-/// The padded exports of one variant present in models_dir: the L of every 'lightglue_<features>_L<L>.onnx'
-/// (the '_fp16' twins have a non-numeric tail and are skipped), ascending.
+/// "_fp32" or "_fp16" (features_precision): what every model's file name carries before '.onnx'.
+std::string precision_suffix()
+{
+    const std::string& precision = feature_models_config().precision;
+    if (precision != "fp32" && precision != "fp16")
+        throw std::runtime_error("features_precision must be \"fp32\" or \"fp16\", got \"" + precision + "\"");
+    return "_" + precision;
+}
+
+/// The padded exports of one variant present in models_dir, in the configured precision: the L of every
+/// 'lightglue_<features>_L<L>_<precision>.onnx', ascending.
 std::vector<int> padded_lengths(const std::string& features)
 {
-    const std::string prefix = "lightglue_" + features + "_L", ext = ".onnx";
+    const std::string prefix = "lightglue_" + features + "_L", ext = precision_suffix() + ".onnx";
     std::vector<int> lengths;
     std::error_code ec;
     for (const auto& entry : std::filesystem::directory_iterator(feature_models_config().models_dir, ec))
@@ -49,9 +60,10 @@ std::vector<int> padded_lengths(const std::string& features)
 
 /// Create and warm up one matcher session: the first Run of a session pays allocation and (CUDA / Core ML) kernel
 /// selection; keep it out of the first frame. Sixteen points per side on a 640x480 frame.
-std::unique_ptr<LightGlueOnnx> load_matcher(const std::string& file, const std::string& features)
+std::unique_ptr<LightGlueOnnx> load_matcher(const std::string& stem, const std::string& features)
 {
-    auto matcher = std::make_unique<LightGlueOnnx>(feature_model_path(file), feature_models_config().ort);
+    const std::string path = feature_model_path(stem);
+    auto matcher = std::make_unique<LightGlueOnnx>(path, feature_models_config().ort);
     std::vector<cv::KeyPoint> kps;
     for (int i = 0; i < 16; ++i)
         kps.emplace_back(40.0f * i + 20.0f, 30.0f * (i % 4) + 15.0f, 3.0f, 10.0f * i);
@@ -61,7 +73,7 @@ std::unique_ptr<LightGlueOnnx> load_matcher(const std::string& file, const std::
         cv::normalize(desc.row(i), desc.row(i));
     matcher->match(kps, desc, kps, desc, cv::Size(640, 480), cv::Size(640, 480));
     AF_INFO("LightGlue (" << features << ") warmed up: " << matcher->last_graph_ms() << " ms for 16x16 points on "
-                          << file);
+                          << path);
     return matcher;
 }
 
@@ -83,23 +95,21 @@ FeatureModelsConfig& feature_models_config()
     return config;
 }
 
-std::string feature_model_path(const std::string& file)
+std::string feature_model_path(const std::string& stem)
 {
-    return feature_models_config().models_dir + "/" + file;
+    return feature_models_config().models_dir + "/" + stem + precision_suffix() + ".onnx";
 }
 
-std::string static_model_path(const std::string& file, int width, int height, const std::string& export_key)
+std::string static_model_path(const std::string& stem, int width, int height, const std::string& export_key)
 {
     const std::string size = std::to_string(width) + "x" + std::to_string(height);
-    const std::string stem = file.size() > 5 && file.compare(file.size() - 5, 5, ".onnx") == 0
-                                 ? file.substr(0, file.size() - 5) : file;
-    const std::string path = feature_model_path(stem + "_" + size + ".onnx");
+    const std::string path = feature_model_path(stem + "_" + size);
     if (std::filesystem::exists(path))
         return path;
 
     // No export for this frame size: the dynamic file takes any size (issue #75). It used to be an
     // exception on the tracking thread, which ended the run on its first frame.
-    const std::string dynamic_path = feature_model_path(file);
+    const std::string dynamic_path = feature_model_path(stem);
     AF_WARN("features_static_shapes is on but " << path << " does not exist: using the dynamic file "
             << dynamic_path << " for " << size << " frames. Export the fixed-size one with: "
             "pixi run -e export-features export-features --only " << export_key << " --static " << size
@@ -131,15 +141,15 @@ void scan_padded(Variant& v, const std::string& features)
     v.scanned = true;
     if (v.lengths.empty())
         throw std::runtime_error("features_static_shapes is on but " + feature_models_config().models_dir +
-                                 " has no lightglue_" + features + "_L<L>.onnx; export one with: pixi run -e "
-                                 "export-features export-features --only lightglue_" + features + " --static-length 1024");
+                                 " has no lightglue_" + features + "_L<L>" + precision_suffix() + ".onnx; export what "
+                                 "the settings ask for with: pixi run -e export-features export-feature-models");
 }
 
 LightGlueOnnx& padded_session(Variant& v, const std::string& features, int length)
 {
     auto& slot = v.padded[length];
     if (!slot)
-        slot = load_matcher("lightglue_" + features + "_L" + std::to_string(length) + ".onnx", features);
+        slot = load_matcher("lightglue_" + features + "_L" + std::to_string(length), features);
     return *slot;
 }
 
@@ -150,7 +160,7 @@ std::vector<int> preload_lightglue(const std::string& features)
     std::lock_guard<std::mutex> lock(variants_mutex());
     Variant& v = variants()[features];
     if (!v.dynamic)
-        v.dynamic = load_matcher("lightglue_" + features + ".onnx", features);
+        v.dynamic = load_matcher("lightglue_" + features, features);
     if (!feature_models_config().static_shapes)
         return {};
     scan_padded(v, features);
@@ -178,7 +188,7 @@ LightGlueOnnx& shared_lightglue(const std::string& features, int n_max)
         }
     }
     if (!v.dynamic)
-        v.dynamic = load_matcher("lightglue_" + features + ".onnx", features);
+        v.dynamic = load_matcher("lightglue_" + features, features);
     return *v.dynamic;
 }
 

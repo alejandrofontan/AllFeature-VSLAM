@@ -2,9 +2,9 @@
 """Export the learned feature models to ONNX: SuperPoint, ALIKED and the three LightGlue matchers.
 
 Author: Alejandro Fontan (with Claude, Fable 5.1)
-Version: 0.3 (clone, weights, wrappers, exports, references)
+Version: 0.4 (clone, weights, wrappers, exports, references; --settings)
 Created: 2026-10-16
-Updated: 2026-10-16
+Updated: 2026-11-21
 
 The ONNX file is the contract between the Python side (this script, run once per export on Linux) and the C++ side
 (ONNX Runtime in AllFeature, on Linux and macOS). Steps 2 and 3 of the plan extend this file with the export wrappers,
@@ -34,10 +34,17 @@ self-check, and dumps the upstream outputs on the given frames as the references
 Step 7 (this version) adds the static exports Core ML needs (it compiles only bounded shapes): `--static WxH` fixes
 the detectors' image size (ALIKED then in top-k mode with its deformable convolutions decomposed), `--static-length L`
 pads both sides of the matchers to L keypoints with additive attention masks (`LightGluePaddedExport`); the files
-carry the size in their name (`superpoint_v1_739x458.onnx`, `lightglue_aliked_L1024.onnx`) and the host's
+carry the size in their name (`superpoint_v1_739x458_fp32.onnx`, `lightglue_aliked_L1024_fp32.onnx`) and the host's
 `features_static_shapes` setting selects them.
 
+`--settings <yaml>` (the `export-feature-models` pixi task, part of `pixi run setup`) exports what a settings file asks
+for and nothing else: the models of the learned features in `features:`, in the precision of `features_precision`
+(fp32, or fp32 + its fp16 twin), plus the matchers padded to PADDED_LENGTH when `features_static_shapes` is on. Files
+already present are kept (`--force` re-exports them), so switching a setting and running setup again adds only what is
+missing.
+
 Run from the repository root:  pixi run -e export-features export-features [--images f0 f1 f2 f3]
+                               pixi run -e export-features export-feature-models
 """
 from __future__ import annotations
 
@@ -137,8 +144,71 @@ ALIKED_TOPK = 2048
 SUPERPOINT_THRESHOLD = 0.0
 
 
+# --settings: the exports each learned feature of the host needs (its detector and its LightGlue matcher; sift128's
+# detector is cv::SIFT, no model file), and the padded length exported for the matchers with features_static_shapes.
+FEATURE_EXPORTS = {
+    "superpoint256": ("superpoint", "lightglue_superpoint"),
+    "aliked128": ("aliked", "lightglue_aliked"),
+    "sift128": ("lightglue_sift",),
+}
+PADDED_LENGTH = 1024
+
+
+def read_settings(path: Path):
+    """The keys of the host's settings YAML that decide which model files it loads (System.cc reads the same ones):
+    features, features_precision, features_static_shapes, features_models_dir."""
+    from types import SimpleNamespace
+
+    import yaml
+
+    text = path.read_text()
+    if text.startswith("%YAML"):                 # OpenCV's '%YAML:1.0' header is not a YAML directive
+        text = text.split("\n", 1)[1]
+    root = yaml.safe_load(text) or {}
+    precision = str(root.get("features_precision", "fp32"))
+    if precision not in ("fp32", "fp16"):
+        raise SystemExit(f'{path}: features_precision must be "fp32" or "fp16", got "{precision}"')
+    models_dir = Path(str(root.get("features_models_dir", "feature_models")))
+    return SimpleNamespace(features=[str(f) for f in root.get("features", [])], precision=precision,
+                           static_shapes=bool(root.get("features_static_shapes", False)),
+                           models_dir=models_dir if models_dir.is_absolute() else REPO_DIR / models_dir)
+
+
+def model_path(key: str, size_suffix: str = "", padded_length: int = 0) -> Path:
+    """The fp32 file of one export (a key of ALL_EXPORTS): the detectors' '<stem>[_<W>x<H>]_fp32.onnx', the matchers'
+    'lightglue_<feat>[_L<L>]_fp32.onnx'. The precision is always in the name (the host's features_precision picks
+    '_fp32' or '_fp16'); the fp16 twin is fp16_twin() of it."""
+    if key == "superpoint":
+        return MODELS_DIR / f"superpoint_v1{size_suffix}_fp32.onnx"
+    if key == "aliked":
+        return MODELS_DIR / f"{aliked_stem()}{size_suffix}_fp32.onnx"
+    return MODELS_DIR / (f"{key}_L{padded_length}_fp32.onnx" if padded_length else f"{key}_fp32.onnx")
+
+
+def fp16_twin(path: Path) -> Path:
+    """'<name>_fp32.onnx' -> '<name>_fp16.onnx'."""
+    assert path.name.endswith("_fp32.onnx"), path
+    return path.with_name(path.name[: -len("_fp32.onnx")] + "_fp16.onnx")
+
+
+def sidecar_of(path: Path) -> Path:
+    return path.with_name(path.name + ".yaml")
+
+
+def settings_files(wanted: set[str], fp16: bool, padded_length: int) -> list[Path]:
+    """Every file (models and sidecars) the host loads for these exports: the dynamic file of each, the padded file of
+    each matcher when `padded_length` is set, and with `fp16` their fp16 twins too (the fp32 file is what the twin is
+    converted from, so it is always there)."""
+    models = [model_path(key) for key in sorted(wanted)]
+    if padded_length:
+        models += [model_path(key, padded_length=padded_length) for key in sorted(wanted) if key.startswith("lightglue_")]
+    if fp16:
+        models += [fp16_twin(p) for p in models]
+    return [f for p in models for f in (p, sidecar_of(p))]
+
+
 def aliked_stem() -> str:
-    """The ALIKED file stem of the mode in force: the host loads 'aliked_n16.onnx' (Aliked128::kModelFile)."""
+    """The ALIKED file stem of the mode in force: the host loads 'aliked_n16_<precision>.onnx' (Aliked128::s_model_stem)."""
     return "aliked_n16" if ALIKED_TRUE_TOPK else "aliked_n16_threshold"
 
 
@@ -1042,7 +1112,7 @@ def write_sidecar(onnx_path: Path, model_key: str, weights_key: str | None, comm
         f"exporter: torch.export   # torch {torch.__version__}, opset {opset}",
         f"precision: {precision}   # weights/internal tensors; inputs and outputs are float32 either way",
     ]
-    onnx_path.with_name(onnx_path.name + ".yaml").write_text("\n".join(lines + contract) + "\n")
+    sidecar_of(onnx_path).write_text("\n".join(lines + contract) + "\n")
 
 
 def superpoint_contract(sp: nn.Module) -> list[str]:
@@ -1127,14 +1197,16 @@ ALL_EXPORTS = ("superpoint", "aliked", "lightglue_superpoint", "lightglue_aliked
 
 def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None = None,
                static_size: tuple[int, int] | None = None, top_k: int = 2048,
-               static_length: int | None = None) -> dict[str, Path]:
+               static_length: int | None = None, fp16: bool = True, skip_existing: bool = False) -> dict[str, Path]:
     """The fp32 exports + fp16 twins + sidecars into feature_models/ (`only`: a subset of ALL_EXPORTS, e.g. the
     `export-superpoint` pixi task - SuperPoint is the one model every machine exports itself).
-    `static_size` (W, H): export the two detectors with that fixed input size as '<stem>_<W>x<H>.onnx' instead of
+    `static_size` (W, H): export the two detectors with that fixed input size as '<stem>_<W>x<H>_fp32.onnx' instead of
     the dynamic-axis files - Core ML compiles only bounded shapes (with dynamic H, W every partition fell
     back to the CPU); ALIKED then also runs its detector in top-k mode (`top_k` keypoints, every shape static).
-    `static_length` L: export the matchers padded to L keypoints per side as 'lightglue_<feat>_L<L>.onnx'. With one
+    `static_length` L: export the matchers padded to L keypoints per side as 'lightglue_<feat>_L<L>_fp32.onnx'. With one
     static option given, only that family is exported (the other's dynamic files are not rewritten).
+    `fp16` False: no fp16 twins. `skip_existing`: a file already there with its sidecar is kept, not re-exported
+    (--settings: only what is missing is produced).
     Returns {key: fp32 path}."""
     from torch.export import Dim
 
@@ -1143,6 +1215,13 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
     export_matchers = static_length is not None or static_size is None
     paths: dict[str, Path] = {}
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    def present(path: Path) -> bool:
+        if skip_existing and path.exists() and sidecar_of(path).exists():
+            print(f"present:  {path.name}")
+            return True
+        return False
+
     if static_size:
         W, H = static_size
         suffix, dyn, size_lines = f"_{W}x{H}", None, [f"input_width: {W}", f"input_height: {H}",
@@ -1154,11 +1233,12 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
 
     # SuperPoint: dynamic H, W unless static_size
     if "superpoint" in wanted and export_detectors:
-        path = MODELS_DIR / f"superpoint_v1{suffix}.onnx"
-        export_onnx(SuperPointDense(models["superpoint"]), path, (torch.rand(1, 1, H, W),), ["image"],
-                    ["scores", "descriptors"], dyn, opset=18)
-        write_sidecar(path, "superpoint", "superpoint", commit, 18, "fp32",
-                      superpoint_contract(models["superpoint"]) + size_lines)
+        path = model_path("superpoint", suffix)
+        if not present(path):
+            export_onnx(SuperPointDense(models["superpoint"]), path, (torch.rand(1, 1, H, W),), ["image"],
+                        ["scores", "descriptors"], dyn, opset=18)
+            write_sidecar(path, "superpoint", "superpoint", commit, 18, "fp32",
+                          superpoint_contract(models["superpoint"]) + size_lines)
         paths["superpoint"] = path
 
     # ALIKED: dynamic H, W unless static_size (then top-k mode too); opset 19 for DeformConv (custom translation)
@@ -1168,15 +1248,17 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
     aliked_lines = size_lines + ([f"topk: {aliked_k}   # the graph returns exactly topk entries by NMS score; {topk_note} "
                                   "- the host drops them"] if aliked_k else [])
     if "aliked" in wanted and export_detectors:
-        path = MODELS_DIR / f"{aliked_stem()}{suffix}.onnx"
-        # static (Core ML): deformable convs decomposed into GridSample + 1x1 conv, no DeformConv node
-        export_onnx(AlikedExport(models["aliked"], aliked_k, decompose_deform=bool(static_size),
-                                 true_top_k=ALIKED_TRUE_TOPK), path,
-                    (torch.rand(1, 3, H, W),), ["image"], ["keypoints", "descriptors", "scores"], dyn, opset=19,
-                    translation=DEFORM_CONV_TRANSLATION)
-        write_sidecar(path, "aliked", "aliked-n16", commit, 19, "fp32", aliked_contract(models["aliked"]) + aliked_lines)
+        path = model_path("aliked", suffix)
+        exported = not present(path)
+        if exported:
+            # static (Core ML): deformable convs decomposed into GridSample + 1x1 conv, no DeformConv node
+            export_onnx(AlikedExport(models["aliked"], aliked_k, decompose_deform=bool(static_size),
+                                     true_top_k=ALIKED_TRUE_TOPK), path,
+                        (torch.rand(1, 3, H, W),), ["image"], ["keypoints", "descriptors", "scores"], dyn, opset=19,
+                        translation=DEFORM_CONV_TRANSLATION)
+            write_sidecar(path, "aliked", "aliked-n16", commit, 19, "fp32", aliked_contract(models["aliked"]) + aliked_lines)
         paths["aliked"] = path
-        if static_size:   # the trunk alone, for the Core ML timing question (no sidecar, no twin: a measurement graph)
+        if static_size and exported:   # the trunk alone, for the Core ML timing question (no sidecar, no twin: a measurement graph)
             export_onnx(AlikedTrunk(models["aliked"], 0, decompose_deform=True), MODELS_DIR / f"aliked_n16{suffix}_trunk.onnx",
                         (torch.rand(1, 3, H, W),), ["image"], ["score_map", "feature_map"], None, opset=18)
 
@@ -1188,7 +1270,10 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
         if f"lightglue_{feat}" not in wanted or not export_matchers:
             continue
         lg = models[f"lightglue_{feat}"]
-        path = MODELS_DIR / (f"lightglue_{feat}_L{L}.onnx" if L else f"lightglue_{feat}.onnx")
+        path = model_path(f"lightglue_{feat}", padded_length=L)
+        paths[f"lightglue_{feat}"] = path
+        if present(path):
+            continue
         d = cfg["input_dim"]
         na, nb = (L, L) if L else (512, 384)    # sample sizes: with L, the last quarter / third of the rows is padding
         k0, k1 = torch.rand(1, na, 2) * 2 - 1, torch.rand(1, nb, 2) * 2 - 1
@@ -1215,17 +1300,18 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
                         ["keypoints_0", "descriptors_0", "keypoints_1", "descriptors_1"], ["log_assignment"],
                         ({1: n0}, {1: n0}, {1: n1}, {1: n1}), opset=18)
         write_sidecar(path, "lightglue", f"lightglue_{feat}", commit, 18, "fp32", lightglue_contract(lg, feat, L))
-        paths[f"lightglue_{feat}"] = path
 
-    for key, path in paths.items():
-        fp16 = path.with_name(path.stem + "_fp16.onnx")
-        convert_fp16(path, fp16)
+    for key, path in paths.items() if fp16 else ():
+        twin = fp16_twin(path)
+        if present(twin):
+            continue
+        convert_fp16(path, twin)
         opset = 19 if key == "aliked" else 18
         contract = {"superpoint": lambda: superpoint_contract(models["superpoint"]) + size_lines,
                     "aliked": lambda: aliked_contract(models["aliked"]) + aliked_lines}.get(
             key, lambda: lightglue_contract(models[key], key.split("_", 1)[1], L))()
         weights_key = {"superpoint": "superpoint", "aliked": "aliked-n16"}.get(key, key)
-        write_sidecar(fp16, key.split("_")[0], weights_key, commit, opset, "fp16", contract)
+        write_sidecar(twin, key.split("_")[0], weights_key, commit, opset, "fp16", contract)
     return paths
 
 
@@ -1301,8 +1387,8 @@ def check_ort(models: dict[str, nn.Module], paths: dict[str, Path], images: list
     static = static_size is not None or static_length is not None
     print(f"\n(a) upstream vs (c) ONNX fp32 / (d) ONNX fp16 on ONNX Runtime CPU, {len(images)} frames"
           f"{' (static exports)' if static else ''}:")
-    sess = {col: {k: OrtModel(p if col == "c" else p.with_name(p.stem + "_fp16.onnx")) for k, p in paths.items()}
-            for col in ("c", "d")}
+    cols = ("c", "d") if all(fp16_twin(p).exists() for p in paths.values()) else ("c",)   # no twins: fp32 only
+    sess = {col: {k: OrtModel(p if col == "c" else fp16_twin(p)) for k, p in paths.items()} for col in cols}
     sp = models["superpoint"]
     feats: list[dict[str, dict]] = []
     for path in images:
@@ -1311,7 +1397,7 @@ def check_ort(models: dict[str, nn.Module], paths: dict[str, Path], images: list
         print(f" {path.name} ({W}x{H})")
         fa = {name: upstream_detect(models, name, grey, rgb) for name in ("superpoint", "aliked", "sift")}
         for key in [k for k in ("superpoint", "aliked") if k in paths]:
-            for col in ("c", "d"):
+            for col in cols:
                 fb = ort_detect(key, sess[col][key], grey, rgb, sp, max_keypoints)
                 compare_detections(f"({col}) {key}", fa[key], fb)
                 print(f"  {'':34s} {sess[col][key].ms:7.1f} ms")
@@ -1326,7 +1412,7 @@ def check_ort(models: dict[str, nn.Module], paths: dict[str, Path], images: list
         for name in matchers:
             lg, key = models[f"lightglue_{name}"], f"lightglue_{name}"
             ref = upstream_match(lg, feats[i][name], feats[i + 1][name], (W, H))
-            for col in ("c", "d"):
+            for col in cols:
                 got = ort_match(lg, sess[col][key], feats[i][name], feats[i + 1][name], (W, H), static_length or 0)
                 compare_matches(f"({col}) {key}", ref, got, sess[col][key].ms)
     if static or not {"superpoint", "aliked"} <= set(paths):
@@ -1385,7 +1471,7 @@ def main() -> None:
     parser.add_argument("--only", nargs="+", choices=ALL_EXPORTS, default=None,
                         help="export only these models (default: all five)")
     parser.add_argument("--static", metavar="WxH", default=None,
-                        help="export the detectors with this fixed input size as <stem>_<W>x<H>.onnx (Core ML)")
+                        help="export the detectors with this fixed input size as <stem>_<W>x<H>_fp32.onnx (Core ML)")
     parser.add_argument("--topk", type=int, default=2048,
                         help="ALIKED: keypoints returned by the graph in top-k mode (and by the static threshold-mode export)")
     parser.add_argument("--aliked-mode", choices=["topk", "threshold"], default="topk",
@@ -1396,17 +1482,47 @@ def main() -> None:
                         help="SuperPoint detection threshold written to the sidecar and applied by the host tail: 0 "
                              "(default) none, the best maxNumFeatures maxima; 0.0005 is upstream's default")
     parser.add_argument("--static-length", metavar="L", type=int, default=None,
-                        help="export the matchers padded to L keypoints per side as lightglue_<feat>_L<L>.onnx (Core ML); "
+                        help="export the matchers padded to L keypoints per side as lightglue_<feat>_L<L>_fp32.onnx (Core ML); "
                              "with --static given too, only the static files are exported")
+    parser.add_argument("--settings", type=Path, default=None,
+                        help="export what this host settings YAML asks for (features, features_precision, "
+                             "features_static_shapes, features_models_dir) and only what is missing")
+    parser.add_argument("--force", action="store_true", help="with --settings: re-export the files already present")
     args = parser.parse_args()
     static_size = None
     if args.static:
         w, h = args.static.lower().split("x")
         static_size = (int(w), int(h))
 
-    global ALIKED_TRUE_TOPK, ALIKED_TOPK, SUPERPOINT_THRESHOLD
+    global ALIKED_TRUE_TOPK, ALIKED_TOPK, SUPERPOINT_THRESHOLD, MODELS_DIR
     ALIKED_TRUE_TOPK, ALIKED_TOPK = args.aliked_mode == "topk", args.topk
     SUPERPOINT_THRESHOLD = args.superpoint_threshold
+
+    # --settings: what the host will load, decided before anything is cloned, downloaded or built
+    only = set(args.only) if args.only else None
+    fp16, skip_existing, padded_length = True, False, 0
+    if args.settings:
+        if args.only or args.static or args.static_length:
+            parser.error("--settings decides what is exported: it does not combine with --only, --static or --static-length")
+        cfg = read_settings(args.settings)
+        MODELS_DIR = cfg.models_dir
+        only = {key for feature in cfg.features for key in FEATURE_EXPORTS.get(feature, ())}
+        fp16, skip_existing = cfg.precision == "fp16", not args.force
+        padded_length = PADDED_LENGTH if cfg.static_shapes else 0
+        print(f"settings {args.settings}: features {cfg.features}, features_precision {cfg.precision}, "
+              f"features_static_shapes {str(cfg.static_shapes).lower()} -> {MODELS_DIR}")
+        if not only:
+            print("no learned feature in `features`: no model file is needed")
+            return
+        missing = [f for f in settings_files(only, fp16, padded_length) if not f.exists()]
+        if not missing and not args.force:
+            print(f"every file the settings ask for is present ({', '.join(sorted(only))}): nothing to export")
+            return
+        print(f"to export ({'all, --force' if args.force else 'missing'}): "
+              f"{', '.join(f.name for f in (missing if not args.force else settings_files(only, fp16, padded_length)) if f.suffix == '.onnx')}")
+        if cfg.static_shapes:
+            print("note: the detectors' fixed-size exports depend on the frame size and are not made here "
+                  "(--only <detector> --static WxH); without one the host uses the dynamic file")
 
     print(f"torch {torch.__version__} (CPU), TORCH_HOME={os.environ['TORCH_HOME']}")
     commit = ensure_lightglue_clone(LIGHTGLUE_COMMIT)
@@ -1418,8 +1534,9 @@ def main() -> None:
             check_wrappers(models, args.images, args.max_keypoints, args.topk if static_size else 0,
                            args.static_length or 0)
         print()
-        paths = export_all(models, commit, set(args.only) if args.only else None, static_size, args.topk,
-                           args.static_length)
+        paths = export_all(models, commit, only, static_size, args.topk, args.static_length, fp16, skip_existing)
+        if padded_length:   # --settings with features_static_shapes: the matchers once more, padded
+            export_all(models, commit, only, None, args.topk, padded_length, fp16, skip_existing)
         if args.images:
             check_ort(models, paths, args.images, args.max_keypoints, static_size, args.static_length)
             # The references follow the models that were exported: every detector's on a full run, with --only the
