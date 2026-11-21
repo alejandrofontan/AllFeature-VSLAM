@@ -71,13 +71,13 @@ public:
         grab_image_time_median_ = time;
     };
 
-    void set_runLocalMapping_time_median(double time){
+    void set_local_mapping_time_median(double time){
         std::unique_lock<std::mutex> lock(mutexProfileStats);
-        runLocalMapping_time_median = time;
+        local_mapping_time_median_ = time;
     };
 
     double grab_image_time_median_{0.0};
-    double runLocalMapping_time_median{0.0};
+    double local_mapping_time_median_{0.0};
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////////////////////////////////////////

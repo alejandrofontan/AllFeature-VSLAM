@@ -86,7 +86,7 @@ public:
     virtual std::optional<KeyframeInformationValue> information(Frame& frame, const std::vector<Keyframe>& window,
                                                                 bool centred) = 0;
 
-    // A keyframe finished LocalMapping::process_new_keyframe (observations registered,
+    // A keyframe finished LocalMapping::register_keyframe (observations registered,
     // connections updated, in the map): make the store explain the next frames with it.
     virtual void on_keyframe_processed(const Keyframe& keyframe) = 0;
 

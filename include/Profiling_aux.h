@@ -1,7 +1,6 @@
 /**
- * Shared profiling primitives for the per-thread profilers (Tracking_aux.h,
- * LocalMapping_aux.h). Everything here compiles to a no-op when
- * PROFILING_EXHAUSTIVE is off.
+ * Shared profiling primitives for Tracking's profiler (Tracking_aux.h). Everything here compiles to a no-op
+ * when PROFILING_EXHAUSTIVE is off.
  */
 #ifndef AF_VSLAM_PROFILING_AUX_H
 #define AF_VSLAM_PROFILING_AUX_H

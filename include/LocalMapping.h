@@ -140,11 +140,11 @@ private:
     // cull_keyframes(): placecell's culling method
     static constexpr const char* KEYFRAME_CULLING_METHOD{"gram-greedy"};
 
-    // One full mapping iteration for the keyframe at the head of the queue (see run())
     void process_keyframe();
-    void process_new_keyframe();
+    void register_keyframe();
     void cull_map_points();
     void create_new_map_points();
+    
     // create_new_map_points() helper: the create_new_map_points_keyframes most covisible keyframes that have
     // enough baseline to triangulate against
     [[nodiscard]] std::vector<Keyframe> select_triangulation_neighbors() const;
@@ -187,7 +187,7 @@ private:
     // Keyframe information kernel (KeyframeInformation.h, LocalMapping.InformationKernel):
     // its placecell store holds one row per keyframe ever processed (rows are never
     // removed when a keyframe is culled -- culled keyframes stay as the culling
-    // "history"), keyed by frame_id. process_new_keyframe registers each keyframe,
+    // "history"), keyed by frame_id. register_keyframe registers each keyframe,
     // cull_keyframes refreshes the alive ones and culls on it. Null when the
     // system has no information kernel (megaloc kernel in a build without MegaLoc).
     std::shared_ptr<KeyframeInformation> keyframe_information_{};
@@ -205,7 +205,7 @@ private:
     bool warned_no_kernel_{false};
     int last_over_budget_{-1};
 
-    // Time of each mapping iteration, as a histogram in ms buckets (LocalMappingProfiler): the Viewer shows its
+    // Time of each mapping iteration, as a histogram in ms buckets: the Viewer shows its
     // median
     std::map<int, int> local_mapping_times_{};
 };

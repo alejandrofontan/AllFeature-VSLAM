@@ -1,5 +1,4 @@
 #include "LocalMapping.h"
-#include "LocalMapping_aux.h"
 
 #include <placecell/placecell.h>
 
@@ -22,6 +21,7 @@
 #include "LoopClosing.h"
 #include "Map.h"
 #include "Optimizer.h"
+#include "Report.h"
 #include "Viewer.h"
 #include "Utils.h"
 #include "afvslam_log.hpp"
@@ -74,56 +74,62 @@ void LocalMapping::run()
     set_finished();
 }
 
-// One full mapping iteration for the keyframe at the head of the queue. Every stage
-// runs for every keyframe, also when Tracking has meanwhile queued another one.
+// One mapping iteration for the keyframe at the head of the queue
 void LocalMapping::process_keyframe()
 {
-    LocalMappingProfiler profiler{};
+    const auto t_start = std::chrono::steady_clock::now();
 
-    // Global descriptor, map-point associations, covisibility graph, map insertion
-    process_new_keyframe();
-
-    // Enforce the quality checks on recently added map points
-    cull_map_points();
-
-    create_new_map_points();
-
-    // The matches against the neighbors have been triangulated from; nothing reads them again
-    FeatureMatcher::clear_keyframe_matches(current_keyframe_);
-
-    // Find more matches in neighbor keyframes and fuse point duplications
-    search_in_neighbors();
-
-    local_bundle_adjustment();
-
-    cull_keyframes();
-
-    loop_closer_->insert_keyframe(current_keyframe_);
-
-    // Median excludes the current iteration (recorded below)
-    if(viewer_)
-        viewer_->set_runLocalMapping_time_median(map_median(local_mapping_times_));
-    profiler.iteration_done(local_mapping_times_);
-}
-
-void LocalMapping::process_new_keyframe()
-{
+    // Take the keyframe: every stage below works on current_keyframe_
     {
         std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
         current_keyframe_ = new_keyframes_.front();
         new_keyframes_.pop_front();
     }
 
-    // Global descriptor (VPR image embedding, backend-dependent)
+    // Report: label this thread's entries with the keyframe's frame; the scope writes time_ms on exit
+    AF_REPORT_CONTEXT("local_mapping", current_keyframe_->frame_id);
+    AF_REPORT_SCOPE();
+
+    // Register the keyframe: observations, covisibility graph, map
+    register_keyframe();
+
+    // Cull recent map points that failed their probation
+    cull_map_points();
+
+    // Create map points: triangulation against neighbours, and sensor depth
+    create_new_map_points();
+
+    // The matches against the neighbours are not read again
+    FeatureMatcher::clear_keyframe_matches(current_keyframe_);
+
+    // Fuse duplicated points with the neighbours
+    search_in_neighbors();
+
+    // Local bundle adjustment around the keyframe
+    local_bundle_adjustment();
+
+    // Cull keyframes the others already explain
+    cull_keyframes();
+
+    // Hand the keyframe to Loop Closing
+    loop_closer_->insert_keyframe(current_keyframe_);
+
+    // Map size after this iteration
+    AF_REPORT("map.keyframes", "", map_->keyframes_in_map());
+    AF_REPORT("map.points", "", map_->map_points_in_map());
+
+    // Iteration time in whole ms
+    local_mapping_times_[int(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count())]++;
+    if(viewer_)
+        viewer_->set_local_mapping_time_median(map_median(local_mapping_times_));
+}
+
+void LocalMapping::register_keyframe()
+{
     current_keyframe_->compute_global_descriptor();
 
-    // Register the keyframe as an observer of the map points Tracking matched into it
-    // (add_observation also refreshes the point's descriptor and normal/depth). Points
-    // that already observe this keyframe -- created WITH it by the initializer -- enter
-    // the probation list instead (cull_map_points).
     for(const FeatureType feature_type : current_keyframe_->feature_types)
     {
-        // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
         const std::vector<Pt> map_points = current_keyframe_->get_map_point_matches(feature_type);
         for(size_t i = 0; i < map_points.size(); i++)
         {
@@ -137,14 +143,10 @@ void LocalMapping::process_new_keyframe()
         }
     }
 
-    // Update links in the covisibility graph
     current_keyframe_->update_connections();
 
     map_->add_keyframe(current_keyframe_);
 
-    // Register the keyframe in the information kernel so it explains the next frames
-    // right away (megaloc: no-op, compute_global_descriptor() already stored the
-    // descriptor; covisibility: its current map-point set)
     if(keyframe_information_)
         keyframe_information_->on_keyframe_processed(current_keyframe_);
 }

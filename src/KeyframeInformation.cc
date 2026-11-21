@@ -179,7 +179,7 @@ void KeyframeInformationCovisibility::on_keyframe_processed(const Keyframe& keyf
     if(!keyframe || keyframe->is_bad())
         return;
     // First call for this frame_id: the store appends the row (item mode from the first
-    // keyframe on). The set is the keyframe's observations right after process_new_keyframe
+    // keyframe on). The set is the keyframe's observations right after register_keyframe
     // (Tracking's matches); create_new_map_points / fuse extend it, refresh() picks that up.
     place_cell_->set_items(keyframe->frame_id, observed_point_ids(*keyframe));
 }
