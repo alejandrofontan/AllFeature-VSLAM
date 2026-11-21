@@ -17,7 +17,12 @@
  *
  * Any image size: the three max-pools floor it, so the maps cover the top-left (W//8*8) x (H//8*8) pixels and no
  * keypoint can land in the last W%8 columns or H%8 rows. Keypoint coordinates are integer pixel positions in the
- * image frame (upstream SuperPoint has no sub-pixel refinement); the score goes to cv::KeyPoint::response.
+ * image frame, as upstream's (it has no sub-pixel refinement); the score goes to cv::KeyPoint::response.
+ * set_subpixel(true) adds a refinement that is not upstream's: a keypoint that is the peak of its own 3x3 raw scores
+ * moves to their score-weighted centre (the peaks are broad: the strongest neighbour holds about 85% of the peak's
+ * score; 0.24 px median shift), and its descriptor is sampled there. A keypoint that is not such a peak - the NMS's
+ * later passes keep pixels beside a stronger, suppressed one: about 3 in 10 at threshold 0, nearly all low-scoring -
+ * keeps its integer position.
  *
  * Threading: detect() uses a per-call input buffer and OrtSession::run serialises the session's runs, so one instance may
  * serve several threads; the host's extractor runs on the tracking thread only.
@@ -51,6 +56,10 @@ class SuperPointOnnx
     void detect(const cv::Mat& image, int max_keypoints, std::vector<cv::KeyPoint>& keypoints,
                 cv::Mat& descriptors, const cv::Mat& mask = cv::Mat());
 
+    /// Sub-pixel keypoint positions (see the header comment); off by default, which is upstream's output.
+    void set_subpixel(bool subpixel) { subpixel_ = subpixel; }
+    [[nodiscard]] bool subpixel() const { return subpixel_; }
+
     [[nodiscard]] const std::string& provider() const { return session_.provider(); }
     [[nodiscard]] const std::string& model_path() const { return session_.model_path(); }
     [[nodiscard]] const std::string& precision() const { return precision_; }
@@ -72,6 +81,7 @@ class SuperPointOnnx
     int nms_radius_{4};
     int remove_borders_{4};
     int descriptor_dim_{256};
+    bool subpixel_{false};
     double last_graph_ms_{0.0};
     double last_total_ms_{0.0};
 };

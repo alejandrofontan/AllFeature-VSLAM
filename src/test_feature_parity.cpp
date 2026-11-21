@@ -18,6 +18,7 @@
  *                  --matches <frame0>__<frame1>.lightglue_superpoint.txt
  *   common:    [--provider auto|cuda|coreml|cpu] [--threads 4] [--coreml-units ALL|CPUAndGPU|CPUAndNeuralEngine|CPUOnly]
  *              [--iters 10] [--max-keypoints 1000] [--min-fraction 0.99] [--min-cos 0.999]
+ *              [--subpixel 1]  (superpoint: sub-pixel keypoints, which the reference does not have)
  *
  * The matcher mode feeds the matcher with the reference detector outputs (the extractor's parity is measured
  * separately), so a matcher failure is the matcher's alone.
@@ -302,6 +303,7 @@ int main(int argc, char** argv)
     if (kind == "superpoint")
     {
         AF_VSLAM::onnx::SuperPointOnnx sp(model, settings);
+        sp.set_subpixel(arg(args, "--subpixel", "0") == "1");   // not upstream's: expect positions off by up to ~0.5 px
         std::vector<cv::KeyPoint> kps;
         cv::Mat desc;
         sp.detect(image, max_keypoints, kps, desc);   // warm-up + the compared result

@@ -108,8 +108,12 @@ void AF_VSLAM::Image::fix_image_size(const int& new_width, const int& new_height
     }
 
     cv::Size new_size(new_width, new_height);
-    cv::resize(grayImg, grayImg, new_size);
-    cv::resize(img, img, new_size);
+    // Shrinking: every output pixel is the average of the source pixels it covers (no aliasing). Linear
+    // interpolation reads only the 2x2 pixels around each position and skips the rest. Enlarging: linear.
+    const bool shrinks = new_width <= img.cols && new_height <= img.rows && (new_width < img.cols || new_height < img.rows);
+    const int interpolation = shrinks ? cv::INTER_AREA : cv::INTER_LINEAR;
+    cv::resize(grayImg, grayImg, new_size, 0, 0, interpolation);
+    cv::resize(img, img, new_size, 0, 0, interpolation);
 
     // Floor to a multiple of 32: the learned feature extractors (SuperPoint/ALIKED)
     // downsample internally by a power-of-2 stride and expect input dimensions

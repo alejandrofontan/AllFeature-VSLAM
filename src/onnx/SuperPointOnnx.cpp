@@ -184,6 +184,7 @@ void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector
     // Tail, upstream order: NMS -> border mask -> threshold (and the host's mask) -> best K by score -> (x, y) ->
     // sample -> L2
     cv::Mat score_map(h8, w8, CV_32F, scores.data.data());
+    const cv::Mat raw_scores = subpixel_ ? score_map.clone() : cv::Mat();   // the NMS zeroes every non-maximum
     simple_nms(score_map, nms_radius_);
     struct Candidate
     {
@@ -217,6 +218,33 @@ void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector
         const Candidate& c = candidates[i];
         cv::KeyPoint kp;
         kp.pt = cv::Point2f(static_cast<float>(c.x), static_cast<float>(c.y));
+        if (subpixel_ && c.x >= 1 && c.x < w8 - 1 && c.y >= 1 && c.y < h8 - 1)
+        {
+            // Sub-pixel position: the score-weighted centre of the 3x3 raw scores around the maximum (softmax
+            // outputs, >= 0). Only for a keypoint that is the peak of its own 3x3: the NMS's later passes also keep
+            // pixels that sit beside a stronger one another keypoint suppressed, and for those the centre would only
+            // drift towards that neighbour (up to 1 px); they keep their integer position
+            const float peak = raw_scores.at<float>(c.y, c.x);
+            float sum = 0.0f, sum_x = 0.0f, sum_y = 0.0f;
+            bool is_peak = true;
+            for (int dy = -1; dy <= 1; ++dy)
+            {
+                const float* raw_row = raw_scores.ptr<float>(c.y + dy);
+                for (int dx = -1; dx <= 1; ++dx)
+                {
+                    const float w = raw_row[c.x + dx];
+                    is_peak = is_peak && w <= peak;
+                    sum += w;
+                    sum_x += w * static_cast<float>(dx);
+                    sum_y += w * static_cast<float>(dy);
+                }
+            }
+            if (is_peak)
+            {
+                kp.pt.x += sum_x / sum;
+                kp.pt.y += sum_y / sum;
+            }
+        }
         kp.response = c.score;
         kp.size = 1.0f;
         kp.angle = 0.0f;

@@ -26,13 +26,15 @@ void AF_VSLAM::Superpoint256Extractor::prepare(const int width, const int height
 void AF_VSLAM::Superpoint256Extractor::load(const std::string& path, const int width, const int height)
 {
     extractor_ = std::make_unique<onnx::SuperPointOnnx>(path, onnx::feature_models_config().ort);
+    extractor_->set_subpixel(onnx::feature_models_config().superpoint_subpixel);
     // Warm-up on a frame-sized blank: the first Run pays allocation and (CUDA / Core ML) kernel selection
     std::vector<cv::KeyPoint> kps;
     cv::Mat desc;
     extractor_->detect(cv::Mat::zeros(height, width, CV_8UC1), 1, kps, desc);
     AF_INFO("SuperPoint256 ready: " << extractor_->model_path() << " (" << extractor_->precision()
             << " weights) on onnxruntime/" << extractor_->provider() << ", budget " << settings->max_num_features
-            << " keypoints, threshold " << extractor_->detection_threshold() << ", warm-up "
+            << " keypoints, threshold " << extractor_->detection_threshold()
+            << (extractor_->subpixel() ? ", sub-pixel positions" : ", integer-pixel positions") << ", warm-up "
             << extractor_->last_graph_ms() << " ms");
 }
 
