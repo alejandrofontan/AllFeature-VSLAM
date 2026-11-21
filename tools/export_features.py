@@ -7,8 +7,7 @@ Created: 2026-10-16
 Updated: 2026-11-21
 
 The ONNX file is the contract between the Python side (this script, run once per export on Linux) and the C++ side
-(ONNX Runtime in AllFeature, on Linux and macOS). Steps 2 and 3 of the plan extend this file with the export wrappers,
-the exports, the sidecars and the references; step 1, implemented here, is only "get the models out of the git repo":
+(ONNX Runtime in AllFeature, on Linux and macOS). What the script does, in order:
 
   1. clone cvg/LightGlue next to this script (tools/lightglue/, gitignored) and pin it to LIGHTGLUE_COMMIT. That one
      repository holds the matcher and PyTorch re-implementations of the three extractors, with the download URL of
@@ -19,19 +18,20 @@ the exports, the sidecars and the references; step 1, implemented here, is only 
      (depth_confidence) and point pruning (width_confidence) are data-dependent control flow that cannot be a graph,
      flash attention and mixed precision are device-specific kernels - the export must be the plain 9-layer graph.
 
-Step 2 (this version) adds the export wrappers: one nn.Module per model that calls the upstream layers unchanged and
+Then the export wrappers: one nn.Module per model that calls the upstream layers unchanged and
 rewrites only the glue the exporter or the runtimes cannot take (Python control flow on data, dict I/O, slice
 assignment into empty tensors), plus the ONNX translation of torchvision's deformable convolution and the Python
 `superpoint_tail` that is the written specification of what the C++ side does after the SuperPoint graph. With
-`--images`, every wrapper is checked against the upstream forward in PyTorch (columns (a) vs (b) of the plan's
-self-check table) before any ONNX file exists.
+`--images`, every wrapper is checked against the upstream forward in PyTorch (columns (a) vs (b) of the self-check: (a) upstream
+PyTorch, (b) the wrapper in PyTorch, (c) the fp32 ONNX file and (d) the fp16 one on ONNX Runtime) before any ONNX file
+exists.
 
-Step 3 (this version) exports the five ONNX files with the torch.export-based exporter (dynamic image size for the
+Then the exports: the five ONNX files with the torch.export-based exporter (dynamic image size for the
 detectors, dynamic keypoint counts for the matchers, the DeformConv translation for ALIKED), writes an fp16-weights
 twin and a sidecar YAML per file, runs the exports on ONNX Runtime (CPU) as columns (c) fp32 and (d) fp16 of the
-self-check, and dumps the upstream outputs on the given frames as the references the C++ parity test (step 4) reads.
+self-check, and dumps the upstream outputs on the given frames as the references the C++ parity test (test_feature_parity) reads.
 
-Step 7 (this version) adds the static exports Core ML needs (it compiles only bounded shapes): `--static WxH` fixes
+Last, the static exports Core ML needs (it compiles only bounded shapes): `--static WxH` fixes
 the detectors' image size (ALIKED then in top-k mode with its deformable convolutions decomposed), `--static-length L`
 pads both sides of the matchers to L keypoints with additive attention masks (`LightGluePaddedExport`); the files
 carry the size in their name (`superpoint_v1_739x458_fp32.onnx`, `lightglue_aliked_L1024_fp32.onnx`) and the host's
@@ -351,7 +351,7 @@ def superpoint_tail(scores: torch.Tensor, descriptors: torch.Tensor, threshold: 
     """What runs after the SuperPoint graph, in the order upstream does it: NMS (`simple_nms`, radius 4: a pixel
     survives if nothing within the radius beats it, two suppression passes), border masking (-1 within
     `remove_borders` px), threshold, best `max_keypoints` by score, bilinear descriptor sampling (upstream
-    `sample_descriptors`, s=8, align_corners=True) and L2. This is the specification the C++ tail (step 4) is written
+    `sample_descriptors`, s=8, align_corners=True) and L2. This is the specification the C++ tail (SuperPointOnnx::detect) is written
     against (cv::dilate is the max-pool). Returns keypoints [N,2] (x,y), scores [N], descriptors [N,256].
 
     `subpixel` is the host's own mode (SuperPointOnnx::set_subpixel, the host's default; not upstream's), specified
@@ -518,7 +518,7 @@ def log_assignment_padded(head: nn.Module, desc0: torch.Tensor, desc1: torch.Ten
 
 
 class LightGluePaddedExport(LightGlueExport):
-    """LightGlueExport with both sides padded to a fixed length L (plan §7.2: Core ML compiles only bounded shapes,
+    """LightGlueExport with both sides padded to a fixed length L (Core ML compiles only bounded shapes,
     so the dynamic matcher fell back to the CPU, 242 ms per pair on the M1 Pro). Two more inputs, mask_0 / mask_1
     [1,L] float32: 0 for a real keypoint, PAD_MASK_VALUE for a padded row (zeros in its keypoints and descriptors).
     Every softmax adds the attended side's mask over its key axis - upstream's `masked_forward` path with float masks -
@@ -780,7 +780,7 @@ class AlikedExport(nn.Module):
 
 class AlikedTrunk(AlikedExport):
     """ALIKED up to the dense maps only (the convolutional trunk, deformable convs decomposed): score_map [1,1,H,W]
-    and the L2-normalised feature_map [1,128,H,W]. A measurement graph for the Core ML split question (step 7): what
+    and the L2-normalised feature_map [1,128,H,W]. A measurement graph for the Core ML split question: what
     the GPU costs for the trunk alone, before the detector / descriptor heads."""
 
     def forward(self, image: torch.Tensor):   # type: ignore[override]
@@ -824,7 +824,7 @@ def load_image(path: Path) -> tuple[torch.Tensor, torch.Tensor]:
 def compare_detections(label: str, a: dict, b: dict) -> None:
     """Same keypoint set? Equal counts (the exact columns): max |dxy| px, max |dscore|, min descriptor cosine over the
     rows in order. Different counts (fp16, later CoreML): nearest-neighbour matching of b's keypoints to a's - the
-    fraction within 0.5 px and the descriptor cosine over those pairs (the T2 criterion of the plan)."""
+    fraction within 0.5 px and the descriptor cosine over those pairs (the pass criterion of the parity test)."""
     ka, kb = a["keypoints"], b["keypoints"]
     if ka.shape != kb.shape or not torch.equal(ka, kb) and (ka - kb).abs().max() > 1e-3:
         # exact pairwise distances: cdist's matmul formula loses ~0.25 px at coordinates in the hundreds
@@ -941,7 +941,7 @@ def rewrite_shape_slices(model) -> int:
     """Shape(start=k, end=k+1) -> Shape() + Slice([k:k+1]) on the 1-D shape tensor. The exporter reads one symbolic
     size as a sliced Shape node; ONNX Runtime's Core ML provider (MLProgram) validates `end` with HandleNegativeAxis
     against the tensor rank, and `end` is exclusive, so reading the last dimension (end == rank) throws at session
-    creation ("axis 4 is not in valid range [-4,3]", found on the Mac in step 7). The plain-Shape path has no such
+    creation ("axis 4 is not in valid range [-4,3]", found on the Mac, 2026-10-16). The plain-Shape path has no such
     check; the values are identical. Returns the number of nodes rewritten."""
     from onnx import helper, numpy_helper
 

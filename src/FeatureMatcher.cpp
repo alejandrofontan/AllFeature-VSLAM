@@ -1,5 +1,6 @@
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -34,6 +35,12 @@ namespace
 cv::Size image_size(const Calibration& calibration)
 {
     return {calibration.width, calibration.height};
+}
+
+// Wall time since `start`, in ms: the report's `match.time_ms` and `filter.time_ms` entries
+[[maybe_unused]] double elapsed_ms(const std::chrono::steady_clock::time_point start)
+{
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 }
 
 // The LightGlue variant of a learned matcher type (nullptr for the brute-force ones)
@@ -251,9 +258,13 @@ std::map<FeatureType, std::vector<cv::DMatch>> FeatureMatcher::filter_matches_ge
     }
 
     // 2. One filter call, then each survivor back to its type and per-type indices
+    [[maybe_unused]] const auto filter_start = std::chrono::steady_clock::now();
+    const std::vector<cv::DMatch> kept =
+        filter_matches_geometric(all_matches, kps1, kps2, sigma2_1, sigma2_2, calibration1, calibration2);
+    AF_REPORT("filter.time_ms", "", elapsed_ms(filter_start));
+
     std::map<FeatureType, std::vector<cv::DMatch>> filtered_by_type;
-    for (const cv::DMatch& match :
-         filter_matches_geometric(all_matches, kps1, kps2, sigma2_1, sigma2_2, calibration1, calibration2)) {
+    for (const cv::DMatch& match : kept) {
         const MatchOrigin& origin = origins[match.queryIdx];
         filtered_by_type[origin.feat_type].emplace_back(origin.idx1, origin.idx2, match.distance);
     }
@@ -281,10 +292,12 @@ std::map<FeatureType, int> FeatureMatcher::match_keyframe_to_frame(const Keyfram
 
         const KeypointData& keyframe_data = keyframe->features.at(ft);
         const KeypointData& frame_data = frame.features.at(ft);
+        [[maybe_unused]] const auto match_start = std::chrono::steady_clock::now();
         std::vector<cv::DMatch> matches = match_descriptors(
             keyframe_data.descriptors, frame_data.descriptors,
             keyframe_data.keypoints, frame_data.keypoints, ft,
             image_size(*keyframe->calibration), image_size(*frame.calibration));
+        AF_REPORT("match.time_ms", get_feature(ft).get_feature_name(), elapsed_ms(match_start));
         AF_REPORT("matches.raw", get_feature(ft).get_feature_name(), matches.size());
 
         if (!matches.empty())
@@ -361,6 +374,8 @@ void FeatureMatcher::match_keyframe_to_keyframes(const Keyframe& keyframe, const
     // 2. Descriptor matching: every pending pair x feature type in parallel
     std::vector<std::vector<std::vector<cv::DMatch>>> matches(   // [other][feature type]
         num_others, std::vector<std::vector<cv::DMatch>>(num_feature_types));
+    [[maybe_unused]] std::vector<std::vector<double>> match_ms(   // [other][feature type], for the report
+        num_others, std::vector<double>(num_feature_types, 0.0));
 
     #pragma omp parallel for collapse(2) schedule(dynamic)
     for (int k = 0; k < num_others; k++) {
@@ -372,9 +387,11 @@ void FeatureMatcher::match_keyframe_to_keyframes(const Keyframe& keyframe, const
                 continue;
             const KeypointData& data1 = keyframe->features.at(ft);
             const KeypointData& data2 = others[k]->features.at(ft);
+            const auto match_start = std::chrono::steady_clock::now();
             matches[k][f] = match_descriptors(data1.descriptors, data2.descriptors,
                                               data1.keypoints, data2.keypoints, ft,
                                               image_size(*keyframe->calibration), image_size(*others[k]->calibration));
+            match_ms[k][f] = elapsed_ms(match_start);   // includes the wait for a shared LightGlue session
         }
     }
 
@@ -407,6 +424,10 @@ void FeatureMatcher::match_keyframe_to_keyframes(const Keyframe& keyframe, const
 
     // 4. Report: totals over the pairs matched in this call
     for (int f = 0; f < num_feature_types; f++) {
+        [[maybe_unused]] double total_match_ms = 0.0;
+        for (int k = 0; k < num_others; k++)
+            total_match_ms += match_ms[k][f];
+        AF_REPORT("match.time_ms", get_feature(feat_types[f]).get_feature_name(), total_match_ms);
         AF_REPORT("matches.raw", get_feature(feat_types[f]).get_feature_name(), num_raw[f]);
         AF_REPORT("matches.filtered", get_feature(feat_types[f]).get_feature_name(), num_filtered[f]);
     }
@@ -450,9 +471,11 @@ std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> FeatureMatcher::ma
             continue;
         const KeypointData& data1 = frame1.features.at(ft);
         const KeypointData& data2 = frame2.features.at(ft);
+        [[maybe_unused]] const auto match_start = std::chrono::steady_clock::now();
         matches_by_type[ft] = match_descriptors(data1.descriptors, data2.descriptors,
                                                 data1.keypoints, data2.keypoints, ft,
                                                 image_size(*frame1.calibration), image_size(*frame2.calibration));
+        AF_REPORT("match.time_ms", get_feature(ft).get_feature_name(), elapsed_ms(match_start));
         AF_REPORT("matches.raw", get_feature(ft).get_feature_name(), matches_by_type.at(ft).size());
     }
 

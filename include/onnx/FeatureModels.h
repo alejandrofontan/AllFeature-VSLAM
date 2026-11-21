@@ -21,7 +21,7 @@
  *                                            on the Core ML provider only, the detectors' '<stem>_<W>x<H>_<precision>.onnx'
  *                                            for the frame size (a missing one falls back to the dynamic file with a
  *                                            warning). Core ML compiles only bounded shapes, so this is the Mac's GPU
- *                                            path (step 7); on CUDA and the CPU the detectors load the dynamic file.
+ *                                            path; on CUDA and the CPU the detectors load the dynamic file.
  *   features_superpoint_subpixel true        SuperPoint keeps only the peaks of its score map and places each at the
  *                                            score-weighted centre of the 3x3 scores around it (SuperPointOnnx::
  *                                            set_subpixel). false is upstream's selection at integer pixels.
@@ -83,7 +83,7 @@ LightGlueOnnx& shared_lightglue(const std::string& features, int n_max = 0);
 /// Create every session of `features` now: the dynamic file and, with `static_shapes` on, every padded export in
 /// models_dir. FeatureMatcher calls this at construction so that no session is created on the tracking thread later
 /// (a Core ML session takes seconds to instantiate even from its compiled cache: a 9 s stall on the first pair that
-/// outgrew the smallest padded file, Mac note 2026-10-16). Returns the padded lengths found, ascending.
+/// outgrew the smallest padded file, measured on an M1 Pro, 2026-10-16). Returns the padded lengths found, ascending.
 /// @throws std::runtime_error as shared_lightglue.
 std::vector<int> preload_lightglue(const std::string& features);
 

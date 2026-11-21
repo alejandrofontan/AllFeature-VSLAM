@@ -28,8 +28,8 @@ download-megaloc-models = { cmd = "hf download vslamlab/megaloc-models --local-d
 download-segmentation-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'efficientvit-seg*' --local-dir segmentation_models", outputs = ["segmentation_models/*.onnx"] }
 # Learned feature models on ONNX Runtime: the four redistributable
 # exports (ALIKED, BSD-3; the three LightGlue matchers, Apache-2.0) with their sidecars are on the HF repo's
-# feature_models/ folder. SuperPoint's weights are Magic Leap's (non-commercial research, no redistribution: plan
-# Q6), so SuperPoint is never there: it is always exported locally (`export-feature-models`, export-features env).
+# feature_models/ folder. SuperPoint's weights are Magic Leap's (non-commercial research, no redistribution),
+# so SuperPoint is never there: it is always exported locally (`export-feature-models`, export-features env).
 # Not part of `setup` any more (export-feature-models makes the files locally). The files on the HF repo predate
 # the precision in the file name ('<stem>.onnx' is '<stem>_fp32.onnx' now): re-upload before relying on this task.
 download-feature-models = { cmd = "hf download vslamlab/allfeature-vslamlab --include 'feature_models/*' --local-dir .", outputs = ["feature_models/lightglue_superpoint.onnx"] }
@@ -139,7 +139,7 @@ build-cpu = { cmd = "./build.sh -c" }   # GPU-free build (build-cpu/, same bin/ 
 # produces the files it asks for (features, features_precision, features_static_shapes), keeping the ones present.
 setup = { depends-on = ["download-megaloc-models", "download-segmentation-models", { task = "export-feature-models", environment = "export-features" }, "build"] }
 
-# macOS: no GPU backend yet (mac_port.md phases 2-5), so setup skips the model downloads; CMake defaults every
+# macOS: no GPU backend yet (the Mac port's later phases), so setup skips the model downloads; CMake defaults every
 # ALLFEATURE_WITH_* option to OFF on Apple, hence plain `build` is already the GPU-free build there
 [feature.build.target.osx-arm64.tasks]
 setup = { depends-on = ["build"] }

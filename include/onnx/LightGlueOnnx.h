@@ -11,7 +11,7 @@
  * LightGlueExport): which one it is comes from the sidecar '<model>.onnx.yaml' - the descriptor size the input
  * projection expects (`input_dim`), whether the positional encoding takes scale and orientation as well
  * (`add_scale_ori`, SIFT), the match threshold and the tensor names - never from code, so a fourth variant is a
- * file (plan §4b).
+ * file.
  *
  * The graph is the fixed-depth matcher: input projection, positional encoding, 9 transformer layers, the last
  * assignment head; it returns the [N0+1, N1+1] log-assignment with the dustbin row and column. This class does
@@ -32,7 +32,7 @@
  * convention for learned matchers).
  *
  * Threading: per-call buffers only and no state written by match(); OrtSession::run serialises the session's runs (concurrent CUDA runs returned zero
- * matches to one caller, host note finding 7), so one instance serves the tracking and
+ * matches to one caller, 2026-10-16; see OrtSession.h, Threading), so one instance serves the tracking and
  * the local-mapping threads.
  */
 

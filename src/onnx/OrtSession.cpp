@@ -192,7 +192,7 @@ std::string OrtSession::append_providers(Ort::SessionOptions& options, const Ort
     {
         // MLProgram: the Core ML format with the widest operator coverage (macOS 12+). Dynamic input shapes are
         // allowed here, but Core ML compiles only bounded ones: the static '<model>_<W>x<H>_<precision>.onnx' exports are what
-        // runs on the GPU (step 7). The compiled model is cached next to the ONNX, in a sub-folder named after the
+        // runs on the GPU. The compiled model is cached next to the ONNX, in a sub-folder named after the
         // file's content (see file_content_hash), so later sessions skip the compile and a re-export never meets a
         // stale compiled model.
         const std::filesystem::path cache_dir = std::filesystem::path(model_path_).parent_path() / "coreml_cache" /
