@@ -237,6 +237,17 @@ std::vector<cv::KeyPoint> AF_VSLAM::FeatureExtractor::distribute_oct_tree(std::v
         result.push_back(*best);
     }
 
+    // The subdivision stops once it has at least max_keypoints cells, and one split can add up to three:
+    // drop the weakest so that the budget is a hard limit (a padded matcher export holds exactly that many)
+    if(max_keypoints >= 0 && static_cast<int>(result.size()) > max_keypoints)
+    {
+        std::partial_sort(result.begin(), result.begin() + max_keypoints, result.end(),
+                          [](const cv::KeyPoint& a, const cv::KeyPoint& b) {
+                              return (a.response != b.response) ? (a.response > b.response) : (a.class_id < b.class_id);
+                          });
+        result.resize(max_keypoints);
+    }
+
     return result;
 }
 
