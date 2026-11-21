@@ -358,22 +358,40 @@ class SuperPointDense(nn.Module):
 
 
 def superpoint_tail(scores: torch.Tensor, descriptors: torch.Tensor, threshold: float, max_keypoints: int,
-                    nms_radius: int = 4, remove_borders: int = 4) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                    nms_radius: int = 4, remove_borders: int = 4,
+                    subpixel: bool = False) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """What runs after the SuperPoint graph, in the order upstream does it: NMS (`simple_nms`, radius 4: a pixel
     survives if nothing within the radius beats it, two suppression passes), border masking (-1 within
     `remove_borders` px), threshold, best `max_keypoints` by score, bilinear descriptor sampling (upstream
     `sample_descriptors`, s=8, align_corners=True) and L2. This is the specification the C++ tail (step 4) is written
-    against (cv::dilate is the max-pool). Returns keypoints [N,2] (x,y), scores [N], descriptors [N,256]."""
+    against (cv::dilate is the max-pool). Returns keypoints [N,2] (x,y), scores [N], descriptors [N,256].
+
+    `subpixel` is the host's own mode (SuperPointOnnx::set_subpixel, the host's default; not upstream's), specified
+    here so that it has a reference too. Selection: a pixel is a candidate only if it is a peak of the raw scores,
+    no lower than its 8 neighbours - the NMS's later passes also let through pixels beside a stronger, suppressed one.
+    Position: each kept keypoint moves to the score-weighted centre of its 3x3 raw scores, and its descriptor is
+    sampled there. The score stays the raw score at the peak. Needs remove_borders >= 1."""
     from lightglue.superpoint import sample_descriptors, simple_nms, top_k_keypoints
 
-    scores = scores.reshape(1, scores.shape[-2], scores.shape[-1])   # [1,1,H8,W8] or [1,H8,W8] -> [1,H8,W8]
-    scores = simple_nms(scores, nms_radius)
+    raw = scores.reshape(1, scores.shape[-2], scores.shape[-1])      # [1,1,H8,W8] or [1,H8,W8] -> [1,H8,W8]
+    scores = simple_nms(raw, nms_radius)
     scores = torch.where(border_mask(scores, remove_borders), scores, torch.full_like(scores, -1.0))
-    best = torch.where(scores[0] > threshold)
+    keep = scores[0] > threshold
+    if subpixel:
+        keep = keep & (raw[0] >= F.max_pool2d(raw[None], kernel_size=3, stride=1, padding=1)[0, 0])   # 3x3 peaks
+    best = torch.where(keep)
     kp_scores = scores[0][best]
     keypoints = torch.stack(best, dim=-1)                          # (row, col)
     keypoints, kp_scores = top_k_keypoints(keypoints, kp_scores, max_keypoints)
+    rows, cols = keypoints[:, 0], keypoints[:, 1]
     keypoints = torch.flip(keypoints, [1]).float()                 # -> (x, y)
+    if subpixel:
+        offsets = torch.tensor([-1, 0, 1])
+        patch = raw[0][rows[:, None, None] + offsets[None, :, None], cols[:, None, None] + offsets[None, None, :]]  # [N,3,3]
+        total = patch.sum((1, 2))
+        dx = (patch * offsets[None, None, :]).sum((1, 2)) / total
+        dy = (patch * offsets[None, :, None]).sum((1, 2)) / total
+        keypoints = keypoints + torch.stack([dx, dy], 1)
     desc = sample_descriptors(keypoints[None], descriptors, 8)[0].t()
     return keypoints, kp_scores, desc
 
@@ -1129,7 +1147,9 @@ def superpoint_contract(sp: nn.Module) -> list[str]:
         "# simple_nms: 9x9 max-pool == scores, two suppression passes), border pixels within remove_borders set to -1,",
         "# keep scores > detection_threshold, best max_keypoints (the host's keypoint budget) by score, sample the",
         "# descriptor map bilinearly at ((x,y) - 4 + 0.5) / (W8 - 4 - 0.5, H8 - 4 - 0.5) * 2 - 1 with align_corners=true,",
-        "# then L2-normalise.",
+        "# then L2-normalise. The host's sub-pixel mode (features_superpoint_subpixel, its default; not upstream's) adds:",
+        "# only 3x3 peaks of the raw scores are candidates, and each keypoint moves to the score-weighted centre of its",
+        "# 3x3 raw scores before its descriptor is sampled (superpoint_tail(subpixel=True) is the specification).",
         f"nms_radius: {c.nms_radius}   # host tail",
         f"remove_borders: {c.remove_borders}   # host tail",
         f"detection_threshold: {c.detection_threshold}   # host tail; 0: no threshold, the best max_keypoints maxima",
@@ -1431,7 +1451,9 @@ def check_ort(models: dict[str, nn.Module], paths: dict[str, Path], images: list
 def write_references(models: dict[str, nn.Module], images: list[Path], commit: str,
                      names: tuple[str, ...] = ("superpoint", "aliked", "sift")) -> None:
     """Column (a), upstream PyTorch, dumped as text for the C++ parity test: per frame and detector the keypoints,
-    scores and descriptors (SIFT also scale and orientation); per consecutive pair and matcher the match list."""
+    scores and descriptors (SIFT also scale and orientation); per consecutive pair and matcher the match list.
+    With SuperPoint, also '<frame>.superpoint_subpixel.txt': the host's sub-pixel mode, which upstream does not have,
+    from the dense graph and `superpoint_tail(subpixel=True)` - the reference for `test_feature_parity --subpixel 1`."""
     ref_dir = MODELS_DIR / "reference"
     ref_dir.mkdir(parents=True, exist_ok=True)
     feats: list[dict[str, dict]] = []
@@ -1440,6 +1462,15 @@ def write_references(models: dict[str, nn.Module], images: list[Path], commit: s
         H, W = grey.shape[-2:]
         fa = {name: upstream_detect(models, name, grey, rgb) for name in names}
         feats.append(fa)
+        if "superpoint" in names:
+            sp = models["superpoint"]
+            kp, kp_scores, desc = superpoint_tail(*SuperPointDense(sp)(grey), sp.conf.detection_threshold,
+                                                  sp.conf.max_num_keypoints, sp.conf.nms_radius, sp.conf.remove_borders,
+                                                  subpixel=True)
+            rows = torch.cat([kp, kp_scores[:, None], desc], 1).numpy()
+            np.savetxt(ref_dir / f"{path.stem}.superpoint_subpixel.txt", rows, fmt="%.7g",
+                       header=f"model=superpoint_subpixel source={LIGHTGLUE_COMMIT[:12]} image={path.name} size={W}x{H} "
+                              f"N={rows.shape[0]} columns: x y score {' '.join(f'd{i}' for i in range(desc.shape[1]))}")
         for name, f in fa.items():
             cols = ["x", "y", "score"] + (["scale", "ori"] if name == "sift" else []) + \
                    [f"d{i}" for i in range(f["descriptors"].shape[1])]

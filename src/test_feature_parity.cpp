@@ -18,7 +18,8 @@
  *                  --matches <frame0>__<frame1>.lightglue_superpoint.txt
  *   common:    [--provider auto|cuda|coreml|cpu] [--threads 4] [--coreml-units ALL|CPUAndGPU|CPUAndNeuralEngine|CPUOnly]
  *              [--iters 10] [--max-keypoints 1000] [--min-fraction 0.99] [--min-cos 0.999]
- *              [--subpixel 1]  (superpoint: sub-pixel keypoints, which the reference does not have)
+ *              [--subpixel 1]  (superpoint: the host's sub-pixel mode; compare it against
+ *                               <frame>.superpoint_subpixel.txt, not <frame>.superpoint.txt)
  *
  * The matcher mode feeds the matcher with the reference detector outputs (the extractor's parity is measured
  * separately), so a matcher failure is the matcher's alone.
