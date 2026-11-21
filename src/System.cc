@@ -65,12 +65,10 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     placecell_settings = PlaceCellSettings::Load(fsSettings);
 
     ////////////////////////////////////////////////////////////////////////////////
-    // Visual place recognition (VPR) backend selection (PlaceRecognition.h). Settings
-    // keys (all optional):
-    //   vpr:               "megaloc" (default) | "none"
-    //   feature_vpr:       local feature that geometrically verifies retrieved candidates
-    //                      (reloc PnP, loop Sim3); must be listed in features:;
-    //                      defaults to the first feature.
+    // Visual place recognition (VPR) backend (PlaceRecognition.h): MegaLoc, the only one. A build
+    // without it (ALLFEATURE_WITH_MEGALOC off) runs with no place recognition. Settings keys (all optional):
+    // The local feature that geometrically verifies retrieved candidates (reloc PnP, loop Sim3) is always the
+    // first one listed in features:.
     //   megaloc_onnx:      the MegaLoc model file to load (default PlaceRecognitionMegaLoc::
     //                      kDefaultOnnx, the fp32 export; 'megaloc_322x322_fp16.onnx' is the
     //                      fp16-weights twin for the CUDA / CoreML providers; the file's
@@ -105,16 +103,17 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //                      VPR backend (KeyframeInformation.h): "megaloc" wraps the
     //                      retrieval store, "covisibility" owns an item-mode store
     // A request that cannot be satisfied (missing model, unknown backend) is a hard error.
-    std::string vpr_method{"megaloc"};
-    std::string feature_vpr_name{};
     std::string megaloc_onnx{PlaceRecognitionMegaLoc::kDefaultOnnx};
     placecell::MegaLocEmbedder::Settings megaloc_settings{};   // provider auto, 4 threads, CoreML ALL
     PlaceRecognitionMegaLocParameters megaloc_params{};
     try {
         const YAML::Node settingsNode = YAML::LoadFile(strSettingsFile);
-        if(settingsNode["vpr"]) vpr_method = settingsNode["vpr"].as<std::string>();
-        if(settingsNode["feature_vpr"]) feature_vpr_name = settingsNode["feature_vpr"].as<std::string>();
+        if(settingsNode["vpr"])
+            AF_WARN("[System] vpr is no longer a setting (MegaLoc is the only place recognition backend) — ignored");
+        if(settingsNode["feature_vpr"])
+            AF_WARN("[System] feature_vpr is no longer a setting (the first feature in features: verifies the candidates) — ignored");
         if(settingsNode["megaloc_onnx"]) megaloc_onnx = settingsNode["megaloc_onnx"].as<std::string>();
+        if(settingsNode["loop_closure"]) LoopClosing::params.loop_closure = settingsNode["loop_closure"].as<bool>();
         if(settingsNode["megaloc_precision"])
             AF_WARN("[System] megaloc_precision is no longer a setting (the model file decides: megaloc_onnx names the fp32 export or its _fp16 twin) — ignored");
         if(settingsNode["megaloc_provider"]) megaloc_settings.provider = settingsNode["megaloc_provider"].as<std::string>();
@@ -144,17 +143,11 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     for (const auto& ft : feature_types)
         feature_list += (feature_list.empty() ? "" : ", ") + feature_name(ft);
 
-    // Explicit feature_vpr must name a configured feature — hard error otherwise
-    FeatureType vpr_feature{feature_types[0]};
-    if(!feature_vpr_name.empty()){
-        bool found{false};
-        for (const auto& ft : feature_types)
-            if(feature_name(ft) == feature_vpr_name){ vpr_feature = ft; found = true; break; }
-        if(!found){
-            AF_ERROR("[System] feature_vpr '" + feature_vpr_name + "' is not in features: [" + feature_list + "]");
-            exit(-1);
-        }
-    }
+    if(!LoopClosing::params.loop_closure)
+        AF_INFO("[System] loop_closure: false — loops are not detected or closed (relocalization still works)");
+
+    // The first feature verifies the retrieved candidates
+    const FeatureType vpr_feature{feature_types[0]};
 
     // placecell's diagnostic managers (PlaceCell.* keys), shared by every store the system
     // builds. The Logger is process-wide: its level is applied through Options
@@ -171,19 +164,15 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 << "' is not a placecell log level (off|error|warn|info|debug|trace or 0-5) — keeping placecell's default");
     placecell::Logger::instance().set_show_elapsed(placecell_settings.log_elapsed);
 
-    if(vpr_method == "none"){
-        AF_INFO("[System] VPR: none (disabled by settings) — no loop closing, no relocalization; a tracking loss is permanent");
-        place_recognition = make_shared<PlaceRecognitionNone>(vpr_feature);
-    }
-    else if(vpr_method == "megaloc"){
+    {
 #ifndef ALLFEATURE_WITH_MEGALOC
         (void)megaloc_params; (void)megaloc_settings;
-        AF_ERROR("[System] vpr: megaloc is not available in this build: it needs the CMake option "
-                 "ALLFEATURE_WITH_MEGALOC=ON. Set vpr: none or rebuild with that backend.");
-        exit(-1);
+        AF_WARN("[System] VPR: none (this build has no MegaLoc: CMake option ALLFEATURE_WITH_MEGALOC is off) — "
+                "no loop closing, no relocalization; a tracking loss is permanent");
+        place_recognition = make_shared<PlaceRecognitionNone>(vpr_feature);
 #else
         if(!std::ifstream(megaloc_onnx).good()){
-            AF_ERROR("[System] vpr: megaloc requested but the model is missing ('" + megaloc_onnx
+            AF_ERROR("[System] the MegaLoc model is missing ('" + megaloc_onnx
                      + "') — let the VSLAM-LAB wrapper download it, generate it with "
                        "Thirdparty/placecell/tools/export_megaloc.py, "
                        "or set megaloc_onnx: to an existing export");
@@ -193,8 +182,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         // announcement is visible during a slow backend setup (TensorRT's engine build
         // takes 1-2 min on first use; ONNX Runtime sessions take seconds, CoreML's first
         // compile up to a minute).
-        AF_INFO("[System] VPR: megaloc | feature_vpr: " + feature_name(vpr_feature)
-                + (feature_vpr_name.empty() ? " (defaulted: first feature)" : "")
+        AF_INFO("[System] VPR: megaloc | verification feature: " + feature_name(vpr_feature)
                 + " | loading " + megaloc_onnx + " on ONNX Runtime (provider " + megaloc_settings.provider + ", "
                 + std::to_string(megaloc_settings.threads) + " threads) ...");
         std::cout.flush();
@@ -214,10 +202,6 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 << ", max candidates " << megaloc_params.max_candidates << ")");
         std::cout.flush();
 #endif
-    }
-    else{
-        AF_ERROR("[System] Unknown vpr backend '" + vpr_method + "' (options: megaloc, none)");
-        exit(-1);
     }
 
     ////////////////////////////////////////////////////////////////////////////////
@@ -241,7 +225,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     }
 #endif
     else
-        AF_INFO("[System] keyframe information kernel: none (InformationKernel: megaloc needs vpr: megaloc) — "
+        AF_INFO("[System] keyframe information kernel: none (InformationKernel: megaloc needs a build with MegaLoc) — "
                 "keyframe insertion by the tracking triggers only, keyframes are never culled");
 
     if(keyframe_information || place_cell){

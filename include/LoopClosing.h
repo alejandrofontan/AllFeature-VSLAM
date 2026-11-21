@@ -51,6 +51,10 @@ class MapDrawer;
 // LoopClosing.* block keep working unchanged.
 struct LoopClosingParameters
 {
+    // Settings key `loop_closure` (read by System). false: no loop is ever detected or closed. Keyframes still
+    // enter the place recognition database, so relocalization keeps working.
+    bool loop_closure{true};
+
     // detect_loop()
     int covisibility_consistency_threshold{3}; // a candidate's covisibility group must be seen in this many consecutive keyframes
     int min_keyframes_between_loops{10};       // no loop detection for this many keyframes after a loop closure (and at the start of a map)

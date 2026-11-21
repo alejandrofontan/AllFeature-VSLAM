@@ -5,6 +5,7 @@ features: ["orb32", "aliked128"]
 features_precision: "fp32"                    # "fp32" | "fp16" (faster on CUDA; accuracy effect not established); `pixi run setup` exports what is missing
 features_superpoint_subpixel: true            # sub-pixel SuperPoint keypoints, true peaks only (accuracy effect not established)
 features_raco_covariance: true                # weight RaCo keypoints by their own 2x2 covariance; false = 1 px
+loop_closure: true                            # false = loops are not detected or closed (relocalization still works)
 segmentation: "none"                          # online semantic segmentation: "efficientvit" | "none"
 
 # Tunable
@@ -15,7 +16,7 @@ LocalMapping.FuseDescriptorQuantile: 0.5      # fusion accepts descriptor distan
 
 Error.Chi2Mono: 5.991                         # outlier threshold of a 2-DoF reprojection error (95%), used by every stage
 Error.Chi2RGBD: 7.815                         # outlier threshold of a 3-DoF RGB-D error (95%); the Huber deltas are their square roots
-Optimizer.LocalBaNeighbors: 10              # best covisible keyframes optimized with the current one
+Optimizer.LocalBaNeighbors: 10                # best covisible keyframes optimized with the current one
 
 Tracking.FlowAssociationRadius: 2.0           # px: a flowed point takes the nearest keypoint of its feature type within this
 Tracking.FlowMaxBackwardError: 1.0            # px: forward-backward KLT disagreement above this drops the track
@@ -28,8 +29,6 @@ Tracking.FrameTracking: "reference_keyframe"  # "reference_keyframe" (descriptor
 # Camera, place recognition and models
 #--------------------------------------------------------------------------------------------
 cam_mono: rgb_0
-vpr: "megaloc"                                # place recognition backend: "megaloc" | "none"
-feature_vpr: "aliked128"                       # feature that verifies retrieved candidates (reloc PnP, loop Sim3); must be in features
 megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # or megaloc_322x322_fp16.onnx (for CUDA / CoreML); from Thirdparty/placecell/tools/export_megaloc.py
 megaloc_provider: "auto"                      # "auto" (CUDA, else CoreML, else CPU) | "cuda" | "coreml" | "cpu"
 megaloc_threads: 4                            # CPU-provider threads; never the core count
@@ -81,7 +80,7 @@ Optimizer.Sim3Chi2: 10.0                    # outlier threshold of both reprojec
 # Tracking (every key is optional: a missing key keeps the compiled-in default)
 #--------------------------------------------------------------------------------------------
 # Initialization
-Tracking.Sequential: 0                  # 1 = deterministic: tracking waits for Local Mapping (pair with features: [orb32], vpr: none, verbose: 0)
+Tracking.Sequential: 0                  # 1 = deterministic: tracking waits for Local Mapping (pair with features: [orb32], verbose: 0)
 Tracking.InitMinKeypoints: 100          # min keypoints to accept a frame
 Tracking.InitSigma: 1.0                 # measurement sigma of the two-view initializer
 Tracking.InitMinMatches: 100            # min matches (all features pooled) to attempt
@@ -125,24 +124,10 @@ Tracking.RelocRansacMaxIterations: 3000
 Tracking.RelocRansacEpsilon: 0.5
 
 #--------------------------------------------------------------------------------------------
-# Place recognition (vpr: megaloc)
+# Place recognition (MegaLoc)
 #--------------------------------------------------------------------------------------------
 PlaceRecognition.MegaLocMinSimilarity: 0.55 # min cosine for a reloc/loop candidate (unrelated places ~0.35-0.4, neighbours ~0.75)
 PlaceRecognition.MaxCandidates: 10          # candidates per query; 0 = unlimited
-
-#--------------------------------------------------------------------------------------------
-# placecell diagnostics (flags are 0/1; compiled-in default in brackets)
-#--------------------------------------------------------------------------------------------
-PlaceCell.Verbosity: "warn"       # [warn] off | error | warn | info | debug | trace; PLACECELL_VERBOSITY overrides it
-PlaceCell.LogElapsed: 0           # [0] prefix lines with the seconds since start
-PlaceCell.Profile: 1              # [1] time the main entry points
-PlaceCell.PrintProfile: 1         # [0] print the timing table at shutdown
-PlaceCell.Record: 1               # [1] keep the history; Dump and Visualize need it
-PlaceCell.Dump: 0                 # [0] write kernels, CSVs and plots to <exp_folder>/<exp_id>_placecell/
-PlaceCell.Visualize: 1            # [0] second window with the kernel and information plots (needs verbose:1)
-PlaceCell.VisualizeMaxHz: 2.0     # [2.0] max redraws per second
-PlaceCell.VisualizeCentred: 0     # [1] draw the centred kernel; 0 = raw cosine
-PlaceCell.VisualizeHistoryLastN: 0 # [0] show only the last N queries; 0 = all
 
 #--------------------------------------------------------------------------------------------
 # Local Mapping (every key is optional: a missing key keeps the compiled-in default)
@@ -160,7 +145,7 @@ LocalMapping.SearchInNeighborsKeyframes: 20       # covisible keyframes fused wi
 LocalMapping.SearchInNeighborsSecondKeyframes: 5  # second-degree neighbours added per covisible keyframe
 
 # Keyframe culling (information-based; without a kernel nothing is culled)
-LocalMapping.InformationKernel: "covisibility"    # "megaloc" (MegaLoc cosine, needs vpr: megaloc) | "covisibility" (shared map points)
+LocalMapping.InformationKernel: "covisibility"    # "megaloc" (MegaLoc cosine) | "covisibility" (shared map points)
 LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # tau: culling keeps every keyframe (1 - tau) explained; a view above tau becomes a keyframe
 LocalMapping.KeyframeCullingMinAge: 5            # younger keyframes are never culled
 LocalMapping.KeyframeCullingMinKeyframes: 5      # never cull below this many alive keyframes
@@ -178,6 +163,20 @@ LoopClosing.Sim3MinMatches: 20                  # fewer matches to the current k
 LoopClosing.Sim3MinInliers: 20                  # inliers of the optimized Sim3 that accept a candidate
 LoopClosing.LoopMinMatches: 40                  # loop-side points matched into the current keyframe that accept the loop
 LoopClosing.GbaIterations: 10                   # global BA iterations after a closure
+
+#--------------------------------------------------------------------------------------------
+# placecell diagnostics (flags are 0/1; compiled-in default in brackets)
+#--------------------------------------------------------------------------------------------
+PlaceCell.Verbosity: "warn"       # [warn] off | error | warn | info | debug | trace; PLACECELL_VERBOSITY overrides it
+PlaceCell.LogElapsed: 0           # [0] prefix lines with the seconds since start
+PlaceCell.Profile: 1              # [1] time the main entry points
+PlaceCell.PrintProfile: 1         # [0] print the timing table at shutdown
+PlaceCell.Record: 1               # [1] keep the history; Dump and Visualize need it
+PlaceCell.Dump: 0                 # [0] write kernels, CSVs and plots to <exp_folder>/<exp_id>_placecell/
+PlaceCell.Visualize: 1            # [0] second window with the kernel and information plots (needs verbose:1)
+PlaceCell.VisualizeMaxHz: 2.0     # [2.0] max redraws per second
+PlaceCell.VisualizeCentred: 0     # [1] draw the centred kernel; 0 = raw cosine
+PlaceCell.VisualizeHistoryLastN: 0 # [0] show only the last N queries; 0 = all
 
 #--------------------------------------------------------------------------------------------
 # Viewer (keep the quotes on strings: cv::FileStorage does not strip a comment from an unquoted one)

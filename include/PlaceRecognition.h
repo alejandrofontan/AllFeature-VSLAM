@@ -12,7 +12,7 @@
  * similarity is computed inside the backend's retrieval, not exposed pairwise. Keyframe information (insertion bands, information culling) lives
  * in KeyframeInformation.h since the covisibility kernel. The downstream geometric verification (feature matching, PnP,
  * Sim3) is backend-agnostic and uses the local feature named by
- * verification_feature() (settings key `feature_vpr`). A new backend (another
+ * verification_feature() (the first feature in the settings). A new backend (another
  * global descriptor / retrieval method) plugs in by implementing this interface
  * and registering in System's constructor.
  *
@@ -87,7 +87,7 @@ protected:
     FeatureType verification_feature_;
 };
 
-// `vpr: none`: inert backend, so the rest of the system needs no null checks — every
+// The backend of a build without MegaLoc: inert, so the rest of the system needs no null checks — every
 // query returns nothing, every compute is a no-op.
 class PlaceRecognitionNone final : public PlaceRecognition
 {

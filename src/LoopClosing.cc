@@ -163,10 +163,10 @@ bool LoopClosing::detect_loop()
     // when their covisibility group was also retrieved by the previous keyframes. No
     // detection right after a loop closure, nor for the first keyframes of a map (both
     // gates share the counter: keyIds start at 0); the consistency groups are left as
-    // they are meanwhile.
+    // they are meanwhile. No detection at all with loop_closure: false.
     loop_candidates_.clear();
     const KeyframeId min_keyframes_between_loops = static_cast<KeyframeId>(params.min_keyframes_between_loops);
-    if(current_keyframe_->keyId >= last_loop_keyframe_id_ + min_keyframes_between_loops)
+    if(params.loop_closure && current_keyframe_->keyId >= last_loop_keyframe_id_ + min_keyframes_between_loops)
         loop_candidates_ = consistent_loop_candidates(place_recognition_->detect_loop_candidates(current_keyframe_));
 
     // Into the database only after its own query

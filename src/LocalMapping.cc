@@ -687,12 +687,12 @@ void LocalMapping::cull_keyframes()
     // (PlaceCell::cull_keyframes); this adapter supplies the host side: the kernel's
     // refresh, parameters, the covisibility window for the local scope, reconciliation
     // of externally removed keyframes, execution of each cull (set_bad_flag), and logging.
-    // No kernel (InformationKernel: megaloc without vpr: megaloc): nothing is culled
+    // No kernel (InformationKernel: megaloc in a build without MegaLoc): nothing is culled
     if(!keyframe_information_ || keyframe_information_->place_cell().size() == 0){
         static bool warned{false};
         if(!warned){
-            AF_WARN("[LocalMapping] no keyframe information kernel (InformationKernel: megaloc needs vpr: megaloc): "
-                    "keyframes are never culled; set vpr: megaloc or InformationKernel: covisibility");
+            AF_WARN("[LocalMapping] no keyframe information kernel (InformationKernel: megaloc needs a build with "
+                    "MegaLoc): keyframes are never culled; set InformationKernel: covisibility");
             warned = true;
         }
         return;
