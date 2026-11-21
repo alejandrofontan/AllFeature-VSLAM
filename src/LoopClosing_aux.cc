@@ -32,6 +32,7 @@ void LoopClosing::LoadParameters(const cv::FileStorage& fSettings)
     read_if_present("LoopClosing.Sim3MinInliers", params.sim3_min_inliers);
     read_if_present("LoopClosing.LoopMinMatches", params.loop_min_matches);
     read_if_present("LoopClosing.GbaIterations", params.gba_iterations);
+    read_if_present("Tracking.ViewingCosLimit", params.fuse_viewing_cos_limit);   // shared with Tracking and Local Mapping
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

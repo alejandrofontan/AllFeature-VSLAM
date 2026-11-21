@@ -12,7 +12,7 @@
  * LocalMappingParameters: compiled-in defaults, overridden only by keys present in the
  * file, so settings YAMLs without a PlaceCell.* block keep working unchanged.
  *
- * Apply to every placecell store the system builds: the `vpr: megaloc` retrieval store
+ * Apply to every placecell store the system builds: the MegaLoc retrieval store
  * and the keyframe information store (LocalMapping.InformationKernel — the same object
  * for `megaloc`, an own item-mode store for `covisibility`). System loads them once,
  * turns them into placecell::PlaceCell::Options when constructing the stores, prints the

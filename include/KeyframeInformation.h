@@ -18,17 +18,17 @@
  *
  * Two backends, selected by the settings key `LocalMapping.InformationKernel`:
  *   - KeyframeInformationMegaLoc    ("megaloc", compiled default): the retrieval store of
- *     the `vpr: megaloc` backend (System::place_cell, MegaLoc image embeddings, cosine
+ *     the place recognition backend (System::place_cell, MegaLoc image embeddings, cosine
  *     kernel with a common-mode floor, hence centred by default). One store serves
  *     retrieval and information; frames are embedded once per tracked frame and the
  *     embedding is cached in Frame::global_descriptor for the keyframe made from it.
- *     Needs vpr: megaloc — System constructs no component otherwise.
+ *     Needs a build with MegaLoc — System constructs no component otherwise.
  *   - KeyframeInformationCovisibility ("covisibility"): its own placecell store in ITEM
  *     mode (placecell::PlaceCell::set_items): a keyframe is the set of map points it
  *     observes and the kernel is the cosine of the indicator vectors,
  *     K_ij = |P_i ∩ P_j| / sqrt(|P_i| |P_j|) — PSD, unit diagonal, exactly 0 for keyframes
  *     that share nothing, so raw (uncentred) by default. Independent of the VPR backend
- *     (works with vpr: none). The sets move with the map (points culled, fused, created),
+ *     (works in a build without MegaLoc). The sets move with the map (points culled, fused, created),
  *     so LocalMapping re-sends every alive keyframe before each cull (refresh()); a culled
  *     keyframe's set is frozen by placecell.
  *

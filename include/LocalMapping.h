@@ -1,50 +1,27 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
-
-#ifndef AF_VSLAM_LOCALMAPPING_H
-#define AF_VSLAM_LOCALMAPPING_H
+#pragma once
 
 #include <atomic>
+#include <chrono>
 #include <list>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
 #include <opencv2/core/core.hpp>
 
-#include "FeatureMatcher.h"
-#include "KeyframeInformation.h"
 #include "KeyFrame.h"
-#include "LoopClosing.h"
-#include "Map.h"
-#include "Viewer.h"
+#include "Types.h"
 
 namespace AF_VSLAM
 {
 
-// Broken by the include cycles above (LoopClosing <-> LocalMapping include each
-// other; Viewer and Map reach back too); these forward declarations keep this
-// header valid while its own include is still being processed by the peer.
+// Held by pointer only: their headers are included where they are used (LocalMapping.cc)
+class FeatureMatcher;
+class KeyframeInformation;
 class LoopClosing;
 class Map;
 class Viewer;
@@ -56,9 +33,9 @@ class Viewer;
 struct LocalMappingParameters
 {
     // The keyframe information kernel (KeyframeInformation.h) that the information
-    // culler AND Tracking's insertion bands read: "megaloc" (the vpr: megaloc store's
-    // MegaLoc cosine, centred; no kernel at all without vpr: megaloc) or "covisibility"
-    // (cosine of the keyframes' shared map points, raw; independent of vpr). The two
+    // culler AND Tracking's insertion bands read: "megaloc" (the retrieval store's
+    // MegaLoc cosine, centred; no kernel at all in a build without MegaLoc) or "covisibility"
+    // (cosine of the keyframes' shared map points, raw). The two
     // kernels live on different scales, so KeyframeCullingMaxUnexplained and
     // KeyframeCullingCentred take a per-kernel default when their keys are absent.
     std::string information_kernel{"megaloc"};
@@ -81,9 +58,12 @@ struct LocalMappingParameters
     // fusion accepts a match only if its descriptor distance is at most this quantile of the distances between map
     // points' descriptors and their own observations (estimated at every keyframe; also used by Loop Closing)
     float fuse_descriptor_quantile{0.5f};
+    // a point is projected into a keyframe for fusion only if the keyframe views it within this cosine of its
+    // mean viewing direction (60 deg). Key Tracking.ViewingCosLimit: one value for tracking and both fusions.
+    float fuse_viewing_cos_limit{0.5f};
 
     // cull_keyframes()
-    // Atomic: the Viewer's "Cull Max Unexplained" slider writes it while LocalMapping reads it.
+    // Atomic: the Viewer's "KF Max Unexplained" slider writes it while LocalMapping reads it.
     std::atomic<float> keyframe_culling_max_unexplained{0.3f};  // a keyframe may be culled only if every keyframe ever inserted stays at least (1 - this) explained by the alive ones
     int keyframe_culling_min_age{5};               // keyframes younger than this many keyframes (by keyId) are never culled
     int keyframe_culling_min_keyframes{5};         // never cull below this many alive keyframes
@@ -120,12 +100,10 @@ public:
     // Busy flag published by run(): false while a keyframe is being processed. Tracking
     // reads it to decide between a normal and an emergency keyframe insertion.
     bool accepts_keyframes() const;
-    void set_accept_keyframes(bool accept);
 
     // Stop protocol, used by Loop Closing while it corrects the map: request_stop()
     // asks the thread to pause at its next safe point; run() pauses there via
-    // stop_if_requested() and idles until release(), which also drops the keyframes
-    // queued meanwhile. Tracking wraps each keyframe
+    // stop_if_requested() and idles until release(). Tracking wraps each keyframe
     // insertion in set_insertion_lock(true/false), which defers a pending stop until
     // the insertion is done; it returns false if the thread is already stopped, in
     // which case the caller must not insert.
@@ -136,8 +114,8 @@ public:
     bool set_insertion_lock(bool locked);
 
     // Reset protocol, used by Tracking::reset: request_reset() blocks the caller until
-    // the Local Mapping thread has dropped its keyframe queue, recent map points and
-    // VPR matrix (reset_if_requested, at the end of each run() iteration).
+    // the Local Mapping thread has dropped its keyframe queue and recent map points
+    // (reset_if_requested, at the end of each run() iteration).
     void request_reset();
 
     // Finish protocol, used by System::Shutdown: request_finish() makes run() return at
@@ -150,15 +128,17 @@ public:
     // probation, some erased since. Called by System::Shutdown before the lifetime summary.
     void release_map_references();
 
-protected:
+private:
 
     // create_new_map_points(): the numerical zero for the homogeneous scale of a triangulated point
     // (its reprojection gate is ErrorModel::params.chi2_mono)
     static constexpr float HOMOGENEOUS_W_EPSILON{1e-12f};
 
-    // fuse_into_keyframe(): a point is projected only if the keyframe views it within this cosine of its
-    // mean viewing direction (60 deg); the match gate is ErrorModel::params.chi2_mono of the keypoint's own variance
-    static constexpr float FUSE_VIEWING_COS_LIMIT{0.5f};
+    // run() and request_reset(): how long the thread sleeps when idle or paused, and how often a waiter polls
+    static constexpr std::chrono::milliseconds IDLE_POLL_PERIOD{3};
+
+    // cull_keyframes(): placecell's culling method
+    static constexpr const char* KEYFRAME_CULLING_METHOD{"gram-greedy"};
 
     // One full mapping iteration for the keyframe at the head of the queue (see run())
     void process_keyframe();
@@ -175,15 +155,15 @@ protected:
     // keyframe's map points' descriptors and their other observations; stored in the map for both fusions
     void estimate_fuse_max_descriptor_distance(FeatureType feature_type);
     // search_in_neighbors() helper: fuses `map_points` into `keyframe`'s keypoints of `feature_type`
-    struct FuseCounts { int merged{0}; int observed{0}; };
-    FuseCounts fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points, FeatureType feature_type);
+    void fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points, FeatureType feature_type);
     // Optimizer::local_bundle_adjustment on the current keyframe (skipped on a too-small map)
     void local_bundle_adjustment();
     // Keyframe culling: joint-information culling on the keyframe information kernel; see the definition for
     // the exact rule. Without a kernel nothing is culled.
     void cull_keyframes();
-    // Called by run(): pause at its safe point (true once stopped) / perform a pending
+    // Called by run(): publish the busy flag / pause at its safe point (true once stopped) / perform a pending
     // reset / exit when asked / publish the exit
+    void set_accept_keyframes(bool accept);
     bool stop_if_requested();
     void reset_if_requested();
     bool is_reset_requested() const;
@@ -209,7 +189,7 @@ protected:
     // removed when a keyframe is culled -- culled keyframes stay as the culling
     // "history"), keyed by frame_id. process_new_keyframe registers each keyframe,
     // cull_keyframes refreshes the alive ones and culls on it. Null when the
-    // system has no information kernel (megaloc kernel without vpr: megaloc).
+    // system has no information kernel (megaloc kernel in a build without MegaLoc).
     std::shared_ptr<KeyframeInformation> keyframe_information_{};
     std::list<Pt> recent_map_points_;
 
@@ -221,17 +201,13 @@ protected:
     bool finish_requested_{false};
     bool finished_{true};
 
-    // Per-iteration timing histograms (ms buckets), printed by log_profile() through
-    // the AF_PROFILE sink. local_mapping_times_ is always recorded -- it feeds the
-    // viewer's median-time display; the per-stage histograms are PROFILING_EXHAUSTIVE-
-    // only, each recorded inside its stage function (LocalMappingProfiler / StageTimer).
-    void log_profile();
+    // cull_keyframes(): the missing-kernel warning is printed once, and the over-budget history once per change
+    bool warned_no_kernel_{false};
+    int last_over_budget_{-1};
+
+    // Time of each mapping iteration, as a histogram in ms buckets (LocalMappingProfiler): the Viewer shows its
+    // median
     std::map<int, int> local_mapping_times_{};
-    std::map<int, int> create_new_map_points_times_{};
-    std::map<int, int> search_in_neighbors_times_{};
-    std::map<int, int> local_ba_times_{};
 };
 
-} // namespace AF_VSLAM
-
-#endif // AF_VSLAM_LOCALMAPPING_H
+}

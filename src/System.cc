@@ -568,7 +568,7 @@ void System::SavePlaceCellDiagnostics(const std::string& directory)
         return;
 
     // The information store gets the full dump + plots; a distinct retrieval store
-    // (vpr: megaloc with InformationKernel: covisibility) its kernel / views / profile only
+    // (MegaLoc with InformationKernel: covisibility) its kernel / views / profile only
     const placecell::PlaceCell* information_store = keyframe_information ? &keyframe_information->place_cell() : nullptr;
     const placecell::PlaceCell* retrieval_store = (place_cell && place_cell.get() != information_store) ? place_cell.get() : nullptr;
     const placecell::PlaceCell& main_store = information_store ? *information_store : *retrieval_store;

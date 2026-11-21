@@ -72,7 +72,7 @@ struct TrackingParameters
     // keyframe decision skips the live busy-flag check (issue #16). Local Mapping
     // work is thereby serialized into the tracking timeline; combined with the
     // determinism fixes (octree sort, id-ordered sets, sorted GBA input) and an
-    // orb32-only / vpr:none / verbose:0 configuration, runs become repeatable.
+    // orb32-only / verbose:0 configuration without place recognition, runs become repeatable.
     bool sequential{false};
 
     // monocular_initialization()
@@ -158,7 +158,7 @@ public:
     void set_loop_closing(std::shared_ptr<LoopClosing> loop_closing) { loop_closing_ = std::move(loop_closing); }
     void set_viewer(std::shared_ptr<Viewer> viewer) { viewer_ = std::move(viewer); }
     // Keyframe information kernel (KeyframeInformation.h); null = no information measure
-    // (LocalMapping.InformationKernel: megaloc without vpr: megaloc): the tracking-health
+    // (LocalMapping.InformationKernel: megaloc in a build without MegaLoc): the tracking-health
     // triggers alone decide keyframe insertion.
     void set_keyframe_information(std::shared_ptr<KeyframeInformation> keyframe_information) { keyframe_information_ = std::move(keyframe_information); }
 

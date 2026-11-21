@@ -10,8 +10,9 @@ segmentation: "none"                          # online semantic segmentation: "e
 
 # Tunable
 Tracking.FeaturesFraction: 0.5                # keypoints per frame, as a share of each feature's maximum (orb32 4000, learned 2048, others 2000)
-Tracking.ViewingCosLimit: 0.5                 # a local point is a candidate only within this cosine of its mean viewing direction (60 deg)
+Tracking.ViewingCosLimit: 0.5                 # a map point is a candidate (tracking, and fusion in Local Mapping and Loop Closing) only within this cosine of its mean viewing direction (60 deg)
 
+LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # tau: culling keeps every keyframe (1 - tau) explained; a view above tau becomes a keyframe
 LocalMapping.FuseDescriptorQuantile: 0.5      # fusion accepts descriptor distances up to this quantile of point-to-observation distances
 
 Error.Chi2Mono: 5.991                         # outlier threshold of a 2-DoF reprojection error (95%), used by every stage
@@ -24,6 +25,7 @@ Tracking.FlowMaxBackwardError: 1.0            # px: forward-backward KLT disagre
 # Constants
 Tracking.NominalImageArea: 307200             # px (640x480): frames are resized to this area and cropped to a multiple of 32 (739x458 -> 672x416)
 Tracking.FrameTracking: "reference_keyframe"  # "reference_keyframe" (descriptor match) | "optical_flow"
+LocalMapping.InformationKernel: "covisibility"   # "megaloc" (MegaLoc cosine) | "covisibility" (shared map points)
 
 #--------------------------------------------------------------------------------------------
 # Camera, place recognition and models
@@ -145,8 +147,6 @@ LocalMapping.SearchInNeighborsKeyframes: 20       # covisible keyframes fused wi
 LocalMapping.SearchInNeighborsSecondKeyframes: 5  # second-degree neighbours added per covisible keyframe
 
 # Keyframe culling (information-based; without a kernel nothing is culled)
-LocalMapping.InformationKernel: "covisibility"    # "megaloc" (MegaLoc cosine) | "covisibility" (shared map points)
-LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # tau: culling keeps every keyframe (1 - tau) explained; a view above tau becomes a keyframe
 LocalMapping.KeyframeCullingMinAge: 5            # younger keyframes are never culled
 LocalMapping.KeyframeCullingMinKeyframes: 5      # never cull below this many alive keyframes
 LocalMapping.KeyframeCullingScope: "map"         # "map" (all alive keyframes) | "local" (current keyframe and its covisibles)

@@ -20,7 +20,7 @@ namespace AF_VSLAM
 MapPoint::MapPoint(const vec3f& world_pos, Keyframe ref_keyframe, std::shared_ptr<Map> map,
                    const FeatureType& featureType, const cv::Vec3b& color):
     first_keyframe_id(ref_keyframe->keyId), featureType(featureType), color(color),
-    fuse_candidate_for_keyframe(0), loop_point_for_keyframe(0),
+    loop_point_for_keyframe(0),
     corrected_by_keyframe(0), corrected_reference(0), ba_global_for_keyframe(0),
     position_(world_pos),
     num_observations_(0), ref_keyframe_(ref_keyframe),

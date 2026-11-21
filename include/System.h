@@ -119,7 +119,7 @@ public:
 
     // placecell diagnostics (PlaceCell.Dump): the information store's kernel (.npy),
     // views.csv, the recorder's CSVs, profile.csv and the three visualizer plots as PNGs,
-    // written into `directory` (created if needed); when the vpr: megaloc retrieval store
+    // written into `directory` (created if needed); when the MegaLoc retrieval store
     // is a different object (InformationKernel: covisibility) its dump goes to
     // `directory`/retrieval_megaloc. No-op without any store or with PlaceCell.Dump: 0.
     // Call after Shutdown().
@@ -171,7 +171,7 @@ private:
     // keyframe database, relocalization and loop-detection candidates.
     std::shared_ptr<PlaceRecognition> place_recognition{};
 
-    // placecell retrieval store (vpr: megaloc only, null otherwise): MegaLoc embedder +
+    // placecell retrieval store (null in a build without MegaLoc): MegaLoc embedder +
     // the global descriptors of every keyframe, keyed by frame_id. Owned here, injected
     // into PlaceRecognitionMegaLoc and, with InformationKernel: megaloc, wrapped by
     // keyframe_information below (one store for retrieval and information).
@@ -179,7 +179,7 @@ private:
 
     // Keyframe information kernel (KeyframeInformation.h, LocalMapping.InformationKernel):
     // Tracking's insertion bands and LocalMapping's information culler read it. Null when
-    // the system has no information kernel (megaloc kernel without vpr: megaloc).
+    // the system has no information kernel (megaloc kernel in a build without MegaLoc).
     std::shared_ptr<KeyframeInformation> keyframe_information{};
 
     // PlaceCell.* settings (print manager / profiler / recorder / visualizer), loaded

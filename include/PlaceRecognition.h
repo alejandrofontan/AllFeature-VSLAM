@@ -62,7 +62,7 @@ public:
 
     // Global descriptor of a query frame / a keyframe (no-op when inactive or
     // already computed). compute(KeyFrame&) may run off the tracking thread
-    // (LocalMapping::ProcessNewKeyFrame) and releases the keyframe's image afterwards.
+    // (LocalMapping::process_new_keyframe) and releases the keyframe's image afterwards.
     virtual void compute(Frame& frame) = 0;
     virtual void compute(KeyFrame& keyframe) = 0;
 

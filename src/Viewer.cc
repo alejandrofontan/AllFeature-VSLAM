@@ -273,7 +273,7 @@ void Viewer::Run()
 
     // placecell window (PlaceCell.Visualize): the visualizer's three images in a second
     // Pangolin window, see the block after d_top below. Only offered when a placecell store
-    // exists (vpr: megaloc).
+    // exists.
     const placecell::PlaceCell* placeCell = system->GetPlaceCell();
     const PlaceCellSettings& placeCellSettings = system->GetPlaceCellSettings();
     std::unique_ptr<pangolin::Var<bool>> menuPlaceCellWindow;

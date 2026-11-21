@@ -1,14 +1,9 @@
-/**
- * Auxiliary LocalMapping members kept out of LocalMapping.cc so the
- * per-keyframe flow there reads uninterrupted (companion to
- * include/LocalMapping_aux.h): parameter loading, thread synchronization, the
- * online keyframe VPR similarity matrix, and profiling output.
- */
 #include "LocalMapping.h"
 
 #include <placecell/placecell.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -16,7 +11,6 @@
 #include <sstream>
 #include <thread>
 
-#include "Profiling_aux.h"   // PROFILING_EXHAUSTIVE, which log_profile() below is gated on
 #include "Utils.h"
 #include "afvslam_log.hpp"
 #include "SettingsReader.h"
@@ -45,7 +39,10 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     // lives on a different scale than MegaLoc's)
     read_if_present("LocalMapping.InformationKernel", params.information_kernel);
     if(params.information_kernel != "megaloc" && params.information_kernel != "covisibility")
+    {
         AF_ERROR("[LocalMapping] Unknown LocalMapping.InformationKernel '" + params.information_kernel + "' (options: megaloc, covisibility)");
+        exit(-1);
+    }
     if(params.information_kernel == "covisibility")
     {
         params.keyframe_culling_max_unexplained.store(LocalMappingParameters::keyframe_culling_max_unexplained_covisibility);
@@ -64,6 +61,7 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("LocalMapping.SearchInNeighborsKeyframes", params.search_in_neighbors_keyframes);
     read_if_present("LocalMapping.SearchInNeighborsSecondKeyframes", params.search_in_neighbors_second_keyframes);
     read_if_present("LocalMapping.FuseDescriptorQuantile", params.fuse_descriptor_quantile);
+    read_if_present("Tracking.ViewingCosLimit", params.fuse_viewing_cos_limit);   // shared with Tracking and Loop Closing
 
     float max_unexplained = params.keyframe_culling_max_unexplained.load();
     read_if_present("LocalMapping.KeyframeCullingMaxUnexplained", max_unexplained);
@@ -72,16 +70,19 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("LocalMapping.KeyframeCullingMinKeyframes", params.keyframe_culling_min_keyframes);
     read_if_present("LocalMapping.KeyframeCullingScope", params.keyframe_culling_scope);
     if(params.keyframe_culling_scope != "map" && params.keyframe_culling_scope != "local")
+    {
         AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingScope '" + params.keyframe_culling_scope + "' (options: map, local)");
+        exit(-1);
+    }
     read_if_present("LocalMapping.KeyframeCullingMaxPerCall", params.keyframe_culling_max_per_call);
     read_if_present("LocalMapping.KeyframeCullingObjective", params.keyframe_culling_objective);
     if(params.keyframe_culling_objective != "unique" && params.keyframe_culling_objective != "minimax"
        && params.keyframe_culling_objective != "total-loss")
     {
-        // Fall back rather than let placecell throw std::invalid_argument inside the mapping thread
-        AF_WARN("[LocalMapping] Unknown LocalMapping.KeyframeCullingObjective '" + params.keyframe_culling_objective
-                + "' (options: unique, minimax, total-loss); using \"unique\"");
-        params.keyframe_culling_objective = "unique";
+        // Stop here rather than let placecell throw std::invalid_argument inside the mapping thread
+        AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingObjective '" + params.keyframe_culling_objective
+                 + "' (options: unique, minimax, total-loss)");
+        exit(-1);
     }
     int centred = params.keyframe_culling_centred ? 1 : 0;   // cv::FileStorage has no bool reader
     read_if_present("LocalMapping.KeyframeCullingCentred", centred);
@@ -142,12 +143,10 @@ void LocalMapping::release()
     if(finished_)
         return;
 
+    // The queue is left alone: it is empty here (run() stops only on an empty queue, and Tracking cannot insert
+    // while the thread is stopped), and a keyframe in it would already be Tracking's reference
     stopped_ = false;
     stop_requested_ = false;
-    {
-        std::lock_guard<std::mutex> queue_lock(new_keyframes_mutex_);
-        new_keyframes_.clear();
-    }
     AF_INFO("[LocalMapping] released");
     std::cout.flush();
 }
@@ -182,7 +181,7 @@ void LocalMapping::request_reset()
     }
     // Block until the Local Mapping thread has performed the reset (reset_if_requested)
     while(is_reset_requested())
-        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+        std::this_thread::sleep_for(IDLE_POLL_PERIOD);
 }
 
 bool LocalMapping::is_reset_requested() const
@@ -206,9 +205,7 @@ void LocalMapping::reset_if_requested()
     // (called from Tracking's reset) clears it.
 
     local_mapping_times_.clear();
-    create_new_map_points_times_.clear();
-    search_in_neighbors_times_.clear();
-    local_ba_times_.clear();
+    last_over_budget_ = -1;
 
     reset_requested_ = false;
 }
@@ -237,20 +234,6 @@ bool LocalMapping::is_finished() const
 {
     std::lock_guard<std::mutex> lock(finish_mutex_);
     return finished_;
-}
-
-// ------------------------------------------------------------------------------------------
-// Cumulative per-stage timing histograms, printed through the AF_PROFILE sink.
-void LocalMapping::log_profile()
-{
-#ifdef PROFILING_EXHAUSTIVE
-    AF_PROFILE_BEGIN("Local Mapping Profiling");
-    AF_PROFILE_FIELD(create_new_map_points_times_, "  Create New Map Points");
-    AF_PROFILE_FIELD(search_in_neighbors_times_,   "  Search in Neighbors");
-    AF_PROFILE_FIELD(local_ba_times_,              "  Local Bundle Adjustment");
-    AF_PROFILE_FIELD(local_mapping_times_,         "Local Mapping");
-    AF_PROFILE_END();
-#endif
 }
 
 void LocalMapping::release_map_references()

@@ -1053,7 +1053,7 @@ bool Tracking::need_new_keyframe()
     //             not novel either. It only becomes a veto if minInfo is configured ABOVE tau,
     //             where tau < v < minInfo is both novel and redundant and redundant wins.
     // WITHOUT AN INFORMATION MEASURE (keyframe_information_ null: InformationKernel is not
-    // covisibility and there is no MegaLoc store, e.g. vpr: none) BOTH BANDS ARE FALSE AND
+    // covisibility and there is no MegaLoc store: a build without MegaLoc) BOTH BANDS ARE FALSE AND
     // THIS RETURNS false ON EVERY FRAME — no keyframe is ever inserted after the initial map.
     // See System.cc, which still announces the (now removed) tracking triggers in that case.
     const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load();
