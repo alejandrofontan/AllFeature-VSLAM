@@ -53,6 +53,15 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("LocalMapping.MapPointCullingMinObservations", params.map_point_culling_min_observations);
     read_if_present("LocalMapping.MapPointCullingObservationTestAge", params.map_point_culling_observation_test_age);
     read_if_present("LocalMapping.MapPointCullingProbationAge", params.map_point_culling_probation_age);
+    if(params.map_point_culling_observation_test_age > params.map_point_culling_probation_age)
+    {
+        // A point would leave probation before it is ever tested
+        AF_ERROR("[LocalMapping] LocalMapping.MapPointCullingObservationTestAge ("
+                 + std::to_string(params.map_point_culling_observation_test_age)
+                 + ") must not exceed LocalMapping.MapPointCullingProbationAge ("
+                 + std::to_string(params.map_point_culling_probation_age) + ")");
+        exit(-1);
+    }
 
     read_if_present("LocalMapping.CreateNewMapPointsKeyframes", params.create_new_map_points_keyframes);
     read_if_present("LocalMapping.CreateNewMapPointsMinBaselineDepthRatio", params.create_new_map_points_min_baseline_depth_ratio);

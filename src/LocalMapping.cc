@@ -7,8 +7,10 @@
 #include <cmath>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <sstream>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -178,31 +180,67 @@ void LocalMapping::register_keyframe()
         keyframe_information_->on_keyframe_processed(current_keyframe_);
 }
 
+// Stage 2: probation of the points created in the last few keyframes
 void LocalMapping::cull_map_points()
 {
-    const int current_id = int(current_keyframe_->keyId);
+    AF_REPORT_SCOPE();
+    const int current_id = static_cast<int>(current_keyframe_->keyId);
 
-    recent_map_points_.remove_if([&](const Pt& map_point)
+    // Report: what became of the points on probation, per feature
+    struct Counts { int points{0}, dead{0}, culled_found_ratio{0}, culled_observations{0}, graduated{0}; };
+    std::map<FeatureType, Counts> counts_by_feature;
+
+    recent_map_points_.remove_if([current_id, &counts_by_feature](const Pt& map_point)
     {
-        if(map_point->is_bad())
-            return true;
+        Counts& counts = counts_by_feature[map_point->featureType];
+        counts.points++;
 
+        // Culled or fused elsewhere meanwhile: it just leaves the list
+        if(map_point->is_bad())
+        {
+            counts.dead++;
+            return true;
+        }
+
+        // In view often, matched rarely (a new point starts at ratio 1)
         if(map_point->get_found_ratio() < params.map_point_culling_min_found_ratio)
         {
             map_point->set_bad_flag();
+            counts.culled_found_ratio++;
             return true;
         }
 
-        const int age = current_id - int(map_point->first_keyframe_id);
+        // Old enough to have been observed again, and was not. Age = keyframes created since the point was;
+        // an observation with sensor depth counts more than one
+        const int age = current_id - static_cast<int>(map_point->first_keyframe_id);
         if(age >= params.map_point_culling_observation_test_age
-           && map_point->number_of_observations() <= params.map_point_culling_min_observations)
+           && map_point->number_of_observations() < params.map_point_culling_min_observations)
         {
             map_point->set_bad_flag();
+            counts.culled_observations++;
             return true;
         }
 
-        return age >= params.map_point_culling_probation_age;
+        // Survived: leaves probation once old enough, and is not tested again
+        if(age >= params.map_point_culling_probation_age)
+        {
+            counts.graduated++;
+            return true;
+        }
+        return false;
     });
+
+    for([[maybe_unused]] const auto& [feature_type, counts] : counts_by_feature)
+    {
+        const std::string& feature = get_feature(feature_type).get_feature_name();
+        AF_REPORT("probation.points", feature, counts.points);
+        AF_REPORT("probation.dead", feature, counts.dead);
+        AF_REPORT("culled.found_ratio", feature, counts.culled_found_ratio);
+        AF_REPORT("culled.observations", feature, counts.culled_observations);
+        AF_REPORT("probation.graduated", feature, counts.graduated);
+        AF_REPORT("probation.waiting", feature, counts.points - counts.dead - counts.culled_found_ratio
+                                                - counts.culled_observations - counts.graduated);
+    }
 }
 
 // The covisible keyframes to triangulate against: the create_new_map_points_keyframes most

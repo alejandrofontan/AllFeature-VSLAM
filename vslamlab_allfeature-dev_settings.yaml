@@ -134,8 +134,17 @@ PlaceRecognition.MaxCandidates: 10          # candidates per query; 0 = unlimite
 #--------------------------------------------------------------------------------------------
 # Local Mapping (every key is optional: a missing key keeps the compiled-in default)
 #--------------------------------------------------------------------------------------------
+# Keyframes
+KeyFrame.MinCovisibilityWeight: 15                # shared map points two keyframes need to be linked in the covisibility graph
+
+# Map points
+MapPoint.MinObservingKeyframes: 3                 # a point that loses an observation and is left with fewer keyframes than this is removed
+MapPoint.DepthObservationWeight: 2                # an observation with sensor depth counts this many times in the observation count
+MapPoint.DepthInvarianceRatio: 1.2                # a point is expected between its reference distance divided and multiplied by this
+
+# Cull map points
 LocalMapping.MapPointCullingMinFoundRatio: 0.25   # cull a recent point when found/visible drops below this
-LocalMapping.MapPointCullingMinObservations: 2    # cull when it has at most this many observations at ObservationTestAge
+LocalMapping.MapPointCullingMinObservations: 3    # observations a point needs by ObservationTestAge to survive (depth-verified ones count more)
 LocalMapping.MapPointCullingObservationTestAge: 2 # keyframes after creation at which that test applies
 LocalMapping.MapPointCullingProbationAge: 3       # keyframes after creation at which a surviving point leaves probation
 
