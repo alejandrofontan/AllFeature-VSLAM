@@ -222,10 +222,22 @@ opencv = "4.12.*"            # cv2: the C++-equivalent preprocessing in the self
 git = "*"
 numpy = "<2"
 
+########################################################################################################################
+# report env = plots of a run's <exp_id>_Report.csv (tools/report.py). Python + matplotlib only, nothing from the build.
+#   pixi run -e report report <Report.csv>                       lists every module, function and variable recorded
+#   pixi run -e report report <module> <function> <Report.csv>   plots every variable of that function against frame_id
+[feature.report.dependencies]
+python = "3.11.*"
+matplotlib = "*"     # with a GUI backend: the plots open in a window
+
+[feature.report.tasks]
+report = { cmd = "python tools/report.py", env = { PYTHONNOUSERSITE = "1" } }
+
 [environments]
 build = ["build"]
 cpu = { features = ["cpu"], no-default-feature = true }
 export-features = { features = ["export-features"], no-default-feature = true }
+report = { features = ["report"], no-default-feature = true }
 
 ########################################################################################################################
 # Package: `allfeature` (the three executables, libAllFeature-VSLAM + its shared libraries, headers under
