@@ -194,12 +194,27 @@ void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector
     std::vector<Candidate> candidates;
     const int b = remove_borders_;
     const bool use_mask = !mask.empty() && mask.type() == CV_8UC1 && mask.cols >= w8 && mask.rows >= h8;
+    // Sub-pixel mode keeps only the peaks of the raw scores: a pixel no lower than its 8 neighbours. The NMS's later
+    // passes also let through pixels beside a stronger one that another keypoint suppressed; those have no peak to
+    // refine, so they are not candidates
+    const auto is_peak = [&raw_scores, w8, h8](const int x, const int y) {
+        const float centre = raw_scores.at<float>(y, x);
+        for (int yy = std::max(y - 1, 0); yy <= std::min(y + 1, h8 - 1); ++yy)
+        {
+            const float* raw_row = raw_scores.ptr<float>(yy);
+            for (int xx = std::max(x - 1, 0); xx <= std::min(x + 1, w8 - 1); ++xx)
+                if (raw_row[xx] > centre)
+                    return false;
+        }
+        return true;
+    };
     for (int y = b; y < h8 - b; ++y)                                   // border pixels are -1 upstream: never above threshold
     {
         const float* row = score_map.ptr<float>(y);
         const uchar* mask_row = use_mask ? mask.ptr<uchar>(y) : nullptr;
         for (int x = b; x < w8 - b; ++x)
-            if (row[x] > detection_threshold_ && (!mask_row || mask_row[x] != 0))   // masked out: not a candidate
+            if (row[x] > detection_threshold_ && (!mask_row || mask_row[x] != 0)    // masked out: not a candidate
+                && (!subpixel_ || is_peak(x, y)))
                 candidates.push_back({row[x], x, y});
     }
     if (max_keypoints > 0 && static_cast<int>(candidates.size()) > max_keypoints)
@@ -220,30 +235,22 @@ void SuperPointOnnx::detect(const cv::Mat& image, int max_keypoints, std::vector
         kp.pt = cv::Point2f(static_cast<float>(c.x), static_cast<float>(c.y));
         if (subpixel_ && c.x >= 1 && c.x < w8 - 1 && c.y >= 1 && c.y < h8 - 1)
         {
-            // Sub-pixel position: the score-weighted centre of the 3x3 raw scores around the maximum (softmax
-            // outputs, >= 0). Only for a keypoint that is the peak of its own 3x3: the NMS's later passes also keep
-            // pixels that sit beside a stronger one another keypoint suppressed, and for those the centre would only
-            // drift towards that neighbour (up to 1 px); they keep their integer position
-            const float peak = raw_scores.at<float>(c.y, c.x);
+            // Sub-pixel position: the score-weighted centre of the 3x3 raw scores around the peak (softmax outputs,
+            // >= 0, and the centre one is the largest: the centre lies inside the patch)
             float sum = 0.0f, sum_x = 0.0f, sum_y = 0.0f;
-            bool is_peak = true;
             for (int dy = -1; dy <= 1; ++dy)
             {
                 const float* raw_row = raw_scores.ptr<float>(c.y + dy);
                 for (int dx = -1; dx <= 1; ++dx)
                 {
                     const float w = raw_row[c.x + dx];
-                    is_peak = is_peak && w <= peak;
                     sum += w;
                     sum_x += w * static_cast<float>(dx);
                     sum_y += w * static_cast<float>(dy);
                 }
             }
-            if (is_peak)
-            {
-                kp.pt.x += sum_x / sum;
-                kp.pt.y += sum_y / sum;
-            }
+            kp.pt.x += sum_x / sum;
+            kp.pt.y += sum_y / sum;
         }
         kp.response = c.score;
         kp.size = 1.0f;

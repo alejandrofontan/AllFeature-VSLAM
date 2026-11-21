@@ -33,10 +33,10 @@ features_precision: "fp32"                            # which export of every le
                                                      # 739x458: LightGlue 2.3x faster (21 -> 9 ms at 1000x1000 keypoints) with ~1% of the matches different;
                                                      # SuperPoint / ALIKED 1.2x faster with 3.4% / 1.2% of the keypoints different. After changing this or
                                                      # `features`, `pixi run setup` (or `pixi run -e export-features export-feature-models`) exports what is missing
-features_superpoint_subpixel: true                   # true (default): a SuperPoint keypoint that is the peak of its own 3x3 scores moves to their score-weighted centre
-                                                     # (0.24 px median shift on ETH table_3; about 7 in 10 keypoints) and its descriptor is sampled there;
-                                                     # false: upstream's integer pixels. Keyframe ATE on ETH table_3 (orb32 + superpoint256, 2026-11-21):
-                                                     # 5.9 and 6.0 mm with it, 7.2 and 7.4 mm without
+features_superpoint_subpixel: true                   # true (default): SuperPoint keeps only the peaks of its score map (a pixel no lower than its 8 neighbours) and moves
+                                                     # each to the score-weighted centre of its 3x3 scores (0.24 px median shift on ETH table_3), sampling the descriptor
+                                                     # there; false: upstream's selection at integer pixels. Keyframe ATE on ETH table_3 (orb32 + superpoint256, 2026-11-21):
+                                                     # 4.5 mm (one run); sub-pixel positions with upstream's selection 5.9 and 6.0 mm; false 7.2 and 7.4 mm
 features_static_shapes: true                         # true: load the fixed-shape exports - the matchers' lightglue_<f>_L<L>_<precision>.onnx padded to L keypoints per side
                                                      # (the smallest L that fits each pair; the dynamic file beyond) and, on the Core ML provider only, the detectors'
                                                      # <stem>_<W>x<H>_<precision>.onnx for the frame size (`export-features --static 672x416`: the size the tracker logs,

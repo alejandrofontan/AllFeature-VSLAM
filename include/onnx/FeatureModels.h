@@ -22,10 +22,12 @@
  *                                            for the frame size (a missing one falls back to the dynamic file with a
  *                                            warning). Core ML compiles only bounded shapes, so this is the Mac's GPU
  *                                            path (step 7); on CUDA and the CPU the detectors load the dynamic file.
- *   features_superpoint_subpixel true        SuperPoint keypoints at sub-pixel positions (SuperPointOnnx::set_subpixel):
- *                                            the score-weighted centre of the 3x3 scores around each maximum. false is
- *                                            upstream's integer-pixel output. Keyframe ATE on ETH table_3 (orb32 +
- *                                            superpoint256, 2026-11-21): 5.9 and 6.0 mm on, 7.2 and 7.4 mm off.
+ *   features_superpoint_subpixel true        SuperPoint keeps only the peaks of its score map and places each at the
+ *                                            score-weighted centre of the 3x3 scores around it (SuperPointOnnx::
+ *                                            set_subpixel). false is upstream's selection at integer pixels.
+ *                                            Keyframe ATE on ETH table_3 (orb32 + superpoint256, 2026-11-21):
+ *                                            4.5 mm (one run); sub-pixel positions with upstream's selection 5.9
+ *                                            and 6.0 mm; false 7.2 and 7.4 mm.
  *   features_precision     "fp32"            which export of every model is loaded, named in the file:
  *                                            "fp32" ('<stem>_fp32.onnx', exact against the PyTorch reference) or
  *                                            "fp16" ('<stem>_fp16.onnx': weights and internal tensors in half precision,

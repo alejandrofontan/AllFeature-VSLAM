@@ -89,9 +89,9 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //   features_static_shapes: false (default) — load the fixed-shape exports: matchers
     //                      'lightglue_<f>_L<L>_<precision>.onnx' padded to L, and on the Core ML
     //                      provider the detectors' '<stem>_<W>x<H>_<precision>.onnx'
-    //   features_superpoint_subpixel: true (default) — SuperPoint keypoints at sub-pixel
-    //                      positions (the score-weighted centre around each maximum);
-    //                      false: upstream's integer pixels
+    //   features_superpoint_subpixel: true (default) — SuperPoint keeps only the peaks of its
+    //                      score map, at sub-pixel positions (the score-weighted centre around
+    //                      each); false: upstream's selection at integer pixels
     //   features_precision: "fp32" (default) | "fp16" — which export of every learned
     //                      feature model is loaded ('<stem>_fp32.onnx' or '<stem>_fp16.onnx')
     //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:

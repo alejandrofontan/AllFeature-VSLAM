@@ -18,11 +18,12 @@
  * Any image size: the three max-pools floor it, so the maps cover the top-left (W//8*8) x (H//8*8) pixels and no
  * keypoint can land in the last W%8 columns or H%8 rows. Keypoint coordinates are integer pixel positions in the
  * image frame, as upstream's (it has no sub-pixel refinement); the score goes to cv::KeyPoint::response.
- * set_subpixel(true) adds a refinement that is not upstream's: a keypoint that is the peak of its own 3x3 raw scores
- * moves to their score-weighted centre (the peaks are broad: the strongest neighbour holds about 85% of the peak's
- * score; 0.24 px median shift), and its descriptor is sampled there. A keypoint that is not such a peak - the NMS's
- * later passes keep pixels beside a stronger, suppressed one: about 3 in 10 at threshold 0, nearly all low-scoring -
- * keeps its integer position.
+ * set_subpixel(true) is not upstream's and changes two things. Selection: only the peaks of the raw scores (a pixel
+ * no lower than its 8 neighbours) are candidates; upstream's NMS also lets through, in its later passes, pixels beside
+ * a stronger one that another keypoint suppressed (about 3 in 10 of the best 1000 at threshold 0, nearly all
+ * low-scoring), and the budget goes to the next peaks instead. Position: each keypoint moves to the score-weighted
+ * centre of its 3x3 raw scores (the peaks are broad: the strongest neighbour holds about 85% of the peak's score;
+ * 0.24 px median shift), and its descriptor is sampled there.
  *
  * Threading: detect() uses a per-call input buffer and OrtSession::run serialises the session's runs, so one instance may
  * serve several threads; the host's extractor runs on the tracking thread only.
@@ -56,7 +57,7 @@ class SuperPointOnnx
     void detect(const cv::Mat& image, int max_keypoints, std::vector<cv::KeyPoint>& keypoints,
                 cv::Mat& descriptors, const cv::Mat& mask = cv::Mat());
 
-    /// Sub-pixel keypoint positions (see the header comment); off by default, which is upstream's output.
+    /// Peaks only, at sub-pixel positions (see the header comment); off by default, which is upstream's output.
     void set_subpixel(bool subpixel) { subpixel_ = subpixel; }
     [[nodiscard]] bool subpixel() const { return subpixel_; }
 
