@@ -146,8 +146,7 @@ public:
     // Owned by the tracking thread (Tracking::search_local_points)
     FrameId last_frame_seen{0};
 
-    // Owned by the local mapping thread (Optimizer's local BA; LocalMapping::search_in_neighbors)
-    long unsigned int ba_local_for_keyframe;
+    // Owned by the local mapping thread (LocalMapping::search_in_neighbors)
     long unsigned int fuse_candidate_for_keyframe;
 
     // Owned by the loop closing thread (LoopClosing; Optimizer's essential-graph optimization)

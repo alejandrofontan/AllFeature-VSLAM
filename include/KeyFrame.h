@@ -172,10 +172,6 @@ public:
     // Variables used by the tracking
     long unsigned int fuse_target_for_keyframe;
 
-    // Variables used by the local mapping
-    long unsigned int ba_local_for_keyframe;
-    long unsigned int ba_fixed_for_keyframe;
-
     // Variables used by loop closing
     mat4f Tcw_gba{mat4f::Identity()}; // Eigen leaves matrices uninitialized: never read garbage poses
     mat4f Tcw_before_gba{mat4f::Identity()};

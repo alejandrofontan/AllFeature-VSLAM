@@ -43,29 +43,6 @@ debug: false
 max_frame_wait: 0.2                           # s: cap on the replay pause between frames; missing, 0 or negative = no cap
 
 #--------------------------------------------------------------------------------------------
-# Viewer (keep the quotes on strings: cv::FileStorage does not strip a comment from an unquoted one)
-#--------------------------------------------------------------------------------------------
-Viewer.KeyFrameSize: 0.05
-Viewer.KeyFrameLineWidth: 1
-Viewer.GraphLineWidth: 0.9
-Viewer.TrajectoryLineWidth: 3.0
-Viewer.PointSize: 5
-Viewer.PointColorMode: "feature"  # "feature" (per-feature palette) | "rgb" (image colour); the PLY export is always rgb
-Viewer.MapPointsRefreshHz: 5      # map-point snapshots per second; 0 = every viewer frame
-Viewer.Multisampling: 0           # MSAA samples requested; 0 = off (the shipped Pangolin ignores it)
-Viewer.DepthFog: 1                # 1 = fade map points with distance
-Viewer.FogStart: 1.5              # clear up to this many scene depths beyond the camera
-Viewer.FogEnd: 6.0                # fully faded from this many scene depths
-Viewer.CameraSize: 0.08
-Viewer.CameraLineWidth: 3
-Viewer.ViewpointX: 0
-Viewer.ViewpointY: -0.7
-Viewer.ViewpointZ: -1.8
-Viewer.ViewpointF: 500
-Viewer.StartPaused: 1             # ARStream: load every model on one black frame, then wait until Pause is unticked; 0 = track at once
-Viewer.StreamStatus: 1            # ARStream: 1 = report the SLAM state to the phone app 10 times a second
-
-#--------------------------------------------------------------------------------------------
 # Optimizer
 #--------------------------------------------------------------------------------------------
 
@@ -207,3 +184,26 @@ LoopClosing.Sim3MinMatches: 20                  # fewer matches to the current k
 LoopClosing.Sim3MinInliers: 20                  # inliers of the optimized Sim3 that accept a candidate
 LoopClosing.LoopMinMatches: 40                  # loop-side points matched into the current keyframe that accept the loop
 LoopClosing.GbaIterations: 10                   # global BA iterations after a closure
+
+#--------------------------------------------------------------------------------------------
+# Viewer (keep the quotes on strings: cv::FileStorage does not strip a comment from an unquoted one)
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1
+Viewer.GraphLineWidth: 0.9
+Viewer.TrajectoryLineWidth: 3.0
+Viewer.PointSize: 5
+Viewer.PointColorMode: "feature"  # "feature" (per-feature palette) | "rgb" (image colour); the PLY export is always rgb
+Viewer.MapPointsRefreshHz: 5      # map-point snapshots per second; 0 = every viewer frame
+Viewer.Multisampling: 0           # MSAA samples requested; 0 = off (the shipped Pangolin ignores it)
+Viewer.DepthFog: 1                # 1 = fade map points with distance
+Viewer.FogStart: 1.5              # clear up to this many scene depths beyond the camera
+Viewer.FogEnd: 6.0                # fully faded from this many scene depths
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3
+Viewer.ViewpointX: 0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500
+Viewer.StartPaused: 1             # ARStream: load every model on one black frame, then wait until Pause is unticked; 0 = track at once
+Viewer.StreamStatus: 1            # ARStream: 1 = report the SLAM state to the phone app 10 times a second

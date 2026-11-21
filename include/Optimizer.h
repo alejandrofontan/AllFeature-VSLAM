@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <vector>
@@ -40,7 +41,7 @@
 #include "ErrorModel.h"
 #include "Frame.h"
 #include "KeyFrame.h"
-#include "LoopClosing.h"
+#include "LoopTypes.h"
 #include "Map.h"
 #include "MapPoint.h"
 #include "Types.h"
@@ -89,9 +90,10 @@ class Optimizer
 {
 public:
     // Bundle adjustment over every keyframe and point of the map. With loop_keyframe_id == 0 the result is written
-    // to the map; otherwise to the *_gba fields, tagged with that id, for the caller to apply.
+    // to the map; otherwise to the *_gba fields, tagged with that id, for the caller to apply. stop_flag, set from
+    // another thread, ends the optimization after the iteration in progress.
     static void global_bundle_adjustment(const std::shared_ptr<Map>& map, int iterations = 5,
-                                         bool* stop_flag = nullptr, KeyframeId loop_keyframe_id = 0,
+                                         const std::atomic<bool>* stop_flag = nullptr, KeyframeId loop_keyframe_id = 0,
                                          bool robust = true);
 
     static void local_bundle_adjustment(const Keyframe& current_keyframe, const std::shared_ptr<Map>& map);
@@ -103,8 +105,8 @@ public:
     // if fix_scale is true, 6DoF optimization (stereo,rgbd), 7DoF otherwise (mono)
     static void optimize_essential_graph(const std::shared_ptr<Map>& map, const Keyframe& matched_keyframe,
                                          const Keyframe& current_keyframe,
-                                         const LoopClosing::KeyframePoses& uncorrected_poses,
-                                         const LoopClosing::KeyframePoses& corrected_poses,
+                                         const KeyframePoses& uncorrected_poses,
+                                         const KeyframePoses& corrected_poses,
                                          std::map<KeyframeId, LoopConnections>& loop_connections,
                                          bool fix_scale);
 
@@ -119,7 +121,7 @@ public:
 
 private:
     static void bundle_adjustment(const std::vector<Keyframe>& keyframes, const std::vector<Pt>& map_points,
-                                  int iterations, bool* stop_flag, KeyframeId loop_keyframe_id, bool robust);
+                                  int iterations, const std::atomic<bool>* stop_flag, KeyframeId loop_keyframe_id, bool robust);
 };
 
 } // namespace AF_VSLAM

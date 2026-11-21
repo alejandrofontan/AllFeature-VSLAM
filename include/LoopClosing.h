@@ -21,6 +21,7 @@
 #ifndef AF_VSLAM_LOOP_CLOSING_H
 #define AF_VSLAM_LOOP_CLOSING_H
 
+#include <atomic>
 #include <list>
 #include <map>
 #include <memory>
@@ -34,6 +35,7 @@
 #include "g2o/types/types_seven_dof_expmap.h"
 
 #include "KeyFrame.h"
+#include "LoopTypes.h"
 #include "Map.h"
 #include "PlaceRecognition.h"
 
@@ -77,14 +79,6 @@ struct ConsistentGroup
     int consistency{0};
 };
 
-// A keyframe of the corrected side of a loop and the covisibility links it gained
-// through the loop fusion: the loop edges of Optimizer::optimize_essential_graph.
-struct LoopConnections
-{
-    Keyframe keyframe{};
-    std::map<KeyframeId, Keyframe> connections{};
-};
-
 // Loop Closing thread. Consumes the keyframes LocalMapping hands over after their
 // mapping iteration (run/detect_loop): retrieves loop candidates from the VPR backend,
 // verifies the consistent ones geometrically (compute_sim3, search_loop_map_points),
@@ -94,10 +88,6 @@ struct LoopConnections
 class LoopClosing
 {
 public:
-    // Keyframe -> Sim3 pose; aligned allocator for g2o::Sim3's fixed-size Eigen members
-    using KeyframePoses = std::map<Keyframe, g2o::Sim3, std::less<Keyframe>,
-                                   Eigen::aligned_allocator<std::pair<const Keyframe, g2o::Sim3>>>;
-
     // The VPR backend provides the loop candidates and names the local feature that
     // verifies them (verification_feature). local_mapper is paused/released around loop
     // corrections; map_drawer records the closed loops for the viewer. Both exist before
@@ -221,7 +211,7 @@ protected:
     // Global BA thread (correct_loop launches it, run_global_bundle_adjustment runs in it)
     mutable std::mutex gba_mutex_;   // guards gba_running_, gba_stop_, gba_generation_; held during apply_gba_correction
     bool gba_running_{false};
-    bool gba_stop_{false};           // read by g2o (setForceStopFlag): aborts a BA superseded by a newer loop closure
+    std::atomic<bool> gba_stop_{false};   // read by the running BA between iterations: aborts one superseded by a newer loop closure
     int gba_generation_{0};          // bumped when a running BA is superseded; the BA drops its result if it changed (issue #35)
     std::thread gba_thread_;
 };

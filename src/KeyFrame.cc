@@ -84,7 +84,7 @@ static std::vector<Keyframe> keyframes_of(const std::vector<Connection>& connect
 KeyFrame::KeyFrame(Frame& frame, std::shared_ptr<Map> map, std::shared_ptr<PlaceRecognition> place_recognition):
     feature_types(frame.feature_types), cache_matched_pairs_feat_type(frame.cache_matched_pairs_feat_type),
     frame_id(frame.frame_id), timestamp(frame.timestamp),
-    fuse_target_for_keyframe(0), ba_local_for_keyframe(0), ba_fixed_for_keyframe(0), ba_global_for_keyframe(0),
+    fuse_target_for_keyframe(0), ba_global_for_keyframe(0),
     calibration(frame.calibration),
     features(frame.features),
     image(frame.image), global_descriptor(frame.global_descriptor),

@@ -34,16 +34,19 @@
 #include "Optimizer.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <map>
 #include <mutex>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include <Eigen/StdVector>
 #include "g2o/core/block_solver.h"
+#include "g2o/core/hyper_graph_action.h"
 #include "g2o/core/optimization_algorithm_levenberg.h"
 #include "g2o/core/robust_kernel_impl.h"
 #include "g2o/solvers/linear_solver_dense.h"
@@ -144,6 +147,23 @@ static KeypointMeasurement keypoint_measurement(const FeatureData& features, Fea
     return measurement;
 }
 
+// Copies the caller's atomic stop flag into the plain bool g2o polls; run by g2o after every iteration, on the
+// optimizing thread.
+struct StopFlagMirror : g2o::HyperGraphAction
+{
+    StopFlagMirror(const std::atomic<bool>* source_, bool& mirror_) : source(source_), mirror(mirror_) {}
+
+    g2o::HyperGraphAction* operator()(const g2o::HyperGraph*, Parameters* = nullptr) override
+    {
+        if(source)
+            mirror = source->load();
+        return this;
+    }
+
+    const std::atomic<bool>* source;
+    bool& mirror;
+};
+
 // A Levenberg-Marquardt algorithm on the given block and linear solvers; the optimizer it is set on owns it
 template<typename BlockSolverT, template<typename> class LinearSolverT>
 static g2o::OptimizationAlgorithmLevenberg* make_levenberg()
@@ -155,14 +175,21 @@ static g2o::OptimizationAlgorithmLevenberg* make_levenberg()
 // Builds and registers a binary (point + pose) g2o edge shared by the mono/RGBD
 // bundle_adjustment/local_bundle_adjustment branches: sets both vertices, measurement,
 // information, robust kernel and camera intrinsics, then adds it to the optimizer.
+// Returns nullptr and adds nothing when either vertex is missing (a keyframe that started observing the point
+// after the vertices were laid out): g2o's addEdge dereferences a null vertex.
 template<typename EdgeT, typename MeasT, typename InfoT>
 static EdgeT* create_ba_edge(g2o::SparseOptimizer& optimizer, int point_id, int keyframe_id,
                            const MeasT& measurement, const InfoT& information,
                            double huber_delta, const Keyframe& keyframe, bool use_robust_kernel = true)
 {
+    auto* point_vertex = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(point_id));
+    auto* pose_vertex = dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(keyframe_id));
+    if(!point_vertex || !pose_vertex)
+        return nullptr;
+
     EdgeT* e = new EdgeT();
-    e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(point_id)));
-    e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(keyframe_id)));
+    e->setVertex(0, point_vertex);
+    e->setVertex(1, pose_vertex);
     e->setMeasurement(measurement);
     e->setInformation(information);
 
@@ -236,7 +263,8 @@ static void collect_ba_outliers(const std::vector<BAObservation<EdgeT>>& observa
     }
 }
 
-void Optimizer::global_bundle_adjustment(const std::shared_ptr<Map>& map, int iterations, bool* stop_flag,
+void Optimizer::global_bundle_adjustment(const std::shared_ptr<Map>& map, int iterations,
+                                         const std::atomic<bool>* stop_flag,
                                          KeyframeId loop_keyframe_id, bool robust)
 {
     // Both arrive ordered by id (the map's sets are id-ordered): g2o's result depends, in round-off, on the order
@@ -249,17 +277,25 @@ void Optimizer::global_bundle_adjustment(const std::shared_ptr<Map>& map, int it
 
 
 void Optimizer::bundle_adjustment(const std::vector<Keyframe>& keyframes, const std::vector<Pt>& map_points,
-                                  int iterations, bool* stop_flag, KeyframeId loop_keyframe_id, bool robust)
+                                  int iterations, const std::atomic<bool>* stop_flag, KeyframeId loop_keyframe_id, bool robust)
 {
     std::vector<bool> point_excluded;
     point_excluded.resize(map_points.size());
 
+    // g2o polls a plain bool: `stop` belongs to this thread and is refreshed from the caller's atomic flag after
+    // every iteration, so the two threads never touch the same plain variable. Declared before the optimizer,
+    // which holds pointers to both.
+    bool stop = stop_flag && stop_flag->load();
+    StopFlagMirror stop_mirror{stop_flag, stop};
+
     g2o::SparseOptimizer optimizer;
     optimizer.setAlgorithm(make_levenberg<g2o::BlockSolver_6_3, g2o::LinearSolverEigen>());
 
-
     if(stop_flag)
-        optimizer.setForceStopFlag(stop_flag);
+    {
+        optimizer.setForceStopFlag(&stop);
+        optimizer.addPostIterationAction(&stop_mirror);
+    }
 
     long unsigned int max_keyframe_id = 0;
 
@@ -304,17 +340,18 @@ void Optimizer::bundle_adjustment(const std::vector<Keyframe>& keyframes, const 
             if(keyframe->is_bad() || keyframe->keyId > max_keyframe_id)
                 continue;
 
-            num_edges++;
-
             const KeypointMeasurement measurement = keypoint_measurement(keyframe->features, feature_type, obs.second.index);
+            bool added = false;
             if(measurement.has_depth)   // RGB-D sensor-depth observation
-                create_ba_edge<g2o::EdgeRGBDSE3ProjectXYZ>(
+                added = create_ba_edge<g2o::EdgeRGBDSE3ProjectXYZ>(
                     optimizer, point_id, keyframe->keyId, measurement.value, measurement.information,
-                    ErrorModel::params.huber_rgbd(), keyframe, robust);
+                    ErrorModel::params.huber_rgbd(), keyframe, robust) != nullptr;
             else                        // mono observation
-                create_ba_edge<g2o::EdgeSE3ProjectXYZ>(
+                added = create_ba_edge<g2o::EdgeSE3ProjectXYZ>(
                     optimizer, point_id, keyframe->keyId, measurement.pixel(), measurement.pixel_information(),
-                    ErrorModel::params.huber_mono(), keyframe, robust);
+                    ErrorModel::params.huber_mono(), keyframe, robust) != nullptr;
+            if(added)
+                num_edges++;
         }
 
         if(num_edges==0)
@@ -332,22 +369,30 @@ void Optimizer::bundle_adjustment(const std::vector<Keyframe>& keyframes, const 
     optimizer.initializeOptimization();
     optimizer.optimize(iterations);
 
-    // Recover optimized data
+    // Recover optimized data. A degenerate edge can drive the solution to NaN or infinity: such a pose or position
+    // is not written, the keyframe or point keeps what it had
+    int num_rejected = 0;
+
     //Keyframes
     for(const Keyframe& keyframe : keyframes)
     {
         if(keyframe->is_bad())
             continue;
         g2o::VertexSE3Expmap* pose_vertex = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(keyframe->keyId));
-        g2o::SE3Quat optimized_pose = pose_vertex->estimate();
+        const mat4f Tcw = Converter::to_matrix4f(pose_vertex->estimate());
+        if(!Tcw.allFinite())   // left untagged after a loop closure: it then inherits its parent's correction
+        {
+            num_rejected++;
+            continue;
+        }
 
         if(loop_keyframe_id==0)
         {
-            keyframe->set_pose(Converter::to_matrix4f(optimized_pose));
+            keyframe->set_pose(Tcw);
         }
         else
         {
-            keyframe->Tcw_gba = Converter::to_matrix4f(optimized_pose);
+            keyframe->Tcw_gba = Tcw;
             keyframe->ba_global_for_keyframe = loop_keyframe_id;
         }
     }
@@ -364,19 +409,27 @@ void Optimizer::bundle_adjustment(const std::vector<Keyframe>& keyframes, const 
             continue;
 
         g2o::VertexSBAPointXYZ* point_vertex = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pt->ptId + max_keyframe_id+1));
+        const vec3f position = point_vertex->estimate().cast<float>();
+        if(!position.allFinite())
+        {
+            num_rejected++;
+            continue;
+        }
 
         if(loop_keyframe_id==0)
         {
-            pt->set_world_pos(point_vertex->estimate().cast<float>());
+            pt->set_world_pos(position);
             pt->update_normal_and_depth();
         }
         else
         {
-            pt->position_gba = point_vertex->estimate().cast<float>();
+            pt->position_gba = position;
             pt->ba_global_for_keyframe = loop_keyframe_id;
         }
     }
 
+    if(num_rejected > 0)
+        AF_WARN("bundle_adjustment: " << num_rejected << " non-finite poses or positions were not written");
 }
 
 // Builds and registers a unary pose-only g2o edge shared by the mono/RGBD
@@ -601,25 +654,35 @@ int Optimizer::pose_optimization(Frame* frame, bool use_depth_channel)
 
     // Recover optimized pose and return number of inliers
     g2o::VertexSE3Expmap* optimized_vertex = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
-    g2o::SE3Quat final_pose = optimized_vertex->estimate();
-    frame->set_pose(Converter::to_matrix4f(final_pose));
+    const mat4f final_pose = Converter::to_matrix4f(optimized_vertex->estimate());
+    if(!final_pose.allFinite())   // the frame keeps its entry pose and reports no inliers
+    {
+        AF_WARN("pose_optimization: non-finite pose, not written | frame=" << frame->frame_id);
+        return 0;
+    }
+    frame->set_pose(final_pose);
 
     return num_correspondences-num_outliers;
 }
 
 void Optimizer::local_bundle_adjustment(const Keyframe& current_keyframe, const std::shared_ptr<Map>& map)
 {
+    // Which keyframes and points are already in the problem (a bad neighbour is marked local too, so that it is
+    // not taken as a fixed keyframe either)
+    std::unordered_set<KeyframeId> local_keyframe_ids, fixed_keyframe_ids;
+    std::unordered_set<PtId> local_point_ids;
+
     // Local KeyFrames: First Breath Search from Current Keyframe
     std::vector<Keyframe> local_keyframes;
 
     local_keyframes.push_back(current_keyframe);
-    current_keyframe->ba_local_for_keyframe = current_keyframe->keyId;
+    local_keyframe_ids.insert(current_keyframe->keyId);
 
     std::vector<Keyframe> neighbors = current_keyframe->get_best_covisibility_keyframes(params.local_ba_neighbors);
 
     for(const Keyframe& keyframe : neighbors)
     {
-        keyframe->ba_local_for_keyframe = current_keyframe->keyId;
+        local_keyframe_ids.insert(keyframe->keyId);
         if(!keyframe->is_bad())
             local_keyframes.push_back(keyframe);
     }
@@ -632,11 +695,8 @@ void Optimizer::local_bundle_adjustment(const Keyframe& current_keyframe, const 
         {
             for(const Pt& pt : keyframe->get_map_point_matches(ft))
             {
-                if(pt && !pt->is_bad() && pt->ba_local_for_keyframe != current_keyframe->keyId)
-                {
+                if(pt && !pt->is_bad() && local_point_ids.insert(pt->ptId).second)
                     local_points.push_back(pt);
-                    pt->ba_local_for_keyframe = current_keyframe->keyId;
-                }
             }
         }
     }
@@ -647,12 +707,9 @@ void Optimizer::local_bundle_adjustment(const Keyframe& current_keyframe, const 
     {
         for(const auto& [key_id, keyframe] : pt->get_observers())
         {
-            if(keyframe->ba_local_for_keyframe!=current_keyframe->keyId && keyframe->ba_fixed_for_keyframe != current_keyframe->keyId)
-            {
-                keyframe->ba_fixed_for_keyframe=current_keyframe->keyId;
-                if(!keyframe->is_bad())
-                    fixed_keyframes.push_back(keyframe);
-            }
+            if(local_keyframe_ids.count(keyframe->keyId) == 0 && fixed_keyframe_ids.insert(keyframe->keyId).second
+               && !keyframe->is_bad())
+                fixed_keyframes.push_back(keyframe);
         }
     }
 
@@ -723,14 +780,16 @@ void Optimizer::local_bundle_adjustment(const Keyframe& current_keyframe, const 
                     auto* e = create_ba_edge<g2o::EdgeRGBDSE3ProjectXYZ>(
                         optimizer, point_id, keyframe->keyId, measurement.value, measurement.information,
                         ErrorModel::params.huber_rgbd(), keyframe);
-                    rgbd_observations.push_back({e, keyframe, pt});
+                    if(e)
+                        rgbd_observations.push_back({e, keyframe, pt});
                 }
                 else                        // mono observation
                 {
                     auto* e = create_ba_edge<g2o::EdgeSE3ProjectXYZ>(
                         optimizer, point_id, keyframe->keyId, measurement.pixel(), measurement.pixel_information(),
                         ErrorModel::params.huber_mono(), keyframe);
-                    mono_observations.push_back({e, keyframe, pt});
+                    if(e)
+                        mono_observations.push_back({e, keyframe, pt});
                 }
             }
         }
@@ -764,6 +823,7 @@ void Optimizer::local_bundle_adjustment(const Keyframe& current_keyframe, const 
     }
 
     // Recover optimized data
+    int num_rejected = 0;
 
     //Keyframes
     for(const Keyframe& keyframe : local_keyframes)
@@ -774,7 +834,10 @@ void Optimizer::local_bundle_adjustment(const Keyframe& current_keyframe, const 
         // than write NaN into the map (from where it reaches tracking, grids and indices)
         const mat4f Tcw = Converter::to_matrix4f(optimized_pose);
         if(!Tcw.allFinite())
+        {
+            num_rejected++;
             continue;
+        }
         keyframe->set_pose(Tcw);
     }
 
@@ -784,17 +847,23 @@ void Optimizer::local_bundle_adjustment(const Keyframe& current_keyframe, const 
         g2o::VertexSBAPointXYZ* point_vertex = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pt->ptId + max_keyframe_id+1));
         const vec3f position = point_vertex->estimate().cast<float>();
         if(!position.allFinite())
+        {
+            num_rejected++;
             continue;
+        }
         pt->set_world_pos(position);
         pt->update_normal_and_depth();
     }
+
+    if(num_rejected > 0)
+        AF_WARN("local_bundle_adjustment: " << num_rejected << " non-finite poses or positions were not written");
 }
 
 
 void Optimizer::optimize_essential_graph(const std::shared_ptr<Map>& map, const Keyframe& matched_keyframe,
                                          const Keyframe& current_keyframe,
-                                         const LoopClosing::KeyframePoses& uncorrected_poses,
-                                         const LoopClosing::KeyframePoses& corrected_poses,
+                                         const KeyframePoses& uncorrected_poses,
+                                         const KeyframePoses& corrected_poses,
                                          std::map<KeyframeId, LoopConnections>& loop_connections,
                                          bool fix_scale)
 {
@@ -952,6 +1021,8 @@ void Optimizer::optimize_essential_graph(const std::shared_ptr<Map>& map, const 
     std::unique_lock<std::mutex> lock(map->map_update_mutex_);
 
     // SE3 Pose Recovering. Sim3:[sR t;0 1] -> SE3:[R t/s;0 1]
+    std::vector<bool> corrected(corrected_Swc.size(), false);   // keyframes whose optimized pose was written
+    int num_rejected = 0;
     for(const Keyframe& keyframe : keyframes)
     {
 
@@ -961,7 +1032,6 @@ void Optimizer::optimize_essential_graph(const std::shared_ptr<Map>& map, const 
         if(!sim3_vertex)   // a bad keyframe (no vertex): nothing was optimized for it
             continue;
         g2o::Sim3 corrected_Siw =  sim3_vertex->estimate();
-        corrected_Swc[id_i]=corrected_Siw.inverse();
         Eigen::Matrix3d R = corrected_Siw.rotation().toRotationMatrix();
         Eigen::Vector3d t = corrected_Siw.translation();
         double s = corrected_Siw.scale();
@@ -969,9 +1039,18 @@ void Optimizer::optimize_essential_graph(const std::shared_ptr<Map>& map, const 
         t *=(1./s); //[R t/s;0 1]
 
         mat4f Tiw = Converter::to_matrix4f(R,t);
+        if(!Tiw.allFinite())   // keeps its pose; its points are not corrected either (below)
+        {
+            num_rejected++;
+            continue;
+        }
 
+        corrected_Swc[id_i]=corrected_Siw.inverse();
+        corrected[id_i] = true;
         keyframe->set_pose(Tiw);
     }
+    if(num_rejected > 0)
+        AF_WARN("optimize_essential_graph: " << num_rejected << " non-finite keyframe poses were not written");
 
     // Correct points. Transform to "non-optimized" reference keyframe pose and transform back with optimized pose
     for(const Pt& pt : map_points)
@@ -994,6 +1073,8 @@ void Optimizer::optimize_essential_graph(const std::shared_ptr<Map>& map, const 
         }
         if(reference_id < 0 || size_t(reference_id) >= Scw.size() || size_t(reference_id) >= corrected_Swc.size())
             continue;
+        if(!corrected[reference_id])   // a reference with no optimized pose: the point stays where it is
+            continue;
 
         g2o::Sim3 Srw = Scw[reference_id];
         g2o::Sim3 corrected_Swr = corrected_Swc[reference_id];
@@ -1015,9 +1096,8 @@ int Optimizer::optimize_sim3(const Keyframe& keyframe1, const Keyframe& keyframe
     g2o::SparseOptimizer optimizer;
     optimizer.setAlgorithm(make_levenberg<g2o::BlockSolverX, g2o::LinearSolverDense>());
 
-    // Calibration
-    const cv::Mat &K1 = keyframe1->calibration->K;
-    const cv::Mat &K2 = keyframe2->calibration->K;
+    const Calibration& calibration1 = *keyframe1->calibration;
+    const Calibration& calibration2 = *keyframe2->calibration;
 
     // Camera poses
     // One lock each: R and t must come from the same pose
@@ -1034,14 +1114,10 @@ int Optimizer::optimize_sim3(const Keyframe& keyframe1, const Keyframe& keyframe
     sim3_vertex->setEstimate(S12);
     sim3_vertex->setId(0);
     sim3_vertex->setFixed(false);
-    sim3_vertex->_principle_point1[0] = K1.at<float>(0,2);
-    sim3_vertex->_principle_point1[1] = K1.at<float>(1,2);
-    sim3_vertex->_focal_length1[0] = K1.at<float>(0,0);
-    sim3_vertex->_focal_length1[1] = K1.at<float>(1,1);
-    sim3_vertex->_principle_point2[0] = K2.at<float>(0,2);
-    sim3_vertex->_principle_point2[1] = K2.at<float>(1,2);
-    sim3_vertex->_focal_length2[0] = K2.at<float>(0,0);
-    sim3_vertex->_focal_length2[1] = K2.at<float>(1,1);
+    sim3_vertex->_principle_point1 << calibration1.cx, calibration1.cy;
+    sim3_vertex->_focal_length1 << calibration1.fx, calibration1.fy;
+    sim3_vertex->_principle_point2 << calibration2.cx, calibration2.cy;
+    sim3_vertex->_focal_length2 << calibration2.fx, calibration2.fy;
     optimizer.addVertex(sim3_vertex);
 
     // Set MapPoint vertices
@@ -1070,9 +1146,7 @@ int Optimizer::optimize_sim3(const Keyframe& keyframe1, const Keyframe& keyframe
         Pt pt2 = matches1[i];
         if(!pt1 || !pt2)
             continue;
-        const FeatureType feature_type1 = pt1->featureType;
-        const FeatureType feature_type2 = pt2->featureType;
-        if (feature_type1 != feature_type2)
+        if(pt2->featureType != feature_type)   // pt1 comes from keyframe1's slots of feature_type
             continue;
 
         const int point_id1 = 2*i+1;
@@ -1103,7 +1177,7 @@ int Optimizer::optimize_sim3(const Keyframe& keyframe1, const Keyframe& keyframe
 
         // Set edge x1 = S12*X2
         Eigen::Matrix<double,2,1> measurement1;
-        const cv::KeyPoint &keypoint1 = keyframe1->features.at(feature_type1).keypoints[i];
+        const cv::KeyPoint &keypoint1 = keyframe1->features.at(feature_type).keypoints[i];
         measurement1 << keypoint1.pt.x, keypoint1.pt.y;
 
         g2o::EdgeSim3ProjectXYZ* e12 = new g2o::EdgeSim3ProjectXYZ();
@@ -1111,7 +1185,7 @@ int Optimizer::optimize_sim3(const Keyframe& keyframe1, const Keyframe& keyframe
         e12->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
 
         e12->setMeasurement(measurement1);
-        e12->setInformation(keyframe1->features.get_information_2d(i, feature_type1).cast<double>());
+        e12->setInformation(keyframe1->features.get_information_2d(i, feature_type).cast<double>());
 
         g2o::RobustKernelHuber* rk1 = new g2o::RobustKernelHuber;
         e12->setRobustKernel(rk1);
@@ -1120,7 +1194,7 @@ int Optimizer::optimize_sim3(const Keyframe& keyframe1, const Keyframe& keyframe
 
         // Set edge x2 = S21*X1
         Eigen::Matrix<double,2,1> measurement2;
-        const cv::KeyPoint &keypoint2 = keyframe2->features.at(feature_type2).keypoints[index2];
+        const cv::KeyPoint &keypoint2 = keyframe2->features.at(feature_type).keypoints[index2];
         measurement2 << keypoint2.pt.x, keypoint2.pt.y;
 
         g2o::EdgeInverseSim3ProjectXYZ* e21 = new g2o::EdgeInverseSim3ProjectXYZ();
@@ -1129,7 +1203,7 @@ int Optimizer::optimize_sim3(const Keyframe& keyframe1, const Keyframe& keyframe
         e21->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
 
         e21->setMeasurement(measurement2);
-        e21->setInformation(keyframe2->features.get_information_2d(index2, feature_type2).cast<double>());
+        e21->setInformation(keyframe2->features.get_information_2d(index2, feature_type).cast<double>());
 
         g2o::RobustKernelHuber* rk2 = new g2o::RobustKernelHuber;
         e21->setRobustKernel(rk2);
@@ -1205,7 +1279,14 @@ int Optimizer::optimize_sim3(const Keyframe& keyframe1, const Keyframe& keyframe
 
     // Recover optimized Sim3
     g2o::VertexSim3Expmap* optimized_vertex = static_cast<g2o::VertexSim3Expmap*>(optimizer.vertex(0));
-    S12= optimized_vertex->estimate();
+    const g2o::Sim3 optimized_S12 = optimized_vertex->estimate();
+    if(!optimized_S12.rotation().coeffs().allFinite() || !optimized_S12.translation().allFinite()
+       || !std::isfinite(optimized_S12.scale()))   // S12 keeps the caller's estimate; the candidate is rejected
+    {
+        AF_WARN("optimize_sim3: non-finite Sim3, not written");
+        return 0;
+    }
+    S12 = optimized_S12;
 
     return num_inliers;
 }
