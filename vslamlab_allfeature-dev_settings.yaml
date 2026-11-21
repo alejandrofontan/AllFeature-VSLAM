@@ -21,7 +21,8 @@ megaloc_coreml_units: "ALL"                          # CoreML compute units: "AL
                                                      # loses accuracy (cos 0.982 vs the 0.9955 floor with the fp16 file on "ALL" / "CPUAndNeuralEngine");
                                                      # the GPU is exact: fp32 file + "ALL" (48 ms) or the fp16 file + "CPUAndGPU" (46 ms, half the download)
 features_models_dir: "feature_models"                # learned feature models on ONNX Runtime (superpoint256, aliked128 and the LightGlue matchers of
-                                                     # superpoint256 / aliked128 / sift128): superpoint_v1_<precision>.onnx, aliked_n16_<precision>.onnx, lightglue_{superpoint,aliked,sift}_<precision>.onnx
+                                                     # superpoint256 / aliked128 / raco128 / sift128): superpoint_v1_<precision>.onnx, aliked_n16_<precision>.onnx,
+                                                     # raco_aliked_n16_<precision>.onnx, lightglue_{superpoint,aliked,raco,sift}_<precision>.onnx
                                                      # + sidecars, exported by `pixi run setup` (`pixi run -e export-features export-feature-models`) from these settings
 features_provider: "auto"                            # their ONNX Runtime execution provider: "auto" | "cuda" | "coreml" | "cpu" (megaloc_provider semantics).
                                                      # Measured 2026-10-16, 739x458: SuperPoint 9 ms / ALIKED 16 ms / LightGlue 9-19 ms per call on CUDA (RTX 4000 Ada),
@@ -44,6 +45,12 @@ features_superpoint_subpixel: true                   # true (default): SuperPoin
                                                      # (orb32 + superpoint256, fp16, 2026-11-21): true 4.5 mm (1 run); sub-pixel positions with upstream's selection 5.9 and
                                                      # 6.0 mm (2 runs); false 7.2 and 7.4 mm (2 runs) - but the same sequence varies by a standard deviation of about 2 mm
                                                      # from run to run (measured with aliked128), so these counts are too few. Compare with at least 5 runs per setting.
+features_raco_covariance: true                       # raco128 only. true (default): each keypoint carries the 2x2 position covariance RaCo predicts (pixels^2; sigma about
+                                                     # 1.15 px median, 0.2 to 2.1 px on ETH table_3) as its uncertainty - it weighs the keypoint's residuals in pose
+                                                     # optimisation and bundle adjustment and sizes its search gates; false: the fixed sigma of 1 px the other learned
+                                                     # features have. Measured on ETH table_3 mono with orb32 + raco128 (fp32), 5 runs each, keyframe ATE: true 2.7 to
+                                                     # 3.6 mm (median 3.3), false 2.9 to 3.5 mm (median 3.2) - no difference; before the final bundle adjustment
+                                                     # 3.9 against 4.3 mm. aliked128 on the same sequence: 4.1 to 9.3 mm over 14 runs (median 5.2).
 features_static_shapes: true                         # true: load the fixed-shape exports - the matchers' lightglue_<f>_L<L>_<precision>.onnx padded to L keypoints per side
                                                      # (the smallest L that fits each pair; the dynamic file beyond) and, on the Core ML provider only, the detectors'
                                                      # <stem>_<W>x<H>_<precision>.onnx for the frame size (`export-features --static 672x416`: the size the tracker logs,
@@ -125,7 +132,7 @@ Tracking.InitMinMedianDisparity: 10.0   # px; below this (static camera) skip th
 Tracking.InitGbaIterations: 20          # global-BA iterations on the initial map
 Tracking.InitMinTrackedPoints: 100      # min tracked points to accept the initial map
 Tracking.InitMinDepthSamples: 10        # min sensor-depth samples to prefer metric scale
-Tracking.FeaturesFraction: 0.5         # keypoints per frame: this share (0..1) of each feature's maximum (orb32 4000, aliked128/superpoint256 2048, others 2000)
+Tracking.FeaturesFraction: 0.5         # keypoints per frame: this share (0..1) of each feature's maximum (orb32 4000, aliked128/raco128/superpoint256 2048, others 2000)
 Tracking.NominalImageArea: 307200       # px (640x480): frames are resized to this area (aspect ratio kept) and cropped to a multiple of 32,
                                         # e.g. 739x458 -> 672x416; the size the log reports is the one a static export (features_static_shapes) needs
 Tracking.ImageWidth: 0                  # both > 0: resize every frame to exactly this size instead (the aspect ratio may change; the intrinsics

@@ -92,6 +92,8 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //   features_superpoint_subpixel: true (default) — SuperPoint keeps only the peaks of its
     //                      score map, at sub-pixel positions (the score-weighted centre around
     //                      each); false: upstream's selection at integer pixels
+    //   features_raco_covariance: true (default) — raco128 keypoints carry RaCo's predicted
+    //                      2x2 covariance as their uncertainty; false: the fixed 1 px
     //   features_precision: "fp32" (default) | "fp16" — which export of every learned
     //                      feature model is loaded ('<stem>_fp32.onnx' or '<stem>_fp16.onnx')
     //   PlaceRecognition.MegaLocMinSimilarity, PlaceRecognition.MaxCandidates:
@@ -124,6 +126,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         if(settingsNode["features_coreml_units"]) feature_models.ort.coreml_compute_units = settingsNode["features_coreml_units"].as<std::string>();
         if(settingsNode["features_static_shapes"]) feature_models.static_shapes = settingsNode["features_static_shapes"].as<bool>();
         if(settingsNode["features_precision"]) feature_models.precision = settingsNode["features_precision"].as<std::string>();
+        if(settingsNode["features_raco_covariance"]) feature_models.raco_covariance = settingsNode["features_raco_covariance"].as<bool>();
         if(settingsNode["features_superpoint_subpixel"]) feature_models.superpoint_subpixel = settingsNode["features_superpoint_subpixel"].as<bool>();
         if(feature_models.precision != "fp32" && feature_models.precision != "fp16")
             throw std::runtime_error("features_precision must be \"fp32\" or \"fp16\", got \"" + feature_models.precision + "\"");

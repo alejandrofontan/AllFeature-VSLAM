@@ -28,6 +28,10 @@
  *                                            Its effect on accuracy is not established: the runs of 2026-11-21 (1
  *                                            or 2 per variant, see the settings file) are fewer than the run-to-run
  *                                            spread of that sequence requires.
+ *   features_raco_covariance true            raco128 keypoints carry the 2x2 position covariance RaCo predicts
+ *                                            (pixels^2) as their sigma2 / information; false: the fixed sigma of
+ *                                            1 px the other learned features have. No difference in keyframe ATE
+ *                                            on ETH table_3 over 5 runs each (medians 3.3 and 3.2 mm).
  *   features_precision     "fp32"            which export of every model is loaded, named in the file:
  *                                            "fp32" ('<stem>_fp32.onnx', exact against the PyTorch reference) or
  *                                            "fp16" ('<stem>_fp16.onnx': weights and internal tensors in half precision,
@@ -58,6 +62,7 @@ struct FeatureModelsConfig
     bool static_shapes{false};                  // features_static_shapes: the fixed-shape exports (Core ML)
     std::string precision{"fp32"};              // features_precision: "fp32" | "fp16", the export every model loads
     bool superpoint_subpixel{true};             // features_superpoint_subpixel: sub-pixel SuperPoint keypoints
+    bool raco_covariance{true};                 // features_raco_covariance: RaCo's covariance as the keypoint's sigma2
 };
 
 /// The one configuration; System fills it from the settings YAML.

@@ -39,7 +39,8 @@ struct SideBuffers
 };
 
 void pack_side(const std::vector<cv::KeyPoint>& kps, const cv::Mat& desc, int input_dim, bool add_scale_ori,
-               float shift_x, float shift_y, float scale, int padded_length, float mask_padded_value, SideBuffers& b)
+               float shift_x, float shift_y, float scale, int padded_length, float mask_padded_value,
+               float keypoint_offset, SideBuffers& b)
 {
     const int n = static_cast<int>(kps.size());
     if (desc.rows != n || desc.cols != input_dim || desc.type() != CV_32F)
@@ -50,8 +51,8 @@ void pack_side(const std::vector<cv::KeyPoint>& kps, const cv::Mat& desc, int in
     b.keypoints.assign(static_cast<size_t>(rows) * 2, 0.0f);
     for (int i = 0; i < n; ++i)
     {
-        b.keypoints[2 * i] = (kps[i].pt.x - shift_x) / scale;        // upstream normalize_keypoints
-        b.keypoints[2 * i + 1] = (kps[i].pt.y - shift_y) / scale;
+        b.keypoints[2 * i] = (kps[i].pt.x + keypoint_offset - shift_x) / scale;        // upstream normalize_keypoints
+        b.keypoints[2 * i + 1] = (kps[i].pt.y + keypoint_offset - shift_y) / scale;
     }
     b.descriptors.assign(static_cast<size_t>(rows) * input_dim, 0.0f);
     for (int i = 0; i < n; ++i)
@@ -119,6 +120,8 @@ void LightGlueOnnx::read_sidecar(const std::string& path)
             padded_length_ = root["padded_length"].as<int>();
         if (root["mask_padded_value"])
             mask_padded_value_ = root["mask_padded_value"].as<float>();
+        if (root["keypoint_offset"])
+            keypoint_offset_ = root["keypoint_offset"].as<float>();
         if (padded_length_ < 0 || (padded_length_ > 0 && padded_length_ < min_keypoints_))
             throw std::runtime_error("padded_length " + std::to_string(padded_length_) + " is not usable");
         if (root["precision"])
@@ -154,10 +157,10 @@ std::vector<cv::DMatch> LightGlueOnnx::match(const std::vector<cv::KeyPoint>& ke
     SideBuffers s0, s1;
     pack_side(keypoints0, descriptors0, input_dim_, add_scale_ori_, image_size0.width / 2.0f,
               image_size0.height / 2.0f, std::max(image_size0.width, image_size0.height) / 2.0f, rows,
-              mask_padded_value_, s0);
+              mask_padded_value_, keypoint_offset_, s0);
     pack_side(keypoints1, descriptors1, input_dim_, add_scale_ori_, image_size1.width / 2.0f,
               image_size1.height / 2.0f, std::max(image_size1.width, image_size1.height) / 2.0f, rows,
-              mask_padded_value_, s1);
+              mask_padded_value_, keypoint_offset_, s1);
 
     std::vector<TensorView> inputs{
         {"keypoints_0", s0.keypoints.data(), {1, r0, 2}},

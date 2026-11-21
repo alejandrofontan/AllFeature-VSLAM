@@ -58,6 +58,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DIR = SCRIPT_DIR.parent
 LIGHTGLUE_DIR = SCRIPT_DIR / "lightglue"
+RACO_DIR = SCRIPT_DIR / "raco"
 MODELS_DIR = REPO_DIR / "feature_models"
 
 # TORCH_HOME must be set before `import torch`: torch.hub reads it at import time to place its download cache
@@ -77,6 +78,9 @@ LIGHTGLUE_GIT = "https://github.com/cvg/LightGlue.git"
 LIGHTGLUE_COMMIT = "eb42fee2d71449efb0aa5c10549752b5d75384d8"  # main, 2026-02-18
 LIGHTGLUE_RELEASE = "v0.1_arxiv"  # the GitHub release the upstream code downloads its .pth files from
 ALIKED_COMMIT = "683d7c65197395c0b3f01ebe76e1084a27e73a65"  # Shiaoming/ALIKED main, 2024-05-05 (models/*.pth)
+RACO_GIT = "https://github.com/cvg/RaCo.git"
+RACO_COMMIT = "ee06fa68dbb20303f334fbc257dad71d4149603b"  # main, 2026-11-02
+RACO_RELEASE = "v1.0.0"  # the GitHub release with raco.pth
 
 # What each model is, where its weights come from, and the licence that governs them: the SuperPoint weights are
 # Magic Leap's, non-commercial research use only and no redistribution - the SuperPoint export is produced locally
@@ -112,14 +116,30 @@ WEIGHTS = {
         "file": f"sift_lightglue_{_LG_SUFFIX}.pth",
         "licence": "Apache-2.0",
     },
+    "raco": {
+        "url": f"https://github.com/cvg/RaCo/releases/download/{RACO_RELEASE}/raco.pth",
+        "file": "raco.pth",
+        "licence": "Apache-2.0",
+    },
+    "lightglue_raco": {
+        "url": f"{_LG_URL}/raco_aliked_lightglue.pth",
+        "file": f"raco_aliked_lightglue_{_LG_SUFFIX}.pth",
+        "licence": "Apache-2.0",
+    },
 }
+# The models of the raco128 feature: built, and their weights fetched, only when one of them is exported
+RACO_KEYS = ("raco", "lightglue_raco")
 
 # LightGlue's per-extractor configuration (lightglue/lightglue.py `features`): the descriptor size the input
 # projection expects, and whether the matcher takes per-keypoint scale + orientation (SIFT does: 4 inputs per side)
+# `upstream`: the name lightglue.py knows the variant by, when it is not ours. `keypoint_offset`: pixels the host adds
+# to its keypoints (pixel centres at integers) before normalising them - RaCo publishes its keypoints with pixel
+# corners at integers (+0.5), and the raco-aliked matcher was trained on those.
 LIGHTGLUE_FEATURES = {
     "superpoint": {"input_dim": 256, "add_scale_ori": False},
     "aliked": {"input_dim": 128, "add_scale_ori": False},
     "sift": {"input_dim": 128, "add_scale_ori": True},
+    "raco": {"input_dim": 128, "add_scale_ori": False, "upstream": "raco-aliked", "keypoint_offset": 0.5},
 }
 
 # ALIKED's keypoint selection, set by main from --topk before anything is built: the graph returns the ALIKED_TOPK best
@@ -130,6 +150,9 @@ LIGHTGLUE_FEATURES = {
 # - at 9x the matching time when the host keeps all 2048, which is what its keypoint budget
 # (Tracking.FeaturesFraction of the feature's maximum) is for.
 ALIKED_TOPK = 2048
+# RaCo (cvg/RaCo): the graph returns the RACO_TOPK best maxima of its detection score, each with RaCo's ranker score
+# and 2x2 covariance and an ALIKED descriptor; the host cuts them to its budget by ranker score.
+RACO_TOPK = 2048
 
 
 # SuperPoint's detection threshold, set by main from --superpoint-threshold. It is not in the graph (which ends at the
@@ -148,6 +171,7 @@ FEATURE_EXPORTS = {
     "superpoint256": ("superpoint", "lightglue_superpoint"),
     "aliked128": ("aliked", "lightglue_aliked"),
     "sift128": ("lightglue_sift",),
+    "raco128": ("raco", "lightglue_raco"),
 }
 PADDED_LENGTH = 1024
 
@@ -180,6 +204,8 @@ def model_path(key: str, size_suffix: str = "", padded_length: int = 0) -> Path:
         return MODELS_DIR / f"superpoint_v1{size_suffix}_fp32.onnx"
     if key == "aliked":
         return MODELS_DIR / f"aliked_n16{size_suffix}_fp32.onnx"
+    if key == "raco":
+        return MODELS_DIR / f"raco_aliked_n16{size_suffix}_fp32.onnx"   # RaCo keypoints, ALIKED-n16 descriptors
     return MODELS_DIR / (f"{key}_L{padded_length}_fp32.onnx" if padded_length else f"{key}_fp32.onnx")
 
 
@@ -220,6 +246,18 @@ def ensure_lightglue_clone(commit: str) -> str:
     return head
 
 
+def ensure_raco_clone(commit: str) -> str:
+    """Clone cvg/RaCo next to this script (gitignored) and pin it to `commit`. Returns the checked-out hash."""
+    if not (RACO_DIR / "raco" / "raco.py").exists():
+        print(f"cloning {RACO_GIT} -> {RACO_DIR}")
+        subprocess.run(["git", "clone", "--quiet", RACO_GIT, str(RACO_DIR)], check=True)
+    subprocess.run(["git", "-C", str(RACO_DIR), "checkout", "--quiet", commit], check=True)
+    head = subprocess.run(["git", "-C", str(RACO_DIR), "rev-parse", "HEAD"],
+                          check=True, capture_output=True, text=True).stdout.strip()
+    sys.path.insert(0, str(RACO_DIR))
+    return head
+
+
 def sha256_of(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -241,19 +279,21 @@ def download_weights(name: str) -> Path:
     return path
 
 
-def load_models(max_keypoints: int) -> dict[str, nn.Module]:
+def load_models(max_keypoints: int, with_raco: bool = False) -> dict[str, nn.Module]:
     """The five upstream models in eval mode, built for export. Keys: superpoint, aliked, sift (the extractors; sift is
     OpenCV-based and only produces references) and lightglue_{superpoint,aliked,sift} (the matchers).
     `max_keypoints` is the budget the C++ side applies (FeatureExtractorSettings::max_num_features): the upstream SuperPoint
     and SIFT references keep the best `max_keypoints` so that the (a) column matches what C++ will output; ALIKED
-    returns its ALIKED_TOPK best, as the graph does (the host's budget is applied after it)."""
+    returns its ALIKED_TOPK best, as the graph does (the host's budget is applied after it).
+    `with_raco`: also `raco` (the RaCo detector, from its own pinned clone) and `lightglue_raco`."""
     from lightglue import ALIKED, SIFT, LightGlue, SuperPoint  # noqa: E402  (from the pinned clone)
 
     # The upstream constructors call torch.hub.load_state_dict_from_url: with the files already in the hub cache under
     # their release filenames they load from disk. The ALIKED port fetches from Shiaoming/ALIKED's main branch; we
     # fetch the pinned-commit file under the same filename so it is the one that gets loaded.
     for name in WEIGHTS:
-        download_weights(name)
+        if with_raco or name not in RACO_KEYS:
+            download_weights(name)
 
     models: dict[str, nn.Module] = {}
     # SuperPoint: upstream defaults for nms_radius (4) and remove_borders (4); the detection threshold is
@@ -267,9 +307,17 @@ def load_models(max_keypoints: int) -> dict[str, nn.Module]:
     # SIFT: OpenCV backend, RootSIFT - the reference for the C++ cv::SIFT extractor
     models["sift"] = SIFT(backend="opencv", rootsift=True, max_num_keypoints=max_keypoints).eval()
     # LightGlue x3, adaptive behaviour off: the graph must be the full 9 layers with no data-dependent exit or pruning
-    for feat in LIGHTGLUE_FEATURES:
-        models[f"lightglue_{feat}"] = LightGlue(features=feat, depth_confidence=-1, width_confidence=-1,
-                                                flash=False, mp=False).eval()
+    for feat, cfg in LIGHTGLUE_FEATURES.items():
+        if f"lightglue_{feat}" in RACO_KEYS and not with_raco:
+            continue
+        models[f"lightglue_{feat}"] = LightGlue(features=cfg.get("upstream", feat), depth_confidence=-1,
+                                                width_confidence=-1, flash=False, mp=False).eval()
+    if with_raco:
+        from raco import RaCo  # noqa: E402  (from the pinned clone)
+
+        # Upstream defaults (NMS 3x3, sub-pixel refinement at temperature 0.5, ranker and covariance heads on); the
+        # weights from the hub cache, so nothing is downloaded by the constructor
+        models["raco"] = RaCo(weights=str(download_weights("raco")), max_num_keypoints=RACO_TOPK).eval()
     return models
 
 
@@ -732,6 +780,34 @@ def crop(x: torch.Tensor, top, height, left, width) -> torch.Tensor:
     return x.narrow(-2, top, height).narrow(-1, left, width)
 
 
+def aliked_dense(m: nn.Module, image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Upstream ALIKED.extract_dense_map for one image of any size: replicate-pad to a multiple of 32, the trunk with
+    its two deformable-convolution blocks, crop back. Returns score_map [1,1,H,W] and the L2-normalised feature_map
+    [1,128,H,W]. Used by AlikedExport (its own detector on the score map) and by RacoAlikedExport (the features only)."""
+    _, _, H, W = image.shape
+    div = 32
+    ph = (((H // div) + 1) * div - H) % div
+    pw = (((W // div) + 1) * div - W) % div
+    pl, pt = pw // 2, ph // 2
+    x = F.pad(image, [pl, pw - pl, pt, ph - pt], mode="replicate")
+
+    x1 = m.block1(x)
+    x2 = m.block2(m.pool2(x1))
+    x3 = m.block3(m.pool4(x2))                                 # deformable
+    x4 = m.block4(m.pool4(x3))                                 # deformable
+    x1 = m.gate(m.conv1(x1))
+    x2 = m.gate(m.conv2(x2))
+    x3 = m.gate(m.conv3(x3))
+    x4 = m.gate(m.conv4(x4))
+    x1234 = torch.cat([x1, m.upsample2(x2), m.upsample8(x3), m.upsample32(x4)], dim=1)
+    # Crop the maps back with narrow(start, length): a slice `pt:pt+H` with the symbolic pad in both bounds gives the
+    # exporter a result size it cannot prove equal to H (an unbacked symbol the following max-pool rejects);
+    # narrow carries the length H through as is.
+    score_map = crop(torch.sigmoid(m.score_head(x1234)), pt, H, pl, W)
+    feature_map = crop(F.normalize(x1234, p=2, dim=1), pt, H, pl, W)
+    return score_map, feature_map
+
+
 class AlikedExport(nn.Module):
     """ALIKED end to end for one RGB image in [0,1] of any size: replicate-pad to a multiple of 32 (upstream's
     InputPadder, split between both sides, computed from the input shape so it exports as shape arithmetic), the
@@ -752,27 +828,7 @@ class AlikedExport(nn.Module):
     def forward(self, image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         m = self.m
         _, _, H, W = image.shape
-        div = 32
-        ph = (((H // div) + 1) * div - H) % div
-        pw = (((W // div) + 1) * div - W) % div
-        pl, pt = pw // 2, ph // 2
-        x = F.pad(image, [pl, pw - pl, pt, ph - pt], mode="replicate")
-
-        x1 = m.block1(x)
-        x2 = m.block2(m.pool2(x1))
-        x3 = m.block3(m.pool4(x2))                                 # deformable
-        x4 = m.block4(m.pool4(x3))                                 # deformable
-        x1 = m.gate(m.conv1(x1))
-        x2 = m.gate(m.conv2(x2))
-        x3 = m.gate(m.conv3(x3))
-        x4 = m.gate(m.conv4(x4))
-        x1234 = torch.cat([x1, m.upsample2(x2), m.upsample8(x3), m.upsample32(x4)], dim=1)
-        # Crop the maps back with narrow(start, length): a slice `pt:pt+H` with the symbolic pad in both bounds gives the
-        # exporter a result size it cannot prove equal to H (an unbacked symbol the following max-pool rejects);
-        # narrow carries the length H through as is.
-        score_map = crop(torch.sigmoid(m.score_head(x1234)), pt, H, pl, W)
-        feature_map = crop(F.normalize(x1234, p=2, dim=1), pt, H, pl, W)
-
+        score_map, feature_map = aliked_dense(m, image)
         kp, kp_scores = dkd_topk(m.dkd, score_map, self.top_k)
         desc = sddh(m.desc_head, feature_map[0], kp)
         return scale_xy(kp + 1, W - 1, H - 1) / 2.0, desc, kp_scores
@@ -803,6 +859,88 @@ class AlikedTrunk(AlikedExport):
         score_map = crop(torch.sigmoid(m.score_head(x1234)), pt, H, pl, W)
         feature_map = crop(x1234 / x1234.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12), pt, H, pl, W)
         return score_map, feature_map
+
+
+class RacoAlikedExport(nn.Module):
+    """The raco128 detector graph for one RGB image in [0,1] of any size: RaCo keypoints with their ranker score and
+    covariance, and an ALIKED-n16 descriptor at each of them. RaCo (cvg/RaCo) is a detector only; its authors match
+    it with ALIKED descriptors and a LightGlue trained for the pair (matching_demo.ipynb), which is what this graph and
+    'lightglue_raco' reproduce.
+
+    RaCo.forward, for one image: ImageNet normalisation, replicate-pad to a multiple of 32, ALIKED-n16's trunk without
+    deformable convolutions, the score head, the ranker head (its own residual net on the padded image) and the
+    covariance head (three Cholesky maps, softplus on the diagonal). Keypoints: softmax of the score map over the whole
+    image, 3x3 NMS, the `top_k` best, then a sub-pixel offset from the softmax of the 3x3 raw scores around each
+    (temperature 0.5). Score, ranker score and Cholesky entries are sampled bilinearly at the refined position.
+    Rewritten for the exporter only where ALIKED's wrapper was: (row, col) from index grids, crops as narrows.
+
+    Descriptors: ALIKED.describe at RaCo's keypoints, at the image's own size (upstream's describe() resizes the long
+    side to 1024 by default; `resize=None` is this). RaCo publishes keypoints with pixel corners at integers (its
+    forward adds 0.5), and the demo hands those to ALIKED as they are; so does this graph.
+
+    Outputs, all float32, K = top_k in detection-score order:
+      keypoints [K,2]    (x,y) with pixel CENTRES at integers, the host's and OpenCV's convention (RaCo's - 0.5)
+      descriptors [K,128] L2-normalised
+      scores [K]         detection probability; -1 marks an entry that is not a maximum (fewer than K maxima)
+      ranker_scores [K]  RaCo's ranking score (unbounded, higher is better): what a smaller budget is chosen by
+      covariances [K,3]  (xx, xy, yy) of the keypoint's 2x2 position covariance, pixels^2 at this image size"""
+
+    def __init__(self, raco: nn.Module, aliked: nn.Module, top_k: int):
+        super().__init__()
+        self.raco, self.aliked, self.top_k = raco, aliked, top_k
+        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1), persistent=False)
+        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1), persistent=False)
+
+    def forward(self, image: torch.Tensor):
+        r = self.raco
+        _, _, H, W = image.shape
+        div = 32
+        ph = (((H // div) + 1) * div - H) % div
+        pw = (((W // div) + 1) * div - W) % div
+        pl, pt = pw // 2, ph // 2
+        x = F.pad((image - self.mean) / self.std, [pl, pw - pl, pt, ph - pt], mode="replicate")
+
+        x1 = r.block1(x)
+        x2 = r.block2(r.pool2(x1))
+        x3 = r.block3(r.pool4(x2))
+        x4 = r.block4(r.pool4(x3))
+        x1234 = torch.cat([r.gate(r.conv1(x1)), r.upsample2(r.gate(r.conv2(x2))), r.upsample8(r.gate(r.conv3(x3))),
+                           r.upsample32(r.gate(r.conv4(x4)))], dim=1)
+        raw = crop(r.score_head(x1234), pt, H, pl, W)                              # [1,1,H,W] logits
+        ranker_map = crop(r.ranker_head(x), pt, H, pl, W)                          # [1,1,H,W]
+        chol = crop(r.covariance_estimator_head(x1234), pt, H, pl, W)              # [1,3,H,W]: L11, L21, L22
+        chol = torch.stack([F.softplus(chol[:, 0]), chol[:, 1], F.softplus(chol[:, 2])], dim=1)
+
+        probs = F.softmax(raw.flatten(1), dim=1).reshape(1, 1, H, W)               # one distribution over the image
+        nms = probs * (probs == F.max_pool2d(probs, 3, stride=1, padding=1))
+        top = torch.topk(nms.reshape(-1), self.top_k)                              # [K], score order
+        flat, valid = top.indices, top.values > 0.0
+        rows = torch.arange(H, device=image.device).view(H, 1).expand(H, W).reshape(-1)[flat]
+        cols = torch.arange(W, device=image.device).view(1, W).expand(H, W).reshape(-1)[flat]
+
+        # Sub-pixel offset: expectation of the 3x3 neighbour offsets under softmax(raw / temperature); the patch is
+        # zero-padded at the image border, as upstream's nn.Unfold does it
+        patch = F.unfold(raw, kernel_size=3, padding=1)[0].reshape(9, H, W)[:, rows, cols].t()   # [K,9], row-major
+        weights = F.softmax(patch / r.conf.subpixel_temp, dim=1)
+        steps = torch.tensor([-1.0, 0.0, 1.0], device=image.device)
+        offsets = torch.stack([steps.repeat(3), steps.repeat_interleave(3)], dim=1)   # [9,2] (x, y) of each neighbour
+        kp = torch.stack([cols, rows], dim=1).to(raw.dtype) + weights @ offsets       # [K,2], pixel centres at integers
+
+        grid = (div_xy(kp, W - 1, H - 1) * 2 - 1).view(1, -1, 1, 2)
+
+        def sample(feature_map: torch.Tensor) -> torch.Tensor:                     # [1,C,H,W] -> [K,C]
+            return F.grid_sample(feature_map, grid, mode="bilinear", padding_mode="border",
+                                 align_corners=True)[0, :, :, 0].t()
+
+        scores = torch.where(valid, sample(probs)[:, 0], torch.full_like(top.values, -1.0))
+        ranker_scores = sample(ranker_map)[:, 0]
+        l11, l21, l22 = sample(chol).unbind(dim=1)
+        covariances = torch.stack([l11 * l11, l11 * l21, l21 * l21 + l22 * l22], dim=1)   # L L^T: xx, xy, yy
+
+        # ALIKED descriptors at RaCo's published keypoints (kp + 0.5), read by ALIKED with centres at integers
+        _, feature_map = aliked_dense(self.aliked, image)
+        descriptors = sddh(self.aliked.desc_head, feature_map[0], div_xy(kp + 0.5, W - 1, H - 1) * 2 - 1)
+        return kp, descriptors, scores, ranker_scores, covariances
 
 
 # --------------------------------------------------------------------------------------
@@ -1007,22 +1145,47 @@ def ensure_float32_io(model) -> None:
     from onnx import TensorProto
 
     producers = {out: n for n in model.graph.node for out in n.output}
+    declared = {v.name: v.type.tensor_type.elem_type for v in model.graph.value_info}
     for output in model.graph.output:
+        node = producers.get(output.name)
+        if output.type.tensor_type.elem_type == TensorProto.FLOAT:
+            # Kept float32 by the converter, through a Cast from the float16 tensor. Nodes inside the graph that read
+            # this output (the raco graph samples its maps at `keypoints`) were converted to read float16: give them
+            # the Cast's input, not its float32 result
+            inside = [n for n in model.graph.node if output.name in n.input]
+            if (inside and node is not None and node.op_type == "Cast"
+                    and declared.get(node.input[0]) == TensorProto.FLOAT16):
+                for consumer in inside:
+                    for k, name in enumerate(consumer.input):
+                        if name == output.name:
+                            consumer.input[k] = node.input[0]
+                print(f"  output '{output.name}': {len(inside)} nodes inside the graph now read its float16 source")
+            continue
         if output.type.tensor_type.elem_type != TensorProto.FLOAT16:
             continue
-        node = producers.get(output.name)
+        # A graph output can also feed nodes inside the graph (the raco graph samples its maps at `keypoints`):
+        # those were converted to read a float16 tensor and must keep reading one under another name
+        inside = [n for n in model.graph.node if output.name in n.input]
+        half_name = output.name + "_fp16"
         if node is not None and node.op_type == "Cast":
             for attr in node.attribute:
                 if attr.name == "to":
                     attr.i = TensorProto.FLOAT
+            if inside:
+                model.graph.node.append(onnx.helper.make_node(
+                    "Cast", [node.input[0]], [half_name], name=output.name + "_to_fp16", to=TensorProto.FLOAT16))
         else:
-            half_name = output.name + "_fp16"
             if node is not None:
                 node.output[list(node.output).index(output.name)] = half_name
             model.graph.node.append(onnx.helper.make_node(
                 "Cast", [half_name], [output.name], name=output.name + "_to_fp32", to=TensorProto.FLOAT))
+        for consumer in inside:
+            for k, name in enumerate(consumer.input):
+                if name == output.name:
+                    consumer.input[k] = half_name
         output.type.tensor_type.elem_type = TensorProto.FLOAT
-        print(f"  output '{output.name}' restored to float32")
+        print(f"  output '{output.name}' restored to float32"
+              f"{f' ({len(inside)} nodes inside the graph read its float16 copy)' if inside else ''}")
 
 
 def fix_cast_targets(model) -> int:
@@ -1070,10 +1233,14 @@ def convert_fp16(fp32_path: Path, fp16_path: Path) -> None:
     ensure_float32_io(model16)
     n_cast = fix_cast_targets(model16)
     onnx.save(model16, str(fp16_path))
-    onnx.checker.check_model(str(fp16_path))
-    so = ort.SessionOptions()
-    so.log_severity_level = 3
-    ort.InferenceSession(str(fp16_path), so, providers=["CPUExecutionProvider"])   # loads, or raises with the name
+    try:
+        onnx.checker.check_model(str(fp16_path))
+        so = ort.SessionOptions()
+        so.log_severity_level = 3
+        ort.InferenceSession(str(fp16_path), so, providers=["CPUExecutionProvider"])   # loads, or raises with the name
+    except Exception:
+        fp16_path.unlink(missing_ok=True)   # never leave a file the host could load and ONNX Runtime cannot
+        raise
     print(f"fp16 twin: {fp16_path.name} ({fp16_path.stat().st_size / 2**20:.1f} MB"
           f"{f', {n_cast} cast targets fixed' if n_cast else ''})")
 
@@ -1145,8 +1312,38 @@ def aliked_contract(m: nn.Module) -> list[str]:
     ]
 
 
+def raco_contract(raco: nn.Module) -> list[str]:
+    c = raco.conf
+    return [
+        f"# RaCo: {RACO_GIT} @ {RACO_COMMIT} (Apache-2.0), weights {WEIGHTS['raco']['url']}",
+        f"# Descriptors: ALIKED-n16 from the lightglue/ package above, weights {WEIGHTS['aliked-n16']['url']} (BSD-3-Clause)",
+        "# Input: one RGB image, [1,3,H,W] float32 in [0,1] (cv::cvtColor BGR2RGB / 255), any H and W: the graph applies",
+        "# RaCo's ImageNet normalisation, replicate-pads to a multiple of 32 and crops the maps back.",
+        "input_tensor: image",
+        "color: rgb",
+        "# Outputs, K = topk entries in detection-score order (RaCo's own selection: softmax over the image, 3x3 NMS):",
+        "#   keypoints [K,2]     (x,y) pixels, pixel CENTRES at integers (RaCo publishes x+0.5, y+0.5; see keypoint_offset",
+        "#                       in the matcher's sidecar)",
+        "#   descriptors [K,128] ALIKED-n16 at RaCo's keypoints, L2-normalised",
+        "#   scores [K]          detection probability; -1 marks an entry that is not a maximum - the host drops it",
+        "#   ranker_scores [K]   RaCo's ranking score (unbounded, higher is better): the host keeps its budget by it",
+        "#   covariances [K,3]   (xx, xy, yy) of the 2x2 position covariance, pixels^2 at the input size",
+        "output_tensors: [keypoints, descriptors, scores, ranker_scores, covariances]",
+        f"topk: {RACO_TOPK}",
+        f"nms_radius: {c.nms_radius}   # inside the graph (the NMS window, 3x3)",
+        f"subpixel_temp: {c.subpixel_temp}   # inside the graph",
+        "descriptor_dim: 128",
+        "# Uses ai.onnx DeformConv (opset 19) in ALIKED's trunk: native on ORT's CPU and CUDA providers.",
+    ]
+
+
 def lightglue_contract(lg: nn.Module, feat: str, padded_length: int = 0) -> list[str]:
     c = lg.conf
+    offset = LIGHTGLUE_FEATURES[feat].get("keypoint_offset", 0.0)
+    offset_lines = [] if not offset else [
+        f"keypoint_offset: {offset}   # pixels the host adds to x and y before normalising: this matcher was trained on",
+        "#   keypoints with pixel corners at integers (RaCo's), the host keeps pixel centres at integers",
+    ]
     sides = ["keypoints_0", "scales_0", "oris_0", "descriptors_0", "keypoints_1", "scales_1", "oris_1", "descriptors_1"] \
         if c.add_scale_ori else ["keypoints_0", "descriptors_0", "keypoints_1", "descriptors_1"]
     if padded_length:
@@ -1158,7 +1355,7 @@ def lightglue_contract(lg: nn.Module, feat: str, padded_length: int = 0) -> list
         "#   (zeros in its keypoints / descriptors); added to every attention and assignment logit over the key axis.",
         "#   Output [1,L+1,L+1]: the host reads the [N0,N1] block (row stride L+1); the rest is not meaningful.",
     ]
-    return padded + [
+    return padded + offset_lines + [
         f"features: {feat}",
         f"input_dim: {c.input_dim}   # descriptor size the input projection expects",
         f"add_scale_ori: {'true' if c.add_scale_ori else 'false'}   # scales [1,N] (px) and oris [1,N] (rad) inputs per side",
@@ -1174,7 +1371,8 @@ def lightglue_contract(lg: nn.Module, feat: str, padded_length: int = 0) -> list
     ]
 
 
-ALL_EXPORTS = ("superpoint", "aliked", "lightglue_superpoint", "lightglue_aliked", "lightglue_sift")
+ALL_EXPORTS = ("superpoint", "aliked", "raco", "lightglue_superpoint", "lightglue_aliked", "lightglue_sift",
+               "lightglue_raco")
 
 
 def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None = None,
@@ -1242,6 +1440,17 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
             export_onnx(AlikedTrunk(models["aliked"], 0, decompose_deform=True), MODELS_DIR / f"aliked_n16{suffix}_trunk.onnx",
                         (torch.rand(1, 3, H, W),), ["image"], ["score_map", "feature_map"], None, opset=18)
 
+    # RaCo keypoints + ALIKED descriptors (raco128): dynamic H, W only - no fixed-size (Core ML) variant
+    if "raco" in wanted and export_detectors and not static_size:
+        path = model_path("raco")
+        if not present(path):
+            export_onnx(RacoAlikedExport(models["raco"], models["aliked"], RACO_TOPK), path,
+                        (torch.rand(1, 3, H, W),), ["image"],
+                        ["keypoints", "descriptors", "scores", "ranker_scores", "covariances"], dyn, opset=19,
+                        translation=DEFORM_CONV_TRANSLATION)
+            write_sidecar(path, "raco", "raco", commit, 19, "fp32", raco_contract(models["raco"]))
+        paths["raco"] = path
+
     # LightGlue x3: dynamic N0, N1 (>= 2: the graph has no empty/single-keypoint branch and 0/1 sizes specialise),
     # or padded to static_length rows per side with the mask inputs (every shape bounded, for Core ML)
     n0, n1 = Dim("n0", min=2), Dim("n1", min=2)
@@ -1286,9 +1495,10 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
         if present(twin):
             continue
         convert_fp16(path, twin)
-        opset = 19 if key == "aliked" else 18
+        opset = 19 if key in ("aliked", "raco") else 18
         contract = {"superpoint": lambda: superpoint_contract(models["superpoint"]) + size_lines,
-                    "aliked": lambda: aliked_contract(models["aliked"]) + aliked_lines}.get(
+                    "aliked": lambda: aliked_contract(models["aliked"]) + aliked_lines,
+                    "raco": lambda: raco_contract(models["raco"])}.get(
             key, lambda: lightglue_contract(models[key], key.split("_", 1)[1], L))()
         weights_key = {"superpoint": "superpoint", "aliked": "aliked-n16"}.get(key, key)
         write_sidecar(twin, key.split("_")[0], weights_key, commit, opset, "fp16", contract)
@@ -1453,6 +1663,85 @@ def write_references(models: dict[str, nn.Module], images: list[Path], commit: s
     print(f"\nreferences: {', '.join(names)} rewritten ({len(list(ref_dir.glob('*.txt')))} files in {ref_dir})")
 
 
+def check_and_reference_raco(models: dict[str, nn.Module], paths: dict[str, Path], images: list[Path]) -> None:
+    """raco128: (a) upstream - RaCo.forward, ALIKED.describe at its keypoints with resize=None, LightGlue raco-aliked -
+    against (b) the export wrapper in PyTorch and (c) the fp32 ONNX files on ONNX Runtime CPU; then (a) dumped as the
+    references of the C++ parity test: '<frame>.raco.txt' (x y score ranker cxx cxy cyy d0..d127, keypoints with pixel
+    centres at integers like the graph's) and '<frame0>__<frame1>.lightglue_raco.txt'."""
+    from lightglue.lightglue import filter_matches, normalize_keypoints
+
+    raco, aliked, lg = models["raco"], models["aliked"], models["lightglue_raco"]
+    wrapper = RacoAlikedExport(raco, aliked, RACO_TOPK)
+    ort_detector = OrtModel(paths["raco"]) if "raco" in paths else None
+    ort_matcher = OrtModel(paths["lightglue_raco"]) if "lightglue_raco" in paths else None
+    ref_dir = MODELS_DIR / "reference"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\nraco128: (a) upstream vs (b) export wrapper vs (c) ONNX fp32 on ONNX Runtime CPU, {len(images)} frames:")
+
+    def as_dict(kp, desc, scores, ranker, cov):       # one layout for (a), (b), (c); keypoints with centres at integers
+        keep = scores >= 0
+        return {"keypoints": kp[keep], "descriptors": desc[keep], "scores": scores[keep], "ranker": ranker[keep],
+                "covariances": cov[keep]}
+
+    def extra(a: dict, b: dict) -> str:
+        # b's keypoints paired with a's by position (the two can order near-equal detection scores differently)
+        d = torch.cdist(b["keypoints"], a["keypoints"], compute_mode="donot_use_mm_for_euclid_dist")
+        dmin, idx = d.min(dim=1)
+        hit = dmin < 0.5
+        ranker_scale = a["ranker"].abs().median().item()
+        return (f"  ranker: median |value| {ranker_scale:.1f}, max|d|={(a['ranker'][idx[hit]] - b['ranker'][hit]).abs().max().item():.2e}"
+                f"  max|dcov|={(a['covariances'][idx[hit]] - b['covariances'][hit]).abs().max().item():.2e} px^2")
+
+    feats = []
+    for path in images:
+        _, rgb = load_image(path)
+        H, W = rgb.shape[-2:]
+        up = raco({"image": rgb})
+        desc = aliked.describe(up["keypoints"], rgb, resize=None)[0]
+        c = up["covariances"][0]
+        fa = as_dict(up["keypoints"][0] - 0.5, desc, up["keypoint_scores"][0], up["ranker_scores"][0],
+                     torch.stack([c[:, 0, 0], c[:, 0, 1], c[:, 1, 1]], 1))
+        print(f" {path.name} ({W}x{H})")
+        fb = as_dict(*wrapper(rgb))
+        compare_detections("(b) raco: wrapper", fa, fb)
+        print(f"  {'':34s}{extra(fa, fb)}")
+        if ort_detector is not None:
+            fc = as_dict(*ort_detector.run(image=rgb))
+            compare_detections("(c) raco: ONNX fp32", fa, fc)
+            print(f"  {'':34s}{extra(fa, fc)}  {ort_detector.ms:7.1f} ms")
+        sigma = fa["covariances"][:, [0, 2]].sqrt()
+        print(f"  {'covariance (a)':34s} sigma_x median {sigma[:, 0].median().item():.2f} px, sigma_y median "
+              f"{sigma[:, 1].median().item():.2f} px, range {sigma.min().item():.2f} to {sigma.max().item():.2f} px")
+        feats.append((fa, (W, H)))
+        cols = ["x", "y", "score", "ranker", "cxx", "cxy", "cyy"] + [f"d{i}" for i in range(fa["descriptors"].shape[1])]
+        rows = torch.cat([fa["keypoints"], fa["scores"][:, None], fa["ranker"][:, None], fa["covariances"],
+                          fa["descriptors"]], 1).numpy()
+        np.savetxt(ref_dir / f"{path.stem}.raco.txt", rows, fmt="%.7g",
+                   header=f"model=raco source={RACO_COMMIT[:12]} image={path.name} size={W}x{H} N={rows.shape[0]} "
+                          f"columns: {' '.join(cols)}")
+    offset = LIGHTGLUE_FEATURES["raco"]["keypoint_offset"]
+    for i in range(0, len(images) - 1, 2):
+        (f0, size), (f1, _) = feats[i], feats[i + 1]
+        wh = torch.tensor([size], dtype=torch.float32)
+        d0 = {"keypoints": f0["keypoints"][None] + offset, "descriptors": f0["descriptors"][None], "image_size": wh}
+        d1 = {"keypoints": f1["keypoints"][None] + offset, "descriptors": f1["descriptors"][None], "image_size": wh}
+        out = lg({"image0": d0, "image1": d1})
+        m_a, s_a = out["matches0"][0], out["matching_scores0"][0]
+        print(f" pair {images[i].name} - {images[i + 1].name}: (a) lightglue_raco matches={int((m_a >= 0).sum())}")
+        if ort_matcher is not None:
+            k0, k1 = normalize_keypoints(d0["keypoints"], wh), normalize_keypoints(d1["keypoints"], wh)
+            (scores,) = ort_matcher.run(keypoints_0=k0, descriptors_0=d0["descriptors"], keypoints_1=k1,
+                                        descriptors_1=d1["descriptors"])
+            m_c, _, s_c, _ = filter_matches(scores, lg.conf.filter_threshold)
+            compare_matches("(c) lightglue_raco", (m_a, s_a), (m_c[0], s_c[0]), ort_matcher.ms)
+        idx = torch.where(m_a >= 0)[0]
+        rows = torch.stack([idx.float(), m_a[idx].float(), s_a[idx]], 1).numpy()
+        np.savetxt(ref_dir / f"{images[i].stem}__{images[i + 1].stem}.lightglue_raco.txt", rows,
+                   fmt=["%d", "%d", "%.7g"], header=f"model=lightglue_raco N0={f0['keypoints'].shape[0]} "
+                   f"N1={f1['keypoints'].shape[0]} size={size[0]}x{size[1]} matches={rows.shape[0]} columns: i0 i1 score")
+    print(f"references: raco rewritten in {ref_dir}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--images", nargs="*", type=Path, default=[],
@@ -1514,8 +1803,11 @@ def main() -> None:
     print(f"torch {torch.__version__} (CPU), TORCH_HOME={os.environ['TORCH_HOME']}")
     commit = ensure_lightglue_clone(LIGHTGLUE_COMMIT)
     print(f"cvg/LightGlue at {commit}")
+    with_raco = only is None or bool(only & set(RACO_KEYS))   # its clone and weights only when it is exported
+    if with_raco:
+        print(f"cvg/RaCo at {ensure_raco_clone(RACO_COMMIT)}")
     with torch.no_grad():
-        models = load_models(args.max_keypoints)
+        models = load_models(args.max_keypoints, with_raco)
         describe_models(models)
         if args.images:
             check_wrappers(models, args.images, args.max_keypoints, args.topk if static_size else 0,
@@ -1533,6 +1825,8 @@ def main() -> None:
                     n for n in ("superpoint", "aliked") if n in args.only)
                 if names:
                     write_references(models, args.images, commit, names)
+                if with_raco:
+                    check_and_reference_raco(models, paths, args.images)
 
 
 if __name__ == "__main__":

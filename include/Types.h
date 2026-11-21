@@ -28,6 +28,7 @@ namespace AF_VSLAM {
 }
 
 enum FeatureType {
+    FEAT_RACO128 = 8,
     FEAT_SUPERPOINT256 = 7,
     FEAT_ALIKED128 = 6,
     FEAT_SIFT128 = 5,
@@ -38,6 +39,7 @@ enum FeatureType {
 };
 
 enum MatcherType {
+    LIGHTGLUE_RACO = 5,
     LIGHTGLUE_SUPERPOINT = 4,
     LIGHTGLUE_ALIKED = 3,
     LIGHTGLUE_SIFT = 2,

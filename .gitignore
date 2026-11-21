@@ -21,6 +21,7 @@ lightglue_models/
 # learned features on ONNX Runtime: the pinned cvg/LightGlue clone the
 # export tool works from, and the exported models + weights cache + references
 tools/lightglue/
+tools/raco/
 feature_models/
 .cache/
 

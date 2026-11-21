@@ -10,7 +10,9 @@
  *
  *   detector:  ./bin/test_feature_parity --model feature_models/superpoint_v1_fp32.onnx \
  *                  --image <frame.png> --reference feature_models/reference/<frame>.superpoint.txt
- *              (same with feature_models/aliked_n16_fp32.onnx and <frame>.aliked.txt)
+ *              (same with feature_models/aliked_n16_fp32.onnx and <frame>.aliked.txt, and with
+ *              feature_models/raco_aliked_n16_fp32.onnx and <frame>.raco.txt: there the score compared is the ranker
+ *              score, and the covariances are compared too)
  *   sift:      ./bin/test_feature_parity --model sift --image <frame.png> --reference <frame>.sift.txt
  *              (cv::SIFT on the CPU, no ONNX file; the reference is cv2.SIFT through lightglue/sift.py)
  *   matcher:   ./bin/test_feature_parity --model feature_models/lightglue_superpoint_fp32.onnx \
@@ -28,6 +30,7 @@
 #include "SiftCpu.h"
 #include "onnx/AlikedOnnx.h"
 #include "onnx/LightGlueOnnx.h"
+#include "onnx/RacoOnnx.h"
 #include "onnx/SuperPointOnnx.h"
 
 #include <opencv2/imgcodecs.hpp>
@@ -164,16 +167,20 @@ double median(std::vector<double> v)
 struct DetectorParity
 {
     int n_ref{0}, n_got{0}, hits{0};
-    double max_dxy{0.0}, max_dscore{0.0}, min_cos{1.0};
+    double max_dxy{0.0}, max_dscore{0.0}, min_cos{1.0}, max_dcov{0.0};
 };
 
+/// `score_column`: the reference column cv::KeyPoint::response is compared with. `covariances` (one (xx, xy, yy) per
+/// keypoint, or null): compared with the reference's cxx / cxy / cyy columns.
 DetectorParity compare_detector(const Reference& ref, const std::vector<cv::KeyPoint>& kps, const cv::Mat& desc,
-                                double radius)
+                                double radius, const std::string& score_column = "score",
+                                const std::vector<cv::Vec3f>* covariances = nullptr)
 {
     DetectorParity p;
     p.n_ref = ref.n;
     p.n_got = static_cast<int>(kps.size());
-    const int cx = ref.col("x"), cy = ref.col("y"), cs = ref.col("score"), cd = ref.col("d0");
+    const int cx = ref.col("x"), cy = ref.col("y"), cs = ref.col(score_column), cd = ref.col("d0");
+    const int ccov = covariances ? ref.col("cxx") : -1;
     const int dim = desc.cols;
     for (int i = 0; i < p.n_got; ++i)
     {
@@ -195,6 +202,9 @@ DetectorParity compare_detector(const Reference& ref, const std::vector<cv::KeyP
         p.hits++;
         p.max_dxy = std::max(p.max_dxy, d);
         p.max_dscore = std::max(p.max_dscore, std::abs(static_cast<double>(ref.rows[best][cs]) - kps[i].response));
+        if (ccov >= 0)
+            for (int k = 0; k < 3; ++k)
+                p.max_dcov = std::max(p.max_dcov, std::abs(static_cast<double>(ref.rows[best][ccov + k]) - (*covariances)[i][k]));
         double dot = 0.0, na = 0.0, nb = 0.0;
         const float* row = desc.ptr<float>(i);
         for (int c = 0; c < dim; ++c)
@@ -355,6 +365,37 @@ int main(int argc, char** argv)
         std::printf("  N=%d (reference %d)  within 0.5px: %d/%d (%.4f)  max|dxy| matched=%.2e px  "
                     "max|dscore|=%.2e  min cos=%.7f\n",
                     p.n_got, p.n_ref, p.hits, p.n_got, fraction, p.max_dxy, p.max_dscore, p.min_cos);
+        std::printf("  time over %d calls: graph median %.1f ms, graph+conversion median %.1f ms\n", iters,
+                    median(graph_ms), median(total_ms));
+        std::printf("%s\n", pass ? "PASS" : "FAIL");
+        return pass ? 0 : 1;
+    }
+    if (kind == "raco")
+    {
+        AF_VSLAM::onnx::RacoOnnx raco(model, settings);
+        std::vector<cv::KeyPoint> kps;
+        cv::Mat desc;
+        std::vector<cv::Vec3f> cov;
+        raco.detect(image, kps, desc, cov);
+        std::vector<double> graph_ms, total_ms;
+        for (int i = 0; i < iters; ++i)
+        {
+            std::vector<cv::KeyPoint> k;
+            cv::Mat d;
+            std::vector<cv::Vec3f> c;
+            raco.detect(image, k, d, c);
+            graph_ms.push_back(raco.last_graph_ms());
+            total_ms.push_back(raco.last_total_ms());
+        }
+        const DetectorParity p = compare_detector(ref, kps, desc, 0.5, "ranker", &cov);   // response is the ranker score
+        const double fraction = p.n_got ? static_cast<double>(p.hits) / p.n_got : 0.0;
+        const bool count_ok = std::abs(p.n_got - p.n_ref) <= std::max(1, p.n_ref / 100);
+        const bool pass = count_ok && fraction >= min_fraction && p.min_cos >= min_cos;
+        std::printf("raco %s (%s, %s weights) %dx%d\n", model.c_str(), raco.provider().c_str(),
+                    raco.precision().c_str(), image.cols, image.rows);
+        std::printf("  N=%d (reference %d)  within 0.5px: %d/%d (%.4f)  max|dxy| matched=%.2e px  "
+                    "max|dranker|=%.2e  max|dcov|=%.2e px^2  min cos=%.7f\n",
+                    p.n_got, p.n_ref, p.hits, p.n_got, fraction, p.max_dxy, p.max_dscore, p.max_dcov, p.min_cos);
         std::printf("  time over %d calls: graph median %.1f ms, graph+conversion median %.1f ms\n", iters,
                     median(graph_ms), median(total_ms));
         std::printf("%s\n", pass ? "PASS" : "FAIL");

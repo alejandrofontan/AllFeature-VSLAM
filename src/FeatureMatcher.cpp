@@ -50,6 +50,7 @@ const char* lightglue_variant(const MatcherType matcher_type)
     {
         case LIGHTGLUE_SUPERPOINT: return "superpoint";
         case LIGHTGLUE_ALIKED: return "aliked";
+        case LIGHTGLUE_RACO: return "raco";
         case LIGHTGLUE_SIFT: return "sift";
         case BF_L2:
         case BF_HAMMING: return nullptr;
@@ -111,6 +112,7 @@ std::vector<cv::DMatch> FeatureMatcher::match_descriptors(
     switch(matcher_type) {
         case LIGHTGLUE_SIFT:
         case LIGHTGLUE_ALIKED:
+        case LIGHTGLUE_RACO:
         case LIGHTGLUE_SUPERPOINT:
         {
             try

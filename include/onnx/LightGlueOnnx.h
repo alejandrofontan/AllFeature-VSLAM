@@ -28,6 +28,10 @@
  * the padding. The output is [L+1, L+1]; match() reads the [N0, N1] block with row stride L+1. A pair with more
  * than L keypoints on a side does not fit: the caller (onnx::shared_lightglue) routes it to the dynamic file.
  *
+ * Keypoint convention: the host's keypoints have pixel centres at integers. A matcher trained on keypoints with
+ * pixel corners at integers (lightglue_raco: RaCo publishes its keypoints that way) says so in its sidecar with
+ * `keypoint_offset: 0.5`, and match() adds that to x and y before normalising.
+ *
  * Output: cv::DMatch with queryIdx in set 0, trainIdx in set 1 and distance = 1 - matching score (the host's
  * convention for learned matchers).
  *
@@ -92,6 +96,7 @@ class LightGlueOnnx
     int min_keypoints_{2};
     int padded_length_{0};
     float mask_padded_value_{-1e9f};
+    float keypoint_offset_{0.0f};   // sidecar `keypoint_offset`: added to x and y before normalising (see the header)
     std::string precision_{"fp32"};
     std::string output_name_;
 };

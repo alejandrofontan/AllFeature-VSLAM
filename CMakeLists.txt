@@ -151,8 +151,8 @@ endif()
 # wrapper per model, the process-wide configuration + shared matchers, and the three features built on them; SIFT on
 # OpenCV's CPU implementation, the extractor the LightGlue-SIFT matcher was trained with. Every platform.
 list(APPEND SRCS_ALLFEATURE src/onnx/OrtSession.cpp src/onnx/SuperPointOnnx.cpp src/onnx/LightGlueOnnx.cpp
-                            src/onnx/AlikedOnnx.cpp src/onnx/FeatureModels.cpp
-                            src/Feature_superpoint256.cpp src/Feature_aliked128.cpp
+                            src/onnx/AlikedOnnx.cpp src/onnx/RacoOnnx.cpp src/onnx/FeatureModels.cpp
+                            src/Feature_superpoint256.cpp src/Feature_aliked128.cpp src/Feature_raco128.cpp
                             src/SiftCpu.cpp src/Feature_sift128.cpp)
 
 # ---- CUDA (help Torch/Caffe2 legacy FindCUDA) ----

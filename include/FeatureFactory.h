@@ -22,6 +22,7 @@
 // settings is an error at startup (feature_compiled_out below throws) instead of a link error.
 #include "Feature_sift128.h"
 #include "Feature_aliked128.h"
+#include "Feature_raco128.h"
 #include "Feature_superpoint256.h"
 
 // Returns a stateless singleton per feature type (every Feature virtual is const).
@@ -45,6 +46,7 @@ static const AF_VSLAM::Brisk48 brisk48;
 static const AF_VSLAM::Kaze64 kaze64;
 static const AF_VSLAM::Sift128 sift128;
 static const AF_VSLAM::Aliked128 aliked128;
+static const AF_VSLAM::Raco128 raco128;
 static const AF_VSLAM::Superpoint256 superpoint256;
 
 switch (feature_type) {
@@ -68,6 +70,8 @@ switch (feature_type) {
         return sift128;
     case FEAT_ALIKED128:
         return aliked128;
+    case FEAT_RACO128:
+        return raco128;
     case FEAT_SUPERPOINT256:
         return superpoint256;
     default:
@@ -91,6 +95,7 @@ static const std::vector<std::pair<std::string, FeatureType>> table{
     {"kaze64",        FEAT_KAZE64},
     {"sift128",       FEAT_SIFT128},
     {"aliked128",     FEAT_ALIKED128},
+    {"raco128",       FEAT_RACO128},
     {"superpoint256", FEAT_SUPERPOINT256},
 };
 return table;

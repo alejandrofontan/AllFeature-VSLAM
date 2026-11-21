@@ -65,7 +65,9 @@ public:
 protected:
 
     void compute_size(KeypointData& data);
-    void compute_sigma(KeypointData& data);
+    // sigma2 and information per keypoint. The base derives an isotropic one from the keypoint's size; an extractor
+    // whose model predicts a covariance (raco128) fills that in instead
+    virtual void compute_sigma(KeypointData& data);
 
     [[nodiscard]] virtual float get_keypoint_size(const cv::KeyPoint& keypoint) const = 0;
 
