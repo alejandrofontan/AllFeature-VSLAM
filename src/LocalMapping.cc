@@ -243,34 +243,43 @@ void LocalMapping::cull_map_points()
     }
 }
 
-// The covisible keyframes to triangulate against: the create_new_map_points_keyframes most
-// covisible ones THAT HAVE ENOUGH BASELINE to the current keyframe, relative to their scene
-// depth -- a near-zero-parallax pair only yields ill-conditioned triangulations. The covisible
-// keyframes are walked from most to least covisible until that many pass, so a neighbor that is
-// too close is replaced by the next one down the list rather than just dropped. Selected before
-// any matching, so no neighbor is matched and filtered only to be skipped.
+// The keyframes to triangulate against: the most covisible ones with enough baseline
 std::vector<Keyframe> LocalMapping::select_triangulation_neighbors() const
 {
+    AF_REPORT_SCOPE();
     const std::vector<Keyframe> covisible = current_keyframe_->get_covisible_keyframes();   // most covisible first
-    const auto [Tcw1, Twc1, Rcw1, Rwc1, tcw1, twc1] = current_keyframe_->get_pose();
+    const vec3f centre = current_keyframe_->get_pose().twc;
 
     const size_t num_wanted = static_cast<size_t>(std::max(params.create_new_map_points_keyframes, 0));
     std::vector<Keyframe> neighbors;
     neighbors.reserve(num_wanted);
+    [[maybe_unused]] size_t num_examined = 0;
+    [[maybe_unused]] float min_baseline_ratio = std::numeric_limits<float>::max();
+
+    // A neighbor that is too close is replaced by the next one down the list
     for(const Keyframe& candidate : covisible)
     {
         if(neighbors.size() >= num_wanted)
             break;
-        const auto [Tcw2, Twc2, Rcw2, Rwc2, tcw2, twc2] = candidate->get_pose();
-        const float baseline = (twc2 - twc1).norm();
-        // No map points, or a scene sitting on the camera plane: nothing to measure the baseline against
+        num_examined++;
+        if(candidate->is_bad())
+            continue;
+
+        // Baseline against the neighbor's median scene depth: too little gives no parallax
+        const float baseline = (candidate->get_pose().twc - centre).norm();
         const std::optional<float> scene_depth = candidate->compute_scene_median_depth();
         if(!scene_depth || *scene_depth <= 0.0f
            || baseline / *scene_depth < params.create_new_map_points_min_baseline_depth_ratio)
             continue;
         neighbors.push_back(candidate);
+        min_baseline_ratio = std::min(min_baseline_ratio, baseline / *scene_depth);
     }
 
+    AF_REPORT("neighbors.covisible", "", covisible.size());
+    AF_REPORT("neighbors.examined", "", num_examined);
+    AF_REPORT("neighbors.selected", "", neighbors.size());
+    if(!neighbors.empty())
+        AF_REPORT("neighbors.baseline_ratio_min", "", min_baseline_ratio);
     return neighbors;
 }
 
