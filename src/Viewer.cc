@@ -270,15 +270,6 @@ void Viewer::Run()
     // View
     pangolin::Var<bool> menuFollowCamera("menu.Follow Camera",true,true);
     pangolin::Var<bool> menuAerialCamera("menu.Aerial View",false,true);
-    pangolin::Var<bool> menuDarkTheme("menu.Dark Theme",true,true);
-    pangolin::Var<bool> menuDepthFog("menu.Depth Fog", defaults.depthFog, true);
-
-    // Elements
-    pangolin::Var<bool> menuShowPoints("menu.Show Map Points",true,true);
-    pangolin::Var<bool> menuShowKeyFrames("menu.Show KeyFrames",true,true);
-    pangolin::Var<bool> menuShowGraph("menu.Show Graph",true,true);
-    pangolin::Var<bool> menuShowTrajectory("menu.Show Trajectory",true,true);
-    pangolin::Var<bool> menuShowTopView("menu.Show Top View",true,true);
 
     // placecell window (PlaceCell.Visualize): the visualizer's three images in a second
     // Pangolin window, see the block after d_top below. Only offered when a placecell store
@@ -289,19 +280,17 @@ void Viewer::Run()
     if(placeCell)
         menuPlaceCellWindow = std::make_unique<pangolin::Var<bool>>("menu.PlaceCell Window", placeCellSettings.visualize, true);
 
-    // Map point coloring: one checkbox per PointColorMode, behaving as radio buttons (ticking one
-    // unticks the other, unticking the active one switches to the other, so exactly one is always
-    // on). Seeded from Viewer.PointColorMode.
-    PointColorMode pointColorMode = defaults.pointColorMode;
-    pangolin::Var<bool> menuColorFeature("menu.Color: Feature", pointColorMode == PointColorMode::Feature, true);
-    pangolin::Var<bool> menuColorRGB("menu.Color: RGB", pointColorMode == PointColorMode::RGB, true);
+    // Map point coloring: ticked = the feature type's palette color, unticked = the point's image color.
+    // Seeded from Viewer.PointColorMode.
+    pangolin::Var<bool> menuColorFeature("menu.Color: Feature", defaults.pointColorMode == PointColorMode::Feature, true);
 
     // Thickness
-    pangolin::Var<float> menuPointSize("menu.Point Size", defaults.pointSize, 1.0f, 10.0f);
-    pangolin::Var<float> menuTrajWidth("menu.Trajectory Width", defaults.trajectoryLineWidth, 0.5f, 10.0f);
-    pangolin::Var<float> menuKFLineWidth("menu.KeyFrame Width", defaults.keyFrameLineWidth, 0.5f, 5.0f);
-    pangolin::Var<float> menuGraphLineWidth("menu.Graph Width", defaults.graphLineWidth, 0.5f, 5.0f);
-    pangolin::Var<float> menuCamLineWidth("menu.Camera Width", defaults.cameraLineWidth, 0.5f, 8.0f);
+    // Each slider starts at 0, and an element whose slider is at 0 is not drawn: there is no separate "show" tick
+    pangolin::Var<float> menuPointSize("menu.Point Size", defaults.pointSize, 0.0f, 10.0f);
+    pangolin::Var<float> menuTrajWidth("menu.Trajectory Width", defaults.trajectoryLineWidth, 0.0f, 10.0f);
+    pangolin::Var<float> menuKFLineWidth("menu.KeyFrame Width", defaults.keyFrameLineWidth, 0.0f, 5.0f);
+    pangolin::Var<float> menuGraphLineWidth("menu.Graph Width", defaults.graphLineWidth, 0.0f, 5.0f);
+    pangolin::Var<float> menuCamLineWidth("menu.Camera Width", defaults.cameraLineWidth, 0.0f, 8.0f);
 
     // Panel width: the narrowest that fits every widget, in pixels, so it stays unclipped
     // when the window is resized. Worst-case runtime strings of the text rows: every tracking
@@ -423,10 +412,7 @@ void Viewer::Run()
     bool bAerial = false;
     while(1)
     {
-        if(menuDarkTheme)
-            glClearColor(vslamlab_colors::kDarkBg[0], vslamlab_colors::kDarkBg[1], vslamlab_colors::kDarkBg[2], 1.0f);
-        else
-            glClearColor(vslamlab_colors::kLightBg[0], vslamlab_colors::kLightBg[1], vslamlab_colors::kLightBg[2], 1.0f);
+        glClearColor(vslamlab_colors::kDarkBg[0], vslamlab_colors::kDarkBg[1], vslamlab_colors::kDarkBg[2], 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         ////////////////////////////////////////////////////////////////////////////////////
@@ -457,18 +443,7 @@ void Viewer::Run()
         }
         ////////////////////////////////////////////////////////////////////////////////////
         ViewerStyle style;
-        style.darkTheme = menuDarkTheme;
-        {
-            // Radio-button behaviour over the two checkboxes: react to the one the user touched
-            // this frame, then re-sync both boxes to the resulting mode.
-            if (menuColorFeature.GuiChanged())
-                pointColorMode = menuColorFeature ? PointColorMode::Feature : PointColorMode::RGB;
-            else if (menuColorRGB.GuiChanged())
-                pointColorMode = menuColorRGB ? PointColorMode::RGB : PointColorMode::Feature;
-            menuColorFeature = (pointColorMode == PointColorMode::Feature);
-            menuColorRGB = (pointColorMode == PointColorMode::RGB);
-            style.pointColorMode = pointColorMode;
-        }
+        style.pointColorMode = menuColorFeature ? PointColorMode::Feature : PointColorMode::RGB;
         style.pointSize = menuPointSize;
         style.trajectoryLineWidth = menuTrajWidth;
         style.keyFrameLineWidth = menuKFLineWidth;
@@ -476,9 +451,6 @@ void Viewer::Run()
         style.cameraLineWidth = menuCamLineWidth;
         style.keyFrameSize = defaults.keyFrameSize;
         style.cameraSize = defaults.cameraSize;
-        style.depthFog = menuDepthFog;
-        style.fogStart = defaults.fogStart;
-        style.fogEnd = defaults.fogEnd;
 
         mapDrawer->GetCurrentOpenGLCameraMatrix(Twc);
 
@@ -500,12 +472,16 @@ void Viewer::Run()
         }
 
         d_cam.Activate(s_cam);
-        mapDrawer->DrawCurrentCamera(Twc, style);
-        if(menuShowKeyFrames || menuShowGraph)
-            mapDrawer->DrawKeyFrames(menuShowKeyFrames, menuShowGraph, style);
-        if(menuShowPoints)
+        // A slider at 0 hides its element (GL would otherwise clamp a zero size or width up to a visible minimum)
+        const bool showKeyFrames = style.keyFrameLineWidth > 0.0f;
+        const bool showGraph = style.graphLineWidth > 0.0f;
+        if(style.cameraLineWidth > 0.0f)
+            mapDrawer->DrawCurrentCamera(Twc, style);
+        if(showKeyFrames || showGraph)
+            mapDrawer->DrawKeyFrames(showKeyFrames, showGraph, style);
+        if(style.pointSize > 0.0f)
             mapDrawer->DrawMapPoints(style);
-        if(menuShowTrajectory)
+        if(style.trajectoryLineWidth > 0.0f)
             mapDrawer->DrawTrajectory(style);
 
         im = frameDrawer->DrawFrame();
@@ -525,11 +501,9 @@ void Viewer::Run()
             imageTexture.RenderToViewportFlipY();
         }
 
-        if(menuShowTopView)
-        {
-            d_top.Activate();
-            mapDrawer->DrawTrajectoryTopView(style);
-        }
+        // The top-down inset of the whole trajectory is always shown
+        d_top.Activate();
+        mapDrawer->DrawTrajectoryTopView(style);
 
         pangolin::FinishFrame();
 

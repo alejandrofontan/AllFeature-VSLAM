@@ -52,8 +52,7 @@ namespace vslamlab_colors
     constexpr float kPeriwinkleVivid[3] = {0.38f, 0.45f, 0.98f};
     constexpr float kLavenderVivid[3]   = {0.62f, 0.44f, 0.92f};
 
-    constexpr float kDarkBg[3]     = {0.043f, 0.051f, 0.078f};  // deep navy
-    constexpr float kLightBg[3]    = {0.985f, 0.985f, 0.995f};
+    constexpr float kDarkBg[3]     = {0.043f, 0.051f, 0.078f};  // deep navy: the viewer's background
 
     // Interpolate the 4-stop logo gradient (cyan -> sky -> periwinkle -> lavender), t in [0,1].
     void gradient(float t, float rgb[3]);
@@ -61,8 +60,8 @@ namespace vslamlab_colors
     void gradientVivid(float t, float rgb[3]);
 }
 
-// How DrawMapPoints colors each map point. The Viewer exposes one checkbox per mode
-// ("Color: Feature" / "Color: RGB"), kept mutually exclusive like radio buttons.
+// How DrawMapPoints colors each map point. The Viewer's "Color: Feature" checkbox switches between the two:
+// ticked = Feature, unticked = RGB.
 enum class PointColorMode : int
 {
     Feature = 0,  // the feature type's palette color (getFeatureColor)
@@ -75,16 +74,8 @@ bool parsePointColorMode(const std::string& name, PointColorMode& mode);
 // All appearance knobs the Viewer UI can adjust at runtime, passed to every draw call.
 struct ViewerStyle
 {
-    bool darkTheme{true};
     PointColorMode pointColorMode{PointColorMode::Feature};
     float pointSize{2.0f};
-    // Linear depth fog on the map points, towards the theme background. The range is anchored
-    // at the SLAM camera and scaled by the local scene depth D (median point distance to that
-    // camera, measured at snapshot time): fully clear up to fogStart*D beyond the camera,
-    // fully faded from fogEnd*D. Viewer checkbox "Depth Fog"; Viewer.DepthFog/FogStart/FogEnd.
-    bool depthFog{true};
-    float fogStart{1.5f};
-    float fogEnd{6.0f};
     float keyFrameSize{0.05f};
     float keyFrameLineWidth{1.0f};
     float graphLineWidth{0.9f};
@@ -149,11 +140,6 @@ private:
     std::chrono::steady_clock::duration pointRefreshPeriod_{std::chrono::milliseconds(200)};
     std::chrono::steady_clock::time_point lastPointRefresh_{};
     bool pointSnapshotEverTaken_{false};
-
-    // Fog anchor, measured at snapshot time: the SLAM camera center (world) and the median
-    // distance of the points to it (local scene depth). sceneDepth 0 = no fog this snapshot.
-    vec3f pointSceneCenter_{vec3f::Zero()};
-    float pointSceneDepth_{0.0f};
 
     // Rebuild pointSnapshot_ from the live map (the only place the map is locked for drawing
     // points) and upload it to pointBuffer_. Viewer thread only.

@@ -138,7 +138,7 @@ PlaceCell.LogElapsed: 0           # [0] prefix lines with the seconds since star
 PlaceCell.Profile: 1              # [1] time the main entry points
 PlaceCell.PrintProfile: 1         # [0] print the timing table at shutdown
 PlaceCell.Record: 1               # [1] keep the history; Dump and Visualize need it
-PlaceCell.Dump: 1                 # [0] write kernels, CSVs and plots to <exp_folder>/<exp_id>_placecell/
+PlaceCell.Dump: 0                 # [0] write kernels, CSVs and plots to <exp_folder>/<exp_id>_placecell/
 PlaceCell.Visualize: 1            # [0] second window with the kernel and information plots (needs verbose:1)
 PlaceCell.VisualizeMaxHz: 2.0     # [2.0] max redraws per second
 PlaceCell.VisualizeCentred: 0     # [1] draw the centred kernel; 0 = raw cosine
@@ -190,9 +190,6 @@ Viewer.PointSize: 5
 Viewer.PointColorMode: "feature"  # "feature" (per-feature palette) | "rgb" (image colour); the PLY export is always rgb
 Viewer.MapPointsRefreshHz: 5      # map-point snapshots per second; 0 = every viewer frame
 Viewer.Multisampling: 0           # MSAA samples requested; 0 = off (the shipped Pangolin ignores it)
-Viewer.DepthFog: 1                # 1 = fade map points with distance
-Viewer.FogStart: 1.5              # clear up to this many scene depths beyond the camera
-Viewer.FogEnd: 6.0                # fully faded from this many scene depths
 Viewer.CameraSize: 0.08
 Viewer.CameraLineWidth: 3
 Viewer.ViewpointX: 0

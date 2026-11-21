@@ -112,20 +112,6 @@ MapDrawer::MapDrawer(shared_ptr<Map> pMap, const string &strSettingPath, const v
         else
             pointRefreshPeriod_ = std::chrono::steady_clock::duration::zero();   // 0 = refresh every viewer frame
     }
-    if (!fSettings["Viewer.DepthFog"].empty())
-        mDefaultStyle.depthFog = static_cast<int>(fSettings["Viewer.DepthFog"]) != 0;
-    if (!fSettings["Viewer.FogStart"].empty())
-        mDefaultStyle.fogStart = fSettings["Viewer.FogStart"];
-    if (!fSettings["Viewer.FogEnd"].empty())
-        mDefaultStyle.fogEnd = fSettings["Viewer.FogEnd"];
-    if (mDefaultStyle.fogEnd <= mDefaultStyle.fogStart)
-    {
-        AF_WARN("MapDrawer: Viewer.FogEnd (" << mDefaultStyle.fogEnd << ") must exceed Viewer.FogStart ("
-                << mDefaultStyle.fogStart << "), using defaults 1.5 / 6.0");
-        mDefaultStyle.fogStart = 1.5f;
-        mDefaultStyle.fogEnd = 6.0f;
-    }
-
     for (size_t i = 0; i < feature_types.size(); i++)
     {
         const cv::Scalar c = getFeatureColor(feature_types[i], 0, true);
@@ -179,36 +165,6 @@ void MapDrawer::RefreshPointSnapshot()
         pointSnapshot_.push_back(v);
     }
 
-    // Fog anchor: SLAM camera center and the median point distance to it, over a stride
-    // subsample (at most ~2048 distances) so this stays negligible on large maps.
-    pointSceneDepth_ = 0.0f;
-    {
-        mat4f Tcw{};
-        {
-            unique_lock<mutex> lock(mMutexCamera);
-            Tcw = mCameraPose;
-        }
-        if (Tcw(3,3) == 1.0f && !pointSnapshot_.empty())
-        {
-            const mat3f Rwc = Tcw.block<3,3>(0,0).transpose();
-            pointSceneCenter_ = -Rwc * Tcw.block<3,1>(0,3);
-
-            const std::size_t stride = std::max<std::size_t>(1, pointSnapshot_.size() / 2048);
-            std::vector<float> dists;
-            dists.reserve(pointSnapshot_.size() / stride + 1);
-            for (std::size_t i = 0; i < pointSnapshot_.size(); i += stride)
-            {
-                const PointVertex& v = pointSnapshot_[i];
-                const float dx = v.x - pointSceneCenter_(0), dy = v.y - pointSceneCenter_(1), dz = v.z - pointSceneCenter_(2);
-                dists.push_back(std::sqrt(dx*dx + dy*dy + dz*dz));
-            }
-            std::nth_element(dists.begin(), dists.begin() + dists.size() / 2, dists.end());
-            const float median = dists[dists.size() / 2];
-            if (std::isfinite(median) && median > 0.0f)
-                pointSceneDepth_ = median;
-        }
-    }
-
     // Upload. Grow the buffer with headroom so a steadily growing map reallocates rarely.
     const std::size_t count = pointSnapshot_.size();
     if (!pointBuffer_)
@@ -239,30 +195,6 @@ void MapDrawer::DrawMapPoints(const ViewerStyle& style)
     const bool rgb = style.pointColorMode == PointColorMode::RGB;
     const std::size_t colorOffset = rgb ? offsetof(PointVertex, rgb) : offsetof(PointVertex, feat);
 
-    // Linear fog towards the theme background, anchored at the SLAM camera: fog is evaluated in
-    // eye space, so map the anchor through the current modelview (column-major) to get its
-    // eye distance d0, then start/end at d0 + fogStart*D / d0 + fogEnd*D.
-    const bool fog = style.depthFog && pointSceneDepth_ > 0.0f;
-    if (fog)
-    {
-        GLfloat mv[16];
-        glGetFloatv(GL_MODELVIEW_MATRIX, mv);
-        const vec3f& c = pointSceneCenter_;
-        const float ex = mv[0]*c(0) + mv[4]*c(1) + mv[8]*c(2)  + mv[12];
-        const float ey = mv[1]*c(0) + mv[5]*c(1) + mv[9]*c(2)  + mv[13];
-        const float ez = mv[2]*c(0) + mv[6]*c(1) + mv[10]*c(2) + mv[14];
-        const float d0 = std::sqrt(ex*ex + ey*ey + ez*ez);
-
-        const float* bg = style.darkTheme ? vslamlab_colors::kDarkBg : vslamlab_colors::kLightBg;
-        const GLfloat fogColor[4] = {bg[0], bg[1], bg[2], 1.0f};
-        glFogi(GL_FOG_MODE, GL_LINEAR);
-        glFogfv(GL_FOG_COLOR, fogColor);
-        glFogf(GL_FOG_START, d0 + style.fogStart * pointSceneDepth_);
-        glFogf(GL_FOG_END,   d0 + style.fogEnd   * pointSceneDepth_);
-        glHint(GL_FOG_HINT, GL_NICEST);
-        glEnable(GL_FOG);
-    }
-
     // Translucent palette points: read depth but do not write it, so overlapping points blend
     // instead of nearer ones punching holes into farther ones. Opaque rgb points keep writes.
     if (!rgb)
@@ -281,8 +213,6 @@ void MapDrawer::DrawMapPoints(const ViewerStyle& style)
 
     if (!rgb)
         glDepthMask(GL_TRUE);
-    if (fog)
-        glDisable(GL_FOG);
 }
 
 void MapDrawer::ReleaseGL()
@@ -314,10 +244,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
             glMultMatrixf(Twc.ptr<GLfloat>(0));
 
             applyLineWidth(style.keyFrameLineWidth);
-            if (style.darkTheme)
-                glColor4f(0.42f, 0.42f, 0.56f, 0.55f);   // muted lavender-grey
-            else
-                glColor4f(0.55f, 0.55f, 0.66f, 0.65f);   // muted slate
+            glColor4f(0.42f, 0.42f, 0.56f, 0.55f);   // muted lavender-grey
             glBegin(GL_LINES);
             glVertex3f(0,0,0);
             glVertex3f(w,h,z);
@@ -349,7 +276,7 @@ void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph, const V
     {
         applyLineWidth(style.graphLineWidth);
         using namespace vslamlab_colors;
-        glColor4f(kSky[0], kSky[1], kSky[2], style.darkTheme ? 0.25f : 0.4f);
+        glColor4f(kSky[0], kSky[1], kSky[2], 0.25f);
         glBegin(GL_LINES);
 
         for(size_t i=0; i<vpKFs.size(); i++)
@@ -501,8 +428,7 @@ void MapDrawer::DrawTrajectoryTopView(const ViewerStyle& style)
 
     // Background panel + border so the inset reads against the map behind it.
     using namespace vslamlab_colors;
-    const float* bg = style.darkTheme ? kDarkBg : kLightBg;
-    glColor4f(bg[0], bg[1], bg[2], 0.85f);
+    glColor4f(kDarkBg[0], kDarkBg[1], kDarkBg[2], 0.85f);
     glBegin(GL_QUADS);
     glVertex2f(cx - halfW, cz - halfH);
     glVertex2f(cx + halfW, cz - halfH);
@@ -513,10 +439,7 @@ void MapDrawer::DrawTrajectoryTopView(const ViewerStyle& style)
     const float bx = 0.995f * halfW;
     const float bz = 0.995f * halfH;
     applyLineWidth(1.0f);
-    if (style.darkTheme)
-        glColor4f(0.42f, 0.42f, 0.56f, 0.8f);
-    else
-        glColor4f(0.55f, 0.55f, 0.66f, 0.8f);
+    glColor4f(0.42f, 0.42f, 0.56f, 0.8f);
     glBegin(GL_LINE_LOOP);
     glVertex2f(cx - bx, cz - bz);
     glVertex2f(cx + bx, cz - bz);
