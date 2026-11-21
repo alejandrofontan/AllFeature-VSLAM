@@ -1,269 +1,209 @@
 %YAML:1.0
 
-#--------------------------------------------------------------------------------------------
-# Camera names
-#--------------------------------------------------------------------------------------------
-cam_mono: rgb_0
+# Settings
 features: ["orb32", "aliked128"]
-vpr: "megaloc"       # visual place recognition backend: "megaloc" (default) | "none"
-feature_vpr: "aliked128" # local feature that verifies retrieved candidates (reloc PnP, loop Sim3);
-                     # must be in features; defaults to the first feature.
-megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # vpr: megaloc — the model file to load, exported by Thirdparty/placecell/tools/export_megaloc.py:
-                                                     # this fp32 file (the reference, fastest on the CPU provider) or "megaloc_models/megaloc_322x322_fp16.onnx"
-                                                     # (fp16 weights, float32 I/O: the file for the CUDA / CoreML providers)
-megaloc_provider: "auto"                             # ONNX Runtime execution provider: "auto" (CUDA where built in, else CoreML on macOS, else CPU) |
-                                                     # "cuda" | "coreml" | "cpu"; an unavailable provider falls back to auto with a warning.
-                                                     # Measured 2026-10-13 (Thirdparty/placecell/docs/notes/2026-10-13_megaloc_onnxruntime_backend.md):
-                                                     # CUDA 8-12 ms/image (RTX 4000 Ada), CoreML 46-48 ms (M1 Pro GPU), CPU 120-230 ms (8 / 6 threads)
-megaloc_threads: 4                                   # ONNX Runtime CPU-provider threads (never the core count: tracking and mapping need the rest;
-                                                     # scaling is near-linear up to the performance cores: 6 on an M1 Pro, 8 on the workstation)
-megaloc_coreml_units: "ALL"                          # CoreML compute units: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly". The Neural Engine
-                                                     # loses accuracy (cos 0.982 vs the 0.9955 floor with the fp16 file on "ALL" / "CPUAndNeuralEngine");
-                                                     # the GPU is exact: fp32 file + "ALL" (48 ms) or the fp16 file + "CPUAndGPU" (46 ms, half the download)
-features_models_dir: "feature_models"                # learned feature models on ONNX Runtime (superpoint256, aliked128 and the LightGlue matchers of
-                                                     # superpoint256 / aliked128 / raco128 / sift128): superpoint_v1_<precision>.onnx, aliked_n16_<precision>.onnx,
-                                                     # raco_aliked_n16_<precision>.onnx, lightglue_{superpoint,aliked,raco,sift}_<precision>.onnx
-                                                     # + sidecars, exported by `pixi run setup` (`pixi run -e export-features export-feature-models`) from these settings
-features_provider: "auto"                            # their ONNX Runtime execution provider: "auto" | "cuda" | "coreml" | "cpu" (megaloc_provider semantics).
-                                                     # Measured 2026-10-16, 739x458: SuperPoint 9 ms / ALIKED 16 ms / LightGlue 9-19 ms per call on CUDA (RTX 4000 Ada),
-                                                     # 97 / 217 / 83-178 ms on 4 CPU threads; cv::SIFT 22 ms on the CPU either way
-features_threads: 4                                  # CPU-provider threads per model session (also the CPU-fallback nodes under CUDA / CoreML)
-features_coreml_units: "CPUAndGPU"                         # CoreML compute units for those models: "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
-features_precision: "fp32"                            # which export of every learned feature model is loaded: "fp32" (<stem>_fp32.onnx, exact against the PyTorch
-                                                     # reference) | "fp16" (<stem>_fp16.onnx: half-precision weights, float32 I/O). Measured 2026-11-21 on CUDA,
-                                                     # 739x458: LightGlue 2.3x faster (21 -> 9 ms at 1000x1000 keypoints) with ~1% of the matches different;
-                                                     # SuperPoint / ALIKED 1.2x faster with 3.4% / 1.2% of the keypoints different. Per frame on ETH table_3 mono
-                                                     # with orb32 + aliked128: 61 ms in fp32, 46 ms in fp16 (50 ms with only the matcher in fp16). Effect on accuracy:
-                                                     # NOT established. fp16 gave keyframe ATE 7.2 and 7.8 mm (2 runs), but 14 fp32 runs of that sequence range from
-                                                     # 4.1 to 9.3 mm (median about 5, standard deviation about 2 mm), so two runs decide nothing; the fp16 and fp32
-                                                     # matchers return the same matches on 525 of 529 per pair. Compare with at least 5 runs per setting.
-                                                     # After changing this or `features`, `pixi run setup` (or `pixi run -e export-features export-feature-models`)
-                                                     # exports what is missing
-features_superpoint_subpixel: true                   # true (default): SuperPoint keeps only the peaks of its score map (a pixel no lower than its 8 neighbours) and moves
-                                                     # each to the score-weighted centre of its 3x3 scores (0.24 px median shift on ETH table_3), sampling the descriptor
-                                                     # there; false: upstream's selection at integer pixels. Effect on accuracy: NOT established. Keyframe ATE on ETH table_3
-                                                     # (orb32 + superpoint256, fp16, 2026-11-21): true 4.5 mm (1 run); sub-pixel positions with upstream's selection 5.9 and
-                                                     # 6.0 mm (2 runs); false 7.2 and 7.4 mm (2 runs) - but the same sequence varies by a standard deviation of about 2 mm
-                                                     # from run to run (measured with aliked128), so these counts are too few. Compare with at least 5 runs per setting.
-features_raco_covariance: true                       # raco128 only. true (default): each keypoint carries the 2x2 position covariance RaCo predicts (pixels^2; sigma about
-                                                     # 1.15 px median, 0.2 to 2.1 px on ETH table_3) as its uncertainty - it weighs the keypoint's residuals in pose
-                                                     # optimisation and bundle adjustment and sizes its search gates; false: the fixed sigma of 1 px the other learned
-                                                     # features have. Measured on ETH table_3 mono with orb32 + raco128 (fp32), 5 runs each, keyframe ATE: true 2.7 to
-                                                     # 3.6 mm (median 3.3), false 2.9 to 3.5 mm (median 3.2) - no difference; before the final bundle adjustment
-                                                     # 3.9 against 4.3 mm. aliked128 on the same sequence: 4.1 to 9.3 mm over 14 runs (median 5.2).
-features_static_shapes: true                         # true: load the fixed-shape exports - the matchers' lightglue_<f>_L<L>_<precision>.onnx padded to L keypoints per side
-                                                     # (the smallest L that fits each pair; the dynamic file beyond) and, on the Core ML provider only, the detectors'
-                                                     # <stem>_<W>x<H>_<precision>.onnx for the frame size (`export-features --static 672x416`: the size the tracker logs,
-                                                     # not the raw frame size; a missing one falls back to the dynamic file with a warning). Core ML compiles only
-                                                     # bounded shapes, so this is the Mac's GPU path; on CUDA and the CPU the detectors always load the dynamic file.
-segmentation: "none" # online semantic segmentation: "efficientvit" | "none"
-debug: false
-max_frame_wait: 0.2  # s; the mono/rgbd executables replay the sequence at its own rate (sleep for the rest of the
-                     # timestamp gap after tracking a frame); this caps that pause so holes in the recording do not
-                     # stall the run. Missing, 0 or negative = no cap (original behaviour).
+features_precision: "fp32"                    # "fp32" | "fp16" (faster on CUDA; accuracy effect not established); `pixi run setup` exports what is missing
+features_superpoint_subpixel: true            # sub-pixel SuperPoint keypoints, true peaks only (accuracy effect not established)
+features_raco_covariance: true                # weight RaCo keypoints by their own 2x2 covariance; false = 1 px
+segmentation: "none"                          # online semantic segmentation: "efficientvit" | "none"
+
+# Tunable
+Tracking.FeaturesFraction: 0.5                # keypoints per frame, as a share of each feature's maximum (orb32 4000, learned 2048, others 2000)
+Tracking.ViewingCosLimit: 0.5                 # a local point is a candidate only within this cosine of its mean viewing direction (60 deg)
+
+LocalMapping.FuseDescriptorQuantile: 0.5      # fusion accepts descriptor distances up to this quantile of point-to-observation distances
+
+Error.Chi2Mono: 5.991                         # outlier threshold of a 2-DoF reprojection error (95%), used by every stage
+Error.Chi2RGBD: 7.815                         # outlier threshold of a 3-DoF RGB-D error (95%); the Huber deltas are their square roots
+Optimizer.LocalBaNeighbors: 10              # best covisible keyframes optimized with the current one
+
+Tracking.FlowAssociationRadius: 2.0           # px: a flowed point takes the nearest keypoint of its feature type within this
+Tracking.FlowMaxBackwardError: 1.0            # px: forward-backward KLT disagreement above this drops the track
+
+# Constants
+Tracking.NominalImageArea: 307200             # px (640x480): frames are resized to this area and cropped to a multiple of 32 (739x458 -> 672x416)
+Tracking.FrameTracking: "reference_keyframe"  # "reference_keyframe" (descriptor match) | "optical_flow"
 
 #--------------------------------------------------------------------------------------------
-# Viewer Parameters
+# Camera, place recognition and models
+#--------------------------------------------------------------------------------------------
+cam_mono: rgb_0
+vpr: "megaloc"                                # place recognition backend: "megaloc" | "none"
+feature_vpr: "aliked128"                       # feature that verifies retrieved candidates (reloc PnP, loop Sim3); must be in features
+megaloc_onnx: "megaloc_models/megaloc_322x322.onnx" # or megaloc_322x322_fp16.onnx (for CUDA / CoreML); from Thirdparty/placecell/tools/export_megaloc.py
+megaloc_provider: "auto"                      # "auto" (CUDA, else CoreML, else CPU) | "cuda" | "coreml" | "cpu"
+megaloc_threads: 4                            # CPU-provider threads; never the core count
+megaloc_coreml_units: "ALL"                   # "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly" (the Neural Engine loses accuracy)
+features_models_dir: "feature_models"         # folder of the exported feature and LightGlue models (`pixi run setup`)
+features_provider: "auto"                     # "auto" | "cuda" | "coreml" | "cpu"
+features_threads: 4                           # CPU-provider threads per model session
+features_coreml_units: "CPUAndGPU"            # "ALL" | "CPUAndGPU" | "CPUAndNeuralEngine" | "CPUOnly"
+features_static_shapes: true                  # padded LightGlue exports (L keypoints per side); fixed-size detector exports on Core ML only
+debug: false
+max_frame_wait: 0.2                           # s: cap on the replay pause between frames; missing, 0 or negative = no cap
+
+#--------------------------------------------------------------------------------------------
+# Viewer (keep the quotes on strings: cv::FileStorage does not strip a comment from an unquoted one)
 #--------------------------------------------------------------------------------------------
 Viewer.KeyFrameSize: 0.05
 Viewer.KeyFrameLineWidth: 1
 Viewer.GraphLineWidth: 0.9
 Viewer.TrajectoryLineWidth: 3.0
 Viewer.PointSize: 5
-Viewer.PointColorMode: "feature"  # map point color: "feature" (feature-type palette) | "rgb" (image color sampled at creation);
-                                  # seeds the Viewer checkboxes "Color: Feature" / "Color: RGB" (mutually exclusive); missing key = feature.
-                                  # The PLY export always writes the rgb color. Keep the quotes: cv::FileStorage does not
-                                  # strip a trailing comment from an unquoted string.
-Viewer.MapPointsRefreshHz: 5      # the viewer snapshots the map points into a vertex buffer at most this often (the only
-                                  # time it locks the map for drawing points); 0 = every viewer frame; missing key = 5
-Viewer.Multisampling: 0           # MSAA samples requested for the window; 0 = off (default). Advisory only: the Pangolin this
-                                  # project ships (conda-forge 2024-07-03, EGL-based X11 backend) ignores the request and always
-                                  # returns a single-sample framebuffer; the viewer logs what it actually got. Points and lines
-                                  # are anti-aliased by GL_POINT_SMOOTH / GL_LINE_SMOOTH regardless.
-Viewer.DepthFog: 1                # 1 = fade map points into the background with distance (Viewer checkbox "Depth Fog"); missing key = 1
-Viewer.FogStart: 1.5              # fog range in units of the local scene depth D (median point distance to the SLAM camera):
-Viewer.FogEnd: 6.0                # clear up to FogStart*D beyond the camera, fully faded from FogEnd*D; missing keys = 1.5 / 6.0
+Viewer.PointColorMode: "feature"  # "feature" (per-feature palette) | "rgb" (image colour); the PLY export is always rgb
+Viewer.MapPointsRefreshHz: 5      # map-point snapshots per second; 0 = every viewer frame
+Viewer.Multisampling: 0           # MSAA samples requested; 0 = off (the shipped Pangolin ignores it)
+Viewer.DepthFog: 1                # 1 = fade map points with distance
+Viewer.FogStart: 1.5              # clear up to this many scene depths beyond the camera
+Viewer.FogEnd: 6.0                # fully faded from this many scene depths
 Viewer.CameraSize: 0.08
 Viewer.CameraLineWidth: 3
 Viewer.ViewpointX: 0
 Viewer.ViewpointY: -0.7
 Viewer.ViewpointZ: -1.8
 Viewer.ViewpointF: 500
-Viewer.StartPaused: 1             # ARStream entry points with the viewer (verbose:1): track one black frame of the stream's size
-                                  # (loads every model session, starts no map), then pause until the Viewer's Pause is unticked;
-                                  # 0 = track from the first frame (default); missing key = 0
-Viewer.StreamStatus: 1            # ARStream entry points: 1 = report the SLAM state to the relay 10 times a second, shown as a banner
-                                  # on the phone app (green TRACKING, red LOST, blue PAUSED, amber INITIALIZING, grey NO SLAM when
-                                  # silent). Needs libarstream >= 0.3.0 and the app with the banner. 0 = off (default); missing key = 0
+Viewer.StartPaused: 1             # ARStream: load every model on one black frame, then wait until Pause is unticked; 0 = track at once
+Viewer.StreamStatus: 1            # ARStream: 1 = report the SLAM state to the phone app 10 times a second
 
 #--------------------------------------------------------------------------------------------
-# Optimizer Parameters
+# Optimizer
 #--------------------------------------------------------------------------------------------
-# Chi-square outlier thresholds (95% for the 2-DoF reprojection / 3-DoF RGB-D residuals).
-# thHuber_* are derived from these (sqrt) at load time -- there is no separate Huber key to set.
-Optimizer.Chi2Mono: 5.991
-Optimizer.Chi2RGBD: 7.815
 
-# PoseOptimization()
-Optimizer.PoseOptIterations: 10
+# pose_optimization()
+Optimizer.PoseOptIterations: 10             # per round
+Optimizer.PoseOptRounds: 4                  # optimize, classify inliers/outliers, repeat
+Optimizer.PoseOptRoundsWithKernel: 3        # the Huber kernel is dropped after this many rounds
+Optimizer.PoseOptMinCorrespondences: 3      # fewer matches: nothing is optimized
+Optimizer.PoseOptMinInliers: 10             # fewer inliers after a round: no further rounds
+Optimizer.PoseOptWarnMinCorrespondences: 20 # the rejection warning needs at least this many matches
+Optimizer.PoseOptWarnOutlierRatio: 0.5      # and more than this share of them rejected
 
-# OptimizeEssentialGraph()
-Optimizer.EssGraphLambdaInit: 1e-16
-Optimizer.EssGraphMinFeat: 100
+# local_bundle_adjustment()
+Optimizer.LocalBaMinKeyframes: 2            # the map needs more keyframes than this
+Optimizer.LocalBaIterations: 5              # first round, every observation
+Optimizer.LocalBaRefineIterations: 10       # second round, without the outliers of the first
+
+# global_bundle_adjustment()
+Optimizer.FinalGbaIterations: 100           # the bundle adjustment at shutdown
+Optimizer.LoopGbaRobust: 0                  # 1 = Huber kernel in the bundle adjustment after a loop closure
+
+# optimize_essential_graph()
+Optimizer.EssGraphLambdaInit: 1e-16         # initial damping
+Optimizer.EssGraphMinFeat: 100              # min covisibility weight of an edge
 Optimizer.EssGraphIterations: 20
+Optimizer.EssGraphEdgeInformation: 1.0      # weight of every edge (spanning tree, loop, covisibility)
 
-# OptimizeSim3()
-Optimizer.Sim3Iterations: 5
-Optimizer.Sim3MoreIterationsHigh: 10
-Optimizer.Sim3MoreIterationsLow: 5
-Optimizer.Sim3MinCorrespondences: 10
+# optimize_sim3()
+Optimizer.Sim3Iterations: 5                 # first round
+Optimizer.Sim3MoreIterationsHigh: 10        # second round when the first rejected matches
+Optimizer.Sim3MoreIterationsLow: 5          # second round otherwise
+Optimizer.Sim3MinCorrespondences: 10        # fewer inliers after the first round: rejected
+Optimizer.Sim3Chi2: 10.0                    # outlier threshold of both reprojections (not the 95% value)
 
 #--------------------------------------------------------------------------------------------
-# Tracking parameters (values shown are the compiled-in defaults; every key is optional —
-# a missing key keeps the default, so this section is safe to trim or edit per dataset)
+# Tracking (every key is optional: a missing key keeps the compiled-in default)
 #--------------------------------------------------------------------------------------------
-# Two-view monocular initialization
-Tracking.Sequential: 0                  # 1 = deterministic mode: tracking blocks until Local Mapping finishes each keyframe (pair with features: [orb32], vpr: none, verbose: 0)
-Tracking.InitMinKeypoints: 100          # min keypoints to accept a frame for init
+# Initialization
+Tracking.Sequential: 0                  # 1 = deterministic: tracking waits for Local Mapping (pair with features: [orb32], vpr: none, verbose: 0)
+Tracking.InitMinKeypoints: 100          # min keypoints to accept a frame
 Tracking.InitSigma: 1.0                 # measurement sigma of the two-view initializer
-Tracking.InitMinMatches: 100            # min correspondences (all features pooled) to attempt init
-Tracking.InitRansacIterations: 200      # initializer RANSAC budget
-Tracking.InitMinMedianDisparity: 10.0   # px; below this (static camera) skip the init attempt
-Tracking.InitGbaIterations: 20          # global-BA iterations on the initial map
+Tracking.InitMinMatches: 100            # min matches (all features pooled) to attempt
+Tracking.InitRansacIterations: 200
+Tracking.InitMinMedianDisparity: 10.0   # px: below this (static camera) skip the attempt
+Tracking.InitGbaIterations: 20          # global BA iterations on the initial map
 Tracking.InitMinTrackedPoints: 100      # min tracked points to accept the initial map
 Tracking.InitMinDepthSamples: 10        # min sensor-depth samples to prefer metric scale
-Tracking.FeaturesFraction: 0.5         # keypoints per frame: this share (0..1) of each feature's maximum (orb32 4000, aliked128/raco128/superpoint256 2048, others 2000)
-Tracking.NominalImageArea: 307200       # px (640x480): frames are resized to this area (aspect ratio kept) and cropped to a multiple of 32,
-                                        # e.g. 739x458 -> 672x416; the size the log reports is the one a static export (features_static_shapes) needs
-Tracking.ImageWidth: 0                  # both > 0: resize every frame to exactly this size instead (the aspect ratio may change; the intrinsics
-Tracking.ImageHeight: 0                 # are scaled per axis). Use multiples of 32 (640x480 is), or the crop trims the remainder
+Tracking.ImageWidth: 0                  # both > 0: resize every frame to exactly this size instead of NominalImageArea
+Tracking.ImageHeight: 0                 # use multiples of 32
 
 # Frame-to-frame tracking
-Tracking.FrameTracking: "reference_keyframe"    # "reference_keyframe": a descriptor match (LightGlue for the learned features) against the reference
-                                                # keyframe on every frame | "optical_flow": KLT of the last frame's tracked points, snapped to the
-                                                # current frame's detected keypoints; the reference-keyframe match only as the fallback. Saves the
-                                                # per-frame matcher call (41 ms on the M1 Pro GPU, 13 ms on CUDA); measured on the gym before it is the default
-Tracking.FlowAssociationRadius: 2.0             # px: a flowed point takes the nearest detected keypoint of its feature type within this radius
-Tracking.FlowMaxBackwardError: 1.0              # px: forward-backward KLT disagreement above this drops the track
-Tracking.FlowMinMatches: 30                     # map points matched by flow below this -> fall back to the reference-keyframe match
-Tracking.TrackRefMinMatches: 15                 # raw matches to the reference keyframe below this -> lost
-Tracking.TrackRefMinInliers: 10                 # pose-optimization inliers below this -> lost
-Tracking.TrackLocalMapMinInliers: 30            # inliers against the local map below this -> lost
-Tracking.TrackLocalMapMinInliersAfterReloc: 50  # stricter bar shortly after a relocalization
+Tracking.FlowMinMatches: 30                     # fewer flow matches: fall back to the reference-keyframe match
+Tracking.TrackRefMinMatches: 15                 # fewer raw matches to the reference keyframe: lost
+Tracking.TrackRefMinInliers: 10                 # fewer pose-optimization inliers: lost
+Tracking.TrackLocalMapMinInliers: 30            # fewer inliers against the local map: lost
+Tracking.TrackLocalMapMinInliersAfterReloc: 50  # the same, shortly after a relocalization
 
 # Local map
-Tracking.MaxLocalKeyframes: 80        # stop expanding the local map beyond this many keyframes
-Tracking.BestCovisibleKeyframes: 10   # covisible neighbors considered per keyframe
-Tracking.ViewingCosLimit: 0.5         # frustum viewing-angle limit for local-point candidates
+Tracking.MaxLocalKeyframes: 80        # the local map stops growing at this many keyframes
+Tracking.BestCovisibleKeyframes: 10   # covisible neighbours considered per keyframe
 
-# Keyframe policy. Information = unexplained information of the current view given the local map
-# (placecell, on the kernel LocalMapping.InformationKernel selects — the same kernel and centring as
-# keyframe culling; [0,1], 1 = nothing in the local map resembles the view). Three bands: below KeyframeMinInformation the view is redundant and no
-# keyframe is inserted (replaces the old pixel-flow stationarity gate); above
-# LocalMapping.KeyframeCullingMaxUnexplained (tau, the culler's budget: one shared key) the view is
-# novel and a keyframe is inserted even if tracking is fine; in between the tracking triggers below decide.
-Tracking.KeyframeMinInformation: 0.05 # redundancy band: information below this -> no keyframe (forced keyframes bypass)
-Tracking.LogKeyframeInformation: 0    # 1 = one diagnostic line per tracked frame (information, best explainer, triggers, decision)
-Tracking.MinObservationsHigh: 3       # reference-KF match counting: min observations per point
-Tracking.MinObservationsLow: 2        #   relaxed bar while the map is young
-Tracking.YoungMapKeyframes: 2         #   map considered young at <= this many keyframes
-Tracking.EmergencyInlierDropRatio: 0.5 # emergency keyframe: inliers < ratio x recent median
-Tracking.InliersHistorySize: 30       # recent-inlier reference window (frames)
+# Keyframe policy: information = how much of the view the local map does not explain (0..1)
+Tracking.KeyframeMinInformation: 0.05 # below this: redundant, no keyframe; above LocalMapping.KeyframeCullingMaxUnexplained: always one
+Tracking.LogKeyframeInformation: 0    # 1 = one diagnostic line per tracked frame
+Tracking.MinObservationsHigh: 3       # min observations for a point to count as tracked
+Tracking.MinObservationsLow: 2        # the same while the map is young
+Tracking.YoungMapKeyframes: 2         # the map is young up to this many keyframes
+Tracking.EmergencyInlierDropRatio: 0.5 # emergency keyframe when inliers < ratio x recent median
+Tracking.InliersHistorySize: 30       # frames in that median
 Tracking.EmergencyKeyframeCooldown: 10 # min frames between emergency keyframes
 
 # Relocalization
-Tracking.RelocMinMatches: 15          # per-candidate matching gate
-Tracking.RelocInliersHigh: 70         # inliers to accept a pose hypothesis
+Tracking.RelocMinMatches: 15          # min matches to try a candidate
+Tracking.RelocInliersHigh: 70         # inliers that accept a pose
 Tracking.RelocInliersMedium: 30       # above this after the first search: search once more
-Tracking.RelocInliersLow: 10          # below this, abandon the hypothesis
-Tracking.RelocRansacProbability: 0.99  # P4P RANSAC (PnPsolver)
+Tracking.RelocInliersLow: 10          # below this: give the candidate up
+Tracking.RelocRansacProbability: 0.99 # P4P RANSAC
 Tracking.RelocRansacMinInliers: 10
 Tracking.RelocRansacMaxIterations: 3000
 Tracking.RelocRansacEpsilon: 0.5
 
 #--------------------------------------------------------------------------------------------
-# Place recognition parameters (vpr: megaloc; values shown are the compiled-in defaults)
+# Place recognition (vpr: megaloc)
 #--------------------------------------------------------------------------------------------
-PlaceRecognition.MegaLocMinSimilarity: 0.55 # cosine floor for a keyframe to be a reloc/loop candidate (unrelated places ~0.35-0.4, keyframe neighbours ~0.75)
-PlaceRecognition.MaxCandidates: 10          # cap on candidates per query (each costs a feature match + PnP/Sim3); 0 = unlimited
+PlaceRecognition.MegaLocMinSimilarity: 0.55 # min cosine for a reloc/loop candidate (unrelated places ~0.35-0.4, neighbours ~0.75)
+PlaceRecognition.MaxCandidates: 10          # candidates per query; 0 = unlimited
 
 #--------------------------------------------------------------------------------------------
-# placecell diagnostics (vpr: megaloc; Thirdparty/placecell's print manager, profiler, recorder
-# and visualizer). Every key is optional — a missing key keeps the compiled-in default, shown in
-# brackets. Flags are 0/1.
+# placecell diagnostics (flags are 0/1; compiled-in default in brackets)
 #--------------------------------------------------------------------------------------------
-# Print manager (process-wide logger; lines look like "[placecell][DEBUG] cull_keyframes: ...", on stderr)
-PlaceCell.Verbosity: "warn"       # [warn] off | error | warn | info | debug | trace (or 0-5). WARN = degraded path, INFO = one-off
-                                  # facts, DEBUG = one line per add / cull / cull call, TRACE = every information query.
-                                  # The environment variable PLACECELL_VERBOSITY overrides this key for a single run.
-PlaceCell.LogElapsed: 0           # [0] 1 = prefix placecell lines with the seconds since the logger started
-# Profiler (per store: add, unexplained_information, cull_keyframes + its stages, add_image, embed)
-PlaceCell.Profile: 1              # [1] time the main entry points, with the problem size of every sample
-PlaceCell.PrintProfile: 1         # [0] print the count / median / p95 / max table at shutdown (stderr, ignores Verbosity)
-# Recorder (per store: every information query, every cull, Tracking's keyframe decisions and thresholds)
+PlaceCell.Verbosity: "warn"       # [warn] off | error | warn | info | debug | trace; PLACECELL_VERBOSITY overrides it
+PlaceCell.LogElapsed: 0           # [0] prefix lines with the seconds since start
+PlaceCell.Profile: 1              # [1] time the main entry points
+PlaceCell.PrintProfile: 1         # [0] print the timing table at shutdown
 PlaceCell.Record: 1               # [1] keep the history; Dump and Visualize need it
-PlaceCell.Dump: 1                 # [0] at the end write kernel.npy / kernel_centred.npy / views.csv, queries.csv / culls.csv /
-                                  # cull_calls.csv / alive_information.csv / decisions.csv / thresholds.csv, profile.csv and the
-                                  # three plots (kernel.png, information.png, alive.png) to <exp_folder>/<exp_id>_placecell/;
-                                  # offline plotting: Thirdparty/placecell/tools/plot_placecell.py <that dir>
-# Visualizer (placecell::viz, drawn in a second Pangolin window next to the Viewer's; needs verbose:1)
-PlaceCell.Visualize: 1            # [0] open a window with the kernel heatmap, the unexplained-information history (with tau /
-                                  # min-information lines, insertions and culls) and the alive unique-information strip;
-                                  # Viewer toggle "PlaceCell Window" (closing the window unticks it)
-PlaceCell.VisualizeMaxHz: 2.0     # [2.0] re-render the panels at most this often (a render is O(keyframes^2) for the centred kernel)
-PlaceCell.VisualizeCentred: 0     # [1] kernel heatmap of the centred kernel (what the culler marginalises with KeyframeCullingCentred 1); 0 = raw cosine (the covisibility kernel)
-PlaceCell.VisualizeHistoryLastN: 0 # [0] information history shows only the last N queries (0 = all)
+PlaceCell.Dump: 1                 # [0] write kernels, CSVs and plots to <exp_folder>/<exp_id>_placecell/
+PlaceCell.Visualize: 1            # [0] second window with the kernel and information plots (needs verbose:1)
+PlaceCell.VisualizeMaxHz: 2.0     # [2.0] max redraws per second
+PlaceCell.VisualizeCentred: 0     # [1] draw the centred kernel; 0 = raw cosine
+PlaceCell.VisualizeHistoryLastN: 0 # [0] show only the last N queries; 0 = all
 
 #--------------------------------------------------------------------------------------------
-# Local Mapping parameters (values shown are the compiled-in defaults; every key is optional —
-# a missing key keeps the default, so this section is safe to trim or edit per dataset)
+# Local Mapping (every key is optional: a missing key keeps the compiled-in default)
 #--------------------------------------------------------------------------------------------
-# Keyframe culling method: "heuristic" (default; ORB-SLAM2-style point redundancy) or "information"
-# (joint information on the online MegaLoc similarity kernel; needs vpr: megaloc, otherwise falls
-# back to heuristic with a warning)
-LocalMapping.MapPointCullingMinFoundRatio: 0.25   # cull a recent map point when found/visible drops below this (all feature types)
-LocalMapping.MapPointCullingMinObservations: 2    # cull when, ObservationTestAge keyframes after creation, it has at most this many observations (depth-verified ones count twice)
-LocalMapping.MapPointCullingObservationTestAge: 2 # keyframes after creation at which the observation test applies
-LocalMapping.MapPointCullingProbationAge: 3       # keyframes after creation at which a surviving point graduates out of probation
+LocalMapping.MapPointCullingMinFoundRatio: 0.25   # cull a recent point when found/visible drops below this
+LocalMapping.MapPointCullingMinObservations: 2    # cull when it has at most this many observations at ObservationTestAge
+LocalMapping.MapPointCullingObservationTestAge: 2 # keyframes after creation at which that test applies
+LocalMapping.MapPointCullingProbationAge: 3       # keyframes after creation at which a surviving point leaves probation
 
-LocalMapping.CreateNewMapPointsKeyframes: 5           # covisible keyframes matched and triangulated against per new keyframe
-LocalMapping.CreateNewMapPointsMinBaselineDepthRatio: 0.01 # skip neighbors with baseline / median scene depth below this
-LocalMapping.CreateNewMapPointsMaxParallaxCos: 0.9998 # two-view triangulation needs cos(parallax) below this (parallax > ~1.15 deg)
+LocalMapping.CreateNewMapPointsKeyframes: 5           # covisible keyframes triangulated against per new keyframe
+LocalMapping.CreateNewMapPointsMinBaselineDepthRatio: 0.01 # skip neighbours with baseline / median depth below this
+LocalMapping.CreateNewMapPointsMaxParallaxCos: 0.9998 # triangulate only below this cos(parallax) (~1.15 deg)
 
 LocalMapping.SearchInNeighborsKeyframes: 20       # covisible keyframes fused with each new keyframe
-LocalMapping.SearchInNeighborsSecondKeyframes: 5  # second-degree neighbors added per covisible keyframe
-LocalMapping.FuseDescriptorQuantile: 0.5       # fusion accepts a match up to this quantile of the descriptor distances between map points and their own observations
+LocalMapping.SearchInNeighborsSecondKeyframes: 5  # second-degree neighbours added per covisible keyframe
 
-LocalMapping.KeyframeCullingMethod: information
-
-# Keyframe information kernel, read by the information culler AND Tracking's insertion bands (KeyframeInformation.h):
-#   "megaloc"      [default] the vpr: megaloc store's MegaLoc cosine (centred; no kernel at all with vpr: none)
-#   "covisibility" cosine of the keyframes' shared map points, K_ij = |P_i & P_j| / sqrt(|P_i| |P_j|): exactly 0 for
-#                  keyframes that share nothing, so raw (uncentred); independent of vpr. When KeyframeCullingMaxUnexplained /
-#                  KeyframeCullingCentred are ABSENT they default per kernel (megaloc 0.3 / 1, covisibility 0.7 / 0).
-LocalMapping.InformationKernel: "covisibility"
+LocalMapping.KeyframeCullingMethod: "information" # "heuristic" (point redundancy) | "information" (needs a kernel, else heuristic)
+LocalMapping.InformationKernel: "covisibility"    # "megaloc" (MegaLoc cosine, needs vpr: megaloc) | "covisibility" (shared map points)
 
 # heuristic
-LocalMapping.KeyframeCullingRedundancyRatio: 0.9 # cull when more than this fraction of a keyframe's points is redundant
-LocalMapping.KeyframeCullingMinObservations: 3   # a point is redundant when this many OTHER keyframes observe it
+LocalMapping.KeyframeCullingRedundancyRatio: 0.9 # cull when more than this share of a keyframe's points is redundant
+LocalMapping.KeyframeCullingMinObservations: 3   # a point is redundant when this many other keyframes observe it
 
-# information (compiled-in defaults: MaxUnexplained 0.3 [covisibility 0.7], MinAge 5, MinKeyframes 5, Scope map, MaxPerCall 5, Objective unique, Centred 1 [covisibility 0])
-LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # tau, shared by culling and insertion: every keyframe ever inserted must stay at least (1 - tau) explained by the alive keyframes, and a view more than tau unexplained by the local map becomes a keyframe (Viewer slider "KF Max Unexplained"); with one explainer v = 1 - s^2, so on the covisibility kernel 0.7 means "shares less than ~55% of its points"
-LocalMapping.KeyframeCullingMinAge: 5            # keyframes younger than this many keyframes are never culled
+# information
+LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # tau: culling keeps every keyframe (1 - tau) explained; a view above tau becomes a keyframe
+LocalMapping.KeyframeCullingMinAge: 5            # younger keyframes are never culled
 LocalMapping.KeyframeCullingMinKeyframes: 5      # never cull below this many alive keyframes
-LocalMapping.KeyframeCullingScope: "map"         # marginalise over "map" (all alive keyframes) or "local" (current keyframe + its covisible keyframes)
-LocalMapping.KeyframeCullingMaxPerCall: 5        # at most this many culls per call (0 = unlimited): a raised threshold thins the map gradually instead of in one burst
-LocalMapping.KeyframeCullingObjective: "total-loss"  # what gram-greedy ranks the feasible candidates by: "unique" = the candidate's own unique information v_i, "minimax" = the worst unexplained view after the cull, "total-loss" = v_i plus the rise of every other view
-
-LocalMapping.KeyframeCullingCentred: 0           # 1 = correlation of mean-centred descriptors (recommended for megaloc: removes its ~0.37 common-mode floor), 0 = raw cosine (covisibility: unrelated keyframes are exactly 0 already)
-# LocalMapping.KeyframeCullingCentred: 1           # 1 = correlation of mean-centred descriptors (recommended for megaloc: removes its ~0.37 common-mode floor), 0 = raw cosine (covisibility: unrelated keyframes are exactly 0 already)
+LocalMapping.KeyframeCullingScope: "map"         # "map" (all alive keyframes) | "local" (current keyframe and its covisibles)
+LocalMapping.KeyframeCullingMaxPerCall: 5        # culls per call; 0 = unlimited
+LocalMapping.KeyframeCullingObjective: "total-loss"  # "unique" | "minimax" | "total-loss": how candidates are ranked
+LocalMapping.KeyframeCullingCentred: 0           # 1 = mean-centred kernel (for megaloc) | 0 = raw cosine (for covisibility)
 
 #--------------------------------------------------------------------------------------------
-# Loop Closing parameters (values shown are the compiled-in defaults; every key is optional)
+# Loop Closing (every key is optional)
 #--------------------------------------------------------------------------------------------
-LoopClosing.CovisibilityConsistencyThreshold: 3 # a loop candidate's covisibility group must be retrieved by this many consecutive keyframes
-LoopClosing.MinKeyframesBetweenLoops: 10        # no loop detection for this many keyframes after a loop closure (and at the start of a map)
-LoopClosing.Sim3MinMatches: 20                  # candidates with fewer feature matches to the current keyframe get no Sim3 solver
+LoopClosing.CovisibilityConsistencyThreshold: 3 # consecutive keyframes that must retrieve a candidate's group
+LoopClosing.MinKeyframesBetweenLoops: 10        # keyframes without loop detection after a closure
+LoopClosing.Sim3MinMatches: 20                  # fewer matches to the current keyframe: no Sim3 solver
 LoopClosing.Sim3MinInliers: 20                  # inliers of the optimized Sim3 that accept a candidate
-LoopClosing.LoopMinMatches: 40                  # loop-side map points matched into the current keyframe (RANSAC inliers + projection search) that accept the loop
-LoopClosing.GbaIterations: 10                   # global bundle adjustment iterations after a loop closure
+LoopClosing.LoopMinMatches: 40                  # loop-side points matched into the current keyframe that accept the loop
+LoopClosing.GbaIterations: 10                   # global BA iterations after a closure

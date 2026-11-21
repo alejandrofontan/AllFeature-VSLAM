@@ -53,6 +53,7 @@
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/types_c.h>
+#include "ErrorModel.h"
 #include "MapPoint.h"
 #include "Frame.h"
 
@@ -66,7 +67,7 @@ class PnPsolver {
   ~PnPsolver();
 
   void set_ransac_parameters(double probability = 0.99, int minInliers = 8 , int maxIterations = 300, int minSet = 4, float epsilon = 0.4,
-                           float th2 = ChiSquared::dof2_95);
+                           float th2 = ErrorModel::params.chi2_mono);
 
   cv::Mat find(vector<bool> &vbInliers, int &nInliers);
 

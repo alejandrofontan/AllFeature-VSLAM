@@ -1215,7 +1215,7 @@ bool Tracking::relocalize()
         }
         solvers[i] = std::make_unique<PnPsolver>(current_frame_, matches_per_candidate[i][feature_type], feature_type);
         solvers[i]->set_ransac_parameters(params.reloc_ransac_probability, params.reloc_ransac_min_inliers, params.reloc_ransac_max_iterations,
-                                        RANSAC_MIN_SET, params.reloc_ransac_epsilon, RANSAC_TH2);
+                                        RANSAC_MIN_SET, params.reloc_ransac_epsilon, ErrorModel::params.chi2_mono);
         num_active++;
     }
     AF_REPORT("reloc.candidates_armed", "", num_active);   // enough matches for a PnP solver

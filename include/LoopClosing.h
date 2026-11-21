@@ -78,7 +78,7 @@ struct ConsistentGroup
 };
 
 // A keyframe of the corrected side of a loop and the covisibility links it gained
-// through the loop fusion: the loop edges of Optimizer::OptimizeEssentialGraph.
+// through the loop fusion: the loop edges of Optimizer::optimize_essential_graph.
 struct LoopConnections
 {
     Keyframe keyframe{};

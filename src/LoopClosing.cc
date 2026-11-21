@@ -257,12 +257,11 @@ std::vector<Keyframe> LoopClosing::consistent_loop_candidates(const std::vector<
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // # Sim3 verification
 
-// RANSAC schedule of the per-candidate Sim3 solvers and the Sim3 optimization threshold
+// RANSAC schedule of the per-candidate Sim3 solvers
 static constexpr double sim3_ransac_probability = 0.99;
 static constexpr int sim3_ransac_min_inliers = 20;
 static constexpr int sim3_ransac_max_iterations = 300;
 static constexpr int sim3_ransac_iterations_per_round = 5;   // rounds alternate over the candidates
-static constexpr float sim3_optimization_chi2 = 10.0f;       // Optimizer::OptimizeSim3 outlier threshold
 
 bool LoopClosing::compute_sim3()
 {
@@ -362,7 +361,7 @@ bool LoopClosing::compute_sim3()
             if(!Scm.empty())
             {
                 // RANSAC consensus: optimize the Sim3 over the candidate's inlier matches
-                // (OptimizeSim3 nulls the matches it rejects)
+                // (optimize_sim3 nulls the matches it rejects)
                 std::vector<Pt> inlier_matches(candidate.matches.size(), nullptr);
                 for(size_t j = 0; j < inliers.size(); j++)
                     if(inliers[j])
@@ -371,8 +370,8 @@ bool LoopClosing::compute_sim3()
                 g2o::Sim3 g2o_Scm(candidate.solver->GetEstimatedRotation().cast<double>(),
                                   candidate.solver->GetEstimatedTranslation().cast<double>(),
                                   candidate.solver->GetEstimatedScale());
-                const int num_optimized_inliers = Optimizer::OptimizeSim3(current_keyframe_, candidate.keyframe, inlier_matches,
-                                                                          g2o_Scm, sim3_optimization_chi2, fix_scale_,
+                const int num_optimized_inliers = Optimizer::optimize_sim3(current_keyframe_, candidate.keyframe, inlier_matches,
+                                                                          g2o_Scm, fix_scale_,
                                                                           verification_feature_);
                 // Per Sim3 hypothesis: RANSAC inliers, and inliers of the optimized Sim3
                 // against sim3_min_inliers
@@ -599,7 +598,7 @@ void LoopClosing::correct_loop()
     // The fusion linked both sides of the loop in the covisibility graph: those links are
     // the loop edges of the essential graph
     std::map<KeyframeId, LoopConnections> loop_connections = loop_connections_after_fusion(connected_keyframes);
-    Optimizer::OptimizeEssentialGraph(map_, matched_keyframe_, current_keyframe_, uncorrected_poses, corrected_poses,
+    Optimizer::optimize_essential_graph(map_, matched_keyframe_, current_keyframe_, uncorrected_poses, corrected_poses,
                                       loop_connections, fix_scale_);
 
     // Loop edge (also pins both keyframes: never culled)
@@ -743,7 +742,8 @@ void LoopClosing::run_global_bundle_adjustment(const KeyframeId loop_keyframe_id
         generation = gba_generation_;
     }
 
-    Optimizer::global_bundle_adjustment(map_, params.gba_iterations, &gba_stop_, loop_keyframe_id, false);
+    Optimizer::global_bundle_adjustment(map_, params.gba_iterations, &gba_stop_, loop_keyframe_id,
+                                        Optimizer::params.loop_gba_robust);
 
     {
         std::lock_guard<std::mutex> lock(gba_mutex_);

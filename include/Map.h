@@ -109,7 +109,7 @@ protected:
     KeyframeIdSet keyframes_;
 
     // Highest keyId ever added, NOT the highest currently in the map: erase_keyframe deliberately
-    // does not lower it. Optimizer::OptimizeEssentialGraph sizes three vectors as
+    // does not lower it. Optimizer::optimize_essential_graph sizes three vectors as
     // get_max_keyframe_id()+1 and indexes them by keyId, so a value that shrank after a cull would
     // index past the end. Only clear() resets it, and only because every keyId restarts with it.
     long unsigned int max_keyframe_id_;

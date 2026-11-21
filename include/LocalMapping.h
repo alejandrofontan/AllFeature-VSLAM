@@ -161,18 +161,13 @@ public:
 
 protected:
 
-    // local_bundle_adjustment(): local BA needs more keyframes than this in the map
-    static constexpr int LOCAL_BA_MIN_KEYFRAMES{2};
-
-    // create_new_map_points(): 2-DoF chi-square 95% quantile (reprojection gate),
-    // and the numerical zero for the homogeneous scale of a triangulated point
-    static constexpr float CHI2_2DOF = ChiSquared::dof2_95;
+    // create_new_map_points(): the numerical zero for the homogeneous scale of a triangulated point
+    // (its reprojection gate is ErrorModel::params.chi2_mono)
     static constexpr float HOMOGENEOUS_W_EPSILON{1e-12f};
 
     // fuse_into_keyframe(): a point is projected only if the keyframe views it within this cosine of its
-    // mean viewing direction (60 deg); the match gate is the 2-DoF 95% quantile of the keypoint's own variance
+    // mean viewing direction (60 deg); the match gate is ErrorModel::params.chi2_mono of the keypoint's own variance
     static constexpr float FUSE_VIEWING_COS_LIMIT{0.5f};
-    static constexpr float FUSE_GATE_SCALE_SIGMA2 = ChiSquared::dof2_95;
 
     // One full mapping iteration for the keyframe at the head of the queue (see run())
     void process_keyframe();
@@ -191,7 +186,7 @@ protected:
     // search_in_neighbors() helper: fuses `map_points` into `keyframe`'s keypoints of `feature_type`
     struct FuseCounts { int merged{0}; int observed{0}; };
     FuseCounts fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points, FeatureType feature_type);
-    // Optimizer::LocalBundleAdjustment on the current keyframe (skipped on a too-small map)
+    // Optimizer::local_bundle_adjustment on the current keyframe (skipped on a too-small map)
     void local_bundle_adjustment();
     // Keyframe culling: dispatches on params.keyframe_culling_method.
     void cull_keyframes();

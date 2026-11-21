@@ -22,6 +22,7 @@
 #define INITIALIZER_H
 
 #include <opencv2/opencv.hpp>
+#include "ErrorModel.h"
 #include "Frame.h"
 
 
@@ -145,11 +146,11 @@ private:
     const int parallaxIdx{50};
 
     // CheckHomography
-    const float chiSquare_th = ChiSquared::dof2_95;
+    const float chiSquare_th = ErrorModel::params.chi2_mono;
 
     // CheckFundamental
     const float chiSquare_th_fund{3.841f};
-    const float chiSquare_thScore_fund = ChiSquared::dof2_95;
+    const float chiSquare_thScore_fund = ErrorModel::params.chi2_mono;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

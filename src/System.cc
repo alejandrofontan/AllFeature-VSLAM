@@ -55,6 +55,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         exit(-1);
     }
 
+    ErrorModel::LoadParameters(fsSettings);
     Optimizer::LoadParameters(fsSettings);
     KeyFrame::LoadParameters(fsSettings);
     MapPoint::LoadParameters(fsSettings);
@@ -829,7 +830,7 @@ void System::setImageSize(const int width, const int height){
 // and position without a lock, so no worker thread may be alive (issue #83).
 void System::GBA(){
     AF_INFO("Starting Global Bundle Adjustment...");
-    Optimizer::global_bundle_adjustment(mpMap, 100);
+    Optimizer::global_bundle_adjustment(mpMap, Optimizer::params.final_gba_iterations);
     AF_INFO("Global Bundle Adjustment finished.");
 }
 

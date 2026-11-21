@@ -389,9 +389,8 @@ protected:
     // update_local_keyframes()
     static constexpr size_t LOCAL_KEYFRAMES_RESERVE_SCALE{3};
 
-    // relocalize(): P4P protocol size, chi2(0.95, 2 dof), RANSAC round scheduling
+    // relocalize(): P4P protocol size, RANSAC round scheduling (the inlier threshold is ErrorModel::params.chi2_mono)
     static constexpr int RANSAC_MIN_SET{4};
-    static constexpr float RANSAC_TH2 = ChiSquared::dof2_95;
     static constexpr int RANSAC_ITERATIONS_PER_ROUND{5};
 
     // load_camera_parameters()
