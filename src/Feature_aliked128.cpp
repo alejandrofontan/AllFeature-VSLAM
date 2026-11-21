@@ -31,7 +31,7 @@ void AF_VSLAM::Aliked128Extractor::load(const std::string& path, const int width
     extractor_->detect(cv::Mat::zeros(height, width, CV_8UC3), kps, desc);   // warm-up
     AF_INFO("ALIKED128 ready: " << extractor_->model_path() << " (" << extractor_->precision()
             << " weights) on onnxruntime/" << extractor_->provider() << ", budget " << settings->max_num_features
-            << " keypoints, threshold " << extractor_->detection_threshold() << ", warm-up "
+            << " keypoints of the graph's top-" << extractor_->top_k() << ", warm-up "
             << extractor_->last_graph_ms() << " ms");
 }
 

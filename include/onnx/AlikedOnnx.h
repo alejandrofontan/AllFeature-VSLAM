@@ -10,13 +10,10 @@
  * graph (tools/export_features.py, AlikedExport) is the whole model: replicate-padding to a multiple of 32 and
  * the crop back, the trunk with its two deformable-convolution blocks (ONNX DeformConv, native on the CPU and
  * CUDA providers), the DKD detector head (NMS radius 2, soft-argmax refinement) and the SDDH descriptor head.
- * Keypoint selection is the export's choice, told by the sidecar:
- *   top-k (sidecar `topk: K`, the default export since 2026-11-12, 'aliked_n16*.onnx'): keypoints [K,2] in pixels of
- *     the input frame, descriptors [K,128] L2-normalised and scores [K] - the K best maxima whatever their score;
- *     an entry carrying score -1 is not a keypoint (fewer than K maxima) and detect() drops it;
- *   threshold (no `topk`, 'aliked_n16_threshold.onnx'): [N,...] with N data-dependent, every maximum scoring above
- *     0.2; its static twins return K by score with -1 on the ones below the threshold, dropped the same way.
- * The host applies its own budget afterwards.
+ * The graph detects in top-k mode (sidecar `topk: K`): keypoints [K,2] in pixels of the input frame, descriptors
+ * [K,128] L2-normalised and scores [K] - the K best maxima whatever their score, with no detection threshold. An
+ * entry carrying score -1 is not a keypoint (an image with fewer than K maxima) and detect() drops it. The host
+ * applies its own budget afterwards.
  *
  * Input contract (sidecar '<model>.onnx.yaml'): RGB in [0,1]. The host's images are BGR (cv::imread), so this
  * class converts - the libtorch path handed ALIKED the BGR image as RGB; this class is the fix by construction.
@@ -51,7 +48,8 @@ class AlikedOnnx
     [[nodiscard]] const std::string& provider() const { return session_.provider(); }
     [[nodiscard]] const std::string& model_path() const { return session_.model_path(); }
     [[nodiscard]] const std::string& precision() const { return precision_; }
-    [[nodiscard]] float detection_threshold() const { return detection_threshold_; }
+    /// K of the graph's top-k: the most keypoints detect() can return.
+    [[nodiscard]] int top_k() const { return top_k_; }
     [[nodiscard]] int descriptor_dim() const { return descriptor_dim_; }
     /// Wall time of the last detect(): the graph alone, and graph + conversions.
     [[nodiscard]] double last_graph_ms() const { return last_graph_ms_; }
@@ -64,8 +62,7 @@ class AlikedOnnx
     std::string input_name_;
     std::string keypoints_name_, descriptors_name_, scores_name_;
     std::string precision_{"fp32"};
-    float detection_threshold_{0.2f};
-    int top_k_{0};   // > 0: the graph returns exactly top_k_ keypoints by score (static exports); detect() thresholds
+    int top_k_{0};   // the graph returns exactly top_k_ entries in score order (sidecar `topk`)
     int descriptor_dim_{128};
     double last_graph_ms_{0.0};
     double last_total_ms_{0.0};

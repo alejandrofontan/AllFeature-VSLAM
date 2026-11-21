@@ -10,8 +10,7 @@
  * aliked128: ALIKED-n16 sub-pixel keypoints + 128-d descriptors on ONNX Runtime (onnx/AlikedOnnx.h), matched by
  * LightGlue-ALIKED (LIGHTGLUE_ALIKED -> onnx::shared_lightglue("aliked") in FeatureMatcher). The model file is
  * `<features_models_dir>/aliked_n16_<precision>.onnx` (`pixi run setup`). The graph detects in top-k mode
- * (its 2048 best keypoints whatever their score; a threshold-mode export, 'aliked_n16_threshold.onnx', exists for
- * comparison); the host's octree distribution brings them down to the keypoint budget (max_num_features), so the
+ * (its 2048 best keypoints whatever their score); the host's octree distribution brings them down to the keypoint budget (max_num_features), so the
  * budget is what sets the number of keypoints now. The session is created and warmed up in prepare(), at the frame
  * size, before the first frame. On the Core ML provider with `features_static_shapes` the fixed-size export
  * `aliked_n16_<W>x<H>_<precision>.onnx` for that size is loaded instead (`export-features --only aliked --static

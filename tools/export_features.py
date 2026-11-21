@@ -122,15 +122,13 @@ LIGHTGLUE_FEATURES = {
     "sift": {"input_dim": 128, "add_scale_ori": True},
 }
 
-# ALIKED's keypoint selection, set by main from --aliked-mode / --topk before anything is built.
-#   top-k (the default since 2026-11-12): the graph returns the ALIKED_TOPK best NMS maxima whatever their score -
-#     upstream's top-k mode (detection_threshold <= 0). On indoor frames about three quarters of them score below the
-#     old 0.2 threshold, and LightGlue still matches them correctly: 979 against 268 geometrically verified matches
-#     per pair on ETH table_3 (tools/feature_lab, 359 MegaLoc pairs) - at 9x the matching time when the host keeps
-#     all 2048, which is what its keypoint budget (Tracking.FeaturesFraction of the feature's maximum) is for.
-#   threshold: every NMS maximum above 0.2, a data-dependent number - the previous default. Exported under another
-#     name ('aliked_n16_threshold...'), so both can sit in feature_models/ and be compared.
-ALIKED_TRUE_TOPK = True
+# ALIKED's keypoint selection, set by main from --topk before anything is built: the graph returns the ALIKED_TOPK best
+# NMS maxima whatever their score - upstream's top-k mode (detection_threshold <= 0). The alternative, every maximum
+# above 0.2 (upstream's default, a data-dependent number), was the default until 2026-11-12 and was removed on
+# 2026-11-21: on indoor frames about three quarters of the top-k keypoints score below 0.2, and LightGlue still
+# matches them correctly - 979 against 268 geometrically verified matches per pair on ETH table_3 (359 MegaLoc pairs)
+# - at 9x the matching time when the host keeps all 2048, which is what its keypoint budget
+# (Tracking.FeaturesFraction of the feature's maximum) is for.
 ALIKED_TOPK = 2048
 
 
@@ -181,7 +179,7 @@ def model_path(key: str, size_suffix: str = "", padded_length: int = 0) -> Path:
     if key == "superpoint":
         return MODELS_DIR / f"superpoint_v1{size_suffix}_fp32.onnx"
     if key == "aliked":
-        return MODELS_DIR / f"{aliked_stem()}{size_suffix}_fp32.onnx"
+        return MODELS_DIR / f"aliked_n16{size_suffix}_fp32.onnx"
     return MODELS_DIR / (f"{key}_L{padded_length}_fp32.onnx" if padded_length else f"{key}_fp32.onnx")
 
 
@@ -205,11 +203,6 @@ def settings_files(wanted: set[str], fp16: bool, padded_length: int) -> list[Pat
     if fp16:
         models += [fp16_twin(p) for p in models]
     return [f for p in models for f in (p, sidecar_of(p))]
-
-
-def aliked_stem() -> str:
-    """The ALIKED file stem of the mode in force: the host loads 'aliked_n16_<precision>.onnx' (Aliked128::s_model_stem)."""
-    return "aliked_n16" if ALIKED_TRUE_TOPK else "aliked_n16_threshold"
 
 
 # --------------------------------------------------------------------------------------
@@ -252,8 +245,8 @@ def load_models(max_keypoints: int) -> dict[str, nn.Module]:
     """The five upstream models in eval mode, built for export. Keys: superpoint, aliked, sift (the extractors; sift is
     OpenCV-based and only produces references) and lightglue_{superpoint,aliked,sift} (the matchers).
     `max_keypoints` is the budget the C++ side applies (FeatureExtractorSettings::max_num_features): the upstream SuperPoint
-    and SIFT references keep the best `max_keypoints` so that the (a) column matches what C++ will output; ALIKED is
-    threshold mode (no cap), as the host runs it today."""
+    and SIFT references keep the best `max_keypoints` so that the (a) column matches what C++ will output; ALIKED
+    returns its ALIKED_TOPK best, as the graph does (the host's budget is applied after it)."""
     from lightglue import ALIKED, SIFT, LightGlue, SuperPoint  # noqa: E402  (from the pinned clone)
 
     # The upstream constructors call torch.hub.load_state_dict_from_url: with the files already in the hub cache under
@@ -268,14 +261,9 @@ def load_models(max_keypoints: int) -> dict[str, nn.Module]:
     # only shapes the references - in the host the top-k lives in C++ (the graph ends at the dense maps)
     models["superpoint"] = SuperPoint(max_num_keypoints=max_keypoints,
                                       detection_threshold=SUPERPOINT_THRESHOLD).eval()
-    # ALIKED n16. Top-k mode: upstream takes the K best maxima when detection_threshold <= 0 (aliked.py). Threshold
-    # mode: every maximum above 0.2, no cap.
-    if ALIKED_TRUE_TOPK:
-        models["aliked"] = ALIKED(model_name="aliked-n16", max_num_keypoints=ALIKED_TOPK, detection_threshold=-1,
-                                  nms_radius=2).eval()
-    else:
-        models["aliked"] = ALIKED(model_name="aliked-n16", max_num_keypoints=-1, detection_threshold=0.2,
-                                  nms_radius=2).eval()
+    # ALIKED n16 in top-k mode: upstream takes the K best maxima when detection_threshold <= 0 (aliked.py)
+    models["aliked"] = ALIKED(model_name="aliked-n16", max_num_keypoints=ALIKED_TOPK, detection_threshold=-1,
+                              nms_radius=2).eval()
     # SIFT: OpenCV backend, RootSIFT - the reference for the C++ cv::SIFT extractor
     models["sift"] = SIFT(backend="opencv", rootsift=True, max_num_keypoints=max_keypoints).eval()
     # LightGlue x3, adaptive behaviour off: the graph must be the full 9 layers with no data-dependent exit or pruning
@@ -690,43 +678,24 @@ def get_patches(x: torch.Tensor, centers_wh: torch.Tensor, ps: int) -> torch.Ten
     return sampled.permute(1, 0, 2, 3)                             # [N, c, ps, ps]
 
 
-def dkd_threshold(dkd: nn.Module, scores_map: torch.Tensor, top_k: int = 0,
-                  true_top_k: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
-    """Upstream DKD.forward with sub-pixel refinement, for one image. top_k == 0: threshold mode (every NMS maximum
-    above scores_th, N data-dependent) without the two data-dependent branches - the "nothing above threshold -> use
-    the mean" fallback (a Python `if` on a tensor sum) and the n_limit cap (an `if` on the keypoint count; 20000 is
-    never reached after NMS at SLAM resolutions, and the C++ side has its own budget). top_k > 0: upstream's top-k
-    mode - the K best NMS maxima, K static, so every shape downstream is bounded (Core ML); upstream's selection
-    rule (NMS score at the pixel > scores_th) is applied inside as a sentinel: entries that fail it get score -1
-    (the refined scores are sigmoid outputs, never negative) and the host drops them. The same set as threshold
-    mode whenever fewer than K pass (the suppressed pixels score 0).
-    `true_top_k` (with top_k > 0): upstream's top-k mode as upstream runs it (detection_threshold <= 0): the K best
-    NMS maxima whatever their score - no scores_th rule. The sentinel then only marks entries that are not maxima
-    at all (NMS value 0: an image with fewer than K maxima), and (row, col) come from index grids instead of
-    `flat // w` and `flat % w`, so the graph also exports with a symbolic image size.
-    Returns keypoints in [-1,1] (x,y) [N,2] and their bilinear scores [N]."""
+def dkd_topk(dkd: nn.Module, scores_map: torch.Tensor, top_k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Upstream DKD.forward in top-k mode with sub-pixel refinement, for one image: the `top_k` best NMS maxima
+    whatever their score (upstream with detection_threshold <= 0). K is static, so every shape downstream is bounded
+    (Core ML). An entry that is not a maximum at all (NMS value 0: an image with fewer than K maxima) gets score -1 -
+    the refined scores are sigmoid outputs, never negative - and the host drops it. (row, col) come from index grids
+    instead of `flat // w` and `flat % w`, so the graph also exports with a symbolic image size.
+    Returns keypoints in [-1,1] (x,y) [K,2] and their bilinear scores [K]."""
     from lightglue.aliked import simple_nms
 
     _, _, h, w = scores_map.shape
     r = dkd.radius
     nms = simple_nms(scores_map, r)
     nms = torch.where(border_mask(nms, r), nms, torch.zeros_like(nms))
-    valid = None
-    if top_k > 0 and true_top_k:
-        top = torch.topk(nms.reshape(-1), top_k)                     # [K], score order
-        flat, valid = top.indices, top.values > 0.0
-        # (row, col) of a flat index, read from index grids: no division or remainder by the symbolic width
-        rows = torch.arange(h, device=nms.device).view(h, 1).expand(h, w).reshape(-1)[flat]
-        cols = torch.arange(w, device=nms.device).view(1, w).expand(h, w).reshape(-1)[flat]
-    elif top_k > 0:
-        top = torch.topk(nms.reshape(-1), top_k)                     # [K], score order (static w: plain integer ops)
-        flat, valid = top.indices, top.values > dkd.scores_th
-        rows, cols = torch.div(flat, w, rounding_mode="trunc"), flat % w
-    else:
-        # (row, col) of every maximum above the threshold, row-major like upstream's flat nonzero. 2-D so that no
-        # `index % w` / `index // w` on the symbolic width is needed (remainder-by-a-symbol does not translate).
-        rc = (nms[0, 0] > dkd.scores_th).nonzero()                 # [N, 2]
-        rows, cols = rc[:, 0], rc[:, 1]
+    top = torch.topk(nms.reshape(-1), top_k)                         # [K], score order
+    flat, valid = top.indices, top.values > 0.0
+    # (row, col) of a flat index, read from index grids: no division or remainder by the symbolic width
+    rows = torch.arange(h, device=nms.device).view(h, 1).expand(h, w).reshape(-1)[flat]
+    cols = torch.arange(w, device=nms.device).view(1, w).expand(h, w).reshape(-1)[flat]
     patch = dkd.unfold(scores_map)[0].reshape(-1, h, w)            # [k*k, H, W]
     patch_scores = patch[:, rows, cols].t()                        # [N, k*k]
     kp_nms = torch.stack([cols, rows], 1)                          # (x, y)
@@ -736,8 +705,7 @@ def dkd_threshold(dkd: nn.Module, scores_map: torch.Tensor, top_k: int = 0,
     xy_residual = x_exp @ hw_grid / x_exp.sum(dim=1)[:, None]      # soft-argmax within the k x k patch
     kp = div_xy(kp_nms + xy_residual, w - 1, h - 1) * 2 - 1       # pixels -> [-1, 1], upstream's operation order
     kp_scores = F.grid_sample(scores_map, kp.view(1, 1, -1, 2), mode="bilinear", align_corners=True)[0, 0, 0, :]
-    if valid is not None:
-        kp_scores = torch.where(valid, kp_scores, torch.full_like(kp_scores, -1.0))
+    kp_scores = torch.where(valid, kp_scores, torch.full_like(kp_scores, -1.0))
     return kp, kp_scores
 
 
@@ -768,12 +736,11 @@ class AlikedExport(nn.Module):
     """ALIKED end to end for one RGB image in [0,1] of any size: replicate-pad to a multiple of 32 (upstream's
     InputPadder, split between both sides, computed from the input shape so it exports as shape arithmetic), the
     dense trunk with its two deformable-convolution blocks, crop the maps back, DKD detection, SDDH description.
-    Outputs: keypoints [N,2] in pixels of the input frame, descriptors [N,128], scores [N]; N is data-dependent in
-    threshold mode (top_k 0) and exactly K in top-k mode (the static exports for Core ML; the host thresholds)."""
+    Outputs: keypoints [K,2] in pixels of the input frame, descriptors [K,128], scores [K]: the `top_k` best maxima
+    whatever their score; an entry with score -1 is not a keypoint and the host drops it."""
 
-    def __init__(self, m: nn.Module, top_k: int = 0, decompose_deform: bool = False, true_top_k: bool = False):
+    def __init__(self, m: nn.Module, top_k: int, decompose_deform: bool = False):
         super().__init__()
-        self.true_top_k = true_top_k                # top_k > 0 only: the K best maxima whatever their score
         if decompose_deform:
             import copy
 
@@ -806,7 +773,7 @@ class AlikedExport(nn.Module):
         score_map = crop(torch.sigmoid(m.score_head(x1234)), pt, H, pl, W)
         feature_map = crop(F.normalize(x1234, p=2, dim=1), pt, H, pl, W)
 
-        kp, kp_scores = dkd_threshold(m.dkd, score_map, self.top_k, self.true_top_k)
+        kp, kp_scores = dkd_topk(m.dkd, score_map, self.top_k)
         desc = sddh(m.desc_head, feature_map[0], kp)
         return scale_xy(kp + 1, W - 1, H - 1) / 2.0, desc, kp_scores
 
@@ -927,8 +894,7 @@ def check_wrappers(models: dict[str, nn.Module], images: list[Path], max_keypoin
           f"{f', static ALIKED (top-{aliked_top_k}, decomposed deform conv)' if aliked_top_k else ''}"
           f"{f', matchers padded to {padded_length}' if padded_length else ''}:")
     sp_dense = SuperPointDense(models["superpoint"])
-    al_export = AlikedExport(models["aliked"], ALIKED_TOPK if ALIKED_TRUE_TOPK else aliked_top_k,
-                             decompose_deform=aliked_top_k > 0, true_top_k=ALIKED_TRUE_TOPK)
+    al_export = AlikedExport(models["aliked"], ALIKED_TOPK, decompose_deform=aliked_top_k > 0)
     feats: list[dict[str, dict]] = []
     for path in images:
         grey, rgb = load_image(path)
@@ -1160,14 +1126,10 @@ def superpoint_contract(sp: nn.Module) -> list[str]:
 
 def aliked_contract(m: nn.Module) -> list[str]:
     c = m.conf
-    selection = ([
+    selection = [
         "# Outputs: keypoints [K,2] (x,y) pixels, descriptors [K,128] L2-normalised, scores [K]: top-k mode, the K (topk",
         "# below) best NMS maxima whatever their score - no detection threshold. The host applies its own budget.",
-    ] if ALIKED_TRUE_TOPK else [
-        "# Outputs: keypoints [N,2] (x,y) pixels, descriptors [N,128] L2-normalised, scores [N]; N data-dependent",
-        "# (threshold mode: every NMS maximum above detection_threshold, no cap - the host applies its own budget).",
-    ])
-    threshold_note = "not applied: top-k mode" if ALIKED_TRUE_TOPK else "inside the graph"
+    ]
     return [
         "# Input: one RGB image, [1,3,H,W] float32 in [0,1] (cv::cvtColor BGR2RGB / 255), any H and W: the graph",
         "# replicate-pads to a multiple of 32 and crops the maps back, keypoints come back in the input frame.",
@@ -1176,7 +1138,7 @@ def aliked_contract(m: nn.Module) -> list[str]:
         *selection,
         "output_tensors: [keypoints, descriptors, scores]",
         f"model_name: {c.model_name}",
-        f"detection_threshold: {c.detection_threshold}   # {threshold_note}",
+        f"detection_threshold: {c.detection_threshold}   # not applied: top-k mode",
         f"nms_radius: {c.nms_radius}   # inside the graph",
         "descriptor_dim: 128",
         "# Uses ai.onnx DeformConv (opset 19) in two blocks: native on ORT's CPU and CUDA providers, CPU fallback on CoreML.",
@@ -1261,19 +1223,17 @@ def export_all(models: dict[str, nn.Module], commit: str, only: set[str] | None 
                           superpoint_contract(models["superpoint"]) + size_lines)
         paths["superpoint"] = path
 
-    # ALIKED: dynamic H, W unless static_size (then top-k mode too); opset 19 for DeformConv (custom translation)
-    aliked_k = top_k if (static_size or ALIKED_TRUE_TOPK) else 0
-    topk_note = ("an entry that is not a maximum at all (an image with fewer than topk maxima) carries score -1"
-                 if ALIKED_TRUE_TOPK else "those failing the detection_threshold carry score -1")
-    aliked_lines = size_lines + ([f"topk: {aliked_k}   # the graph returns exactly topk entries by NMS score; {topk_note} "
-                                  "- the host drops them"] if aliked_k else [])
+    # ALIKED: dynamic H, W unless static_size; opset 19 for DeformConv (custom translation)
+    aliked_k = top_k
+    aliked_lines = size_lines + [f"topk: {aliked_k}   # the graph returns exactly topk entries by NMS score; an entry that "
+                                 "is not a maximum at all (an image with fewer than topk maxima) carries score -1 - the "
+                                 "host drops them"]
     if "aliked" in wanted and export_detectors:
         path = model_path("aliked", suffix)
         exported = not present(path)
         if exported:
             # static (Core ML): deformable convs decomposed into GridSample + 1x1 conv, no DeformConv node
-            export_onnx(AlikedExport(models["aliked"], aliked_k, decompose_deform=bool(static_size),
-                                     true_top_k=ALIKED_TRUE_TOPK), path,
+            export_onnx(AlikedExport(models["aliked"], aliked_k, decompose_deform=bool(static_size)), path,
                         (torch.rand(1, 3, H, W),), ["image"], ["keypoints", "descriptors", "scores"], dyn, opset=19,
                         translation=DEFORM_CONV_TRANSLATION)
             write_sidecar(path, "aliked", "aliked-n16", commit, 19, "fp32", aliked_contract(models["aliked"]) + aliked_lines)
@@ -1402,7 +1362,7 @@ def check_ort(models: dict[str, nn.Module], paths: dict[str, Path], images: list
               static_size: tuple[int, int] | None = None, static_length: int | None = None) -> None:
     """(c) fp32 and (d) fp16 exports on ORT CPU against upstream (a), for the files in `paths`; plus, for the dynamic
     detectors, the fp32 files on a 640x480 resize of the first frame against upstream on the same resize (the
-    dynamic axes at work). Static ALIKED goes through the host threshold of its top-k output; the padded matchers
+    dynamic axes at work). ALIKED's entries with score -1 are dropped as the host drops them; the padded matchers
     through the padded feed and the [N0,N1] block of their output."""
     static = static_size is not None or static_length is not None
     print(f"\n(a) upstream vs (c) ONNX fp32 / (d) ONNX fp16 on ONNX Runtime CPU, {len(images)} frames"
@@ -1504,11 +1464,7 @@ def main() -> None:
     parser.add_argument("--static", metavar="WxH", default=None,
                         help="export the detectors with this fixed input size as <stem>_<W>x<H>_fp32.onnx (Core ML)")
     parser.add_argument("--topk", type=int, default=2048,
-                        help="ALIKED: keypoints returned by the graph in top-k mode (and by the static threshold-mode export)")
-    parser.add_argument("--aliked-mode", choices=["topk", "threshold"], default="topk",
-                        help="ALIKED keypoint selection: 'topk' (default) the --topk best maxima whatever their score, "
-                             "exported as aliked_n16*.onnx; 'threshold' every maximum above 0.2, exported as "
-                             "aliked_n16_threshold*.onnx")
+                        help="ALIKED: keypoints returned by the graph (its best maxima whatever their score)")
     parser.add_argument("--superpoint-threshold", type=float, default=0.0,
                         help="SuperPoint detection threshold written to the sidecar and applied by the host tail: 0 "
                              "(default) none, the best maxima up to the keypoint budget; 0.0005 is upstream's default")
@@ -1525,8 +1481,8 @@ def main() -> None:
         w, h = args.static.lower().split("x")
         static_size = (int(w), int(h))
 
-    global ALIKED_TRUE_TOPK, ALIKED_TOPK, SUPERPOINT_THRESHOLD, MODELS_DIR
-    ALIKED_TRUE_TOPK, ALIKED_TOPK = args.aliked_mode == "topk", args.topk
+    global ALIKED_TOPK, SUPERPOINT_THRESHOLD, MODELS_DIR
+    ALIKED_TOPK = args.topk
     SUPERPOINT_THRESHOLD = args.superpoint_threshold
 
     # --settings: what the host will load, decided before anything is cloned, downloaded or built
