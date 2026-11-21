@@ -159,14 +159,8 @@ LocalMapping.CreateNewMapPointsMaxParallaxCos: 0.9998 # triangulate only below t
 LocalMapping.SearchInNeighborsKeyframes: 20       # covisible keyframes fused with each new keyframe
 LocalMapping.SearchInNeighborsSecondKeyframes: 5  # second-degree neighbours added per covisible keyframe
 
-LocalMapping.KeyframeCullingMethod: "information" # "heuristic" (point redundancy) | "information" (needs a kernel, else heuristic)
+# Keyframe culling (information-based; without a kernel nothing is culled)
 LocalMapping.InformationKernel: "covisibility"    # "megaloc" (MegaLoc cosine, needs vpr: megaloc) | "covisibility" (shared map points)
-
-# heuristic
-LocalMapping.KeyframeCullingRedundancyRatio: 0.9 # cull when more than this share of a keyframe's points is redundant
-LocalMapping.KeyframeCullingMinObservations: 3   # a point is redundant when this many other keyframes observe it
-
-# information
 LocalMapping.KeyframeCullingMaxUnexplained: 0.5  # tau: culling keeps every keyframe (1 - tau) explained; a view above tau becomes a keyframe
 LocalMapping.KeyframeCullingMinAge: 5            # younger keyframes are never culled
 LocalMapping.KeyframeCullingMinKeyframes: 5      # never cull below this many alive keyframes

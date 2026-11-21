@@ -55,11 +55,6 @@ class Viewer;
 // LocalMapping.* block keep working unchanged.
 struct LocalMappingParameters
 {
-    // cull_keyframes(): "heuristic" (ORB-SLAM2-style point redundancy, default) or
-    // "information" (joint information on the keyframe information kernel below; falls
-    // back to heuristic with a one-time warning when the system has no such kernel)
-    std::string keyframe_culling_method{"heuristic"};
-
     // The keyframe information kernel (KeyframeInformation.h) that the information
     // culler AND Tracking's insertion bands read: "megaloc" (the vpr: megaloc store's
     // MegaLoc cosine, centred; no kernel at all without vpr: megaloc) or "covisibility"
@@ -87,11 +82,7 @@ struct LocalMappingParameters
     // points' descriptors and their own observations (estimated at every keyframe; also used by Loop Closing)
     float fuse_descriptor_quantile{0.5f};
 
-    // cull_keyframes_heuristic()
-    float keyframe_culling_redundancy_ratio{0.9f}; // cull when more than this fraction of a keyframe's points is redundant
-    int keyframe_culling_min_observations{3};      // a point is redundant when this many OTHER keyframes observe it
-
-    // cull_keyframes_information()
+    // cull_keyframes()
     // Atomic: the Viewer's "Cull Max Unexplained" slider writes it while LocalMapping reads it.
     std::atomic<float> keyframe_culling_max_unexplained{0.3f};  // a keyframe may be culled only if every keyframe ever inserted stays at least (1 - this) explained by the alive ones
     int keyframe_culling_min_age{5};               // keyframes younger than this many keyframes (by keyId) are never culled
@@ -188,14 +179,9 @@ protected:
     FuseCounts fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points, FeatureType feature_type);
     // Optimizer::local_bundle_adjustment on the current keyframe (skipped on a too-small map)
     void local_bundle_adjustment();
-    // Keyframe culling: dispatches on params.keyframe_culling_method.
+    // Keyframe culling: joint-information culling on the keyframe information kernel; see the definition for
+    // the exact rule. Without a kernel nothing is culled.
     void cull_keyframes();
-    // "heuristic": mark as bad the covisible keyframes whose map points are (mostly)
-    // already observed by enough other keyframes; see the definition for the exact rule.
-    void cull_keyframes_heuristic();
-    // "information": joint-information culling on the online keyframe VPR matrix; see
-    // the definition for the exact rule.
-    void cull_keyframes_information();
     // Called by run(): pause at its safe point (true once stopped) / perform a pending
     // reset / exit when asked / publish the exit
     bool stop_if_requested();
@@ -222,7 +208,7 @@ protected:
     // its placecell store holds one row per keyframe ever processed (rows are never
     // removed when a keyframe is culled -- culled keyframes stay as the culling
     // "history"), keyed by frame_id. process_new_keyframe registers each keyframe,
-    // cull_keyframes_information refreshes the alive ones and culls on it. Null when the
+    // cull_keyframes refreshes the alive ones and culls on it. Null when the
     // system has no information kernel (megaloc kernel without vpr: megaloc).
     std::shared_ptr<KeyframeInformation> keyframe_information_{};
     std::list<Pt> recent_map_points_;

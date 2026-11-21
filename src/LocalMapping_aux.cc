@@ -33,9 +33,12 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
         read_setting_if_present(fSettings, key, field);
     };
 
-    read_if_present("LocalMapping.KeyframeCullingMethod", params.keyframe_culling_method);
-    if(params.keyframe_culling_method != "heuristic" && params.keyframe_culling_method != "information")
-        AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingMethod '" + params.keyframe_culling_method + "' (options: heuristic, information)");
+    // Removed with the heuristic culler: say so once instead of ignoring an old settings file silently
+    std::string removed_method;
+    read_if_present("LocalMapping.KeyframeCullingMethod", removed_method);
+    if(!removed_method.empty() && removed_method != "information")
+        AF_WARN("[LocalMapping] LocalMapping.KeyframeCullingMethod '" + removed_method + "' is ignored: the information "
+                "culler is the only one (the heuristic culler was removed)");
 
     // Information kernel first: tau and the centring take a per-kernel default below
     // when their keys are absent (the covisibility cosine has no common-mode floor and
@@ -61,9 +64,6 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("LocalMapping.SearchInNeighborsKeyframes", params.search_in_neighbors_keyframes);
     read_if_present("LocalMapping.SearchInNeighborsSecondKeyframes", params.search_in_neighbors_second_keyframes);
     read_if_present("LocalMapping.FuseDescriptorQuantile", params.fuse_descriptor_quantile);
-
-    read_if_present("LocalMapping.KeyframeCullingRedundancyRatio", params.keyframe_culling_redundancy_ratio);
-    read_if_present("LocalMapping.KeyframeCullingMinObservations", params.keyframe_culling_min_observations);
 
     float max_unexplained = params.keyframe_culling_max_unexplained.load();
     read_if_present("LocalMapping.KeyframeCullingMaxUnexplained", max_unexplained);

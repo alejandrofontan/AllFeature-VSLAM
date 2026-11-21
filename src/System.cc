@@ -242,7 +242,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
 #endif
     else
         AF_INFO("[System] keyframe information kernel: none (InformationKernel: megaloc needs vpr: megaloc) — "
-                "keyframe insertion by the tracking triggers only, information culling falls back to the heuristic");
+                "keyframe insertion by the tracking triggers only, keyframes are never culled");
 
     if(keyframe_information || place_cell){
         AF_INFO("[System] placecell diagnostics: verbosity "

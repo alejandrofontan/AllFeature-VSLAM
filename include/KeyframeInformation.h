@@ -11,7 +11,7 @@
  * questions —
  *   - Tracking::need_new_keyframe: how much of the current view is NOT explained by the
  *     local keyframes (information(), placecell::PlaceCell::unexplained_information);
- *   - LocalMapping::cull_keyframes_information: which alive keyframe every view ever
+ *   - LocalMapping::cull_keyframes: which alive keyframe every view ever
  *     inserted can spare (place_cell(), placecell::PlaceCell::cull_keyframes).
  * Both read the same kernel, so a keyframe inserted as novel is not a cull candidate on
  * its own account (Schur identity, see placecell's CLAUDE.md).
@@ -99,7 +99,7 @@ public:
     // is cleared by PlaceRecognitionMegaLoc::clear (same object), so this is a no-op there.
     virtual void clear() = 0;
 
-    // The store behind the kernel: the culler (LocalMapping::cull_keyframes_information),
+    // The store behind the kernel: the culler (LocalMapping::cull_keyframes),
     // the Viewer panels and System::SavePlaceCellDiagnostics work on it directly.
     virtual placecell::PlaceCell& place_cell() = 0;
     virtual const placecell::PlaceCell& place_cell() const = 0;

@@ -683,93 +683,25 @@ void LocalMapping::local_bundle_adjustment()
 
 void LocalMapping::cull_keyframes()
 {
-    if(params.keyframe_culling_method == "information"){
-        // The information method needs the keyframe information kernel (KeyframeInformation.h).
-        // Without one, degrade to the heuristic once, loudly.
-        if(!keyframe_information_ || keyframe_information_->place_cell().size() == 0){
-            static bool warned{false};
-            if(!warned){
-                AF_WARN("[LocalMapping] KeyframeCullingMethod: information requested but the system has no keyframe "
-                        "information kernel (InformationKernel: megaloc needs vpr: megaloc) — falling back to the heuristic "
-                        "culling; set vpr: megaloc or InformationKernel: covisibility to use it");
-                warned = true;
-            }
-            cull_keyframes_heuristic();
-            return;
-        }
-        cull_keyframes_information();
-        return;
-    }
-    cull_keyframes_heuristic();
-}
-
-void LocalMapping::cull_keyframes_heuristic()
-{
-    // A covisible keyframe is redundant when more than
-    // params.keyframe_culling_redundancy_ratio of its (non-bad) map points are each
-    // observed by at least params.keyframe_culling_min_observations OTHER non-bad
-    // keyframes. The test runs per feature type, and a keyframe redundant for ANY
-    // of its feature types is culled. (Stock ORB-SLAM2's extra requirement that the
-    // other observations be at the same or a finer scale level is not applied.)
-
-    // By-value snapshot: get_covisible_keyframes copies under the keyframe's mutex
-    const std::vector<Keyframe> local_keyframes = current_keyframe_->get_covisible_keyframes();
-    for(const Keyframe& keyframe : local_keyframes){
-        if(keyframe->is_origin())
-            continue; // the first keyframe anchors the map and is never culled
-
-        for(const FeatureType ft : keyframe->feature_types){
-            // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
-            const std::vector<Pt> map_points = keyframe->get_map_point_matches(ft);
-
-            int num_points = 0;
-            int num_redundant = 0;
-            for(const Pt& pt : map_points){
-                if(!pt || pt->is_bad())
-                    continue;
-                num_points++;
-
-                // number_of_observations counts depth-verified observations twice
-                if(pt->number_of_observations() <= params.keyframe_culling_min_observations)
-                    continue;
-
-                // By-value snapshot: get_observers copies the observing keyframes under the
-                // point's mutex. The Observation itself is not needed -- only who observes.
-                int num_other_observers = 0;
-                for(const auto& [key_id, observer] : pt->get_observers()){
-                    if(key_id == keyframe->keyId || observer->is_bad())
-                        continue;
-                    if(++num_other_observers >= params.keyframe_culling_min_observations)
-                        break;
-                }
-                if(num_other_observers >= params.keyframe_culling_min_observations)
-                    num_redundant++;
-            }
-
-            if(num_redundant <= params.keyframe_culling_redundancy_ratio * static_cast<float>(num_points))
-                continue;
-
-            bool protected_keyframe{false};
-
-            if(!protected_keyframe)
-                keyframe->set_bad_flag();
-        }
-    }
-}
-
-void LocalMapping::cull_keyframes_information()
-{
     // The joint-information culling maths ("gram-greedy") lives in placecell
     // (PlaceCell::cull_keyframes); this adapter supplies the host side: the kernel's
     // refresh, parameters, the covisibility window for the local scope, reconciliation
     // of externally removed keyframes, execution of each cull (set_bad_flag), and logging.
-    if(!keyframe_information_)
+    // No kernel (InformationKernel: megaloc without vpr: megaloc): nothing is culled
+    if(!keyframe_information_ || keyframe_information_->place_cell().size() == 0){
+        static bool warned{false};
+        if(!warned){
+            AF_WARN("[LocalMapping] no keyframe information kernel (InformationKernel: megaloc needs vpr: megaloc): "
+                    "keyframes are never culled; set vpr: megaloc or InformationKernel: covisibility");
+            warned = true;
+        }
         return;
+    }
     placecell::PlaceCell& place_cell = keyframe_information_->place_cell();
 
     // Resolve every stored row back to a keyframe. A row that no longer resolves (or
-    // resolves to a bad keyframe) was removed outside this culler (e.g. by the
-    // heuristic method) -- tell placecell so it becomes culling history there too.
+    // resolves to a bad keyframe) was removed outside this culler -- tell placecell
+    // so it becomes culling history there too.
     std::unordered_map<FrameId, Keyframe> keyframe_by_frame_id;
     std::vector<Keyframe> alive_keyframes;
     for(const Keyframe& keyframe : map_->get_all_keyframes())
