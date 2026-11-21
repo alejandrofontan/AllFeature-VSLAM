@@ -392,7 +392,12 @@ void KeyFrame::erase_connection(const Keyframe& keyframe)
     std::unique_lock<std::mutex> lock(connections_mutex_);
 
     if(connections_.erase(keyframe->keyId) > 0)
-        ordered_dirty_ = true;
+    {
+        // Rebuilt now, not on the next read: the cached order holds the keyframe too, and until it is rebuilt
+        // it keeps an erased keyframe alive (the keyframe culled last in a run was never released)
+        rebuild_ordered_connections();
+        ordered_dirty_ = false;
+    }
 }
 
 std::vector<Keyframe> KeyFrame::get_best_covisibility_keyframes(int N) const
@@ -612,6 +617,17 @@ void KeyFrame::set_bad_flag()
 
     for(const auto& [id, connection] : connected)
         connection.keyframe->erase_connection(this_keyframe());
+
+    // `connected` does not reach every keyframe that lists this one. update_connections stores every keyframe
+    // that shares a point, but registers itself back only with the strong ones (weight >= min_covisibility_weight),
+    // so a weak link is one-sided: the other keyframe knows this one, this one does not know it. Such a keyframe
+    // was never told, and kept this one alive - with its image, descriptors, grid and point slots - for as long
+    // as it lived (found 2026-11-21: keyframe 3 of an ETH table_3 run, held by 19 keyframes at shutdown).
+    // Measured on that sequence, 7 runs with and 7 without this loop: no keyframe retained with it, and no
+    // difference in keyframe ATE beyond the run-to-run spread (medians 5.6 and 4.6 mm, standard deviation 2 mm)
+    for(const Keyframe& other : map_->get_all_keyframes())
+        if(other.get() != this)
+            other->erase_connection(this_keyframe());
 
     for(const auto& [ft, points] : map_points)
         for(const Pt& point : points)

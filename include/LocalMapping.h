@@ -155,6 +155,10 @@ public:
     void request_finish();
     bool is_finished() const;
 
+    // Drops what the thread still refers to once it has finished: the keyframe it processed last and the points on
+    // probation, some erased since. Called by System::Shutdown before the lifetime summary.
+    void release_map_references();
+
 protected:
 
     // local_bundle_adjustment(): local BA needs more keyframes than this in the map

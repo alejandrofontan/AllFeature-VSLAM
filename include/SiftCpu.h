@@ -45,13 +45,19 @@ class SiftCpu
                      double edge_threshold = 10.0, double sigma = 1.6);
 
     /// Detect on a grey (CV_8UC1; BGR is converted) image. Descriptors: [N, 128] CV_32F RootSIFT.
-    void detect(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors);
+    /// `mask` (CV_8UC1, the image's size; empty = none): a pixel at 0 cannot hold a keypoint. It is applied before
+    /// the strongest `max_keypoints` are kept, so the budget is filled from the unmasked area (cv::SIFT's own mask
+    /// argument is applied after its budget). A mask of another type or size is ignored.
+    void detect(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors,
+                const cv::Mat& mask = cv::Mat());
 
     /// Wall time of the last detect().
     [[nodiscard]] double last_total_ms() const { return last_total_ms_; }
 
   private:
-    cv::Ptr<cv::SIFT> sift_;
+    cv::Ptr<cv::SIFT> sift_;             // keeps the strongest max_keypoints itself: the path without a mask
+    cv::Ptr<cv::SIFT> sift_unlimited_;   // same parameters, no limit: the masked path limits after the mask
+    int max_keypoints_;
     double last_total_ms_{0.0};
 };
 

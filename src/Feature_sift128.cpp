@@ -27,9 +27,9 @@ void AF_VSLAM::Sift128Extractor::set_budget(const int max_num_features)
 }
 
 void AF_VSLAM::Sift128Extractor::detect_and_compute(const Image& img, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors){
-    sift_->detect(img.grayImg, keypoints, descriptors);
-    // Discard keypoints outside the mask (if one was loaded for this frame). Scale (size) and orientation (angle)
-    // stay on the keypoints: LightGlue-SIFT takes them as inputs.
+    // The mask goes in before the budget is taken; the filter after it only acts on a mask detect() could not use
+    // (type or size). Scale (size) and orientation (angle) stay on the keypoints: LightGlue-SIFT takes them as inputs.
+    sift_->detect(img.grayImg, keypoints, descriptors, img.mask);
     filter_keypoints_by_mask(keypoints, descriptors, img.mask);
 }
 

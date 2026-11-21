@@ -145,4 +145,15 @@ bool LoopClosing::is_finished() const
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+void LoopClosing::release_map_references()
+{
+    current_keyframe_.reset();
+    matched_keyframe_.reset();
+    loop_candidates_.clear();
+    loop_matched_points_.clear();
+    loop_map_points_.clear();
+    std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
+    new_keyframes_.clear();
+}
+
 } // namespace AF_VSLAM

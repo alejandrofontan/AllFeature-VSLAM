@@ -137,6 +137,16 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
         AF_INFO("[Tracking] frame-to-frame stage: reference_keyframe (a descriptor match per frame)");
 }
 
+void Tracking::release_map_references()
+{
+    ref_keyframe_.reset();
+    local_keyframes_.clear();
+    local_points_.clear();
+    current_frame_ = Frame();
+    last_frame_ = Frame();
+    initial_frame_ = Frame();
+}
+
 mat4f Tracking::grab_image(Image &im, const double timestamp)
 {
     // This thread's model runs go ahead of Local Mapping's and Loop Closing's on a shared session

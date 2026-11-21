@@ -253,4 +253,12 @@ void LocalMapping::log_profile()
 #endif
 }
 
+void LocalMapping::release_map_references()
+{
+    current_keyframe_.reset();
+    recent_map_points_.clear();
+    std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
+    new_keyframes_.clear();
+}
+
 } // namespace AF_VSLAM

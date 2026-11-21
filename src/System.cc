@@ -506,11 +506,22 @@ void System::Shutdown()
         if(thread && thread->joinable())
             thread->join();
 
+    // The three threads are over, and each still refers to things that may have been erased
+    // since it last looked: Tracking's local map and frames, Local Mapping's points on probation,
+    // Loop Closing's current keyframe and candidates. Dropped here so that the summary below
+    // counts only what something else holds.
+    tracker->release_map_references();
+    localMapper->release_map_references();
+    loopCloser->release_map_references();
+
     // Every thread has stopped, so these are stable. "alive" counts objects still owned by
     // SOMETHING; "in map" counts those the map still holds. The difference is what outlived
     // being erased from the map -- retention by another owner, not a leak (all ownership is
-    // shared_ptr). Keyframes are the expensive case: each retained one keeps its image, its
-    // descriptors and its grid.
+    // shared_ptr). With the threads' references released above, the keyframe count should be 0:
+    // anything else is an owner worth finding, and each retained keyframe keeps its image, its
+    // descriptors, its grid and every point in its slots. A few tens of points can remain: a
+    // keyframe made from a frame keeps, in its slots, tracked points that were erased before
+    // Local Mapping processed it (seen in 4 of 14 runs, 20 to 54 points in one keyframe).
     {
         const long points_in_map = static_cast<long>(mpMap->map_points_in_map());
         const long keyframes_in_map = static_cast<long>(mpMap->keyframes_in_map());

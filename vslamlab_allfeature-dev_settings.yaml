@@ -31,15 +31,19 @@ features_coreml_units: "CPUAndGPU"                         # CoreML compute unit
 features_precision: "fp32"                            # which export of every learned feature model is loaded: "fp32" (<stem>_fp32.onnx, exact against the PyTorch
                                                      # reference) | "fp16" (<stem>_fp16.onnx: half-precision weights, float32 I/O). Measured 2026-11-21 on CUDA,
                                                      # 739x458: LightGlue 2.3x faster (21 -> 9 ms at 1000x1000 keypoints) with ~1% of the matches different;
-                                                     # SuperPoint / ALIKED 1.2x faster with 3.4% / 1.2% of the keypoints different. What that costs, ETH table_3 mono
-                                                     # with orb32 + aliked128: keyframe ATE 4.5 and 4.7 mm at 61 ms per frame in fp32, 7.2 mm at 46 ms in fp16, and
-                                                     # 7.8 mm at 50 ms with an fp32 detector and the fp16 matcher - the loss and the gain are both the matcher's.
+                                                     # SuperPoint / ALIKED 1.2x faster with 3.4% / 1.2% of the keypoints different. Per frame on ETH table_3 mono
+                                                     # with orb32 + aliked128: 61 ms in fp32, 46 ms in fp16 (50 ms with only the matcher in fp16). Effect on accuracy:
+                                                     # NOT established. fp16 gave keyframe ATE 7.2 and 7.8 mm (2 runs), but 14 fp32 runs of that sequence range from
+                                                     # 4.1 to 9.3 mm (median about 5, standard deviation about 2 mm), so two runs decide nothing; the fp16 and fp32
+                                                     # matchers return the same matches on 525 of 529 per pair. Compare with at least 5 runs per setting.
                                                      # After changing this or `features`, `pixi run setup` (or `pixi run -e export-features export-feature-models`)
                                                      # exports what is missing
 features_superpoint_subpixel: true                   # true (default): SuperPoint keeps only the peaks of its score map (a pixel no lower than its 8 neighbours) and moves
                                                      # each to the score-weighted centre of its 3x3 scores (0.24 px median shift on ETH table_3), sampling the descriptor
-                                                     # there; false: upstream's selection at integer pixels. Keyframe ATE on ETH table_3 (orb32 + superpoint256, 2026-11-21):
-                                                     # 4.5 mm (one run); sub-pixel positions with upstream's selection 5.9 and 6.0 mm; false 7.2 and 7.4 mm
+                                                     # there; false: upstream's selection at integer pixels. Effect on accuracy: NOT established. Keyframe ATE on ETH table_3
+                                                     # (orb32 + superpoint256, fp16, 2026-11-21): true 4.5 mm (1 run); sub-pixel positions with upstream's selection 5.9 and
+                                                     # 6.0 mm (2 runs); false 7.2 and 7.4 mm (2 runs) - but the same sequence varies by a standard deviation of about 2 mm
+                                                     # from run to run (measured with aliked128), so these counts are too few. Compare with at least 5 runs per setting.
 features_static_shapes: true                         # true: load the fixed-shape exports - the matchers' lightglue_<f>_L<L>_<precision>.onnx padded to L keypoints per side
                                                      # (the smallest L that fits each pair; the dynamic file beyond) and, on the Core ML provider only, the detectors'
                                                      # <stem>_<W>x<H>_<precision>.onnx for the frame size (`export-features --static 672x416`: the size the tracker logs,

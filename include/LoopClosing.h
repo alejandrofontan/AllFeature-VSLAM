@@ -138,6 +138,10 @@ public:
     void request_finish();
     bool is_finished() const;
 
+    // Drops what the thread still refers to once it has finished: its current keyframe, its loop candidates and
+    // the points of the last loop it examined. Called by System::Shutdown before the lifetime summary.
+    void release_map_references();
+
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
 protected:

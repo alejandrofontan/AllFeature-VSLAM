@@ -25,9 +25,9 @@
  *   features_superpoint_subpixel true        SuperPoint keeps only the peaks of its score map and places each at the
  *                                            score-weighted centre of the 3x3 scores around it (SuperPointOnnx::
  *                                            set_subpixel). false is upstream's selection at integer pixels.
- *                                            Keyframe ATE on ETH table_3 (orb32 + superpoint256, 2026-11-21):
- *                                            4.5 mm (one run); sub-pixel positions with upstream's selection 5.9
- *                                            and 6.0 mm; false 7.2 and 7.4 mm.
+ *                                            Its effect on accuracy is not established: the runs of 2026-11-21 (1
+ *                                            or 2 per variant, see the settings file) are fewer than the run-to-run
+ *                                            spread of that sequence requires.
  *   features_precision     "fp32"            which export of every model is loaded, named in the file:
  *                                            "fp32" ('<stem>_fp32.onnx', exact against the PyTorch reference) or
  *                                            "fp16" ('<stem>_fp16.onnx': weights and internal tensors in half precision,

@@ -189,6 +189,11 @@ public:
 
     void reset();
 
+    // Drops every reference the tracker holds into the map: its local keyframes and points, its reference
+    // keyframe and its frames. Called by System::Shutdown once tracking is over, so that the lifetime summary
+    // counts only what something else still holds. The tracker must not track again afterwards.
+    void release_map_references();
+
     // Drop the current pose and relocalize on the next frame (System::Track after a pause): an OK tracker
     // becomes LOST; an uninitialized or already lost one is left as it is. Tracking thread only.
     void request_relocalization();

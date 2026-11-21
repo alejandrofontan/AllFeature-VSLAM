@@ -87,11 +87,14 @@ void root_sift_in_place(float* d, int dim)
 
 SiftCpu::SiftCpu(int max_keypoints, int n_octave_layers, double contrast_threshold, double edge_threshold,
                  double sigma)
-    : sift_(cv::SIFT::create(max_keypoints, n_octave_layers, contrast_threshold, edge_threshold, sigma))
+    : sift_(cv::SIFT::create(max_keypoints, n_octave_layers, contrast_threshold, edge_threshold, sigma)),
+      sift_unlimited_(cv::SIFT::create(0, n_octave_layers, contrast_threshold, edge_threshold, sigma)),
+      max_keypoints_(max_keypoints)
 {
 }
 
-void SiftCpu::detect(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors)
+void SiftCpu::detect(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors,
+                     const cv::Mat& mask)
 {
     const auto t_start = Clock::now();
     cv::Mat grey;
@@ -104,7 +107,18 @@ void SiftCpu::detect(const cv::Mat& image, std::vector<cv::KeyPoint>& keypoints,
 
     std::vector<cv::KeyPoint> all;
     cv::Mat all_desc;
-    sift_->detectAndCompute(grey, cv::noArray(), all, all_desc);
+    if (!mask.empty() && mask.type() == CV_8UC1 && mask.size() == grey.size())
+    {
+        // Every keypoint, then the mask, then the strongest max_keypoints (cv::SIFT's rule: by response), and only
+        // then the descriptors, for the keypoints that are kept
+        sift_unlimited_->detect(grey, all);
+        cv::KeyPointsFilter::runByPixelsMask(all, mask);
+        if (max_keypoints_ > 0)
+            cv::KeyPointsFilter::retainBest(all, max_keypoints_);
+        sift_unlimited_->compute(grey, all, all_desc);
+    }
+    else
+        sift_->detectAndCompute(grey, cv::noArray(), all, all_desc);   // the reference path (lightglue/sift.py)
 
     const std::vector<int> keep = filter_dog_point(all);
     const int n = static_cast<int>(keep.size());
