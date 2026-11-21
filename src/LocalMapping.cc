@@ -124,55 +124,75 @@ void LocalMapping::process_keyframe()
         viewer_->set_local_mapping_time_median(map_median(local_mapping_times_));
 }
 
+// Stage 1: make the keyframe part of the map
 void LocalMapping::register_keyframe()
 {
+    // Place recognition descriptor of the keyframe's image
     current_keyframe_->compute_global_descriptor();
 
+    // The keyframe becomes an observer of the points Tracking matched into it
     for(const FeatureType feature_type : current_keyframe_->feature_types)
     {
         const std::vector<Pt> map_points = current_keyframe_->get_map_point_matches(feature_type);
-        for(size_t i = 0; i < map_points.size(); i++)
+        const KeypointIndex num_slots = static_cast<KeypointIndex>(map_points.size());
+        for(KeypointIndex index = 0; index < num_slots; index++)
         {
-            const Pt& map_point = map_points[i];
-            if(!map_point || map_point->is_bad())
+            Pt map_point = map_points[index];
+            if(!map_point)
                 continue;
-            if(!map_point->is_in_keyframe(current_keyframe_))
-                map_point->add_observation(current_keyframe_, i);
-            else
+
+            // Culled or fused since Tracking matched it
+            if(map_point->is_bad())
+            {
+                // Fused into another point: follow the chain to the one that survives
+                Pt survivor = map_point->get_replaced();
+                while(survivor && survivor->is_bad())
+                    survivor = survivor->get_replaced();
+
+                // The survivor takes the slot, unless the keyframe already holds it in another one
+                const bool adopt = survivor && survivor->featureType == feature_type
+                                   && std::find(map_points.begin(), map_points.end(), survivor) == map_points.end();
+                if(!current_keyframe_->replace_map_point_match(map_point, index, adopt ? survivor : nullptr) || !adopt)
+                    continue;
+                map_point = survivor;
+            }
+
+            const KeypointIndex observed_index = map_point->get_index_in_keyframe(current_keyframe_);
+            if(observed_index < 0)
+                map_point->add_observation(current_keyframe_, index);
+            // Already observing through this slot: the point was created with the keyframe, so it is on probation
+            else if(observed_index == index)
                 recent_map_points_.push_back(map_point);
+            // Already observing through another slot: one point cannot hold two keypoints
+            else
+                current_keyframe_->erase_map_point_match(map_point, index);
         }
     }
 
+    // Covisibility links from the shared points
     current_keyframe_->update_connections();
 
+    // Into the map, and into the information kernel
     map_->add_keyframe(current_keyframe_);
-
     if(keyframe_information_)
         keyframe_information_->on_keyframe_processed(current_keyframe_);
 }
 
 void LocalMapping::cull_map_points()
 {
-    // Probation for recently added map points: cull the ones that fail their quality
-    // checks, and graduate survivors out of the probation list after
-    // map_point_culling_probation_age keyframes (they stay in the map for good).
     const int current_id = int(current_keyframe_->keyId);
 
     recent_map_points_.remove_if([&](const Pt& map_point)
     {
         if(map_point->is_bad())
-            return true; // already culled elsewhere: just drop it from the list
+            return true;
 
-        // Visible (in frustum) often but actually matched rarely: unreliable point.
-        // Applies to every feature type uniformly.
         if(map_point->get_found_ratio() < params.map_point_culling_min_found_ratio)
         {
             map_point->set_bad_flag();
             return true;
         }
 
-        // Old enough to have been re-observed, but wasn't
-        // (number_of_observations counts depth-verified observations twice)
         const int age = current_id - int(map_point->first_keyframe_id);
         if(age >= params.map_point_culling_observation_test_age
            && map_point->number_of_observations() <= params.map_point_culling_min_observations)
