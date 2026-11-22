@@ -1,22 +1,22 @@
 #include "LocalMapping.h"
 
-#include <placecell/placecell.h>
-
-#include <chrono>
 #include <cstdlib>
-#include <iomanip>
 #include <iostream>
-#include <limits>
 #include <mutex>
-#include <sstream>
+#include <string>
 #include <thread>
 
-#include "Utils.h"
 #include "afvslam_log.hpp"
+#include "KeyFrame.h"
+#include "MapPoint.h"
 #include "SettingsReader.h"
 
 namespace AF_VSLAM
 {
+
+// ============================================================================
+// Parameters
+// ============================================================================
 
 LocalMappingParameters LocalMapping::params{};
 
@@ -30,18 +30,20 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     std::string removed_method;
     read_if_present("LocalMapping.KeyframeCullingMethod", removed_method);
     if(!removed_method.empty() && removed_method != "information")
-        AF_WARN("[LocalMapping] LocalMapping.KeyframeCullingMethod '" + removed_method + "' is ignored: the information "
-                "culler is the only one (the heuristic culler was removed)");
+        AF_WARN("[LocalMapping] LocalMapping.KeyframeCullingMethod '" << removed_method << "' is ignored: the "
+                << "information culler is the only one (the heuristic culler was removed)");
 
     read_if_present("LocalMapping.InformationKernel", params.information_kernel);
     if(params.information_kernel != "megaloc" && params.information_kernel != "covisibility")
     {
-        AF_ERROR("[LocalMapping] Unknown LocalMapping.InformationKernel '" + params.information_kernel + "' (options: megaloc, covisibility)");
+        AF_ERROR("[LocalMapping] Unknown LocalMapping.InformationKernel '" << params.information_kernel
+                 << "' (options: megaloc, covisibility)");
         exit(-1);
     }
     if(params.information_kernel == "covisibility")
     {
-        params.keyframe_culling_max_unexplained.store(LocalMappingParameters::keyframe_culling_max_unexplained_covisibility);
+        params.keyframe_culling_max_unexplained.store(
+            LocalMappingParameters::keyframe_culling_max_unexplained_covisibility);
         params.keyframe_culling_centred = false;
     }
 
@@ -52,15 +54,25 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     if(params.map_point_culling_observation_test_age > params.map_point_culling_probation_age)
     {
         AF_ERROR("[LocalMapping] LocalMapping.MapPointCullingObservationTestAge ("
-                 + std::to_string(params.map_point_culling_observation_test_age)
-                 + ") must not exceed LocalMapping.MapPointCullingProbationAge ("
-                 + std::to_string(params.map_point_culling_probation_age) + ")");
+                 << params.map_point_culling_observation_test_age
+                 << ") must not exceed LocalMapping.MapPointCullingProbationAge ("
+                 << params.map_point_culling_probation_age << ")");
         exit(-1);
     }
 
     read_if_present("LocalMapping.CreateNewMapPointsKeyframes", params.create_new_map_points_keyframes);
-    read_if_present("LocalMapping.CreateNewMapPointsMinBaselineDepthRatio", params.create_new_map_points_min_baseline_depth_ratio);
+    read_if_present("LocalMapping.CreateNewMapPointsMinBaselineDepthRatio",
+                    params.create_new_map_points_min_baseline_depth_ratio);
+    read_if_present("LocalMapping.CreateNewMapPointsMinParallaxCos", params.create_new_map_points_min_parallax_cos);
     read_if_present("LocalMapping.CreateNewMapPointsMaxParallaxCos", params.create_new_map_points_max_parallax_cos);
+    if(!(params.create_new_map_points_min_parallax_cos < params.create_new_map_points_max_parallax_cos))
+    {
+        AF_ERROR("[LocalMapping] LocalMapping.CreateNewMapPointsMinParallaxCos ("
+                 << params.create_new_map_points_min_parallax_cos
+                 << ") must be below LocalMapping.CreateNewMapPointsMaxParallaxCos ("
+                 << params.create_new_map_points_max_parallax_cos << ")");
+        exit(-1);
+    }
 
     read_if_present("LocalMapping.SearchInNeighborsKeyframes", params.fuse_with_neighbors_keyframes);
     read_if_present("LocalMapping.SearchInNeighborsSecondKeyframes", params.fuse_with_neighbors_second_keyframes);
@@ -68,10 +80,18 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     if(!(params.fuse_descriptor_quantile >= 0.0f && params.fuse_descriptor_quantile <= 1.0f))
     {
         AF_ERROR("[LocalMapping] LocalMapping.FuseDescriptorQuantile must be between 0 and 1, got "
-                 + std::to_string(params.fuse_descriptor_quantile));
+                 << params.fuse_descriptor_quantile);
         exit(-1);
     }
-    read_if_present("Tracking.ViewingCosLimit", params.fuse_viewing_cos_limit);   // shared with Tracking and Loop Closing
+    read_if_present("LocalMapping.FuseEstimateMinSamples", params.fuse_estimate_min_samples);
+    if(params.fuse_estimate_min_samples < 1)
+    {
+        AF_ERROR("[LocalMapping] LocalMapping.FuseEstimateMinSamples must be at least 1, got "
+                 << params.fuse_estimate_min_samples);
+        exit(-1);
+    }
+    // Shared with Tracking and Loop Closing
+    read_if_present("Tracking.ViewingCosLimit", params.fuse_viewing_cos_limit);
 
     float max_unexplained = params.keyframe_culling_max_unexplained.load();
     read_if_present("LocalMapping.KeyframeCullingMaxUnexplained", max_unexplained);
@@ -81,7 +101,8 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("LocalMapping.KeyframeCullingScope", params.keyframe_culling_scope);
     if(params.keyframe_culling_scope != "map" && params.keyframe_culling_scope != "local")
     {
-        AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingScope '" + params.keyframe_culling_scope + "' (options: map, local)");
+        AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingScope '" << params.keyframe_culling_scope
+                 << "' (options: map, local)");
         exit(-1);
     }
     read_if_present("LocalMapping.KeyframeCullingMaxPerCall", params.keyframe_culling_max_per_call);
@@ -89,8 +110,8 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     if(params.keyframe_culling_objective != "unique" && params.keyframe_culling_objective != "minimax"
        && params.keyframe_culling_objective != "total-loss")
     {
-        AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingObjective '" + params.keyframe_culling_objective
-                 + "' (options: unique, minimax, total-loss)");
+        AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingObjective '" << params.keyframe_culling_objective
+                 << "' (options: unique, minimax, total-loss)");
         exit(-1);
     }
     int centred = params.keyframe_culling_centred ? 1 : 0;   // cv::FileStorage has no bool reader
@@ -98,9 +119,9 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     params.keyframe_culling_centred = (centred != 0);
 }
 
-// ------------------------------------------------------------------------------------------
-// Thread synchronization 
-// ------------------------------------------------------------------------------------------
+// ============================================================================
+// Thread synchronization
+// ============================================================================
 
 void LocalMapping::insert_keyframe(const Keyframe& keyframe)
 {
@@ -237,6 +258,10 @@ bool LocalMapping::is_finished() const
     std::lock_guard<std::mutex> lock(finish_mutex_);
     return finished_;
 }
+
+// ============================================================================
+// Shutdown
+// ============================================================================
 
 void LocalMapping::release_map_references()
 {

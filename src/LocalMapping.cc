@@ -1,31 +1,37 @@
 #include "LocalMapping.h"
 
-#include <placecell/placecell.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <iomanip>
 #include <limits>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include <Eigen/Dense>
+#include <placecell/placecell.h>
 
+#include "afvslam_log.hpp"
 #include "ErrorModel.h"
+#include "FeatureFactory.h"
 #include "FeatureMatcher.h"
+#include "KeyFrame.h"
 #include "KeyframeInformation.h"
 #include "LoopClosing.h"
 #include "Map.h"
+#include "MapPoint.h"
 #include "Optimizer.h"
 #include "Report.h"
-#include "Viewer.h"
 #include "Utils.h"
-#include "afvslam_log.hpp"
+#include "Viewer.h"
 
 namespace AF_VSLAM
 {
@@ -106,13 +112,13 @@ void LocalMapping::process_keyframe()
     // Cull recent map points that failed their probation
     cull_map_points();
 
-    // Create map points: triangulation against neighbours, and sensor depth
+    // Create map points: triangulation against neighbors, and sensor depth
     create_new_map_points();
 
-    // The matches against the neighbours are not read again
+    // The matches against the neighbors are not read again
     FeatureMatcher::clear_keyframe_matches(current_keyframe_);
 
-    // Fuse duplicated points with the neighbours
+    // Fuse duplicated points with the neighbors
     fuse_with_neighbors();
 
     // Local bundle adjustment around the keyframe
@@ -129,7 +135,9 @@ void LocalMapping::process_keyframe()
     AF_REPORT("map.points", "", map_->map_points_in_map());
 
     // Iteration time in whole ms
-    local_mapping_times_[int(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count())]++;
+    const double elapsed_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count();
+    local_mapping_times_[static_cast<int>(elapsed_ms)]++;
     if(viewer_)
         viewer_->set_local_mapping_time_median(map_median(local_mapping_times_));
 }
@@ -195,12 +203,12 @@ void LocalMapping::cull_map_points()
     const int current_id = static_cast<int>(current_keyframe_->keyId);
 
     // Report: what became of the points on probation, per feature
-    struct Counts { int points{0}, dead{0}, culled_found_ratio{0}, culled_observations{0}, graduated{0}; };
-    std::map<FeatureType, Counts> counts_by_feature;
+    struct ProbationCounts { int points{0}, dead{0}, culled_found_ratio{0}, culled_observations{0}, graduated{0}; };
+    std::map<FeatureType, ProbationCounts> counts_by_feature;
 
     recent_map_points_.remove_if([current_id, &counts_by_feature](const Pt& map_point)
     {
-        Counts& counts = counts_by_feature[map_point->featureType];
+        ProbationCounts& counts = counts_by_feature[map_point->featureType];
         counts.points++;
 
         // Culled or fused elsewhere meanwhile: it just leaves the list
@@ -294,12 +302,15 @@ std::vector<Keyframe> LocalMapping::select_triangulation_neighbors() const
 namespace
 {
 
+// Degrees in one radian
+constexpr float DEGREES_PER_RADIAN{57.29577951308232f};
+
 // One keyframe as the point-creation code needs it: its pose (read once, under one lock), its intrinsics and
 // its keypoints.
 struct KeyframeView
 {
-    explicit KeyframeView(const Keyframe& keyframe_)
-        : keyframe(keyframe_), pose(keyframe_->get_pose()), calibration(*keyframe_->calibration) {}
+    explicit KeyframeView(Keyframe keyframe_)
+        : keyframe(std::move(keyframe_)), pose(keyframe->get_pose()), calibration(*keyframe->calibration) {}
 
     // The keypoint's viewing ray in the camera frame, at depth 1
     [[nodiscard]] vec3f normalized(const cv::KeyPoint& keypoint) const
@@ -318,7 +329,7 @@ struct KeyframeView
     // residual and threshold: error^T * information * error of the pixel error against Error.Chi2Mono, or, when
     // the keypoint has sensor depth, with the inverse-depth error added, against Error.Chi2RGBD. A point at
     // infinity (a degenerate triangulation) fails here.
-    [[nodiscard]] bool observes(const vec3f& x3D, const cv::KeyPoint& keypoint, size_t index,
+    [[nodiscard]] bool observes(const vec3f& x3D, const cv::KeyPoint& keypoint, KeypointIndex index,
                                 FeatureType feature_type) const
     {
         const float z = pose.Rcw.row(2).dot(x3D) + pose.tcw(2);
@@ -341,16 +352,16 @@ struct KeyframeView
 
     // How much a back-projection from this keypoint's sensor depth is worth: the inverse variance of that depth.
     // depth = 1 / inv_depth, so its variance is sigma2_inv_depth / inv_depth^4.
-    [[nodiscard]] float depth_weight(size_t index, FeatureType feature_type) const
+    [[nodiscard]] float depth_weight(KeypointIndex index, FeatureType feature_type) const
     {
         const KeypointData& data = keyframe->features.at(feature_type);
         const float inv_depth = data.inv_depth[index];
         return inv_depth * inv_depth * inv_depth * inv_depth / data.sigma2_inv_depth[index];
     }
 
-    const Keyframe& keyframe;
+    const Keyframe keyframe;
     const Pose pose;
-    const Calibration& calibration;
+    const Calibration& calibration;   // owned by keyframe
 };
 
 // The point takes the keyframe's free keypoint. Published first, observed only if the slot was won: another
@@ -377,7 +388,7 @@ struct MatchedPair
 {
     const KeyframeView& view1;
     const KeyframeView& view2;
-    size_t index1, index2;
+    KeypointIndex index1, index2;
     const cv::KeyPoint& keypoint1;
     const cv::KeyPoint& keypoint2;
     FeatureType feature_type;
@@ -386,8 +397,8 @@ struct MatchedPair
 // Report: what became of the matched pairs of one feature
 struct PairCounts
 {
-    size_t matched{0}, free{0}, rejected_parallax{0}, rejected_gate{0}, triangulated{0}, depth{0};
-    size_t same_point{0}, one_point{0}, two_points{0}, observed{0}, merged{0};   // the pairs that are not free
+    int matched{0}, free{0}, rejected_parallax{0}, rejected_gate{0}, triangulated{0}, depth{0};
+    int same_point{0}, one_point{0}, two_points{0}, observed{0}, merged{0};   // the pairs that are not free
     std::vector<float> parallax_cos;   // of the triangulated points
 };
 
@@ -419,10 +430,10 @@ void fuse_matched_pair(const MatchedPair& pair, const Pt& pt1, const Pt& pt2, Pa
     const Pt& pt = pt1 ? pt1 : pt2;
     const KeyframeView& view = pt1 ? pair.view2 : pair.view1;
     const cv::KeyPoint& keypoint = pt1 ? pair.keypoint2 : pair.keypoint1;
-    const size_t index = pt1 ? pair.index2 : pair.index1;
+    const KeypointIndex index = pt1 ? pair.index2 : pair.index1;
     if(!pt->is_bad() && !pt->is_in_keyframe(view.keyframe)
        && view.observes(pt->get_world_pos(), keypoint, index, pair.feature_type)
-       && observe(view.keyframe, pt, KeypointIndex(index)))
+       && observe(view.keyframe, pt, index))
         counts.observed++;
 }
 
@@ -459,7 +470,8 @@ Pt create_point_from_pair(const MatchedPair& pair, Map& map, PairCounts& counts)
         const vec3f ray1 = view1.pose.Rwc * xn1;
         const vec3f ray2 = view2.pose.Rwc * xn2;
         cos_parallax = ray1.dot(ray2) / (ray1.norm() * ray2.norm());
-        if(!(cos_parallax > 0 && cos_parallax < LocalMapping::params.create_new_map_points_max_parallax_cos))
+        if(!(cos_parallax > LocalMapping::params.create_new_map_points_min_parallax_cos
+             && cos_parallax < LocalMapping::params.create_new_map_points_max_parallax_cos))
         {
             counts.rejected_parallax++;
             return nullptr;
@@ -486,8 +498,8 @@ Pt create_point_from_pair(const MatchedPair& pair, Map& map, PairCounts& counts)
         return nullptr;
     }
 
-    const Pt map_point = map.create_monocular_map_point(x3D, view1.keyframe, KeypointIndex(pair.index1),
-                                                        view2.keyframe, KeypointIndex(pair.index2), pair.feature_type);
+    const Pt map_point = map.create_monocular_map_point(x3D, view1.keyframe, pair.index1,
+                                                        view2.keyframe, pair.index2, pair.feature_type);
     if(!map_point)
         return nullptr;   // another thread took a slot meanwhile
     if(have_depth1 || have_depth2)
@@ -502,12 +514,12 @@ Pt create_point_from_pair(const MatchedPair& pair, Map& map, PairCounts& counts)
 
 }
 
-// Stage 3: new map points, and fusion, from the matches against the neighbours
+// Stage 3: new map points, and fusion, from the matches against the neighbors
 void LocalMapping::create_new_map_points()
 {
     AF_REPORT_SCOPE();
 
-    // Neighbours with enough baseline, matched against the keyframe all at once
+    // Neighbors with enough baseline, matched against the keyframe all at once
     const std::vector<Keyframe> neighbors = select_triangulation_neighbors();
     matcher_->match_keyframe_to_keyframes(current_keyframe_, neighbors, current_keyframe_->feature_types);
 
@@ -525,11 +537,14 @@ void LocalMapping::create_new_map_points()
             const auto& keypoints1 = current_keyframe_->features.at(feature_type).keypoints;
             const auto& keypoints2 = neighbor->features.at(feature_type).keypoints;
             PairCounts& counts = counts_by_feature[feature_type];
-            counts.matched += pairs.size();
+            counts.matched += static_cast<int>(pairs.size());
 
-            for(const auto& [index1, index2] : pairs)
+            for(const auto& [match1, match2] : pairs)
             {
-                const MatchedPair pair{view1, view2, index1, index2, keypoints1[index1], keypoints2[index2], feature_type};
+                const KeypointIndex index1 = static_cast<KeypointIndex>(match1);
+                const KeypointIndex index2 = static_cast<KeypointIndex>(match2);
+                const MatchedPair pair{view1, view2, index1, index2, keypoints1[match1], keypoints2[match2],
+                                       feature_type};
 
                 // A point on either side: fusion. Two free keypoints: a new point, on probation.
                 const Pt pt1 = current_keyframe_->get_map_point(index1, feature_type);
@@ -563,9 +578,11 @@ void LocalMapping::create_new_map_points()
         if(!counts.parallax_cos.empty())
         {
             // Median parallax of the triangulated points, in degrees
-            const auto middle = counts.parallax_cos.begin() + static_cast<std::ptrdiff_t>(counts.parallax_cos.size() / 2);
-            std::nth_element(counts.parallax_cos.begin(), middle, counts.parallax_cos.end());
-            AF_REPORT("created.parallax_deg", feature, std::acos(std::clamp(*middle, -1.0f, 1.0f)) * 180.0f / float(M_PI));
+            auto& parallax_cos = counts.parallax_cos;
+            const auto middle = parallax_cos.begin() + static_cast<std::ptrdiff_t>(parallax_cos.size() / 2);
+            std::nth_element(parallax_cos.begin(), middle, parallax_cos.end());
+            AF_REPORT("created.parallax_deg", feature,
+                      std::acos(std::clamp(*middle, -1.0f, 1.0f)) * DEGREES_PER_RADIAN);
         }
     }
 
@@ -573,7 +590,7 @@ void LocalMapping::create_new_map_points()
     create_depth_seeded_points();
 }
 
-// Points from sensor depth for the keypoints no neighbour matched (RGB-D only)
+// Points from sensor depth for the keypoints no neighbor matched (RGB-D only)
 void LocalMapping::create_depth_seeded_points()
 {
     const KeyframeView view(current_keyframe_);
@@ -612,7 +629,7 @@ void LocalMapping::create_depth_seeded_points()
     }
 }
 
-// Stage 4: fuse duplicated points with the neighbours, by projection
+// Stage 4: fuse duplicated points with the neighbors, by projection
 void LocalMapping::fuse_with_neighbors()
 {
     AF_REPORT_SCOPE();
@@ -621,7 +638,9 @@ void LocalMapping::fuse_with_neighbors()
     std::vector<Keyframe> targets;
     std::unordered_set<KeyframeId> target_ids;
     [[maybe_unused]] size_t num_first = 0;   // for the report
-    for(const Keyframe& neighbor : current_keyframe_->get_best_covisibility_keyframes(params.fuse_with_neighbors_keyframes))
+    const std::vector<Keyframe> neighbors =
+        current_keyframe_->get_best_covisibility_keyframes(params.fuse_with_neighbors_keyframes);
+    for(const Keyframe& neighbor : neighbors)
     {
         if(neighbor->is_bad())
             continue;
@@ -630,9 +649,12 @@ void LocalMapping::fuse_with_neighbors()
             continue;   // already a target, through an earlier neighbor: its own neighbors are not added
         targets.push_back(neighbor);
 
-        for(const Keyframe& second : neighbor->get_best_covisibility_keyframes(params.fuse_with_neighbors_second_keyframes))
+        const std::vector<Keyframe> seconds =
+            neighbor->get_best_covisibility_keyframes(params.fuse_with_neighbors_second_keyframes);
+        for(const Keyframe& second : seconds)
         {
-            if(second->is_bad() || second->keyId == current_keyframe_->keyId || !target_ids.insert(second->keyId).second)
+            if(second->is_bad() || second->keyId == current_keyframe_->keyId
+               || !target_ids.insert(second->keyId).second)
                 continue;
             targets.push_back(second);
         }
@@ -668,7 +690,8 @@ void LocalMapping::fuse_with_neighbors()
                 candidates.push_back(candidate);
             }
         }
-        [[maybe_unused]] const FuseCounts into_current = fuse_into_keyframe(current_keyframe_, candidates, feature_type);
+        [[maybe_unused]] const FuseCounts into_current =
+            fuse_into_keyframe(current_keyframe_, candidates, feature_type);
 
         const std::string& feature = get_feature(feature_type).get_feature_name();
         AF_REPORT("into_targets.not_visible", feature, into_targets.not_visible);
@@ -716,7 +739,7 @@ void LocalMapping::estimate_fuse_max_descriptor_distance(const FeatureType featu
     // Too few samples to trust: the previous estimate stays
     const std::string& feature = get_feature(feature_type).get_feature_name();
     AF_REPORT("descriptor.samples", feature, distances.size());
-    if(distances.size() < FUSE_ESTIMATE_MIN_SAMPLES)
+    if(distances.size() < static_cast<size_t>(params.fuse_estimate_min_samples))
         return;
 
     // The quantile becomes the map's limit, read by this thread's fusion and by Loop Closing's
@@ -789,7 +812,8 @@ LocalMapping::FuseCounts LocalMapping::fuse_into_keyframe(const Keyframe& keyfra
 void LocalMapping::local_bundle_adjustment()
 {
     AF_REPORT_SCOPE();
-    [[maybe_unused]] const Optimizer::LocalBaCounts counts = Optimizer::local_bundle_adjustment(current_keyframe_, map_);
+    [[maybe_unused]] const Optimizer::LocalBaCounts counts =
+        Optimizer::local_bundle_adjustment(current_keyframe_, map_);
     AF_REPORT("keyframes.local", "", counts.local_keyframes);
     AF_REPORT("keyframes.fixed", "", counts.fixed_keyframes);
     AF_REPORT("points", "", counts.points);
@@ -803,8 +827,10 @@ void LocalMapping::cull_keyframes()
     AF_REPORT_SCOPE();
 
     // No kernel: nothing is culled (warned once)
-    if(!keyframe_information_ || keyframe_information_->place_cell().size() == 0){
-        if(!warned_no_kernel_){
+    if(!keyframe_information_ || keyframe_information_->place_cell().size() == 0)
+    {
+        if(!warned_no_kernel_)
+        {
             AF_WARN("[LocalMapping] no keyframe information kernel (InformationKernel: megaloc needs a build with "
                     "MegaLoc): keyframes are never culled; set InformationKernel: covisibility");
             warned_no_kernel_ = true;
@@ -848,14 +874,16 @@ void LocalMapping::cull_keyframes()
     // Local scope: the current keyframe and its covisibles only
     const bool local_scope = (params.keyframe_culling_scope == "local");
     std::vector<placecell::PlaceCell::ExternalId> window;
-    if(local_scope){
+    if(local_scope)
+    {
         window.push_back(current_keyframe_->frame_id);
         for(const Keyframe& keyframe : current_keyframe_->get_covisible_keyframes())
             window.push_back(keyframe->frame_id);
     }
 
     // A cull pinned by Loop Closing is refused, and placecell moves on to the next candidate
-    const auto try_cull = [&keyframe_by_frame_id](const placecell::PlaceCell::ExternalId id) -> bool {
+    const auto try_cull = [&keyframe_by_frame_id](const placecell::PlaceCell::ExternalId id) -> bool
+    {
         const auto it = keyframe_by_frame_id.find(static_cast<FrameId>(id));
         if(it == keyframe_by_frame_id.end())
             return false;
@@ -874,7 +902,8 @@ void LocalMapping::cull_keyframes()
     AF_REPORT("max_per_call_reached", "", report.reached_max_per_call ? 1 : 0);
 
     // Keyframes ever inserted that the alive ones no longer explain within tau: warned whenever the count changes
-    if(report.history_over_budget != last_over_budget_){
+    if(report.history_over_budget != last_over_budget_)
+    {
         if(report.history_over_budget > 0)
             AF_WARN("[LocalMapping] cull_keyframes: " << report.history_over_budget << " keyframes ever inserted are "
                     << "more than tau unexplained (worst " << std::fixed << std::setprecision(3) << report.worst_history
