@@ -306,20 +306,38 @@ struct KeyframeView
         return pose.Rwc * (normalized_keypoint / inv_depth) + pose.twc;
     }
 
-    // True when the world point lies in front of the camera and reprojects onto the keypoint within the
-    // chi-square gate of the keypoint's own 2x2 covariance: error^T * information * error, the same quantity the
-    // optimizer and the matcher's gate test. For a keypoint with an isotropic sigma this is error^2 / sigma^2.
+    // True when the world point lies in front of the camera and agrees with the keypoint, by the optimizer's own
+    // residual and threshold: error^T * information * error of the pixel error against Error.Chi2Mono, or, when
+    // the keypoint has sensor depth, with the inverse-depth error added, against Error.Chi2RGBD. A point at
+    // infinity (a degenerate triangulation) fails here.
     [[nodiscard]] bool observes(const vec3f& x3D, const cv::KeyPoint& keypoint, size_t index,
                                 FeatureType feature_type) const
     {
         const float z = pose.Rcw.row(2).dot(x3D) + pose.tcw(2);
-        if(z <= 0)
+        if(!(z > 0))
             return false;
         const float u = calibration.fx * (pose.Rcw.row(0).dot(x3D) + pose.tcw(0)) / z + calibration.cx;
         const float v = calibration.fy * (pose.Rcw.row(1).dot(x3D) + pose.tcw(1)) / z + calibration.cy;
         const vec2f error{u - keypoint.pt.x, v - keypoint.pt.y};
-        return error.dot(keyframe->features.get_information_2d(index, feature_type) * error)
-               <= ErrorModel::params.chi2_mono;
+        const float chi2_pixel = error.dot(keyframe->features.get_information_2d(index, feature_type) * error);
+
+        const KeypointData& data = keyframe->features.at(feature_type);
+        const float inv_depth = data.inv_depth[index];
+        if(!(inv_depth > 0.0f))
+            return chi2_pixel <= ErrorModel::params.chi2_mono;
+
+        const float error_inv_depth = inv_depth - 1.0f / z;
+        return chi2_pixel + error_inv_depth * error_inv_depth / data.sigma2_inv_depth[index]
+               <= ErrorModel::params.chi2_rgbd;
+    }
+
+    // How much a back-projection from this keypoint's sensor depth is worth: the inverse variance of that depth.
+    // depth = 1 / inv_depth, so its variance is sigma2_inv_depth / inv_depth^4.
+    [[nodiscard]] float depth_weight(size_t index, FeatureType feature_type) const
+    {
+        const KeypointData& data = keyframe->features.at(feature_type);
+        const float inv_depth = data.inv_depth[index];
+        return inv_depth * inv_depth * inv_depth * inv_depth / data.sigma2_inv_depth[index];
     }
 
     const Keyframe& keyframe;
@@ -327,119 +345,228 @@ struct KeyframeView
     const Calibration& calibration;
 };
 
+// The point takes the keyframe's free keypoint. Published first, observed only if the slot was won: another
+// thread can fill it meanwhile.
+bool observe(const Keyframe& keyframe, const Pt& pt, KeypointIndex index)
+{
+    if(!keyframe->add_map_point(pt, index))
+        return false;
+    pt->add_observation(keyframe, index);
+    return true;
 }
 
+// Two points that are one: the one with more observations survives
+void merge(const Pt& a, const Pt& b)
+{
+    if(a->number_of_observations() > b->number_of_observations())
+        b->replace(a);
+    else
+        a->replace(b);
+}
+
+// One matched pair of keypoints: keypoint index1 of view1's keyframe and index2 of view2's
+struct MatchedPair
+{
+    const KeyframeView& view1;
+    const KeyframeView& view2;
+    size_t index1, index2;
+    const cv::KeyPoint& keypoint1;
+    const cv::KeyPoint& keypoint2;
+    FeatureType feature_type;
+};
+
+// Report: what became of the matched pairs of one feature
+struct PairCounts
+{
+    size_t matched{0}, free{0}, rejected_parallax{0}, rejected_gate{0}, triangulated{0}, depth{0};
+    size_t same_point{0}, one_point{0}, two_points{0}, observed{0}, merged{0};   // the pairs that are not free
+    std::vector<float> parallax_cos;   // of the triangulated points
+};
+
+// A pair with a point on either side is a fusion statement, not a new point
+void fuse_matched_pair(const MatchedPair& pair, const Pt& pt1, const Pt& pt2, PairCounts& counts)
+{
+    if(pt1 == pt2)
+    {
+        counts.same_point++;
+        return;
+    }
+
+    // Two points matched to each other: one point, if each reprojects onto the other's keypoint
+    if(pt1 && pt2)
+    {
+        counts.two_points++;
+        if(!pt1->is_bad() && !pt2->is_bad()
+           && pair.view2.observes(pt1->get_world_pos(), pair.keypoint2, pair.index2, pair.feature_type)
+           && pair.view1.observes(pt2->get_world_pos(), pair.keypoint1, pair.index1, pair.feature_type))
+        {
+            merge(pt1, pt2);
+            counts.merged++;
+        }
+        return;
+    }
+
+    // A point matched to a free keypoint: it is seen there too, if it reprojects onto it
+    counts.one_point++;
+    const Pt& pt = pt1 ? pt1 : pt2;
+    const KeyframeView& view = pt1 ? pair.view2 : pair.view1;
+    const cv::KeyPoint& keypoint = pt1 ? pair.keypoint2 : pair.keypoint1;
+    const size_t index = pt1 ? pair.index2 : pair.index1;
+    if(!pt->is_bad() && !pt->is_in_keyframe(view.keyframe)
+       && view.observes(pt->get_world_pos(), keypoint, index, pair.feature_type)
+       && observe(view.keyframe, pt, KeypointIndex(index)))
+        counts.observed++;
+}
+
+// Two free keypoints: a new point, placed from sensor depth when there is any. Null when the pair gives none.
+Pt create_point_from_pair(const MatchedPair& pair, Map& map, PairCounts& counts)
+{
+    const KeyframeView& view1 = pair.view1;
+    const KeyframeView& view2 = pair.view2;
+    const vec3f xn1 = view1.normalized(pair.keypoint1);
+    const vec3f xn2 = view2.normalized(pair.keypoint2);
+    const float inv_depth1 = view1.keyframe->features.at(pair.feature_type).inv_depth[pair.index1];
+    const float inv_depth2 = view2.keyframe->features.at(pair.feature_type).inv_depth[pair.index2];
+    const bool have_depth1 = inv_depth1 > 0.0f;
+    const bool have_depth2 = inv_depth2 > 0.0f;
+
+    vec3f x3D;
+    float cos_parallax = 1.0f;   // of the two rays; set when the point is triangulated
+    if(have_depth1 && have_depth2)
+    {
+        // Two depth readings: their mean, each weighted by how certain it is. The gates below reject
+        // the pair when the result disagrees with either reading.
+        const float w1 = view1.depth_weight(pair.index1, pair.feature_type);
+        const float w2 = view2.depth_weight(pair.index2, pair.feature_type);
+        x3D = (w1 * view1.back_project(xn1, inv_depth1) + w2 * view2.back_project(xn2, inv_depth2)) / (w1 + w2);
+    }
+    // One depth reading: its back-projection
+    else if(have_depth1)
+        x3D = view1.back_project(xn1, inv_depth1);
+    else if(have_depth2)
+        x3D = view2.back_project(xn2, inv_depth2);
+    // No depth: two-view triangulation, if the rays have enough parallax
+    else
+    {
+        const vec3f ray1 = view1.pose.Rwc * xn1;
+        const vec3f ray2 = view2.pose.Rwc * xn2;
+        cos_parallax = ray1.dot(ray2) / (ray1.norm() * ray2.norm());
+        if(!(cos_parallax > 0 && cos_parallax < LocalMapping::params.create_new_map_points_max_parallax_cos))
+        {
+            counts.rejected_parallax++;
+            return nullptr;
+        }
+
+        const mat4f& Tcw1 = view1.pose.Tcw;
+        const mat4f& Tcw2 = view2.pose.Tcw;
+        Eigen::Matrix<float, 4, 4> A;
+        A.row(0) = xn1(0) * Tcw1.row(2) - Tcw1.row(0);
+        A.row(1) = xn1(1) * Tcw1.row(2) - Tcw1.row(1);
+        A.row(2) = xn2(0) * Tcw2.row(2) - Tcw2.row(0);
+        A.row(3) = xn2(1) * Tcw2.row(2) - Tcw2.row(1);
+
+        const Eigen::JacobiSVD<Eigen::Matrix<float, 4, 4>> svd(A, Eigen::ComputeFullV);
+        const Eigen::Vector4f x_h = svd.matrixV().col(3);
+        x3D = x_h.head<3>() / x_h(3);
+    }
+
+    // In front of both cameras and inside both keypoints' gates
+    if(!view1.observes(x3D, pair.keypoint1, pair.index1, pair.feature_type)
+       || !view2.observes(x3D, pair.keypoint2, pair.index2, pair.feature_type))
+    {
+        counts.rejected_gate++;
+        return nullptr;
+    }
+
+    const Pt map_point = map.create_monocular_map_point(x3D, view1.keyframe, KeypointIndex(pair.index1),
+                                                        view2.keyframe, KeypointIndex(pair.index2), pair.feature_type);
+    if(!map_point)
+        return nullptr;   // another thread took a slot meanwhile
+    if(have_depth1 || have_depth2)
+        counts.depth++;
+    else
+    {
+        counts.triangulated++;
+        counts.parallax_cos.push_back(cos_parallax);
+    }
+    return map_point;
+}
+
+}
+
+// Stage 3: new map points, and fusion, from the matches against the neighbours
 void LocalMapping::create_new_map_points()
 {
-    const std::vector<Keyframe> neighbors = select_triangulation_neighbors();
+    AF_REPORT_SCOPE();
 
-    // Match the new keyframe against all its neighbors at once; the loop below reads the pairs back
+    // Neighbours with enough baseline, matched against the keyframe all at once
+    const std::vector<Keyframe> neighbors = select_triangulation_neighbors();
     matcher_->match_keyframe_to_keyframes(current_keyframe_, neighbors, current_keyframe_->feature_types);
 
     const KeyframeView view1(current_keyframe_);
+    std::map<FeatureType, PairCounts> counts_by_feature;
 
-    // For each neighbor, place each matched keypoint pair in 3D: from sensor depth when either
-    // view has it (cross-validated by the reprojection gates below), by two-view triangulation
-    // otherwise.
     for(const Keyframe& neighbor : neighbors)
     {
         const KeyframeView view2(neighbor);
-        const mat4f& Tcw1 = view1.pose.Tcw;
-        const mat4f& Tcw2 = view2.pose.Tcw;
-
         const std::map<FeatureType, std::vector<std::pair<size_t, size_t>>> matched_indices =
             FeatureMatcher::get_keyframe_matches(current_keyframe_, neighbor);
 
         for(const auto& [feature_type, pairs] : matched_indices)
         {
-            const auto& inv_depth1_ft = current_keyframe_->features.at(feature_type).inv_depth;
-            const auto& inv_depth2_ft = neighbor->features.at(feature_type).inv_depth;
-            const auto& keypoints1_ft = current_keyframe_->features.at(feature_type).keypoints;
-            const auto& keypoints2_ft = neighbor->features.at(feature_type).keypoints;
+            const auto& keypoints1 = current_keyframe_->features.at(feature_type).keypoints;
+            const auto& keypoints2 = neighbor->features.at(feature_type).keypoints;
+            PairCounts& counts = counts_by_feature[feature_type];
+            counts.matched += pairs.size();
 
-            for(const auto& [idx1, idx2] : pairs)
+            for(const auto& [index1, index2] : pairs)
             {
-                // Only a pair where neither keypoint has a map point yet is a candidate to triangulate
-                if(current_keyframe_->get_map_point(idx1, feature_type) || neighbor->get_map_point(idx2, feature_type))
+                const MatchedPair pair{view1, view2, index1, index2, keypoints1[index1], keypoints2[index2], feature_type};
+
+                // A point on either side: fusion. Two free keypoints: a new point, on probation.
+                const Pt pt1 = current_keyframe_->get_map_point(index1, feature_type);
+                const Pt pt2 = neighbor->get_map_point(index2, feature_type);
+                if(pt1 || pt2)
+                {
+                    fuse_matched_pair(pair, pt1, pt2, counts);
                     continue;
-
-                const cv::KeyPoint& kp1 = keypoints1_ft[idx1];
-                const cv::KeyPoint& kp2 = keypoints2_ft[idx2];
-
-                // Viewing rays and their parallax
-                const vec3f xn1 = view1.normalized(kp1);
-                const vec3f xn2 = view2.normalized(kp2);
-                const vec3f ray1 = view1.pose.Rwc * xn1;
-                const vec3f ray2 = view2.pose.Rwc * xn2;
-                const float cos_parallax = ray1.dot(ray2) / (ray1.norm() * ray2.norm());
-
-                const float inv_depth1 = inv_depth1_ft[idx1];
-                const float inv_depth2 = inv_depth2_ft[idx2];
-                const bool have_depth1 = inv_depth1 > 0.0f;
-                const bool have_depth2 = inv_depth2 > 0.0f;
-
-                vec3f x3D;
-                if(have_depth1 && have_depth2)
-                {
-                    // Two independent sensor depth readings of the same point: back-project
-                    // each from its own keyframe and average. The reprojection gates below
-                    // then validate agreement between them in both views.
-                    x3D = 0.5f * (view1.back_project(xn1, inv_depth1) + view2.back_project(xn2, inv_depth2));
                 }
-                else if(have_depth1)
-                {
-                    // Back-project from this keyframe's own measured depth: no second-view
-                    // triangulation, no parallax requirement. The reprojection gate against
-                    // the neighbor below still cross-validates it.
-                    x3D = view1.back_project(xn1, inv_depth1);
-                }
-                else if(have_depth2)
-                {
-                    // Symmetric case: back-project from the neighbor's depth,
-                    // cross-validated against this keyframe
-                    x3D = view2.back_project(xn2, inv_depth2);
-                }
-                else if(cos_parallax > 0 && cos_parallax < params.create_new_map_points_max_parallax_cos)
-                {
-                    // No sensor depth on either side: linear two-view triangulation (SVD)
-                    Eigen::Matrix<float, 4, 4> A;
-                    A.row(0) = xn1(0) * Tcw1.row(2) - Tcw1.row(0);
-                    A.row(1) = xn1(1) * Tcw1.row(2) - Tcw1.row(1);
-                    A.row(2) = xn2(0) * Tcw2.row(2) - Tcw2.row(0);
-                    A.row(3) = xn2(1) * Tcw2.row(2) - Tcw2.row(1);
-
-                    const Eigen::JacobiSVD<Eigen::Matrix<float, 4, 4>> svd(A, Eigen::ComputeFullV);
-                    const Eigen::Vector4f x_h = svd.matrixV().col(3);
-                    if(std::abs(x_h(3)) < HOMOGENEOUS_W_EPSILON)
-                        continue;   // degenerate solve
-                    x3D = x_h.head<3>() / x_h(3);
-                }
-                else
-                    continue; // no depth, and too little parallax to triangulate
-
-                // In front of both cameras, and within the reprojection gate of both keypoints
-                if(!view1.observes(x3D, kp1, idx1, feature_type) || !view2.observes(x3D, kp2, idx2, feature_type))
-                    continue;
-
-                const Pt map_point = map_->create_monocular_map_point(
-                    x3D, current_keyframe_, KeypointIndex(idx1), neighbor, KeypointIndex(idx2), feature_type);
-                if(!map_point)
-                    continue;   // a slot was taken between the emptiness check and the write
-                recent_map_points_.push_back(map_point);
+                counts.free++;
+                if(const Pt map_point = create_point_from_pair(pair, *map_, counts))
+                    recent_map_points_.push_back(map_point);
             }
         }
     }
 
+    for([[maybe_unused]] auto& [feature_type, counts] : counts_by_feature)
+    {
+        const std::string& feature = get_feature(feature_type).get_feature_name();
+        AF_REPORT("pairs.matched", feature, counts.matched);
+        AF_REPORT("pairs.free", feature, counts.free);
+        AF_REPORT("pairs.same_point", feature, counts.same_point);
+        AF_REPORT("pairs.one_point", feature, counts.one_point);
+        AF_REPORT("pairs.two_points", feature, counts.two_points);
+        AF_REPORT("fused.observed", feature, counts.observed);
+        AF_REPORT("fused.merged", feature, counts.merged);
+        AF_REPORT("rejected.parallax", feature, counts.rejected_parallax);
+        AF_REPORT("rejected.gate", feature, counts.rejected_gate);
+        AF_REPORT("created.triangulated", feature, counts.triangulated);
+        AF_REPORT("created.depth", feature, counts.depth);
+        if(!counts.parallax_cos.empty())
+        {
+            // Median parallax of the triangulated points, in degrees
+            const auto middle = counts.parallax_cos.begin() + static_cast<std::ptrdiff_t>(counts.parallax_cos.size() / 2);
+            std::nth_element(counts.parallax_cos.begin(), middle, counts.parallax_cos.end());
+            AF_REPORT("created.parallax_deg", feature, std::acos(std::clamp(*middle, -1.0f, 1.0f)) * 180.0f / float(M_PI));
+        }
+    }
+
+    // Keypoints with sensor depth and still no point
     create_depth_seeded_points();
 }
 
 void LocalMapping::create_depth_seeded_points()
 {
-    // Back-project still-unmatched keypoints straight from the keyframe's own sensor depth.
-    // Triangulation only creates points for keypoints with a 2D feature match in a covisible
-    // neighbor -- a keypoint with a valid depth reading but no such match (textureless
-    // region, repeated pattern, fast motion) is exactly where sensor depth helps most.
-    // Same trust policy as the triangulation depth branches: any inv_depth > 0, no range gate.
     const KeyframeView view(current_keyframe_);
 
     for(const FeatureType feature_type : current_keyframe_->feature_types)
@@ -449,14 +576,14 @@ void LocalMapping::create_depth_seeded_points()
         for(size_t idx = 0; idx < inv_depth.size(); idx++)
         {
             if(inv_depth[idx] <= 0.0f)
-                continue; // no valid sensor depth at this keypoint
+                continue;
             if(current_keyframe_->get_map_point(idx, feature_type))
-                continue; // already has a map point (from tracking, or the triangulation loop)
+                continue;
 
             const Pt map_point = map_->create_map_point(view.back_project(view.normalized(keypoints[idx]), inv_depth[idx]),
                                                         current_keyframe_, KeypointIndex(idx), feature_type);
             if(!map_point)
-                continue;   // a slot was taken between the emptiness check and the write
+                continue;
             recent_map_points_.push_back(map_point);
         }
     }
@@ -611,15 +738,12 @@ void LocalMapping::fuse_into_keyframe(const Keyframe& keyframe, const std::vecto
         {
             if(existing->is_bad())
                 continue;
-            if(existing->number_of_observations() > pt->number_of_observations())
-                pt->replace(existing);
-            else
-                existing->replace(pt);
+            merge(existing, pt);
         }
         // Publish first, observe only if the slot was won: another thread can fill it after
         // get_map_point. pt already has a descriptor, so publishing before observing is safe.
-        else if(keyframe->add_map_point(pt, index))
-            pt->add_observation(keyframe, index);
+        else
+            observe(keyframe, pt, index);
     }
 }
 

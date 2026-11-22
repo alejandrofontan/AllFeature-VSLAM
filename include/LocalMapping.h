@@ -92,8 +92,6 @@ public:
 
 private:
 
-    static constexpr float HOMOGENEOUS_W_EPSILON{1e-12f};
-
     static constexpr std::chrono::milliseconds IDLE_POLL_PERIOD{3};
 
     static constexpr const char* KEYFRAME_CULLING_METHOD{"gram-greedy"};

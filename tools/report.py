@@ -88,7 +88,7 @@ def aggregation_of(key):
         return "min", min
     if last.endswith("_max") or last == "max":
         return "max", max
-    if any(word in last for word in ("ratio", "sigma", "nu", "model", "frame_id", "median", "mean", "q95")):
+    if any(word in last for word in ("ratio", "sigma", "nu", "model", "frame_id", "median", "mean", "q95", "deg")):
         return "mean", lambda values: sum(values) / len(values)
     return "sum", sum
 

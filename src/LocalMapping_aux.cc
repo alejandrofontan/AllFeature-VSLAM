@@ -27,16 +27,12 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
         read_setting_if_present(fSettings, key, field);
     };
 
-    // Removed with the heuristic culler: say so once instead of ignoring an old settings file silently
     std::string removed_method;
     read_if_present("LocalMapping.KeyframeCullingMethod", removed_method);
     if(!removed_method.empty() && removed_method != "information")
         AF_WARN("[LocalMapping] LocalMapping.KeyframeCullingMethod '" + removed_method + "' is ignored: the information "
                 "culler is the only one (the heuristic culler was removed)");
 
-    // Information kernel first: tau and the centring take a per-kernel default below
-    // when their keys are absent (the covisibility cosine has no common-mode floor and
-    // lives on a different scale than MegaLoc's)
     read_if_present("LocalMapping.InformationKernel", params.information_kernel);
     if(params.information_kernel != "megaloc" && params.information_kernel != "covisibility")
     {
@@ -55,7 +51,6 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("LocalMapping.MapPointCullingProbationAge", params.map_point_culling_probation_age);
     if(params.map_point_culling_observation_test_age > params.map_point_culling_probation_age)
     {
-        // A point would leave probation before it is ever tested
         AF_ERROR("[LocalMapping] LocalMapping.MapPointCullingObservationTestAge ("
                  + std::to_string(params.map_point_culling_observation_test_age)
                  + ") must not exceed LocalMapping.MapPointCullingProbationAge ("
@@ -88,7 +83,6 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     if(params.keyframe_culling_objective != "unique" && params.keyframe_culling_objective != "minimax"
        && params.keyframe_culling_objective != "total-loss")
     {
-        // Stop here rather than let placecell throw std::invalid_argument inside the mapping thread
         AF_ERROR("[LocalMapping] Unknown LocalMapping.KeyframeCullingObjective '" + params.keyframe_culling_objective
                  + "' (options: unique, minimax, total-loss)");
         exit(-1);
@@ -146,14 +140,10 @@ bool LocalMapping::is_stop_requested() const
 
 void LocalMapping::release()
 {
-    // scoped_lock (deadlock-free acquisition): set_finished takes the same two mutexes in
-    // the opposite order from the Local Mapping thread.
     std::scoped_lock lock(stop_mutex_, finish_mutex_);
     if(finished_)
         return;
 
-    // The queue is left alone: it is empty here (run() stops only on an empty queue, and Tracking cannot insert
-    // while the thread is stopped), and a keyframe in it would already be Tracking's reference
     stopped_ = false;
     stop_requested_ = false;
     AF_INFO("[LocalMapping] released");
@@ -188,7 +178,7 @@ void LocalMapping::request_reset()
         std::lock_guard<std::mutex> lock(reset_mutex_);
         reset_requested_ = true;
     }
-    // Block until the Local Mapping thread has performed the reset (reset_if_requested)
+
     while(is_reset_requested())
         std::this_thread::sleep_for(IDLE_POLL_PERIOD);
 }
@@ -210,8 +200,6 @@ void LocalMapping::reset_if_requested()
         new_keyframes_.clear();
     }
     recent_map_points_.clear();
-    // The VPR store/kernel lives in placecell; PlaceRecognitionMegaLoc::clear()
-    // (called from Tracking's reset) clears it.
 
     local_mapping_times_.clear();
     last_over_budget_ = -1;
@@ -233,10 +221,9 @@ bool LocalMapping::is_finish_requested() const
 
 void LocalMapping::set_finished()
 {
-    // Same two mutexes as release(), acquired deadlock-free
     std::scoped_lock lock(finish_mutex_, stop_mutex_);
     finished_ = true;
-    stopped_ = true; // releases anyone waiting on is_stopped()
+    stopped_ = true;
 }
 
 bool LocalMapping::is_finished() const
@@ -253,4 +240,4 @@ void LocalMapping::release_map_references()
     new_keyframes_.clear();
 }
 
-} // namespace AF_VSLAM
+}
