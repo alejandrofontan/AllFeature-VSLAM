@@ -673,6 +673,7 @@ void LocalMapping::fuse_with_neighbors()
     current_keyframe_->update_connections();
 }
 
+// The descriptor limit of the fusion, for one feature: how far a point's descriptor lies from its observations
 void LocalMapping::estimate_fuse_max_descriptor_distance(const FeatureType feature_type)
 {
     std::vector<Descriptor_Distance_Type> distances;
@@ -690,7 +691,9 @@ void LocalMapping::estimate_fuse_max_descriptor_distance(const FeatureType featu
                 continue;
             const Descriptor_Distance_Type distance = FeatureMatcher::descriptor_distance(descriptor,
                 observation.keyframe->features.at(feature_type).descriptors.row(observation.index), feature_type);
-            if(!self_skipped && distance == Descriptor_Distance_Type(0))
+
+            // The point's descriptor is a copy of one observation's: that one, at distance 0, is not a sample
+            if(!self_skipped && distance == 0)
             {
                 self_skipped = true;
                 continue;
@@ -699,13 +702,18 @@ void LocalMapping::estimate_fuse_max_descriptor_distance(const FeatureType featu
         }
     }
 
-    if(distances.empty())
+    // Too few samples to trust: the previous estimate stays
+    const std::string& feature = get_feature(feature_type).get_feature_name();
+    AF_REPORT("descriptor.samples", feature, distances.size());
+    if(distances.size() < FUSE_ESTIMATE_MIN_SAMPLES)
         return;
 
-    const float quantile = std::clamp(params.fuse_descriptor_quantile, 0.0f, 1.0f);
-    const size_t index = std::min(distances.size() - 1, static_cast<size_t>(quantile * distances.size()));
+    // The quantile becomes the map's limit, read by this thread's fusion and by Loop Closing's
+    const size_t index = std::min(distances.size() - 1,
+                                  static_cast<size_t>(params.fuse_descriptor_quantile * distances.size()));
     std::nth_element(distances.begin(), distances.begin() + static_cast<std::ptrdiff_t>(index), distances.end());
     map_->set_fuse_max_descriptor_distance(feature_type, distances[index]);
+    AF_REPORT("descriptor.fuse_max", feature, distances[index]);
 }
 
 LocalMapping::FuseCounts LocalMapping::fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points,

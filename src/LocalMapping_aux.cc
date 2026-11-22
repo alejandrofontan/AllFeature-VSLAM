@@ -65,6 +65,12 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("LocalMapping.SearchInNeighborsKeyframes", params.fuse_with_neighbors_keyframes);
     read_if_present("LocalMapping.SearchInNeighborsSecondKeyframes", params.fuse_with_neighbors_second_keyframes);
     read_if_present("LocalMapping.FuseDescriptorQuantile", params.fuse_descriptor_quantile);
+    if(!(params.fuse_descriptor_quantile >= 0.0f && params.fuse_descriptor_quantile <= 1.0f))
+    {
+        AF_ERROR("[LocalMapping] LocalMapping.FuseDescriptorQuantile must be between 0 and 1, got "
+                 + std::to_string(params.fuse_descriptor_quantile));
+        exit(-1);
+    }
     read_if_present("Tracking.ViewingCosLimit", params.fuse_viewing_cos_limit);   // shared with Tracking and Loop Closing
 
     float max_unexplained = params.keyframe_culling_max_unexplained.load();

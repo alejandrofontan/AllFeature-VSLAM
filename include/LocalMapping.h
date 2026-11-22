@@ -96,6 +96,9 @@ private:
 
     static constexpr const char* KEYFRAME_CULLING_METHOD{"gram-greedy"};
 
+    // estimate_fuse_max_descriptor_distance(): fewer descriptor distances than this give no estimate
+    static constexpr size_t FUSE_ESTIMATE_MIN_SAMPLES{50};
+
     void process_keyframe();
     void register_keyframe();
     void cull_map_points();
