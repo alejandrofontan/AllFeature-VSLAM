@@ -1,7 +1,7 @@
 %YAML:1.0
 
 # Settings
-features: ["orb32", "aliked128"]
+features: ["orb32", "raco128"]
 features_precision: "fp32"                    # "fp32" | "fp16" (faster on CUDA; accuracy effect not established); `pixi run setup` exports what is missing
 features_superpoint_subpixel: true            # sub-pixel SuperPoint keypoints, true peaks only (accuracy effect not established)
 features_raco_covariance: true                # weight RaCo keypoints by their own 2x2 covariance; false = 1 px
@@ -10,7 +10,7 @@ segmentation: "none"                          # online semantic segmentation: "e
 
 # Tunable
 Tracking.FeaturesFraction: 0.5        # keypoints per frame, as a share of each feature's maximum (orb32 4000, learned 2048, others 2000)
-Tracking.ViewingCosLimit: 0.5          # a map point is a candidate (tracking, and fusion in Local Mapping and Loop Closing) only within this cosine of its mean viewing direction (0 = 90 deg)
+Tracking.ViewingCosLimit: 0           # a map point is a candidate (tracking, and fusion in Local Mapping and Loop Closing) only within this cosine of its mean viewing direction (0 = 90 deg)
 
 MapPoint.DepthInvarianceRatio: 1.2    # a point is expected between its reference distance divided and multiplied by this
 
