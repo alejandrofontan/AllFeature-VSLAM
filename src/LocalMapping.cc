@@ -565,6 +565,7 @@ void LocalMapping::create_new_map_points()
     create_depth_seeded_points();
 }
 
+// Points from sensor depth for the keypoints no neighbour matched (RGB-D only)
 void LocalMapping::create_depth_seeded_points()
 {
     const KeyframeView view(current_keyframe_);
@@ -573,18 +574,32 @@ void LocalMapping::create_depth_seeded_points()
     {
         const auto& inv_depth = current_keyframe_->features.at(feature_type).inv_depth;
         const auto& keypoints = current_keyframe_->features.at(feature_type).keypoints;
-        for(size_t idx = 0; idx < inv_depth.size(); idx++)
+        const KeypointIndex num_keypoints = static_cast<KeypointIndex>(inv_depth.size());
+        [[maybe_unused]] size_t num_with_depth = 0, num_created = 0;   // for the report
+        for(KeypointIndex index = 0; index < num_keypoints; index++)
         {
-            if(inv_depth[idx] <= 0.0f)
+            // No sensor depth here, or the keypoint already has a point
+            if(inv_depth[index] <= 0.0f)
                 continue;
-            if(current_keyframe_->get_map_point(idx, feature_type))
+            num_with_depth++;
+            if(current_keyframe_->get_map_point(index, feature_type))
                 continue;
 
-            const Pt map_point = map_->create_map_point(view.back_project(view.normalized(keypoints[idx]), inv_depth[idx]),
-                                                        current_keyframe_, KeypointIndex(idx), feature_type);
-            if(!map_point)
-                continue;
-            recent_map_points_.push_back(map_point);
+            // One observation so far: probation decides whether another keyframe confirms it
+            const vec3f position = view.back_project(view.normalized(keypoints[index]), inv_depth[index]);
+            if(const Pt map_point = map_->create_map_point(position, current_keyframe_, index, feature_type))
+            {
+                recent_map_points_.push_back(map_point);
+                num_created++;
+            }
+        }
+
+        // Nothing is written for a keyframe without sensor depth
+        if(num_with_depth > 0)
+        {
+            const std::string& feature = get_feature(feature_type).get_feature_name();
+            AF_REPORT("keypoints.with_depth", feature, num_with_depth);
+            AF_REPORT("created.depth_seeded", feature, num_created);
         }
     }
 }
@@ -592,8 +607,6 @@ void LocalMapping::create_depth_seeded_points()
 void LocalMapping::search_in_neighbors()
 {
 
-    // Fuse target set: the best covisible keyframes plus a few of THEIR best covisible keyframes, each once (a
-    // keyframe reachable through two neighbors is fused once, not twice). Collected once for all feature types.
     std::vector<Keyframe> targets;
     std::unordered_set<KeyframeId> target_ids;
     for(const Keyframe& neighbor : current_keyframe_->get_best_covisibility_keyframes(params.search_in_neighbors_keyframes))
@@ -614,13 +627,10 @@ void LocalMapping::search_in_neighbors()
     {
         estimate_fuse_max_descriptor_distance(feature_type);
 
-        // Project this keyframe's map points into each target and fuse duplicates.
-        // By-value snapshot: get_map_point_matches copies under the keyframe's mutex.
         const std::vector<Pt> map_points = current_keyframe_->get_map_point_matches(feature_type);
         for(const Keyframe& target : targets)
             fuse_into_keyframe(target, map_points, feature_type);
 
-        // Project the targets' map points into this keyframe and fuse duplicates (each point once)
         std::vector<Pt> candidates;
         std::unordered_set<PtId> candidate_ids;
         for(const Keyframe& target : targets)
@@ -634,7 +644,6 @@ void LocalMapping::search_in_neighbors()
         }
         fuse_into_keyframe(current_keyframe_, candidates, feature_type);
 
-        // Refresh the surviving matches (fusion may have replaced points)
         for(const Pt& map_point : current_keyframe_->get_map_point_matches(feature_type))
         {
             if(map_point && !map_point->is_bad())
@@ -646,7 +655,6 @@ void LocalMapping::search_in_neighbors()
 
     }
 
-    // Update links in the covisibility graph
     current_keyframe_->update_connections();
 }
 
