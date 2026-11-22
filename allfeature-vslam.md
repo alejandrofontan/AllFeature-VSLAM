@@ -65,6 +65,18 @@ flowchart TB
   - `Tracking.FlowMaxBackwardError = 1.0` px: forward–backward round-trip tolerance
   - `Tracking.FlowAssociationRadius = 2.0` px: how far a flowed point may be from the keypoint it takes
 
+**ONNX Models**
+`pixi` environment: `export-features`
+`pixi run -e export-features export-superpoint` = `python tools/export_features.py --only superpoint`
+- Clone `cvg/LightGlue` to `tools/lightglue/`: pinned to commit eb42fee. **It holds the model code for SuperPoint, ALIKED, SIFT and LightGlue.**
+- Downloads the original weights from *LightGlue GitHub release* to `feature_models/.cache/hub/checkpoints`: `superpoint_v1.pth`, `aliked-n16.pth`, and the three `*_lightglue_v0-1_arxiv.pth`.
+- Export the weights to `feature_models/superpoint_v1.onnx`
+- With --static WxH it exports `superpoint_v1_672x416.onnx, _739x458`
+
+At run time:
+- Each run creates the ONNX Runtime Session from the .onnx file at startup
+
+
 ## Feature Matching - Helpers
 #### FeatureMatcher (constructor)
 Loads and warms up the LightGlue variant of every learned feature in `feature_types`, so no session is created later on the tracking thread. Holds no state; `name` is only for the log.
