@@ -233,7 +233,7 @@ matplotlib = "*"     # with a GUI backend: the plots open in a window
 
 [feature.report.tasks]
 report = { cmd = "python tools/report.py", env = { PYTHONNOUSERSITE = "1" } }
-profile = { cmd = "python tools/profile.py", env = { PYTHONNOUSERSITE = "1" } }
+profile = { cmd = "python tools/report_profile.py", env = { PYTHONNOUSERSITE = "1" } }
 
 [environments]
 build = ["build"]
