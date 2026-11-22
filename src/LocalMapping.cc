@@ -9,7 +9,6 @@
 #include <limits>
 #include <map>
 #include <mutex>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -785,13 +784,12 @@ void LocalMapping::local_bundle_adjustment()
     Optimizer::local_bundle_adjustment(current_keyframe_, map_);
 }
 
+// Stage 6: cull keyframes the others explain (placecell's joint-information culler)
 void LocalMapping::cull_keyframes()
 {
-    // The joint-information culling maths ("gram-greedy") lives in placecell
-    // (PlaceCell::cull_keyframes); this adapter supplies the host side: the kernel's
-    // refresh, parameters, the covisibility window for the local scope, reconciliation
-    // of externally removed keyframes, execution of each cull (set_bad_flag), and logging.
-    // No kernel (InformationKernel: megaloc in a build without MegaLoc): nothing is culled
+    AF_REPORT_SCOPE();
+
+    // No kernel: nothing is culled (warned once)
     if(!keyframe_information_ || keyframe_information_->place_cell().size() == 0){
         if(!warned_no_kernel_){
             AF_WARN("[LocalMapping] no keyframe information kernel (InformationKernel: megaloc needs a build with "
@@ -802,9 +800,7 @@ void LocalMapping::cull_keyframes()
     }
     placecell::PlaceCell& place_cell = keyframe_information_->place_cell();
 
-    // Resolve every stored row back to a keyframe. A row that no longer resolves (or
-    // resolves to a bad keyframe) was removed outside this culler -- tell placecell
-    // so it becomes culling history there too.
+    // Keyframes that died elsewhere become culling history in placecell too
     std::unordered_map<FrameId, Keyframe> keyframe_by_frame_id;
     std::vector<Keyframe> alive_keyframes;
     for(const Keyframe& keyframe : map_->get_all_keyframes())
@@ -817,27 +813,26 @@ void LocalMapping::cull_keyframes()
     {
         if(place_cell.is_culled(id))
             continue;
-        const auto it = keyframe_by_frame_id.find(FrameId(id));
+        const auto it = keyframe_by_frame_id.find(static_cast<FrameId>(id));
         if(it == keyframe_by_frame_id.end() || it->second->is_bad())
             place_cell.set_culled(id);
     }
 
-    // Bring the kernel up to date with the map (covisibility: every alive keyframe's
-    // current map-point set, after this cycle's point culling / creation / fusion;
-    // megaloc: nothing to do)
+    // The kernel follows the map: every alive keyframe's current points
     keyframe_information_->refresh(alive_keyframes);
 
+    // Tau is read live: the viewer's slider can move it. Keyframe 0 is never culled (placecell), nor the
+    // current keyframe (protect_last is at least 1).
     placecell::PlaceCell::CullParameters cull_parameters;
     cull_parameters.method = KEYFRAME_CULLING_METHOD;
     cull_parameters.objective = params.keyframe_culling_objective;
-    cull_parameters.max_unexplained = params.keyframe_culling_max_unexplained.load();   // live: Viewer slider
+    cull_parameters.max_unexplained = params.keyframe_culling_max_unexplained.load();
     cull_parameters.centred = params.keyframe_culling_centred;
     cull_parameters.min_keyframes = params.keyframe_culling_min_keyframes;
-    // min_age keyframes back from the current one, measured in stored rows; >= 1 so
-    // the current keyframe itself is never culled (KF0 is covered by protect_first)
     cull_parameters.protect_last = std::max(params.keyframe_culling_min_age, 1);
     cull_parameters.max_per_call = params.keyframe_culling_max_per_call;
 
+    // Local scope: the current keyframe and its covisibles only
     const bool local_scope = (params.keyframe_culling_scope == "local");
     std::vector<placecell::PlaceCell::ExternalId> window;
     if(local_scope){
@@ -846,44 +841,32 @@ void LocalMapping::cull_keyframes()
             window.push_back(keyframe->frame_id);
     }
 
-    const auto try_cull = [&](const placecell::PlaceCell::ExternalId id) -> bool {
-        const auto it = keyframe_by_frame_id.find(FrameId(id));
+    // A cull pinned by Loop Closing is refused, and placecell moves on to the next candidate
+    const auto try_cull = [&keyframe_by_frame_id](const placecell::PlaceCell::ExternalId id) -> bool {
+        const auto it = keyframe_by_frame_id.find(static_cast<FrameId>(id));
         if(it == keyframe_by_frame_id.end())
             return false;
         it->second->set_bad_flag();
-        // Deferred by pin() (loop closing holds it): leave it alive; placecell
-        // never retries a refused candidate within the same call
         return it->second->is_bad();
     };
 
     const placecell::PlaceCell::CullReport report =
         place_cell.cull_keyframes(cull_parameters, try_cull, local_scope ? &window : nullptr);
 
-    auto fmt = [](double x) { std::ostringstream s; s << std::fixed << std::setprecision(3) << x; return s.str(); };
-    for(const auto& culled : report.culled){
-        const auto it = keyframe_by_frame_id.find(FrameId(culled.id));
-        AF_INFO("[VPR] culled keyframe " << (it != keyframe_by_frame_id.end() ? std::to_string(it->second->keyId) : "?")
-                << " (frame " << culled.id
-                << "): unique information " << fmt(culled.unique_information)
-                << ", worst unexplained keyframe after the cull " << fmt(culled.worst_unexplained_after)
-                << ", alive keyframes " << culled.alive_after);
-    }
-    const double tau = double(cull_parameters.max_unexplained);
-    if(!report.culled.empty()){
-        AF_INFO("[VPR] cull_keyframes[" << params.keyframe_culling_scope << (params.keyframe_culling_centred ? ", centred" : ", raw")
-                << "]: culled " << report.culled.size() << " of " << report.candidates
-                << " candidates (" << report.alive_after << " alive in scope, " << report.views_total
-                << " keyframes ever); worst unexplained keyframe "
-                << fmt(report.worst_history) << " (tau " << fmt(tau) << ")"
-                << (report.reached_max_per_call ? " [per-call limit reached]" : ""));
-    } else {
-        // Threshold lowered below earlier culls: report the over-budget history once per change
-        if(report.history_over_budget != last_over_budget_){
-            if(report.history_over_budget > 0)
-                AF_INFO("[VPR] cull_keyframes: " << report.history_over_budget << " culled keyframes are above tau (max unexplained "
-                        << fmt(report.worst_history) << " > tau " << fmt(tau) << ") — only keyframes that do not explain them can be culled");
-            last_over_budget_ = report.history_over_budget;
-        }
+    AF_REPORT("culled", "", report.culled.size());
+    AF_REPORT("candidates", "", report.candidates);
+    AF_REPORT("alive_after", "", report.alive_after);
+    AF_REPORT("history_worst_unexplained", "", report.worst_history);
+    AF_REPORT("history_over_budget", "", report.history_over_budget);
+    AF_REPORT("max_per_call_reached", "", report.reached_max_per_call ? 1 : 0);
+
+    // Keyframes ever inserted that the alive ones no longer explain within tau: warned whenever the count changes
+    if(report.history_over_budget != last_over_budget_){
+        if(report.history_over_budget > 0)
+            AF_WARN("[LocalMapping] cull_keyframes: " << report.history_over_budget << " keyframes ever inserted are "
+                    << "more than tau unexplained (worst " << std::fixed << std::setprecision(3) << report.worst_history
+                    << " > tau " << cull_parameters.max_unexplained << ")");
+        last_over_budget_ = report.history_over_budget;
     }
 }
 
