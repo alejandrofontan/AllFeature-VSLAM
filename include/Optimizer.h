@@ -66,7 +66,9 @@ public:
                                          const std::atomic<bool>* stop_flag = nullptr, KeyframeId loop_keyframe_id = 0,
                                          bool robust = true);
 
-    static void local_bundle_adjustment(const Keyframe& current_keyframe, const std::shared_ptr<Map>& map);
+    // What one local bundle adjustment did; all zero when the map is too small to run it
+    struct LocalBaCounts { int local_keyframes{0}, fixed_keyframes{0}, points{0}, edges{0}, outliers_erased{0}; };
+    static LocalBaCounts local_bundle_adjustment(const Keyframe& current_keyframe, const std::shared_ptr<Map>& map);
 
     // Returns the number of inliers. use_depth_channel = false books RGB-D observations as plain 2D reprojection
     // edges: used by track_reference_keyframe's divergence rescue (see Tracking.cc).

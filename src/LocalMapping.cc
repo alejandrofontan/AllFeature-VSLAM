@@ -776,12 +776,16 @@ LocalMapping::FuseCounts LocalMapping::fuse_into_keyframe(const Keyframe& keyfra
     return counts;
 }
 
+// Stage 5: local bundle adjustment around the keyframe
 void LocalMapping::local_bundle_adjustment()
 {
-    // Local BA needs more keyframes than this in the map
-    if(map_->keyframes_in_map() <= static_cast<size_t>(Optimizer::params.local_ba_min_keyframes))
-        return;
-    Optimizer::local_bundle_adjustment(current_keyframe_, map_);
+    AF_REPORT_SCOPE();
+    [[maybe_unused]] const Optimizer::LocalBaCounts counts = Optimizer::local_bundle_adjustment(current_keyframe_, map_);
+    AF_REPORT("keyframes.local", "", counts.local_keyframes);
+    AF_REPORT("keyframes.fixed", "", counts.fixed_keyframes);
+    AF_REPORT("points", "", counts.points);
+    AF_REPORT("edges", "", counts.edges);
+    AF_REPORT("outliers.erased", "", counts.outliers_erased);
 }
 
 // Stage 6: cull keyframes the others explain (placecell's joint-information culler)

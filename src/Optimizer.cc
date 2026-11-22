@@ -632,8 +632,13 @@ int Optimizer::pose_optimization(Frame* frame, bool use_depth_channel)
     return num_correspondences-num_outliers;
 }
 
-void Optimizer::local_bundle_adjustment(const Keyframe& current_keyframe, const std::shared_ptr<Map>& map)
+Optimizer::LocalBaCounts Optimizer::local_bundle_adjustment(const Keyframe& current_keyframe,
+                                                            const std::shared_ptr<Map>& map)
 {
+    // The map needs more keyframes than this
+    if(map->keyframes_in_map() <= static_cast<size_t>(params.local_ba_min_keyframes))
+        return {};
+
     // Which keyframes and points are already in the problem (a bad neighbour is marked local too, so that it is
     // not taken as a fixed keyframe either)
     std::unordered_set<KeyframeId> local_keyframe_ids, fixed_keyframe_ids;
@@ -824,6 +829,14 @@ void Optimizer::local_bundle_adjustment(const Keyframe& current_keyframe, const 
 
     if(num_rejected > 0)
         AF_WARN("local_bundle_adjustment: " << num_rejected << " non-finite poses or positions were not written");
+
+    LocalBaCounts counts;
+    counts.local_keyframes = static_cast<int>(local_keyframes.size());
+    counts.fixed_keyframes = static_cast<int>(fixed_keyframes.size());
+    counts.points = static_cast<int>(local_points.size());
+    counts.edges = static_cast<int>(mono_observations.size() + rgbd_observations.size());
+    counts.outliers_erased = static_cast<int>(to_erase.size());
+    return counts;
 }
 
 
