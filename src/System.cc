@@ -255,9 +255,8 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                              strCalibrationFile, strSettingsFile,
                              feature_types, fixImageSize);
 
-    //Initialize the Local Mapping thread and launch
+    // Local Mapping: its thread starts at the end, once it is wired
     localMapper = make_shared<LocalMapping>(mpMap, feature_types);
-    mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::run, localMapper);
 
     //Initialize the Loop Closing thread and launch. Without an active VPR backend the object
     //is still constructed (other threads hold pointers to it and enqueue keyframes) but its
@@ -290,6 +289,9 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
         tracker->set_keyframe_information(keyframe_information);       // insertion bands, decision history
         localMapper->set_keyframe_information(keyframe_information);   // keyframe registration, refresh, information culling
     }
+
+    // Local Mapping starts only now: it reads Loop Closing, the viewer and the information kernel set above
+    mptLocalMapping = make_shared<thread>(&AF_VSLAM::LocalMapping::run, localMapper);
 }
 
 mat4f System::TrackStereo(const cv::Mat &, const cv::Mat &, const double &)

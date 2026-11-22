@@ -99,7 +99,7 @@ void LocalMapping::LoadParameters(const cv::FileStorage &fSettings)
 }
 
 // ------------------------------------------------------------------------------------------
-// Thread synchronization (see the protocol comments in LocalMapping.h)
+// Thread synchronization 
 // ------------------------------------------------------------------------------------------
 
 void LocalMapping::insert_keyframe(const Keyframe& keyframe)
@@ -128,7 +128,7 @@ bool LocalMapping::stop_if_requested()
 
     stopped_ = true;
     AF_INFO("[LocalMapping] stopped");
-    std::cout.flush(); // AF_INFO's stdout is fully buffered under the runner's redirect
+    std::cout.flush();
     return true;
 }
 

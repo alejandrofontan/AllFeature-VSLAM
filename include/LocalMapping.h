@@ -29,39 +29,41 @@ struct LocalMappingParameters
 {
 
     std::string information_kernel{"megaloc"};
-    static constexpr float keyframe_culling_max_unexplained_covisibility{0.7f};   // tau default for the covisibility kernel (starting point, untuned)
+    static constexpr float keyframe_culling_max_unexplained_covisibility{0.7f};
 
     // cull_map_points()
-    float map_point_culling_min_found_ratio{0.25f}; // cull when found/visible drops below this
-    int map_point_culling_min_observations{3};      // observations a point needs by observation_test_age to survive (depth-verified ones count more)
-    int map_point_culling_observation_test_age{2};  // keyframes after creation at which the observation test applies
-    int map_point_culling_probation_age{3};         // keyframes after creation at which a surviving point graduates out of the probation list
+    float map_point_culling_min_found_ratio{0.25f};
+    int map_point_culling_min_observations{3};
+    int map_point_culling_observation_test_age{2};
+    int map_point_culling_probation_age{3};
 
     // create_new_map_points()
-    int create_new_map_points_keyframes{5};                      // covisible keyframes matched and triangulated against
-    float create_new_map_points_min_baseline_depth_ratio{0.01f}; // skip neighbors with baseline / median scene depth below this
-    float create_new_map_points_max_parallax_cos{0.9998f};       // two-view triangulation needs cos(parallax) below this (parallax > ~1.15 deg)
+    int create_new_map_points_keyframes{5};
+    float create_new_map_points_min_baseline_depth_ratio{0.01f};
+    float create_new_map_points_max_parallax_cos{0.9998f};
 
     // fuse_with_neighbors()
-    int fuse_with_neighbors_keyframes{20};       // covisible keyframes fused with the new keyframe
-    int fuse_with_neighbors_second_keyframes{5}; // second-degree neighbors added per covisible keyframe
+    int fuse_with_neighbors_keyframes{20};
+    int fuse_with_neighbors_second_keyframes{5};
     float fuse_descriptor_quantile{0.5f};
     float fuse_viewing_cos_limit{0.5f};
 
-    std::atomic<float> keyframe_culling_max_unexplained{0.3f};  // a keyframe may be culled only if every keyframe ever inserted stays at least (1 - this) explained by the alive ones
-    int keyframe_culling_min_age{5};               // keyframes younger than this many keyframes (by keyId) are never culled
-    int keyframe_culling_min_keyframes{5};         // never cull below this many alive keyframes
-    std::string keyframe_culling_scope{"map"};     // explainers + candidates: "map" = all alive keyframes, "local" = current keyframe + its covisible keyframes
-    int keyframe_culling_max_per_call{5};          // at most this many culls per cull_keyframes() call (0 = unlimited); spreads the response to a raised threshold over several keyframes
-    std::string keyframe_culling_objective{"unique"}; // gram-greedy ranks the feasible candidates by: "unique" = own unique information v_i, "minimax" = worst unexplained view after the cull, "total-loss" = v_i plus the rise of every other view
-    bool keyframe_culling_centred{true};           // double-centre the kernel (Pearson correlation of mean-centred descriptors) instead of raw cosine
+    std::atomic<float> keyframe_culling_max_unexplained{0.3f};
+    int keyframe_culling_min_age{5};
+    int keyframe_culling_min_keyframes{5};
+    std::string keyframe_culling_scope{"map"};
+    int keyframe_culling_max_per_call{5};
+    std::string keyframe_culling_objective{"unique"};
+    bool keyframe_culling_centred{true};
 
 };
 
 class LocalMapping
 {
 public:
+    // The thread is started by System after set_loop_closer (required) and the optional setters below
     LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureType>& feature_types);
+    ~LocalMapping();
 
     static LocalMappingParameters params;
     static void LoadParameters(const cv::FileStorage &fSettings);
@@ -94,9 +96,11 @@ private:
 
     static constexpr std::chrono::milliseconds IDLE_POLL_PERIOD{3};
 
+    // The thread's name in the log and in the report
+    static constexpr const char* THREAD_NAME{"local_mapping"};
+
     static constexpr const char* KEYFRAME_CULLING_METHOD{"gram-greedy"};
 
-    // estimate_fuse_max_descriptor_distance(): fewer descriptor distances than this give no estimate
     static constexpr size_t FUSE_ESTIMATE_MIN_SAMPLES{50};
 
     void process_keyframe();
@@ -110,7 +114,7 @@ private:
     void fuse_with_neighbors();
 
     void estimate_fuse_max_descriptor_distance(FeatureType feature_type);
-    struct FuseCounts { int not_visible{0}; int observed{0}; int merged{0}; };   // offered points the keyframe cannot see, observations added, points merged
+    struct FuseCounts { int not_visible{0}; int observed{0}; int merged{0}; };   
     FuseCounts fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points, FeatureType feature_type);
     void local_bundle_adjustment();
     void cull_keyframes();
@@ -122,15 +126,15 @@ private:
     bool is_finish_requested() const;
     void set_finished();
 
-    mutable std::mutex finish_mutex_;          // guards finish_requested_ and finished_
-    mutable std::mutex reset_mutex_;           // guards reset_requested_
-    mutable std::mutex new_keyframes_mutex_;   // guards new_keyframes_
-    mutable std::mutex stop_mutex_;            // guards stopped_, stop_requested_ and insertion_locked_
-    mutable std::mutex accept_mutex_;          // guards accept_keyframes_
+    mutable std::mutex finish_mutex_;
+    mutable std::mutex reset_mutex_;
+    mutable std::mutex new_keyframes_mutex_;
+    mutable std::mutex stop_mutex_;
+    mutable std::mutex accept_mutex_;
 
     std::shared_ptr<Map> map_;
     std::shared_ptr<LoopClosing> loop_closer_;
-    std::shared_ptr<FeatureMatcher> matcher_;
+    std::unique_ptr<FeatureMatcher> matcher_;
     std::shared_ptr<Viewer> viewer_;
 
     std::list<Keyframe> new_keyframes_;

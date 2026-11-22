@@ -32,12 +32,21 @@ namespace AF_VSLAM
 
 LocalMapping::LocalMapping(std::shared_ptr<Map> map, const std::vector<FeatureType>& feature_types):
     map_(std::move(map)),
-    matcher_(std::make_shared<FeatureMatcher>(feature_types, "LocalMapping"))
+    matcher_(std::make_unique<FeatureMatcher>(feature_types, THREAD_NAME))
 {
 }
 
+LocalMapping::~LocalMapping() = default;   // here, where FeatureMatcher is complete
+
 void LocalMapping::run()
 {
+    // Loop Closing receives every processed keyframe: the thread cannot work without it
+    if(!loop_closer_)
+    {
+        AF_ERROR("[LocalMapping] started without Loop Closing (set_loop_closer before the thread)");
+        exit(-1);
+    }
+
     {
         std::lock_guard<std::mutex> lock(finish_mutex_);
         finished_ = false;
@@ -88,7 +97,7 @@ void LocalMapping::process_keyframe()
     }
 
     // Report: label this thread's entries with the keyframe's frame; the scope writes time_ms on exit
-    AF_REPORT_CONTEXT("local_mapping", current_keyframe_->frame_id);
+    AF_REPORT_CONTEXT(THREAD_NAME, current_keyframe_->frame_id);
     AF_REPORT_SCOPE();
 
     // Register the keyframe: observations, covisibility graph, map
