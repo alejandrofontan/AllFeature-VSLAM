@@ -145,6 +145,8 @@ void LocalMapping::process_keyframe()
 // Stage 1: make the keyframe part of the map
 void LocalMapping::register_keyframe()
 {
+    AF_REPORT_SCOPE();
+
     // Place recognition descriptor of the keyframe's image
     current_keyframe_->compute_global_descriptor();
 
@@ -593,6 +595,7 @@ void LocalMapping::create_new_map_points()
 // Points from sensor depth for the keypoints no neighbor matched (RGB-D only)
 void LocalMapping::create_depth_seeded_points()
 {
+    AF_REPORT_SCOPE();
     const KeyframeView view(current_keyframe_);
 
     for(const FeatureType feature_type : current_keyframe_->feature_types)

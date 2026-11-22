@@ -84,6 +84,9 @@ void LoopClosing::run()
         // One queued keyframe per iteration: candidates, geometric verification, correction
         if(has_new_keyframes())
         {
+            // Report: the thread's total for this keyframe (its frame is set by detect_loop)
+            AF_REPORT_SCOPE();
+
             if(detect_loop() && compute_sim3() && search_loop_map_points())
             {
                 const auto t_start = std::chrono::steady_clock::now();
@@ -140,6 +143,7 @@ void LoopClosing::abort_global_bundle_adjustment()
 // # Loop detection
 bool LoopClosing::detect_loop()
 {
+    AF_REPORT_SCOPE();
     {
         std::lock_guard<std::mutex> lock(new_keyframes_mutex_);
         current_keyframe_ = new_keyframes_.front();
@@ -495,6 +499,7 @@ void LoopClosing::release_loop_candidates(const bool loop_accepted)
 // # Loop correction
 void LoopClosing::correct_loop()
 {
+    AF_REPORT_SCOPE();
     AF_INFO("[LoopClosing] loop detected: keyframe " << current_keyframe_->keyId << " -> " << matched_keyframe_->keyId);
     std::cout.flush();
 

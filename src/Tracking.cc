@@ -149,6 +149,9 @@ void Tracking::release_map_references()
 
 mat4f Tracking::grab_image(Image &im, const double timestamp)
 {
+    // Report: the thread's total for this frame (its frame is set below, before the extraction)
+    AF_REPORT_SCOPE();
+
     // This thread's model runs go ahead of Local Mapping's and Loop Closing's on a shared session
     // (OrtSession, Threading). Set per frame rather than once: this is the thread's entry point,
     // and the flag is a thread-local bool.

@@ -62,6 +62,7 @@ private:
 // inclusive time: everything the function calls, and any wait on a lock, counts. The `time_ms`
 // entries (this one and any key ending in `.time_ms`, such as `extraction.time_ms`) are the ones
 // that differ between otherwise identical runs -- filter them out before comparing two reports.
+// It also records `parent_call`: the enclosing call's id, 0 for a thread's outermost scope.
 class ReportScope
 {
 public:

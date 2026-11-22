@@ -110,6 +110,20 @@ def format_number(value):
     return f"{value:.2e}"
 
 
+def apply_style(plt):
+    plt.rcParams.update({
+        "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
+        "axes.edgecolor": MUTED, "axes.labelcolor": SECONDARY_INK, "text.color": INK,
+        "xtick.color": MUTED, "ytick.color": MUTED, "xtick.labelcolor": SECONDARY_INK, "ytick.labelcolor": SECONDARY_INK,
+        "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.8, "axes.axisbelow": True,
+        "axes.spines.top": False, "axes.spines.right": False, "font.size": 9, "axes.titlesize": 10,
+    })
+
+
+def has_display():
+    return not sys.platform.startswith("linux") or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def plot_function(rows, module, function, path, save=None, show=True):
     selected = [row for row in rows if row["thread"] == module and row["function"] == function]
 
@@ -133,13 +147,7 @@ def plot_function(rows, module, function, path, save=None, show=True):
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
 
-    plt.rcParams.update({
-        "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
-        "axes.edgecolor": MUTED, "axes.labelcolor": SECONDARY_INK, "text.color": INK,
-        "xtick.color": MUTED, "ytick.color": MUTED, "xtick.labelcolor": SECONDARY_INK, "ytick.labelcolor": SECONDARY_INK,
-        "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.8, "axes.axisbelow": True,
-        "axes.spines.top": False, "axes.spines.right": False, "font.size": 9, "axes.titlesize": 10,
-    })
+    apply_style(plt)
 
     columns = 1 if len(keys) <= 3 else 2 if len(keys) <= 8 else 3
     rows_of_plots = math.ceil(len(keys) / columns)
@@ -255,7 +263,7 @@ def main():
                  f"{', '.join(sorted(tree[module]))}." + hint)
 
     show = not arguments.no_show
-    if show and sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+    if show and not has_display():
         show = False
         if not arguments.save:
             arguments.save = f"{module}_{function}.png"

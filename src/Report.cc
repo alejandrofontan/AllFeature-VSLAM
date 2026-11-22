@@ -50,8 +50,9 @@ ReportScope::~ReportScope()
     const double elapsed_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start_).count();
 
-    // Recorded before the enclosing call's id is restored, so the row belongs to this call.
+    // Recorded before the enclosing call's id is restored, so the rows belong to this call
     Report::instance().add(function_, "time_ms", "", elapsed_ms);
+    Report::instance().add(function_, "parent_call", "", static_cast<double>(enclosing_call_));
     current_call = enclosing_call_;
 }
 

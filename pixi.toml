@@ -226,12 +226,14 @@ numpy = "<2"
 # report env = plots of a run's <exp_id>_Report.csv (tools/report.py). Python + matplotlib only, nothing from the build.
 #   pixi run -e report report <Report.csv>                       lists every module, function and variable recorded
 #   pixi run -e report report <module> <function> <Report.csv>   plots every variable of that function against frame_id
+#   pixi run -e report profile <Report.csv>                      each thread's stages stacked per frame (--depth N)
 [feature.report.dependencies]
 python = "3.11.*"
 matplotlib = "*"     # with a GUI backend: the plots open in a window
 
 [feature.report.tasks]
 report = { cmd = "python tools/report.py", env = { PYTHONNOUSERSITE = "1" } }
+profile = { cmd = "python tools/profile.py", env = { PYTHONNOUSERSITE = "1" } }
 
 [environments]
 build = ["build"]
