@@ -291,6 +291,8 @@ void Viewer::Run()
     pangolin::Var<float> menuKFLineWidth("menu.KeyFrame Width", defaults.keyFrameLineWidth, 0.0f, 5.0f);
     pangolin::Var<float> menuGraphLineWidth("menu.Graph Width", defaults.graphLineWidth, 0.0f, 5.0f);
     pangolin::Var<float> menuCamLineWidth("menu.Camera Width", defaults.cameraLineWidth, 0.0f, 8.0f);
+    // Keypoint covariance ellipses in the image, in sigmas (2.45 is the 95% contour, the pose-optimisation gate)
+    pangolin::Var<float> menuEllipseScale("menu.Ellipse Sigmas", 6.0f, 0.0f, 12.0f);
 
     // Panel width: the narrowest that fits every widget, in pixels, so it stays unclipped
     // when the window is resized. Worst-case runtime strings of the text rows: every tracking
@@ -484,7 +486,7 @@ void Viewer::Run()
         if(style.trajectoryLineWidth > 0.0f)
             mapDrawer->DrawTrajectory(style);
 
-        im = frameDrawer->DrawFrame();
+        im = frameDrawer->DrawFrame(menuEllipseScale);
         if(!im.empty() && im.isContinuous())
         {
             if(im.cols != texW || im.rows != texH)

@@ -40,13 +40,29 @@ FrameDrawer::FrameDrawer(shared_ptr<Map> pMap, const vector<FeatureType>& featur
     // (a 640x480 one once sized the viewer's texture wrongly, issue #7)
 }
 
-cv::Mat FrameDrawer::DrawFrame()
+// The ellipse of a 2x2 covariance at k sigmas; k = sqrt(5.991) is the 95% contour, the inlier gate of pose
+// optimisation. Semi-axes are floored at 3 px so sub-pixel covariances stay visible around the keypoint dot.
+// Drawn on the raw (distorted) keypoint with the undistorted keypoint's covariance.
+static cv::RotatedRect covariance_ellipse(const cv::Point2f& center, const mat2f& sigma2, float k)
+{
+    constexpr float min_semi_axis = 3.0f;
+    const float a = sigma2(0,0), b = sigma2(0,1), c = sigma2(1,1);
+    const float mean = 0.5f * (a + c);
+    const float radius = std::sqrt(0.25f * (a - c) * (a - c) + b * b);
+    const float major = std::max(k * std::sqrt(std::max(mean + radius, 0.0f)), min_semi_axis);
+    const float minor = std::max(k * std::sqrt(std::max(mean - radius, 0.0f)), min_semi_axis);
+    const float angle_deg = 0.5f * std::atan2(2.0f * b, a - c) * 180.0f / float(CV_PI);
+    return {center, cv::Size2f(2.0f * major, 2.0f * minor), angle_deg};
+}
+
+cv::Mat FrameDrawer::DrawFrame(float ellipse_scale)
 {
     cv::Mat im;
     cv::Mat mask;
     std::map<FeatureType, vector<cv::KeyPoint>> vIniKeys; // Initialization: KeyPoints in reference frame
     std::map<FeatureType, vector<int>> vMatches; // Initialization: correspondeces with reference keypoints
     std::map<FeatureType, vector<cv::KeyPoint>> vCurrentKeys; // KeyPoints in current frame
+    std::map<FeatureType, vector<mat2f>> vCurrentSigma2; // their position covariances
     std::map<FeatureType, vector<bool>> vbVO, vbMap; // Tracked MapPoints in current frame
     TrackingState state; // Tracking state
 
@@ -73,6 +89,7 @@ cv::Mat FrameDrawer::DrawFrame()
             vCurrentKeys = mvCurrentKeys;
             vbVO = mvbVO;
             vbMap = mvbMap;
+            vCurrentSigma2 = mvCurrentSigma2;
         }
         else if(mState==TrackingState::LOST)
         {
@@ -131,29 +148,32 @@ cv::Mat FrameDrawer::DrawFrame()
         for (auto const& [feature_type, N_] : N) {
             const int n = vCurrentKeys[feature_type].size();
             cv::Scalar color = getFeatureColor(feature_type, 0);
+            // Ellipses only when every keypoint has a covariance; otherwise this feature type falls back to boxes
+            const vector<mat2f>* sigma2 = nullptr;
+            const auto it = vCurrentSigma2.find(feature_type);
+            if(it != vCurrentSigma2.end() && int(it->second.size()) == n)
+                sigma2 = &it->second;
             for(int i=0;i<n;i++)
             {
                 if(vbVO.at(feature_type)[i] || vbMap.at(feature_type)[i])
                 {
-                    cv::Point2f pt1,pt2;
-                    pt1.x=vCurrentKeys[feature_type][i].pt.x-r;
-                    pt1.y=vCurrentKeys[feature_type][i].pt.y-r;
-                    pt2.x=vCurrentKeys[feature_type][i].pt.x+r;
-                    pt2.y=vCurrentKeys[feature_type][i].pt.y+r;
+                    const cv::Point2f& pt = vCurrentKeys[feature_type][i].pt;
 
-                    // This is a match to a MapPoint in the map
-                    if(vbMap[feature_type][i])
+                    // Map point match in the feature colour, visual-odometry match (last frame's point) in blue
+                    const bool in_map = vbMap[feature_type][i];
+                    const cv::Scalar c = in_map ? color : cv::Scalar(255,0,0);
+                    if(sigma2)
                     {
-                        cv::rectangle(im,pt1,pt2,color);
-                        cv::circle(im,vCurrentKeys[feature_type][i].pt,2,color,-1);
+                        if(ellipse_scale > 0.0f)
+                            cv::ellipse(im, covariance_ellipse(pt, (*sigma2)[i], ellipse_scale), c, 1, cv::LINE_AA);
+                    }
+                    else
+                        cv::rectangle(im, cv::Point2f(pt.x-r, pt.y-r), cv::Point2f(pt.x+r, pt.y+r), c);
+                    cv::circle(im,pt,2,c,-1);
+                    if(in_map)
                         mnTracked++;
-                    }
-                    else // This is match to a "visual odometry" MapPoint created in the last frame
-                    {
-                        cv::rectangle(im,pt1,pt2,cv::Scalar(255,0,0));
-                        cv::circle(im,vCurrentKeys[feature_type][i].pt,2,cv::Scalar(255,0,0),-1);
+                    else
                         mnTrackedVO++;
-                    }
                 }
             }
         }
@@ -209,6 +229,9 @@ void FrameDrawer::update(Tracking *pTracker)
     pTracker->color_image_.copyTo(mIm);
     pTracker->mask_image_.copyTo(mMask);
     mvCurrentKeys = pTracker->current_frame_.raw_keypoints;
+    mvCurrentSigma2.clear();
+    for (const auto& [feature_type, data] : pTracker->current_frame_.features.per_type)
+        mvCurrentSigma2[feature_type] = data.sigma2;
     for (auto const& [feature_type, raw_keypoints] : mvCurrentKeys) {
         N[feature_type] = raw_keypoints.size();
         mvbVO[feature_type] = vector<bool>(N[feature_type],false);

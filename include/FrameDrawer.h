@@ -43,8 +43,8 @@ public:
     // Update info from the last processed frame.
     void update(Tracking *pTracker);
 
-    // Draw last processed frame.
-    cv::Mat DrawFrame();
+    // Draw last processed frame. Tracked keypoints as covariance ellipses of ellipse_scale sigmas (0 hides them).
+    cv::Mat DrawFrame(float ellipse_scale = 2.4477f);
 
 protected:
 
@@ -55,6 +55,7 @@ protected:
     cv::Mat mMask; // segmentation mask (1 = static, 0 = dynamic); empty when segmentation is off
     std::map<FeatureType, int> N;
     std::map<FeatureType, vector<cv::KeyPoint>> mvCurrentKeys;
+    std::map<FeatureType, vector<mat2f>> mvCurrentSigma2; // position covariance per keypoint, px^2
     std::map<FeatureType, vector<bool>> mvbMap, mvbVO;
     int mnTracked, mnTrackedVO;
     std::map<FeatureType, vector<cv::KeyPoint>> mvIniKeys;
