@@ -42,9 +42,9 @@ struct LocalMappingParameters
     float create_new_map_points_min_baseline_depth_ratio{0.01f}; // skip neighbors with baseline / median scene depth below this
     float create_new_map_points_max_parallax_cos{0.9998f};       // two-view triangulation needs cos(parallax) below this (parallax > ~1.15 deg)
 
-    // search_in_neighbors()
-    int search_in_neighbors_keyframes{20};       // covisible keyframes fused with the new keyframe
-    int search_in_neighbors_second_keyframes{5}; // second-degree neighbors added per covisible keyframe
+    // fuse_with_neighbors()
+    int fuse_with_neighbors_keyframes{20};       // covisible keyframes fused with the new keyframe
+    int fuse_with_neighbors_second_keyframes{5}; // second-degree neighbors added per covisible keyframe
     float fuse_descriptor_quantile{0.5f};
     float fuse_viewing_cos_limit{0.5f};
 
@@ -104,10 +104,11 @@ private:
     [[nodiscard]] std::vector<Keyframe> select_triangulation_neighbors() const;
 
     void create_depth_seeded_points();
-    void search_in_neighbors();
+    void fuse_with_neighbors();
 
     void estimate_fuse_max_descriptor_distance(FeatureType feature_type);
-    void fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points, FeatureType feature_type);
+    struct FuseCounts { int observed{0}; int merged{0}; };   // observations added, points merged
+    FuseCounts fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points, FeatureType feature_type);
     void local_bundle_adjustment();
     void cull_keyframes();
 

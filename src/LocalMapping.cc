@@ -105,7 +105,7 @@ void LocalMapping::process_keyframe()
     FeatureMatcher::clear_keyframe_matches(current_keyframe_);
 
     // Fuse duplicated points with the neighbours
-    search_in_neighbors();
+    fuse_with_neighbors();
 
     // Local bundle adjustment around the keyframe
     local_bundle_adjustment();
@@ -604,33 +604,50 @@ void LocalMapping::create_depth_seeded_points()
     }
 }
 
-void LocalMapping::search_in_neighbors()
+// Stage 4: fuse duplicated points with the neighbours, by projection
+void LocalMapping::fuse_with_neighbors()
 {
+    AF_REPORT_SCOPE();
 
+    // Targets: the best covisible keyframes and a few of theirs, each once
     std::vector<Keyframe> targets;
     std::unordered_set<KeyframeId> target_ids;
-    for(const Keyframe& neighbor : current_keyframe_->get_best_covisibility_keyframes(params.search_in_neighbors_keyframes))
+    [[maybe_unused]] size_t num_first = 0;   // for the report
+    for(const Keyframe& neighbor : current_keyframe_->get_best_covisibility_keyframes(params.fuse_with_neighbors_keyframes))
     {
-        if(neighbor->is_bad() || !target_ids.insert(neighbor->keyId).second)
+        if(neighbor->is_bad())
             continue;
+        num_first++;
+        if(!target_ids.insert(neighbor->keyId).second)
+            continue;   // already a target, through an earlier neighbor: its own neighbors are not added
         targets.push_back(neighbor);
 
-        for(const Keyframe& second : neighbor->get_best_covisibility_keyframes(params.search_in_neighbors_second_keyframes))
+        for(const Keyframe& second : neighbor->get_best_covisibility_keyframes(params.fuse_with_neighbors_second_keyframes))
         {
             if(second->is_bad() || second->keyId == current_keyframe_->keyId || !target_ids.insert(second->keyId).second)
                 continue;
             targets.push_back(second);
         }
     }
+    AF_REPORT("targets.first", "", num_first);
+    AF_REPORT("targets.second", "", targets.size() - num_first);
 
     for(const FeatureType feature_type : current_keyframe_->feature_types)
     {
         estimate_fuse_max_descriptor_distance(feature_type);
 
-        const std::vector<Pt> map_points = current_keyframe_->get_map_point_matches(feature_type);
+        // This keyframe's points, projected into every target. Read again for each one: a merge in one target
+        // replaces a point of this keyframe, and the next target must get the survivor.
+        [[maybe_unused]] FuseCounts into_targets;
         for(const Keyframe& target : targets)
-            fuse_into_keyframe(target, map_points, feature_type);
+        {
+            const FuseCounts counts =
+                fuse_into_keyframe(target, current_keyframe_->get_map_point_matches(feature_type), feature_type);
+            into_targets.observed += counts.observed;
+            into_targets.merged += counts.merged;
+        }
 
+        // Every target's points, each once, projected into this keyframe
         std::vector<Pt> candidates;
         std::unordered_set<PtId> candidate_ids;
         for(const Keyframe& target : targets)
@@ -642,27 +659,20 @@ void LocalMapping::search_in_neighbors()
                 candidates.push_back(candidate);
             }
         }
-        fuse_into_keyframe(current_keyframe_, candidates, feature_type);
+        [[maybe_unused]] const FuseCounts into_current = fuse_into_keyframe(current_keyframe_, candidates, feature_type);
 
-        for(const Pt& map_point : current_keyframe_->get_map_point_matches(feature_type))
-        {
-            if(map_point && !map_point->is_bad())
-            {
-                map_point->compute_distinctive_descriptors();
-                map_point->update_normal_and_depth();
-            }
-        }
-
+        const std::string& feature = get_feature(feature_type).get_feature_name();
+        AF_REPORT("into_targets.observed", feature, into_targets.observed);
+        AF_REPORT("into_targets.merged", feature, into_targets.merged);
+        AF_REPORT("into_current.candidates", feature, candidates.size());
+        AF_REPORT("into_current.observed", feature, into_current.observed);
+        AF_REPORT("into_current.merged", feature, into_current.merged);
     }
 
+    // Covisibility links from the points gained
     current_keyframe_->update_connections();
 }
 
-// How far apart in descriptor space a correct match lies, for one feature type: for each map
-// point of the current keyframe, the distance from its distinctive descriptor to the descriptor
-// of every other observation (the observation it was chosen from, at distance 0, is skipped once).
-// The fuse_descriptor_quantile quantile of these becomes the map's fuse descriptor distance; a
-// keyframe whose points have no second observation leaves the previous estimate in place.
 void LocalMapping::estimate_fuse_max_descriptor_distance(const FeatureType feature_type)
 {
     std::vector<Descriptor_Distance_Type> distances;
@@ -698,22 +708,14 @@ void LocalMapping::estimate_fuse_max_descriptor_distance(const FeatureType featu
     map_->set_fuse_max_descriptor_distance(feature_type, distances[index]);
 }
 
-// Fuses `map_points` into `keyframe`'s keypoints of `feature_type`. Each point the keyframe does not already
-// observe is projected with the keyframe's pose (project_if_visible: depth, image, scale range, viewing angle)
-// and matched by FeatureMatcher's gated mutual search, every keypoint a target whether it holds a point or not,
-// at most the map's fuse descriptor distance apart. A match on an empty keypoint adds the observation; a match
-// on a keypoint holding another point merges the two, the one with more observations surviving. A point or
-// keyframe slot changed by an earlier merge of this call is re-checked.
-void LocalMapping::fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points,
-                                      const FeatureType feature_type)
+LocalMapping::FuseCounts LocalMapping::fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points,
+                                                          const FeatureType feature_type)
 {
-    // No estimate yet for this type (no point with two observations): nothing is fused
     const std::optional<Descriptor_Distance_Type> max_descriptor_distance =
         map_->get_fuse_max_descriptor_distance(feature_type);
     if(!max_descriptor_distance)
-        return;
+        return {};
 
-    // One pose for all points: get_pose() takes the keyframe's pose lock once
     const Pose pose = keyframe->get_pose();
 
     std::vector<Pt> candidates;
@@ -734,6 +736,7 @@ void LocalMapping::fuse_into_keyframe(const Keyframe& keyframe, const std::vecto
     matcher_->match_map_points_to_keyframe(keyframe, candidates, projections, feature_type, matches,
                                            ErrorModel::params.chi2_mono, *max_descriptor_distance);
 
+    FuseCounts counts;
     for(size_t idx = 0; idx < matches.size(); idx++)
     {
         const Pt& pt = matches[idx];
@@ -747,12 +750,12 @@ void LocalMapping::fuse_into_keyframe(const Keyframe& keyframe, const std::vecto
             if(existing->is_bad())
                 continue;
             merge(existing, pt);
+            counts.merged++;
         }
-        // Publish first, observe only if the slot was won: another thread can fill it after
-        // get_map_point. pt already has a descriptor, so publishing before observing is safe.
-        else
-            observe(keyframe, pt, index);
+        else if(observe(keyframe, pt, index))
+            counts.observed++;
     }
+    return counts;
 }
 
 void LocalMapping::local_bundle_adjustment()

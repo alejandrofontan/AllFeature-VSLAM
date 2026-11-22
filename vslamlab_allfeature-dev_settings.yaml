@@ -13,10 +13,14 @@ Tracking.FeaturesFraction: 0.5                # keypoints per frame, as a share 
 Tracking.ViewingCosLimit: 0.5                 # a map point is a candidate (tracking, and fusion in Local Mapping and Loop Closing) only within this cosine of its mean viewing direction (60 deg)
 
 LocalMapping.KeyframeCullingMaxUnexplained: 0.5            # tau: culling keeps every keyframe (1 - tau) explained; a view above tau becomes a keyframe
-LocalMapping.FuseDescriptorQuantile: 0.5                   # fusion accepts descriptor distances up to this quantile of point-to-observation distances
+
 LocalMapping.CreateNewMapPointsKeyframes: 5                # covisible keyframes triangulated against per new keyframe
 LocalMapping.CreateNewMapPointsMinBaselineDepthRatio: 0.01 # skip neighbours with baseline / median depth below this
 LocalMapping.CreateNewMapPointsMaxParallaxCos: 0.9998      # triangulate only below this cos(parallax) (~1.15 deg)
+
+LocalMapping.SearchInNeighborsKeyframes: 20       # covisible keyframes fused with each new keyframe
+LocalMapping.SearchInNeighborsSecondKeyframes: 5  # second-degree neighbours added per covisible keyframe
+LocalMapping.FuseDescriptorQuantile: 0.5          # fusion accepts descriptor distances up to this quantile of point-to-observation distances
 
 Error.Chi2Mono: 5.991                         # outlier threshold of a 2-DoF reprojection error (95%), used by every stage
 Error.Chi2RGBD: 7.815                         # outlier threshold of a 3-DoF RGB-D error (95%); the Huber deltas are their square roots
@@ -150,9 +154,6 @@ LocalMapping.MapPointCullingMinFoundRatio: 0.25   # cull a recent point when fou
 LocalMapping.MapPointCullingMinObservations: 3    # observations a point needs by ObservationTestAge to survive (depth-verified ones count more)
 LocalMapping.MapPointCullingObservationTestAge: 2 # keyframes after creation at which that test applies
 LocalMapping.MapPointCullingProbationAge: 3       # keyframes after creation at which a surviving point leaves probation
-
-LocalMapping.SearchInNeighborsKeyframes: 20       # covisible keyframes fused with each new keyframe
-LocalMapping.SearchInNeighborsSecondKeyframes: 5  # second-degree neighbours added per covisible keyframe
 
 # Keyframe culling (information-based; without a kernel nothing is culled)
 LocalMapping.KeyframeCullingMinAge: 5            # younger keyframes are never culled
