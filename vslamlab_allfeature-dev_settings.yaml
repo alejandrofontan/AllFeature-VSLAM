@@ -10,7 +10,8 @@ segmentation: "none"                          # online semantic segmentation: "e
 
 # Tunable
 Tracking.FeaturesFraction: 0.5                # keypoints per frame, as a share of each feature's maximum (orb32 4000, learned 2048, others 2000)
-Tracking.ViewingCosLimit: 0.5                 # a map point is a candidate (tracking, and fusion in Local Mapping and Loop Closing) only within this cosine of its mean viewing direction (60 deg)
+
+MapPoint.DepthInvarianceRatio: 1.2                # a point is expected between its reference distance divided and multiplied by this
 
 LocalMapping.KeyframeCullingMaxUnexplained: 0.5            # tau: culling keeps every keyframe (1 - tau) explained; a view above tau becomes a keyframe
 
@@ -33,6 +34,7 @@ Tracking.FlowMaxBackwardError: 1.0            # px: forward-backward KLT disagre
 Tracking.NominalImageArea: 307200             # px (640x480): frames are resized to this area and cropped to a multiple of 32 (739x458 -> 672x416)
 Tracking.FrameTracking: "reference_keyframe"  # "reference_keyframe" (descriptor match) | "optical_flow"
 LocalMapping.InformationKernel: "covisibility"   # "megaloc" (MegaLoc cosine) | "covisibility" (shared map points)
+
 
 #--------------------------------------------------------------------------------------------
 # Camera, place recognition and models
@@ -111,6 +113,7 @@ Tracking.TrackLocalMapMinInliersAfterReloc: 50  # the same, shortly after a relo
 # Local map
 Tracking.MaxLocalKeyframes: 80        # the local map stops growing at this many keyframes
 Tracking.BestCovisibleKeyframes: 10   # covisible neighbours considered per keyframe
+Tracking.ViewingCosLimit: 0.5          # a map point is a candidate (tracking, and fusion in Local Mapping and Loop Closing) only within this cosine of its mean viewing direction (0 = 90 deg)
 
 # Keyframe policy: information = how much of the view the local map does not explain (0..1)
 Tracking.KeyframeMinInformation: 0.05 # below this: redundant, no keyframe; above LocalMapping.KeyframeCullingMaxUnexplained: always one
@@ -147,7 +150,6 @@ KeyFrame.MinCovisibilityWeight: 15                # shared map points two keyfra
 # Map points
 MapPoint.MinObservingKeyframes: 3                 # a point that loses an observation and is left with fewer keyframes than this is removed
 MapPoint.DepthObservationWeight: 2                # an observation with sensor depth counts this many times in the observation count
-MapPoint.DepthInvarianceRatio: 1.2                # a point is expected between its reference distance divided and multiplied by this
 
 # Cull map points
 LocalMapping.MapPointCullingMinFoundRatio: 0.25   # cull a recent point when found/visible drops below this

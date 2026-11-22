@@ -643,6 +643,7 @@ void LocalMapping::fuse_with_neighbors()
         {
             const FuseCounts counts =
                 fuse_into_keyframe(target, current_keyframe_->get_map_point_matches(feature_type), feature_type);
+            into_targets.not_visible += counts.not_visible;
             into_targets.observed += counts.observed;
             into_targets.merged += counts.merged;
         }
@@ -662,9 +663,11 @@ void LocalMapping::fuse_with_neighbors()
         [[maybe_unused]] const FuseCounts into_current = fuse_into_keyframe(current_keyframe_, candidates, feature_type);
 
         const std::string& feature = get_feature(feature_type).get_feature_name();
+        AF_REPORT("into_targets.not_visible", feature, into_targets.not_visible);
         AF_REPORT("into_targets.observed", feature, into_targets.observed);
         AF_REPORT("into_targets.merged", feature, into_targets.merged);
         AF_REPORT("into_current.candidates", feature, candidates.size());
+        AF_REPORT("into_current.not_visible", feature, into_current.not_visible);
         AF_REPORT("into_current.observed", feature, into_current.observed);
         AF_REPORT("into_current.merged", feature, into_current.merged);
     }
@@ -716,16 +719,19 @@ void LocalMapping::estimate_fuse_max_descriptor_distance(const FeatureType featu
     AF_REPORT("descriptor.fuse_max", feature, distances[index]);
 }
 
+// Fuses map_points into one keyframe by projection: an observation at a free keypoint, a merge at a taken one
 LocalMapping::FuseCounts LocalMapping::fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points,
                                                           const FeatureType feature_type)
 {
+    // No descriptor limit yet for this feature: nothing is fused
     const std::optional<Descriptor_Distance_Type> max_descriptor_distance =
         map_->get_fuse_max_descriptor_distance(feature_type);
     if(!max_descriptor_distance)
         return {};
 
+    // The points the keyframe can see: in front, in the image, at a plausible distance and viewing angle
+    FuseCounts counts;
     const Pose pose = keyframe->get_pose();
-
     std::vector<Pt> candidates;
     std::vector<cv::Point2f> projections;
     for(const Pt& pt : map_points)
@@ -735,24 +741,28 @@ LocalMapping::FuseCounts LocalMapping::fuse_into_keyframe(const Keyframe& keyfra
         const std::optional<Projection> projection =
             project_if_visible(pose, *keyframe->calibration, pt, params.fuse_viewing_cos_limit);
         if(!projection)
+        {
+            counts.not_visible++;
             continue;
+        }
         candidates.push_back(pt);
         projections.push_back(projection->uv);
     }
 
+    // Matched by position (gate around the projection) and descriptor (below the limit), mutually
     std::vector<Pt> matches(keyframe->features.at(feature_type).count());
     matcher_->match_map_points_to_keyframe(keyframe, candidates, projections, feature_type, matches,
                                            ErrorModel::params.chi2_mono, *max_descriptor_distance);
 
-    FuseCounts counts;
-    for(size_t idx = 0; idx < matches.size(); idx++)
+    const KeypointIndex num_keypoints = static_cast<KeypointIndex>(matches.size());
+    for(KeypointIndex index = 0; index < num_keypoints; index++)
     {
-        const Pt& pt = matches[idx];
+        const Pt& pt = matches[index];
         if(!pt || pt->is_bad() || pt->is_in_keyframe(keyframe))
             continue;
 
-        const KeypointIndex index = static_cast<KeypointIndex>(idx);
         const Pt existing = keyframe->get_map_point(index, feature_type);
+        // The keypoint holds another point: the two are one, the better observed survives
         if(existing)
         {
             if(existing->is_bad())
@@ -760,6 +770,7 @@ LocalMapping::FuseCounts LocalMapping::fuse_into_keyframe(const Keyframe& keyfra
             merge(existing, pt);
             counts.merged++;
         }
+        // A free keypoint: the point is seen there too
         else if(observe(keyframe, pt, index))
             counts.observed++;
     }

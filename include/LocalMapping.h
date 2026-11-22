@@ -110,7 +110,7 @@ private:
     void fuse_with_neighbors();
 
     void estimate_fuse_max_descriptor_distance(FeatureType feature_type);
-    struct FuseCounts { int observed{0}; int merged{0}; };   // observations added, points merged
+    struct FuseCounts { int not_visible{0}; int observed{0}; int merged{0}; };   // offered points the keyframe cannot see, observations added, points merged
     FuseCounts fuse_into_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_points, FeatureType feature_type);
     void local_bundle_adjustment();
     void cull_keyframes();
