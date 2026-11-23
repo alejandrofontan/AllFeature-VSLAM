@@ -38,7 +38,6 @@
 #include "Initializer.h"
 #include "KeyframeInformation.h"
 #include "PlaceRecognition.h"
-#include "Profiling_aux.h"
 #include "LocalMapping.h"
 #include "LoopClosing.h"
 #include "Map.h"
@@ -50,6 +49,9 @@
 
 namespace AF_VSLAM
 {
+
+// Tracking.FrameTracking: the frame-to-frame stage (see TrackingParameters::frame_tracking)
+enum class FrameTracking { reference_keyframe, optical_flow };
 
 // Broken by the include cycles above (Tracking <-> FrameDrawer/Viewer/LocalMapping/
 // LoopClosing/System include each other); these forward declarations keep this
@@ -100,7 +102,7 @@ struct TrackingParameters
     // keyframe on every frame (track_reference_keyframe); "optical_flow" = KLT on the last frame's tracked
     // points, snapped to the current frame's detected keypoints (track_with_optical_flow), with the
     // reference-keyframe match as the fallback when the flow finds too few matches or inliers
-    std::string frame_tracking{"reference_keyframe"};
+    FrameTracking frame_tracking{FrameTracking::reference_keyframe};
     float flow_association_radius{2.0f};  // px: a flowed point takes the nearest detected keypoint within this
     float flow_max_backward_error{1.0f};  // px: forward-backward KLT disagreement above this drops the track
     int flow_min_matches{30};             // map points matched by flow below this -> fall back to the reference match
@@ -123,7 +125,8 @@ struct TrackingParameters
     // need_new_keyframe()
     float keyframe_min_information{0.05f}; // unexplained information (placecell, [0,1]) below which the local map already explains the view: no keyframe
     bool log_keyframe_information{false};  // one diagnostic line per tracked frame with the information, the flow, the triggers, and the decision
-    int min_observations_high{3};       // reference-KF match counting: min observations per point
+    // Diagnostic only (refMatches in the log_keyframe_information line): reference-KF match counting
+    int min_observations_high{3};       // min observations per point
     int min_observations_low{2};        //   relaxed bar while the map is young
     int young_map_keyframes{2};         //   map considered young at <= this many keyframes
     float emergency_inlier_drop_ratio{0.5f}; // emergency keyframe: inliers < ratio x recent median
@@ -180,9 +183,7 @@ public:
     cv::Mat last_grey_image_; // the previous frame's, whatever its tracking state
     cv::Mat mask_image_; // segmentation mask of the current image (1 = static, 0 = dynamic); empty when segmentation is off
 
-    // Initialization Variables (mono)
-    std::vector<int> init_matches_;
-    std::vector<vec3f> init_points3d_;
+    // Two-view initialization reference frame (drawn by the FrameDrawer while NOT_INITIALIZED)
     Frame initial_frame_;
 
     std::map<FeatureType, std::vector<int>> matches_per_feature_;
@@ -203,19 +204,8 @@ public:
     std::vector<FeatureType> feature_types_{};
 
 
-    ////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////
-    // Profiling
-    std::map<int, int> resize_times_{};
-    std::map<int, int> frame_times_{};
-    std::map<int, int> tracking_times_{};
-    std::map<int, int> track_ref_times_{};
-    std::map<int, int> pose_opt_times_{};
-    std::map<int, int> local_map_times_{};
+    // grab_image time histogram (ms) of tracked frames: the viewer's median
     std::map<int, int> grab_image_times_{};
-
-    ////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////
 
 protected:
 
@@ -226,14 +216,6 @@ protected:
     // Runs one tracking stage: a TrackingLostException fails the stage (logged
     // with its reason and statistics).
     bool run_tracking_stage(const std::function<bool()>& stage);
-
-    // Low-rate tracking-stats heartbeat for post-mortems (PROFILING_EXHAUSTIVE
-    // builds only; compiles to a no-op otherwise).
-    void log_heartbeat();
-
-    // Cumulative stage-timing histograms via the AF_PROFILE sink (also
-    // PROFILING_EXHAUSTIVE-only).
-    void log_profile();
 
     // Store this frame's pose relative to its reference keyframe (Tlr); composed
     // with the keyframe's CURRENT pose it re-derives the frame's pose next frame
@@ -258,7 +240,7 @@ protected:
     bool track_with_optical_flow();
     // The tail both stages share: seed the pose from the last frame's relative pose, optimize, the depth-free
     // rescue, discard the outlier matches. Returns the inlier count; the caller decides what too few means.
-    int optimize_pose_from_last_frame(int num_matches, const char* stage, StageTimer& timer);
+    int optimize_pose_from_last_frame(int num_matches, const char* stage);
 
     bool relocalize();
     // One RANSAC pose hypothesis for a relocalization candidate: seed the frame
@@ -315,6 +297,8 @@ protected:
 
     // Initialization (only for monocular)
     std::shared_ptr<Initializer> initializer_;
+    std::vector<int> init_matches_;     // initial_frame_ keypoint -> current keypoint, flat over feature types
+    std::vector<vec3f> init_points3d_;  // the initializer's triangulations, same indexing
 
     //Local Map
     Keyframe ref_keyframe_;
@@ -340,8 +324,6 @@ protected:
     // the image as the tracker actually sees it. One instance serves the run; per-frame
     // intrinsics would build one per frame here.
     std::shared_ptr<const Calibration> calibration_;
-    // Stereo baseline x fx. Nothing sets it yet (its only writer was the dead
-    // ChangeCalibration); zero-initialized so Frame gets a defined value.
     int image_width_{};
     int image_height_{};
 
@@ -361,8 +343,7 @@ protected:
     // Rolling inlier history (last params.inliers_history_size tracked frames) — reference for the
     // emergency-keyframe trigger in need_new_keyframe(). Comparing against recent frames
     // instead of ref_keyframe_->count_tracked_map_points() avoids the self-inflating feedback loop
-    // where every inserted keyframe grows the reference stat via post-hoc triangulation
-    // (see CLAUDE.md, Stop-Induced Keyframe Runaway Investigation).
+    // where every inserted keyframe grows the reference stat via post-hoc triangulation.
     std::deque<int> recent_inliers_history_;
     FrameId last_emergency_keyframe_id_{0};
 
@@ -375,10 +356,10 @@ protected:
 
     // Last Frame and Relocalisation Info
     Frame last_frame_;
-    mat4f last_frame_relative_pose_; // Tlr of last_frame_ (see store_relative_pose)
+    mat4f last_frame_relative_pose_{mat4f::Identity()}; // Tlr of last_frame_ (see store_relative_pose)
     FrameId last_reloc_frame_id_{0};
 
-    // Fix image size to nominal size 307200 pixels
+    // Resize frames (Tracking.NominalImageArea or Tracking.ImageWidth/Height; see load_camera_parameters)
     bool fix_image_size_{false};
 
     //////////////////////////////////////////////// Constants

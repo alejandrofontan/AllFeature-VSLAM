@@ -3,12 +3,13 @@
  * an optional RGB-D depth channel). Receives images (grab_image), initializes
  * the map via two-view monocular initialization, tracks each frame against the
  * reference keyframe and the local map, decides keyframe insertion, and
- * recovers from losses via relocalization. Auxiliary members (profilers,
- * diagnostics, calibration loading) live in Tracking_aux.{h,cc}.
+ * recovers from losses via relocalization. Auxiliary members (calibration
+ * loading, extractor budgets, stage error handling) live in Tracking_aux.cc.
  */
 #include "Tracking.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -17,6 +18,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include <opencv2/calib3d.hpp>
@@ -28,7 +30,6 @@
 #include "Optimizer.h"
 #include "PnPsolver.h"
 #include "Report.h"
-#include "Tracking_aux.h"
 #include "Utils.h"
 #include "afvslam_log.hpp"
 #include "onnx/OrtSession.h"
@@ -64,14 +65,19 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.NominalImageArea", params.nominal_image_area);
     read_if_present("Tracking.ImageWidth", params.image_width);
     read_if_present("Tracking.ImageHeight", params.image_height);
-    read_if_present("Tracking.FrameTracking", params.frame_tracking);
+    std::string frame_tracking = params.frame_tracking == FrameTracking::optical_flow ? "optical_flow" : "reference_keyframe";
+    read_if_present("Tracking.FrameTracking", frame_tracking);
     read_if_present("Tracking.FlowAssociationRadius", params.flow_association_radius);
     read_if_present("Tracking.FlowMaxBackwardError", params.flow_max_backward_error);
     read_if_present("Tracking.FlowMinMatches", params.flow_min_matches);
-    if(params.frame_tracking != "reference_keyframe" && params.frame_tracking != "optical_flow")
+    if(frame_tracking == "reference_keyframe")
+        params.frame_tracking = FrameTracking::reference_keyframe;
+    else if(frame_tracking == "optical_flow")
+        params.frame_tracking = FrameTracking::optical_flow;
+    else
     {
         AF_ERROR("[Tracking] Tracking.FrameTracking must be \"reference_keyframe\" or \"optical_flow\", got \""
-                 << params.frame_tracking << "\"");
+                 << frame_tracking << "\"");
         exit(-1);
     }
     read_if_present("Tracking.TrackRefMinMatches", params.track_ref_min_matches);
@@ -129,7 +135,7 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
         extractor->prepare(frame_width, frame_height);
 
     matcher_ = std::make_shared<FeatureMatcher>(feature_types, "Tracking");
-    if(params.frame_tracking == "optical_flow")
+    if(params.frame_tracking == FrameTracking::optical_flow)
         AF_INFO("[Tracking] frame-to-frame stage: optical_flow (KLT on the last frame's tracked points, association radius "
                 << params.flow_association_radius << " px, min " << params.flow_min_matches
                 << " matches; fallback: the reference-keyframe match)");
@@ -160,7 +166,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     // A Features Fraction moved in the viewer takes effect from this frame
     apply_features_fraction();
 
-    GrabProfiler profiler{};
+    const auto t_start = std::chrono::steady_clock::now();
 
     // Convert image to grayscale and resize
     im.get_gray_image();
@@ -180,25 +186,20 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     grey_image_ = im.grayImg.clone();                 // the caller may reuse its Image
     color_image_ = im.img;
     mask_image_ = im.mask;
-    profiler.resize_done(resize_times_);
 
     // Create the frame (feature extraction). The report context is set first, with the id the frame is about
     // to take, so that what the extraction reports is stamped with its own frame
     AF_REPORT_CONTEXT("tracking", Frame::next_id);
     current_frame_ = Frame(im, timestamp, feature_extractor_left_, place_recognition_, calibration_);
-    profiler.frame_created(frame_times_);
 
     const mat4f Tcw = track();
-    profiler.tracking_done(tracking_times_, state_ == TrackingState::OK);
 
-    // Median excludes the current frame (updated below), matching the original order.
+    // Median excludes the current frame (updated below)
     if(viewer_)
         viewer_->set_grab_image_time_median(map_median(grab_image_times_));
 
-    log_profile();
-
     if(state_ == TrackingState::OK)
-        grab_image_times_[profiler.total_ms()]++;
+        grab_image_times_[int(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count())]++;
 
     return Tcw;
 }
@@ -221,11 +222,8 @@ mat4f Tracking::track()
 
     last_processed_state_ = state_;
 
-    TrackProfiler profiler{};
-
     // Get Map Mutex -> Map cannot be changed
     std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
-    profiler.lock_acquired();
 
     // No map yet: the frame goes to two-view initialization, which finishes the
     // frame itself (drawer update, first stored relative pose once a map exists).
@@ -247,7 +245,7 @@ mat4f Tracking::track()
     {
         // Local Mapping might have changed some MapPoints tracked in last frame
         check_replaced_in_last_frame();
-        if(params.frame_tracking == "optical_flow")             // false: not lost, fall back to the descriptor match
+        if(params.frame_tracking == FrameTracking::optical_flow)   // false: not lost, fall back to the descriptor match
             ok = run_tracking_stage([this] { return track_with_optical_flow(); });
         if(!ok)
             ok = run_tracking_stage([this] { return track_reference_keyframe(); });
@@ -256,12 +254,10 @@ mat4f Tracking::track()
         ok = run_tracking_stage([this] { return relocalize(); });
 
     current_frame_.ref_keyframe = ref_keyframe_;
-    profiler.track_ref_done();
 
     // If we have an initial estimation of the camera pose and matching, track the local map.
     if(ok)
         ok = run_tracking_stage([this] { return track_local_map(); });
-    profiler.local_map_done(local_map_times_);
 
     state_ = ok ? TrackingState::OK : TrackingState::LOST;
 
@@ -271,7 +267,6 @@ mat4f Tracking::track()
     if(ok)
     {
         ++num_tracked_frames_;
-        log_heartbeat();
 
         map_drawer_->set_current_camera_pose(current_frame_.get_Tcw());
 
@@ -289,9 +284,8 @@ mat4f Tracking::track()
     if(!current_frame_.ref_keyframe)
         current_frame_.ref_keyframe = ref_keyframe_;
 
-    // All three read current_frame_, so they run before it is moved from
+    // Both read current_frame_, so they run before it is moved from
     store_relative_pose();
-    const FrameId frame_id = current_frame_.frame_id;
     const mat4f Tcw = current_frame_.get_Tcw();
 
     // Moved, not copied: grab_image rebuilds current_frame_ from scratch next frame, and nothing
@@ -307,29 +301,24 @@ mat4f Tracking::track()
         wait_for_idle_local_mapper();
     }
     // An emergency keyframe was just inserted: block until Local Mapping has processed
-    // it (the trigger is already logged by need_new_keyframe, and in profiling builds the
-    // wait shows up as emergencyWait in the slow-frame report below).
+    // it (the trigger is already logged by need_new_keyframe).
     else if (emergency_keyframe_)
     {
-        profiler.emergency_wait_begin();
         lock.unlock();
         // ... or until it is stopped (a loop correction: accepts_keyframes stays false for the whole correction)
         // or finished, which no longer process anything this frame could wait for
         while(!local_mapper_->accepts_keyframes() && !local_mapper_->is_stopped() && !local_mapper_->is_finished())
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         emergency_keyframe_ = false;
-        profiler.emergency_wait_end();
     }
 
-    profiler.report(frame_id);
     return Tcw;
 }
 
 void Tracking::store_relative_pose()
 {
-    const mat4f& Tcw = current_frame_.get_Tcw();
-    if(Tcw(3,3) == 1.0f)
-        last_frame_relative_pose_ = Tcw * current_frame_.ref_keyframe->get_Twc();
+    if(state_ == TrackingState::OK)
+        last_frame_relative_pose_ = current_frame_.get_Tcw() * current_frame_.ref_keyframe->get_Twc();
 }
 
 void Tracking::monocular_initialization()
@@ -664,7 +653,6 @@ void Tracking::check_replaced_in_last_frame()
 
 bool Tracking::track_reference_keyframe()
 {
-    StageTimer timer{};
 
     // Feature matching against the reference keyframe (global descriptor matching)
     std::map<FeatureType, std::vector<Pt>> map_point_matches;
@@ -687,9 +675,8 @@ bool Tracking::track_reference_keyframe()
                << " | frame=" << current_frame_.frame_id << " ref_keyframe_=" << ref_keyframe_->keyId;
         throw TrackingLostException(reason.str());
     }
-    timer.record(track_ref_times_);
 
-    const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_reference_keyframe", timer);
+    const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_reference_keyframe");
     if(num_map_inliers < params.track_ref_min_inliers)
     {
         std::ostringstream reason;
@@ -702,7 +689,7 @@ bool Tracking::track_reference_keyframe()
     return true;
 }
 
-int Tracking::optimize_pose_from_last_frame(const int num_matches, const char* stage, StageTimer& timer)
+int Tracking::optimize_pose_from_last_frame(const int num_matches, const char* stage)
 {
     // Optimize pose — seeded from the last frame's pose, recomputed on the fly from its
     // stored RELATIVE pose and the reference keyframe's CURRENT pose, so BA/loop-closure
@@ -758,13 +745,11 @@ int Tracking::optimize_pose_from_last_frame(const int num_matches, const char* s
             }
         }
     }
-    timer.record(pose_opt_times_);
     return num_map_inliers;
 }
 
 bool Tracking::track_with_optical_flow()
 {
-    StageTimer timer{};
     const auto fall_back = [this](const char* why, const int count)
     {
         for (auto& [ft, pts] : current_frame_.pts)
@@ -790,10 +775,9 @@ bool Tracking::track_with_optical_flow()
     const int num_matches = counts.matched;
     if(num_matches < params.flow_min_matches)
         return fall_back("too few flow tracks landed on a detected keypoint", num_matches);
-    timer.record(track_ref_times_);
 
     // 5. The shared pose optimization; too few inliers is a fallback here, not a loss
-    const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_with_optical_flow", timer);
+    const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_with_optical_flow");
     if(num_map_inliers < params.track_ref_min_inliers)
         return fall_back("too few inliers after pose optimization", num_map_inliers);
     return true;
@@ -1282,17 +1266,23 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
             current_frame_.pts.at(feature_type)[j] = nullptr;
     }
 
-    int num_good = Optimizer::pose_optimization(&current_frame_);
+    // Pose optimization, then the outliers it flagged lose their match (their keypoints are free for the searches)
+    const auto optimize = [&]
+    {
+        const int num_inliers = Optimizer::pose_optimization(&current_frame_);
+        for(size_t j = 0; j < current_frame_.features.at(feature_type).count(); j++)
+            if(current_frame_.outliers.at(feature_type)[j])
+                current_frame_.pts.at(feature_type)[j] = nullptr;
+        return num_inliers;
+    };
+
+    int num_good = optimize();
     AF_REPORT("reloc.inliers_optimized", "", num_good);
     if(num_good < params.reloc_inliers_low)
     {
         AF_REPORT("reloc.accepted", "", 0);
         return false;
     }
-
-    for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
-        if(current_frame_.outliers.at(feature_type)[j])
-            current_frame_.pts.at(feature_type)[j] = nullptr;
 
     // More matches for the hypothesis, now that it has a pose: project the candidate keyframe's
     // map points that are not matched yet into the frame, and match them to the frame's free
@@ -1332,7 +1322,7 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
         AF_REPORT("reloc.first_search_added", "", additional);
         if(additional + num_good >= params.reloc_inliers_high)
         {
-            num_good = Optimizer::pose_optimization(&current_frame_);
+            num_good = optimize();
             AF_REPORT("reloc.inliers_after_first_search", "", num_good);
 
             // Many inliers but still not enough: the pose has moved, so the projections have
@@ -1347,11 +1337,8 @@ bool Tracking::accept_relocalization_hypothesis(Keyframe candidate, const std::v
                 AF_REPORT("reloc.second_search_added", "", second_additional);
                 if(num_good + second_additional >= params.reloc_inliers_high)
                 {
-                    num_good = Optimizer::pose_optimization(&current_frame_);
+                    num_good = optimize();
                     AF_REPORT("reloc.inliers_after_second_search", "", num_good);
-                    for(int j = 0; j < static_cast<int>(current_frame_.features.at(feature_type).count()); j++)
-                        if(current_frame_.outliers.at(feature_type)[j])
-                            current_frame_.pts.at(feature_type)[j] = nullptr;
                 }
             }
         }
@@ -1421,6 +1408,10 @@ void Tracking::reset()
     matches_per_feature_.clear();
     init_matches_.clear();
     last_grey_image_.release();
+    grey_image_.release();
+    last_frame_relative_pose_ = mat4f::Identity();
+    last_keyframe_information_.reset();
+    num_tracked_frames_ = 2;
 
     // Per-run tracking state: frame ids restart at 0, so id-anchored state from
     // the previous run (reloc embargo, emergency cooldown) must not leak into the
@@ -1431,12 +1422,6 @@ void Tracking::reset()
     num_inlier_matches_ = 0;
     recent_inliers_history_.clear();
 
-    resize_times_.clear();
-    frame_times_.clear();
-    tracking_times_.clear();
-    track_ref_times_.clear();
-    pose_opt_times_.clear();
-    local_map_times_.clear();
     grab_image_times_.clear();
 
     if(viewer_)
