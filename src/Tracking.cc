@@ -215,22 +215,27 @@ mat4f Tracking::track()
     last_processed_state_ = state_;
 
     std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
+    [[maybe_unused]] const auto t_lock = std::chrono::steady_clock::now();
+    const auto release_map = [&]   // Local BA and loop correction wait on this lock: report how long it was held
+    {
+        [[maybe_unused]] const double held_ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_lock).count();
+        AF_REPORT("tracking.map_lock_ms", "", held_ms);
+        lock.unlock();
+    };
 
     if(state_ == TrackingState::NOT_INITIALIZED)
     {
         monocular_initialization();
+        release_map();
         if(params.sequential)
-        {
-            lock.unlock();
             wait_for_local_mapper(/*drain_queue=*/true);
-        }
         return current_frame_.get_Tcw();
     }
 
     bool ok{false};
     if(state_ == TrackingState::OK)
     {
-        check_replaced_in_last_frame();
         if(params.frame_tracking == FrameTracking::optical_flow)
             ok = run_tracking_stage([this] { return track_with_optical_flow(); });
         if(!ok)
@@ -257,25 +262,22 @@ mat4f Tracking::track()
         if(need_new_keyframe())
             create_new_keyframe();
 
+        // Outliers reach the new keyframe (BA decides), not the next frame's pose
         current_frame_.drop_outlier_points();
     }
-
-    if(!current_frame_.ref_keyframe)
-        current_frame_.ref_keyframe = ref_keyframe_;
 
     store_relative_pose();
     const mat4f Tcw = current_frame_.get_Tcw();
 
+    // Moved: grab_image builds a fresh frame next time
     last_frame_ = std::move(current_frame_);
+    release_map();
 
+    // Sequential: Local Mapping idle before the next frame; emergency: until it takes the keyframe
     if (params.sequential)
-    {
-        lock.unlock();
         wait_for_local_mapper(/*drain_queue=*/true);
-    }
     else if (run_.emergency_keyframe)
     {
-        lock.unlock();
         wait_for_local_mapper(/*drain_queue=*/false);
         run_.emergency_keyframe = false;
     }
@@ -299,7 +301,6 @@ void Tracking::monocular_initialization()
 
 void Tracking::attempt_monocular_initialization()
 {
-    // Every gate below pools over all feature types.
     const auto total_keypoints = [this](const Frame& frame) {
         size_t n = 0;
         for (const auto& ft : feature_types_)
@@ -307,14 +308,10 @@ void Tracking::attempt_monocular_initialization()
         return n;
     };
 
-    // The previous attempt's matches index the previous reference / current frames: never let them reach the
-    // FrameDrawer with this frame's keypoints (it draws matches_per_feature_ while NOT_INITIALIZED). They are
-    // refilled below when this attempt matches.
     matches_per_feature_.clear();
 
     if(!initializer_)
     {
-        // Set Reference Frame
         if(total_keypoints(current_frame_) > static_cast<size_t>(params.init_min_keypoints))
         {
             initial_frame_ = current_frame_;
@@ -325,18 +322,14 @@ void Tracking::attempt_monocular_initialization()
     }
     else
     {
-        // Try to initialize
         if(total_keypoints(current_frame_) <= static_cast<size_t>(params.init_min_keypoints))
         {
             initializer_ = nullptr;
             return;
         }
 
-        // Find correspondences
         const auto matched_pairs = matcher_->match_frames_for_initialization(initial_frame_, current_frame_, feature_types_);
 
-        // Fill matches_per_feature_ (used later in create_initial_map) and
-        // init_matches_ (flat over all feature types, the structure the initializer uses).
         init_matches_.clear();
         size_t offset2 = 0;
         for (const auto& ft : feature_types_) {
@@ -351,7 +344,6 @@ void Tracking::attempt_monocular_initialization()
             offset2 += current_frame_.features.at(ft).keypoints.size();
         }
 
-        // Check if there are enough correspondences (pooled over all feature types)
         size_t num_matches = 0;
         for (const auto& ft : feature_types_)
             num_matches += matched_pairs.at(ft).size();
@@ -361,9 +353,6 @@ void Tracking::attempt_monocular_initialization()
             return;
         }
 
-        // Disparity gate: with (near-)zero baseline — e.g. a static camera — two-view
-        // initialization can only produce ill-conditioned geometry, so don't attempt it.
-        // Keep the reference frame: disparity only grows once the camera starts moving.
         {
             std::vector<float> disparities;
             disparities.reserve(num_matches);
@@ -379,17 +368,15 @@ void Tracking::attempt_monocular_initialization()
                 return;
         }
 
-        mat3f Rcw{}; // Current Camera Rotation
-        vec3f tcw{}; // Current Camera Translation
+        mat3f Rcw{};
+        vec3f tcw{};
         std::vector<bool> triangulated;
         if(initializer_->initialize(current_frame_, init_matches_, Rcw, tcw, init_points3d_, triangulated))
         {
-            // Discard matches the initializer could not triangulate
             for (size_t j = 0; j < init_matches_.size(); j++)
                 if (init_matches_[j] >= 0 && !triangulated[j])
                     init_matches_[j] = -1;
 
-            // Set Frame Poses
             initial_frame_.set_pose(mat4f::Identity());
             mat4f Tcw{mat4f::Identity()};
             Tcw.block<3,3>(0,0) = Rcw;
@@ -402,17 +389,14 @@ void Tracking::attempt_monocular_initialization()
 
 void Tracking::create_initial_map()
 {
-    // Create the two founding keyframes
     Keyframe keyframe_ini = std::make_shared<KeyFrame>(initial_frame_, map_, place_recognition_);
     Keyframe keyframe_cur = std::make_shared<KeyFrame>(current_frame_, map_, place_recognition_);
 
     map_->add_keyframe(keyframe_ini);
     map_->add_keyframe(keyframe_cur);
 
-    // Triangulated matches become map points observed by both keyframes
-    // (create_monocular_map_point registers them in the map)
     int num_triangulated = 0;
-    size_t flat_index = 0; // runs over init_matches_, flattened across feature types
+    size_t flat_index = 0;
     for (const auto& ft : feature_types_) {
         const auto& matches = matches_per_feature_.at(ft);
         for (size_t i = 0; i < matches.size(); i++, flat_index++) {
@@ -423,19 +407,13 @@ void Tracking::create_initial_map()
                                                             KeypointIndex(matches[i]),
                                                             keyframe_ini, KeypointIndex(i), ft);
             if (!map_point)
-                continue;   // a slot was taken between the emptiness check and the write
+                continue;
             current_frame_.pts.at(ft)[matches[i]] = map_point;
             current_frame_.outliers.at(ft)[matches[i]] = false;
             num_triangulated++;
         }
     }
 
-    // Depth-verified metric scale, decided from the raw triangulations (median of
-    // sensor-depth / triangulated-depth over the geometrically verified matches;
-    // keyframe_ini sits at the origin, so a point's z IS its depth there). Decided
-    // BEFORE global BA so that depth-completed matches can join the map and be
-    // refined by the BA — whose RGB-D inverse-depth edges then anchor the metric
-    // scale during the optimization itself.
     std::vector<float> depth_ratios;
     for (const auto& ft : feature_types_) {
         const auto& inv_depth_kf = keyframe_ini->features.at(ft).inv_depth;
@@ -462,8 +440,6 @@ void Tracking::create_initial_map()
         std::nth_element(depth_ratios.begin(), mid, depth_ratios.end());
         const float scale = *mid;
 
-        // Rescale the baseline and the triangulated points to metric now, so that
-        // metric depth back-projections below are scale-consistent with them
         mat4f Tc2w = keyframe_cur->get_Tcw();
         Tc2w.block<3,1>(0,3) *= scale;
         keyframe_cur->set_pose(Tc2w);
@@ -472,11 +448,6 @@ void Tracking::create_initial_map()
                 if (map_point)
                     map_point->set_world_pos(map_point->get_world_pos() * scale);
 
-        // Matched pairs the initializer could not triangulate (low parallax,
-        // degenerate geometry): back-project from sensor depth — reference frame
-        // preferred (origin), current frame as fallback — and keep BOTH
-        // observations, exactly like a triangulated point. Added before BA, so
-        // they are refined together with everything else.
         const float cx = calibration_->cx, cy = calibration_->cy;
         const float invfx = calibration_->invfx, invfy = calibration_->invfy;
         const mat4f Twc_cur = keyframe_cur->get_Twc();
@@ -492,7 +463,7 @@ void Tracking::create_initial_map()
             const auto& keypoints_cur = keyframe_cur->features.at(ft).keypoints;
             for (size_t i = 0; i < matches.size(); i++, flat_index++) {
                 if (matches[i] < 0 || init_matches_[flat_index] >= 0)
-                    continue; // no match, or already triangulated
+                    continue;
                 const int j = matches[i];
 
                 vec3f world_pos;
@@ -508,12 +479,12 @@ void Tracking::create_initial_map()
                     world_pos = Rwc_cur * (xn / inv_depth_cur[j]) + twc_cur;
                 }
                 else
-                    continue; // matched, but neither frame has depth here
+                    continue;
 
                 Pt map_point = map_->create_monocular_map_point(world_pos, keyframe_cur, KeypointIndex(j),
                                                                 keyframe_ini, KeypointIndex(i), ft);
                 if (!map_point)
-                    continue;   // a slot was taken between the emptiness check and the write
+                    continue;
                 current_frame_.pts.at(ft)[j] = map_point;
                 current_frame_.outliers.at(ft)[j] = false;
                 num_depth_completed++;
@@ -534,12 +505,10 @@ void Tracking::create_initial_map()
         AF_WARN("create_initial_map: degenerate initialization (median_depth=" << median_depth.value_or(-1.0f)
                 << ", tracked map points=" << tracked_map_points << " < " << params.init_min_tracked_points
                 << ") — resetting...");
-        reset_after_failed_initialization_ = true;   // run at the start of the next frame, outside the map lock
+        reset_after_failed_initialization_ = true;
         return;
     }
 
-    // Monocular fallback (no usable depth): normalize to the arbitrary
-    // "median scene depth = 1" convention, from the BA-refined map as before
     if (!metric_scale)
     {
         const float inv_median_depth = 1.0f / *median_depth;
@@ -552,11 +521,6 @@ void Tracking::create_initial_map()
                     map_point->set_world_pos(map_point->get_world_pos() * inv_median_depth);
     }
 
-    // Unmatched keypoints of the current keyframe with valid depth: single-
-    // observation points added AFTER the BA (nothing to refine against yet), same
-    // any-inv_depth>0 trust policy as LocalMapping's depth-seeded pass. Metric map
-    // only. The reference frame's unmatched keypoints are deliberately left out:
-    // without an association they would duplicate the same surfaces.
     int num_depth_only = 0;
     if (metric_scale)
     {
@@ -577,7 +541,7 @@ void Tracking::create_initial_map()
                 Pt map_point = map_->create_map_point(Rwc_cur * (xn / inv_depth_cur[j]) + twc_cur,
                                                       keyframe_cur, KeypointIndex(j), ft);
                 if (!map_point)
-                    continue;   // a slot was taken between the emptiness check and the write
+                    continue; 
                 current_frame_.pts.at(ft)[j] = map_point;
                 current_frame_.outliers.at(ft)[j] = false;
                 num_depth_only++;
@@ -717,6 +681,7 @@ void Tracking::discard_pose_outliers()
 bool Tracking::track_with_optical_flow()
 {
     AF_REPORT_SCOPE();
+    check_replaced_in_last_frame();   // Local Mapping may have fused the last frame's points
 
     // A failed attempt leaves no match behind: the reference-keyframe match starts from a clean frame
     const auto fall_back = [this]([[maybe_unused]] const char* why, [[maybe_unused]] const int count)
