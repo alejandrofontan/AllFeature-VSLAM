@@ -115,6 +115,7 @@ struct TrackingParameters
 
     // relocalize()
     float reloc_window_seconds{1.0f};   // after a relocalization: stricter local-map bar and the keyframe embargo
+    int reset_lost_max_keyframes{0};    // lost with at most this many keyframes: reset (0 = never; no VPR: always)
     int reloc_min_matches{15};    // per-candidate matching gate
     int reloc_inliers_high{50};   // inliers to accept a pose hypothesis
     int reloc_inliers_medium{30}; // above this (and below high) after the first search: search once more
@@ -217,7 +218,7 @@ protected:
     void discard_pose_outliers();
 
     bool relocalize();
-    bool accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,
+    bool accept_relocalization_hypothesis(const Keyframe& candidate, const std::vector<Pt>& matches,
                                           const std::vector<bool>& inliers, FeatureType feature_type);
 
     void update_local_points();
@@ -311,8 +312,8 @@ protected:
     };
     RunState run_{};
 
-    // Set by a degenerate initialization (create_initial_map): grab_image resets before the next frame is built
-    bool reset_after_failed_initialization_{false};
+    // A degenerate initialization, or a loss with no way back: grab_image resets before the next frame is built
+    bool reset_requested_{false};
 
     Frame last_frame_;
     // Within reloc_window_frames_ of the last relocalization (never before the first one)
