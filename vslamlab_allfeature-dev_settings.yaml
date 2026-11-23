@@ -125,14 +125,13 @@ Tracking.BestCovisibleKeyframes: 10   # covisible neighbours considered per keyf
 Tracking.ProjectionGateSigma2: 64     # squared sigmas: a projected map point matches keypoints within this gate (8 sigma)
 
 # Keyframe policy: information = how much of the view the local map does not explain (0..1)
-Tracking.KeyframeMinInformation: 0.05 # below this: redundant, no keyframe; above LocalMapping.KeyframeCullingMaxUnexplained: always one
+Tracking.KeyframeMinInformation: 0.05 # below this: redundant, no keyframe; above LocalMapping.KeyframeCullingMaxUnexplained: novel -> keyframe when Local Mapping accepts one
 Tracking.LogKeyframeInformation: 0    # 1 = one diagnostic line per tracked frame
-Tracking.MinObservationsHigh: 3       # min observations for a point to count as tracked
-Tracking.MinObservationsLow: 2        # the same while the map is young
-Tracking.YoungMapKeyframes: 2         # the map is young up to this many keyframes
 Tracking.EmergencyInlierDropRatio: 0.5 # emergency keyframe when inliers < ratio x recent median
 Tracking.InliersHistorySize: 30       # frames in that median
 Tracking.EmergencyKeyframeCooldown: 10 # min frames between emergency keyframes
+Tracking.RelocEmbargoBypassInliers: 100 # no keyframes for ~1 s after a relocalization unless this many inliers
+Tracking.RelocEmbargoMinKeyframes: 30   # ... and only once the map has more keyframes than this
 
 # Relocalization
 Tracking.RelocMinMatches: 15          # min matches to try a candidate

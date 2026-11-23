@@ -88,12 +88,11 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     int log_keyframe_information = params.log_keyframe_information ? 1 : 0;   // cv::FileStorage has no bool reader
     read_if_present("Tracking.LogKeyframeInformation", log_keyframe_information);
     params.log_keyframe_information = (log_keyframe_information != 0);
-    read_if_present("Tracking.MinObservationsHigh", params.min_observations_high);
-    read_if_present("Tracking.MinObservationsLow", params.min_observations_low);
-    read_if_present("Tracking.YoungMapKeyframes", params.young_map_keyframes);
     read_if_present("Tracking.EmergencyInlierDropRatio", params.emergency_inlier_drop_ratio);
     read_if_present("Tracking.InliersHistorySize", params.inliers_history_size);
     read_if_present("Tracking.EmergencyKeyframeCooldown", params.emergency_keyframe_cooldown);
+    read_if_present("Tracking.RelocEmbargoBypassInliers", params.reloc_embargo_bypass_inliers);
+    read_if_present("Tracking.RelocEmbargoMinKeyframes", params.reloc_embargo_min_keyframes);
     read_if_present("Tracking.RelocMinMatches", params.reloc_min_matches);
     read_if_present("Tracking.RelocInliersHigh", params.reloc_inliers_high);
     read_if_present("Tracking.RelocInliersMedium", params.reloc_inliers_medium);
@@ -231,7 +230,7 @@ mat4f Tracking::track()
         {
             // The two founding keyframes must be fully mapped before the next frame
             lock.unlock();
-            wait_for_idle_local_mapper();
+            wait_for_local_mapper(/*drain_queue=*/true);
         }
         return current_frame_.get_Tcw();
     }
@@ -295,17 +294,13 @@ mat4f Tracking::track()
     if (params.sequential)
     {
         lock.unlock();
-        wait_for_idle_local_mapper();
+        wait_for_local_mapper(/*drain_queue=*/true);
     }
-    // An emergency keyframe was just inserted: block until Local Mapping has processed
-    // it (the trigger is already logged by need_new_keyframe).
+    // An emergency keyframe was just inserted: block until Local Mapping has taken it
     else if (emergency_keyframe_)
     {
         lock.unlock();
-        // ... or until it is stopped (a loop correction: accepts_keyframes stays false for the whole correction)
-        // or finished, which no longer process anything this frame could wait for
-        while(!local_mapper_->accepts_keyframes() && !local_mapper_->is_stopped() && !local_mapper_->is_finished())
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        wait_for_local_mapper(/*drain_queue=*/false);
         emergency_keyframe_ = false;
     }
 
@@ -975,24 +970,10 @@ std::vector<Pt> Tracking::search_local_points()
 
 bool Tracking::need_new_keyframe()
 {
-    if(local_mapper_->is_stopped() || local_mapper_->is_stop_requested())
-        return false;
+    AF_REPORT_SCOPE();
 
-    const size_t num_keyframes_in_map = map_->keyframes_in_map();
-
-    if(shortly_after_relocalization()
-       && num_keyframes_in_map > max_frames_
-       && num_inliers_ < 2 * params.track_local_map_min_inliers_after_reloc)
-        return false;
-
-    int num_ref_matches = -1;
-    if(params.log_keyframe_information)
-    {
-        const int min_observations = (num_keyframes_in_map <= static_cast<size_t>(params.young_map_keyframes))
-                                     ? params.min_observations_low : params.min_observations_high;
-        num_ref_matches = ref_keyframe_->count_tracked_map_points(min_observations);
-    }
-
+    // Recent inliers: the emergency trigger's reference (median of the last InliersHistorySize tracked frames,
+    // once half of them exist)
     int median_recent_inliers = -1;
     if (recent_inliers_history_.size() >= static_cast<size_t>(params.inliers_history_size) / 2) {
         std::vector<int> history(recent_inliers_history_.begin(), recent_inliers_history_.end());
@@ -1003,85 +984,95 @@ bool Tracking::need_new_keyframe()
     recent_inliers_history_.push_back(num_inliers_);
     if (recent_inliers_history_.size() > static_cast<size_t>(params.inliers_history_size))
         recent_inliers_history_.pop_front();
+    AF_REPORT("inliers.median_recent", "", median_recent_inliers);
 
     const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load();
-    const std::optional<KeyframeInformationValue> information = keyframe_information_
-        ? keyframe_information_->information(current_frame_, local_keyframes_, LocalMapping::params.keyframe_culling_centred)
-        : std::nullopt;
-    last_keyframe_information_ = information ? std::optional<float>(information->unexplained) : std::nullopt;
-    const bool redundant = information && information->unexplained < params.keyframe_min_information;
-    const bool novel = information && information->unexplained > tau;
+    keyframe_information_->record_thresholds(tau, params.keyframe_min_information);
+    std::optional<KeyframeInformationValue> information{};
 
-    if(keyframe_information_)
-        keyframe_information_->record_thresholds(tau, params.keyframe_min_information);
-
-    const auto decide = [&](const bool insert, const std::string& reason) -> bool
+    // Every decision: the decision history (placecell Recorder), the report, the log line
+    const auto decide = [&](const bool insert, const std::string& reason, const bool emergency = false,
+                            [[maybe_unused]] const bool blocked = false) -> bool
     {
-        if(keyframe_information_)
-            keyframe_information_->record_decision(current_frame_.frame_id, insert, last_keyframe_information_, reason);
+        const std::optional<float> unexplained =
+            information ? std::optional<float>(information->unexplained) : std::nullopt;
+        keyframe_information_->record_decision(current_frame_.frame_id, insert, unexplained, reason);
+        AF_REPORT("keyframe.inserted", "", insert);
+        AF_REPORT("keyframe.emergency", "", emergency);
+        AF_REPORT("keyframe.blocked", "", blocked);   // novel, but Local Mapping busy
         if(insert || params.log_keyframe_information)
-        {
-            std::ostringstream line;
-            line << (insert ? "need_new_keyframe: keyframe (" : "need_new_keyframe: skip (") << reason << ")"
-                 << " | frame=" << current_frame_.frame_id;
-            if(information)
-            {
-                KeyframeId best_explainer_key_id = 0;
-                for(const Keyframe& keyframe : local_keyframes_)
-                    if(keyframe && keyframe->frame_id == information->best_explainer)
-                        best_explainer_key_id = keyframe->keyId;
-                line << " info=" << std::fixed << std::setprecision(3) << information->unexplained
-                     << " tau=" << tau << " minInfo=" << params.keyframe_min_information
-                     << " explainers=" << information->explainers
-                     << " best=KF" << best_explainer_key_id << "(" << information->best_similarity << ")";
-            }
-            else
-                line << " info=n/a";
-            if(params.log_keyframe_information)
-            {
-                line << " inliers=" << num_inliers_ << " refMatches=" << num_ref_matches
-                     << " medianRecentInliers=" << median_recent_inliers
-                     << " novel=" << novel << " redundant=" << redundant
-                     << " KFs=" << num_keyframes_in_map;
-            }
-            AF_INFO(line.str());
-        }
+            log_keyframe_decision(insert, reason, emergency, information, tau, median_recent_inliers);
         return insert;
     };
 
-    if(redundant)
+    // Gates: no keyframe while Local Mapping is stopped (loop correction) or under the relocalization embargo
+    if(local_mapper_->is_stopped() || local_mapper_->is_stop_requested())
+        return decide(false, "local mapping stopped");
+    if(shortly_after_relocalization()
+       && map_->keyframes_in_map() > static_cast<size_t>(params.reloc_embargo_min_keyframes)
+       && num_inliers_ < params.reloc_embargo_bypass_inliers)
+        return decide(false, "relocalization embargo");
+
+    // Information: the view's unexplained information given the local keyframes (the culler's kernel and tau)
+    information = keyframe_information_->information(current_frame_, local_keyframes_,
+                                                     LocalMapping::params.keyframe_culling_centred);
+    if(information)
+        AF_REPORT("keyframe.information", "", information->unexplained);
+
+    // Bands: below KeyframeMinInformation redundant, above tau novel; a label only while minInfo < tau
+    if(information && information->unexplained < params.keyframe_min_information)
         return decide(false, "redundant");
+    if(!information || information->unexplained <= tau)
+        return decide(false, "not novel");
 
-    if(!novel)
-        return decide(false, "no trigger");
+    // Insert: novel and Local Mapping accepts it (sequential mode: always idle here, the busy flag is not read)
+    if(params.sequential || local_mapper_->accepts_keyframes())
+        return decide(true, "novel");
 
-    const std::string reason = "novel";
-
-    if(params.sequential)
-        return decide(true, reason);
-
-    if(local_mapper_->accepts_keyframes())
-        return decide(true, reason);
-
+    // Busy: only on an emergency inlier drop against the recent median, with a cooldown
     if(median_recent_inliers > 0
        && num_inliers_ < params.emergency_inlier_drop_ratio * static_cast<float>(median_recent_inliers)
        && current_frame_.frame_id >= last_emergency_keyframe_id_ + static_cast<FrameId>(params.emergency_keyframe_cooldown))
     {
-        AF_WARN("need_new_keyframe: emergency keyframe (inliers=" << num_inliers_
-                << " < " << params.emergency_inlier_drop_ratio << "*medianRecentInliers=" << median_recent_inliers
-                << ", info=" << (information ? std::to_string(information->unexplained) : std::string("n/a"))
-                << ") | frame=" << current_frame_.frame_id);
         last_emergency_keyframe_id_ = current_frame_.frame_id;
         emergency_keyframe_ = true;
-        return decide(true, reason + "+emergency");
+        return decide(true, "novel+emergency", /*emergency=*/true, /*blocked=*/true);
     }
-    return decide(false, reason + ", local mapping busy");
+    return decide(false, "novel, local mapping busy", /*emergency=*/false, /*blocked=*/true);
+}
+
+void Tracking::log_keyframe_decision(const bool insert, const std::string& reason, const bool emergency,
+                                     const std::optional<KeyframeInformationValue>& information, const float tau,
+                                     const int median_recent_inliers) const
+{
+    std::ostringstream line;
+    line << (insert ? "need_new_keyframe: keyframe (" : "need_new_keyframe: skip (") << reason << ")"
+         << " | frame=" << current_frame_.frame_id;
+    if(information)
+    {
+        KeyframeId best_explainer_key_id = 0;
+        for(const Keyframe& keyframe : local_keyframes_)
+            if(keyframe && keyframe->frame_id == information->best_explainer)
+                best_explainer_key_id = keyframe->keyId;
+        line << " info=" << std::fixed << std::setprecision(3) << information->unexplained
+             << " tau=" << tau << " min_info=" << params.keyframe_min_information
+             << " explainers=" << information->explainers
+             << " best=KF" << best_explainer_key_id << "(" << information->best_similarity << ")";
+    }
+    else
+        line << " info=n/a";
+    if(params.log_keyframe_information || emergency)
+        line << " inliers=" << num_inliers_ << " median_recent_inliers=" << median_recent_inliers
+             << " keyframes=" << map_->keyframes_in_map();
+    if(emergency)
+        AF_WARN(line.str());
+    else
+        AF_INFO(line.str());
 }
 
 void Tracking::create_new_keyframe()
 {
-    // Lock Local Mapping against stopping while the keyframe is inserted;
-    // fails (and skips insertion) if a loop closure already stopped it.
+    // Lock Local Mapping against stopping while the keyframe is inserted; fails (no insertion) if a loop closure stopped it
     if(!local_mapper_->set_insertion_lock(true))
     {
         emergency_keyframe_ = false;   // nothing inserted: nothing to wait for
@@ -1097,9 +1088,11 @@ void Tracking::create_new_keyframe()
     local_mapper_->set_insertion_lock(false);
 }
 
-void Tracking::wait_for_idle_local_mapper() const
+void Tracking::wait_for_local_mapper(const bool drain_queue) const
 {
-    while(local_mapper_->has_new_keyframes() || !local_mapper_->accepts_keyframes())
+    // A stopped (loop correction) or finished Local Mapping processes nothing this frame could wait for
+    while(((drain_queue && local_mapper_->has_new_keyframes()) || !local_mapper_->accepts_keyframes())
+          && !local_mapper_->is_stopped() && !local_mapper_->is_finished())
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 }
 
@@ -1310,14 +1303,11 @@ void Tracking::request_relocalization()
 
 void Tracking::reset()
 {
-    // Each step logs before it runs and flushes (stdout is fully buffered under
-    // the runner's redirect), so a hang shows the last started step.
     AF_INFO("reset: stopping viewer...");
     std::cout.flush();
     if(viewer_)
     {
         viewer_->request_stop();
-        // A finished viewer never stops (Viewer::Stop refuses once finish is requested): do not wait for it
         while(!viewer_->is_stopped() && !viewer_->isFinished())
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
     }
@@ -1334,8 +1324,8 @@ void Tracking::reset()
     std::cout.flush();
     place_recognition_->clear();
     if(keyframe_information_)
-        keyframe_information_->clear();   // no-op for the megaloc kernel (same store as place_recognition_)
-    map_->clear(); // erases all map points and keyframes
+        keyframe_information_->clear();
+    map_->clear();
 
     KeyFrame::next_id = 0;
     Frame::next_id = 0;
@@ -1343,8 +1333,6 @@ void Tracking::reset()
     state_ = TrackingState::NO_IMAGES_YET;
     initializer_ = nullptr;
 
-    // Everything that points into the wiped map: ids restart at 0, so a stale keyframe here would alias the new
-    // map's ones (local_keyframes_ also used to keep growing: create_initial_map appends to it)
     ref_keyframe_.reset();
     local_keyframes_.clear();
     local_points_.clear();
@@ -1355,12 +1343,8 @@ void Tracking::reset()
     last_grey_image_.release();
     grey_image_.release();
     last_frame_relative_pose_ = mat4f::Identity();
-    last_keyframe_information_.reset();
     num_tracked_frames_ = 2;
 
-    // Per-run tracking state: frame ids restart at 0, so id-anchored state from
-    // the previous run (reloc embargo, emergency cooldown) must not leak into the
-    // next one and suppress keyframes there.
     last_reloc_frame_id_.reset();
     last_emergency_keyframe_id_ = 0;
     emergency_keyframe_ = false;
@@ -1376,4 +1360,4 @@ void Tracking::reset()
     std::cout.flush();
 }
 
-} //namespace AF_VSLAM
+}

@@ -106,14 +106,12 @@ struct TrackingParameters
 
     // need_new_keyframe()
     float keyframe_min_information{0.05f}; // unexplained information (placecell, [0,1]) below which the local map already explains the view: no keyframe
-    bool log_keyframe_information{false};  // one diagnostic line per tracked frame with the information, the flow, the triggers, and the decision
-    // Diagnostic only (refMatches in the log_keyframe_information line): reference-KF match counting
-    int min_observations_high{3};       // min observations per point
-    int min_observations_low{2};        //   relaxed bar while the map is young
-    int young_map_keyframes{2};         //   map considered young at <= this many keyframes
+    bool log_keyframe_information{false};  // one diagnostic line per tracked frame with the information and the decision
     float emergency_inlier_drop_ratio{0.5f}; // emergency keyframe: inliers < ratio x recent median
     int inliers_history_size{30};       // recent-inlier reference window (frames)
     int emergency_keyframe_cooldown{10}; // min frames between emergency keyframes
+    int reloc_embargo_bypass_inliers{100}; // no keyframe within max_frames_ of a relocalization unless this many inliers
+    int reloc_embargo_min_keyframes{30};   //   and the embargo applies only above this many keyframes in the map
 
     // relocalize()
     int reloc_min_matches{15};    // per-candidate matching gate
@@ -230,7 +228,12 @@ protected:
 
     bool need_new_keyframe();
     void create_new_keyframe();
-    void wait_for_idle_local_mapper() const;
+    // Waits for Local Mapping to accept keyframes (drain_queue: and to have dequeued every one), or to stop or finish.
+    // Call with the map mutex released.
+    void wait_for_local_mapper(bool drain_queue) const;
+    void log_keyframe_decision(bool insert, const std::string& reason, bool emergency,
+                               const std::optional<KeyframeInformationValue>& information, float tau,
+                               int median_recent_inliers) const;
 
     void load_camera_parameters(const std::string& calibration_yaml, const std::string& settings_yaml);
     static std::shared_ptr<FeatureExtractor> get_feature_extractor(int max_num_features, FeatureType feature_type);
@@ -305,10 +308,6 @@ protected:
     // where every inserted keyframe grows the reference stat via post-hoc triangulation.
     std::deque<int> recent_inliers_history_;
     FrameId last_emergency_keyframe_id_{0};
-
-    // Unexplained information of the last tracked frame given the local map (see
-    // need_new_keyframe); nullopt when the system has no information measure.
-    std::optional<float> last_keyframe_information_{};
 
     // Set by a degenerate initialization (create_initial_map): track() resets on the next frame, outside the map lock
     bool reset_after_failed_initialization_{false};
