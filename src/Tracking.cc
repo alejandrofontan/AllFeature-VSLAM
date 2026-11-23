@@ -1,32 +1,51 @@
+/**
+ * Module: AllFeature-VSLAM - Tracking.cc
+ * - Author: Alejandro Fontan Villacampa
+ * - Assisted by: Claude (Opus 5.5)
+ * - Version: 1.1
+ * - Created: 2026-01-22
+ * - Updated: 2026-11-24 (Tracking review: run state, report scopes, fisheye, resets)
+ * - License: GPLv3 License
+ */
+
 #include "Tracking.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
-#include <limits>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
 
-#include <opencv2/calib3d.hpp>
-#include <opencv2/core/core.hpp>
+#include <opencv2/core.hpp>
 
 #include "Converter.h"
 #include "FeatureFactory.h"
+#include "FeatureMatcher.h"
+#include "FrameDrawer.h"
+#include "Image.h"
 #include "Initializer.h"
+#include "KeyFrame.h"
+#include "LocalMapping.h"
+#include "LoopClosing.h"
 #include "Map.h"
+#include "MapDrawer.h"
+#include "MapPoint.h"
 #include "Optimizer.h"
 #include "PnPsolver.h"
 #include "Report.h"
+#include "SettingsReader.h"
+#include "TrackingLostException.h"
 #include "Utils.h"
+#include "Viewer.h"
 #include "afvslam_log.hpp"
 #include "onnx/OrtSession.h"
-#include "SettingsReader.h"
 
 namespace AF_VSLAM
 {
@@ -111,9 +130,9 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
                    const std::string& calibration_yaml, const std::string& cam_name,
                    const std::vector<FeatureType>& feature_types,
                    const bool fix_image_size):
-    feature_types_(feature_types), place_recognition_(std::move(place_recognition)),
-    frame_drawer_(std::move(frame_drawer)), map_drawer_(std::move(map_drawer)), map_(std::move(map)),
-    fix_image_size_(fix_image_size)
+    map_(std::move(map)), place_recognition_(std::move(place_recognition)),
+    frame_drawer_(std::move(frame_drawer)), map_drawer_(std::move(map_drawer)),
+    fix_image_size_(fix_image_size), feature_types_(feature_types)
 {
     // Camera: intrinsics, distortion and fps of cam_name (rescaled when frames are resized)
     const float fps = load_camera_parameters(calibration_yaml, cam_name);
@@ -122,7 +141,8 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
     // Extractors: one per feature at the Features Fraction budget, warmed up at the frame size
     features_fraction_in_use_ = std::clamp(params.features_fraction.load(), 0.0f, 1.0f);
     for (const FeatureType ft : feature_types_)
-        feature_extractors_[ft] = get_feature_extractor(features_budget(ft, features_fraction_in_use_), ft);
+        feature_extractors_[ft] = get_feature(ft).create_extractor(
+            std::make_shared<FeatureExtractorSettings>(ft, features_budget(ft, features_fraction_in_use_)));
     const int frame_width = fix_image_size_ ? (image_width_ / Image::SIZE_MULTIPLE) * Image::SIZE_MULTIPLE : image_width_;
     const int frame_height = fix_image_size_ ? (image_height_ / Image::SIZE_MULTIPLE) * Image::SIZE_MULTIPLE : image_height_;
     for (const auto& [ft, extractor] : feature_extractors_)
@@ -194,7 +214,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     current_frame_ = Frame(im, timestamp, feature_extractors_, place_recognition_, calibration_);
 
     const mat4f Tcw = track();
-    AF_REPORT("tracking.state", "", static_cast<int>(state_));
+    AF_REPORT("tracking.state", "", static_cast<int>(state_.load()));
 
     // The viewer's median excludes this frame
     if(viewer_)

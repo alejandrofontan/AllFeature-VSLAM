@@ -1,14 +1,26 @@
-#include "Tracking.h"
+/**
+ * Module: AllFeature-VSLAM - Tracking_aux.cc
+ * - Author: Alejandro Fontan Villacampa
+ * - Assisted by: Claude (Opus 5.5)
+ * - Version: 1.1
+ * - Created: 2026-08-22
+ * - Updated: 2026-11-24 (camera loading: distortion models, optional fps)
+ * - License: GPLv3 License
+ */
 
-#include <string>
+#include "Tracking.h"
 
 #include <algorithm>
 #include <cmath>
-#include <iostream>
+#include <cstdlib>
+#include <string>
+#include <vector>
 
 #include <yaml-cpp/yaml.h>
 
 #include "FeatureFactory.h"
+#include "Image.h"
+#include "TrackingLostException.h"
 #include "afvslam_log.hpp"
 
 namespace AF_VSLAM
@@ -114,12 +126,6 @@ float Tracking::load_camera_parameters(const std::string& calibration_yaml, cons
     AF_CONFIG_FIELD("fps:                ", fps);
     AF_CONFIG_END();
     return fps;
-}
-
-std::shared_ptr<FeatureExtractor> Tracking::get_feature_extractor(const int max_num_features, const FeatureType feature_type)
-{
-    auto settings = std::make_shared<FeatureExtractorSettings>(feature_type, max_num_features);
-    return get_feature(feature_type).create_extractor(settings);
 }
 
 // The keypoints per frame of `feature_type` at `features_fraction` of its own maximum: 1 gives the

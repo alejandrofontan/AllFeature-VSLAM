@@ -442,7 +442,7 @@ mat4f System::Track(Image &im, const double &timestamp)
     mnFramesProcessed.fetch_add(1);
 
     unique_lock<mutex> lock2(mMutexState);
-    mTrackingState = static_cast<int>(tracker->state_);
+    mTrackingState = static_cast<int>(tracker->state_.load());
 
     std::chrono::steady_clock::time_point t_end = std::chrono::steady_clock::now();
     double t_duration = std::chrono::duration_cast<std::chrono::duration<double> >(t_end - t_start).count();
