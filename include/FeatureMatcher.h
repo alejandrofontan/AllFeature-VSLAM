@@ -68,12 +68,11 @@ public:
 
     // ==================== Optical Flow ====================
     struct FlowMatchCounts { int tracked{0}; int survived{0}; int matched{0}; };
-    static constexpr int flow_window_px = 21;          // KLT window
-    static constexpr int flow_pyramid_levels = 3;      // KLT pyramid levels above the image
     static constexpr int flow_max_iterations = 30;     // KLT stopping criteria
     static constexpr double flow_epsilon = 0.01;
     FlowMatchCounts match_frame_to_frame_by_flow(const Frame& last_frame, const cv::Mat& last_grey, Frame& frame,
-                                                 const cv::Mat& grey, float max_backward_error, float association_radius);
+                                                 const cv::Mat& grey, int window, int pyramid_levels,
+                                                 float max_backward_error, float association_radius);
 
 protected:
 

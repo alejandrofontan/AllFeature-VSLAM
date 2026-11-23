@@ -698,11 +698,25 @@ void FeatureMatcher::match_map_points_to_keyframe(const Keyframe& keyframe, cons
 
 FeatureMatcher::FlowMatchCounts FeatureMatcher::match_frame_to_frame_by_flow(
     const Frame& last_frame, const cv::Mat& last_grey, Frame& frame, const cv::Mat& grey,
-    const float max_backward_error, const float association_radius)
+    const int window, const int pyramid_levels, const float max_backward_error, const float association_radius)
 {
     AF_REPORT_SCOPE();
 
     FlowMatchCounts counts{};
+    std::map<FeatureType, FlowMatchCounts> counts_by_feature;   // the report's per-feature split of counts
+    for (const auto& [ft, pts] : last_frame.pts)
+        counts_by_feature[ft] = {};
+    const auto report = [&]
+    {
+        for ([[maybe_unused]] const auto& [ft, c] : counts_by_feature)
+        {
+            [[maybe_unused]] const std::string& feature = get_feature(ft).get_feature_name();
+            AF_REPORT("flow.tracked", feature, c.tracked);
+            AF_REPORT("flow.survived", feature, c.survived);
+            AF_REPORT("flow.matched", feature, c.matched);
+        }
+        return counts;
+    };
 
     // 1. The last frame's tracked points: raw (distorted) positions, the flow runs on the image as it is
     struct Track { FeatureType ft; int index; Pt map_point; };
@@ -718,23 +732,21 @@ FeatureMatcher::FlowMatchCounts FeatureMatcher::match_frame_to_frame_by_flow(
                 continue;
             tracks.push_back({ft, static_cast<int>(i), pts[i]});
             prev_pts.push_back(raw[i].pt);
+            counts_by_feature[ft].tracked++;
         }
     }
     counts.tracked = static_cast<int>(prev_pts.size());
     if(prev_pts.empty())
-    {
-        AF_REPORT("flow.tracked", "", 0);
-        return counts;
-    }
+        return report();
 
     // 2. KLT forward and backward; a track survives when both succeed and it returns to where it started
     std::vector<cv::Point2f> next_pts, back_pts;
     std::vector<uchar> status_fwd, status_bwd;
     std::vector<float> err;
-    const cv::Size window(flow_window_px, flow_window_px);
+    const cv::Size window_size(window, window);
     const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, flow_max_iterations, flow_epsilon);
-    cv::calcOpticalFlowPyrLK(last_grey, grey, prev_pts, next_pts, status_fwd, err, window, flow_pyramid_levels, criteria);
-    cv::calcOpticalFlowPyrLK(grey, last_grey, next_pts, back_pts, status_bwd, err, window, flow_pyramid_levels, criteria);
+    cv::calcOpticalFlowPyrLK(last_grey, grey, prev_pts, next_pts, status_fwd, err, window_size, pyramid_levels, criteria);
+    cv::calcOpticalFlowPyrLK(grey, last_grey, next_pts, back_pts, status_bwd, err, window_size, pyramid_levels, criteria);
     std::vector<int> kept;
     std::vector<cv::Point2f> kept_pts;
     const float max_err2 = max_backward_error * max_backward_error;
@@ -750,14 +762,11 @@ FeatureMatcher::FlowMatchCounts FeatureMatcher::match_frame_to_frame_by_flow(
             continue;
         kept.push_back(static_cast<int>(t));
         kept_pts.push_back(p);
+        counts_by_feature[tracks[t].ft].survived++;
     }
     counts.survived = static_cast<int>(kept.size());
     if(kept.empty())
-    {
-        AF_REPORT("flow.tracked", "", counts.tracked);
-        AF_REPORT("flow.survived", "", 0);
-        return counts;
-    }
+        return report();
 
     // 3. The frame's keypoints live in undistorted coordinates: undistort the flowed positions to look them up
     const std::vector<cv::Point2f> lookup_pts = frame.calibration->undistort(kept_pts);
@@ -789,15 +798,15 @@ FeatureMatcher::FlowMatchCounts FeatureMatcher::match_frame_to_frame_by_flow(
             continue;
         auto& pts = frame.pts.at(track.ft);
         if(!pts[best])
+        {
             ++counts.matched;                               // a re-claim replaces, the count stays
+            ++counts_by_feature[track.ft].matched;
+        }
         pts[best] = track.map_point;
         best_dist2[track.ft][best] = best_d2;
     }
 
-    AF_REPORT("flow.tracked", "", counts.tracked);
-    AF_REPORT("flow.survived", "", counts.survived);
-    AF_REPORT("flow.matched", "", counts.matched);
-    return counts;
+    return report();
 }
 
 }

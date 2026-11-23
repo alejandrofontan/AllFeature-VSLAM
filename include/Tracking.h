@@ -84,6 +84,8 @@ struct TrackingParameters
     float flow_association_radius{2.0f};  // px: a flowed point takes the nearest detected keypoint within this
     float flow_max_backward_error{1.0f};  // px: forward-backward KLT disagreement above this drops the track
     int flow_min_matches{30};             // map points matched by flow below this -> fall back to the reference match
+    int flow_window{21};                  // px: KLT window side
+    int flow_pyramid_levels{3};           // KLT pyramid levels above the image (with the window: the largest motion followed)
 
     // track_reference_keyframe()
     int track_ref_min_matches{15}; // raw matches to the reference keyframe below this -> lost
@@ -212,6 +214,7 @@ protected:
     bool track_reference_keyframe();
     bool track_with_optical_flow();
     int optimize_pose_from_last_frame(int num_matches, const char* stage);
+    void discard_pose_outliers();
 
     bool relocalize();
     bool accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,

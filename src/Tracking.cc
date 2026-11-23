@@ -63,6 +63,8 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.FlowAssociationRadius", params.flow_association_radius);
     read_if_present("Tracking.FlowMaxBackwardError", params.flow_max_backward_error);
     read_if_present("Tracking.FlowMinMatches", params.flow_min_matches);
+    read_if_present("Tracking.FlowWindow", params.flow_window);
+    read_if_present("Tracking.FlowPyramidLevels", params.flow_pyramid_levels);
     if(frame_tracking == "reference_keyframe")
         params.frame_tracking = FrameTracking::reference_keyframe;
     else if(frame_tracking == "optical_flow")
@@ -682,6 +684,7 @@ bool Tracking::track_reference_keyframe()
         throw TrackingLostException(reason.str());
     }
 
+    discard_pose_outliers();
     return true;
 }
 
@@ -732,45 +735,59 @@ int Tracking::optimize_pose_from_last_frame(const int num_matches, const char* s
     }
 #endif
 
+    return num_inliers;
+}
+
+void Tracking::discard_pose_outliers()
+{
     // Outliers lose their match and are marked seen, so search_local_points neither re-matches nor re-counts them
     for (const auto& [ft, pts] : current_frame_.pts)
         for (size_t i = 0; i < pts.size(); i++)
             if (pts[i] && current_frame_.outliers.at(ft)[i])
                 pts[i]->last_frame_seen = current_frame_.frame_id;
     current_frame_.drop_outlier_points();   // the flags too: a slot re-matched later must not start as an outlier
-    return num_inliers;
 }
 
 bool Tracking::track_with_optical_flow()
 {
-    const auto fall_back = [this](const char* why, const int count)
+    AF_REPORT_SCOPE();
+
+    // A failed attempt leaves no match behind: the reference-keyframe match starts from a clean frame
+    const auto fall_back = [this]([[maybe_unused]] const char* why, [[maybe_unused]] const int count)
     {
         for (auto& [ft, pts] : current_frame_.pts)
         {
             std::fill(pts.begin(), pts.end(), nullptr);
             std::fill(current_frame_.outliers.at(ft).begin(), current_frame_.outliers.at(ft).end(), false);
         }
-        AF_INFO("track_with_optical_flow: " << why << " (" << count << ") - falling back to the reference-keyframe match"
-                << " | frame=" << current_frame_.frame_id);
+        AF_REPORT("flow.fallback", "", 1);
+        AF_DEBUG("track_with_optical_flow: " << why << " (" << count << ") - falling back to the reference-keyframe match"
+                 << " | frame=" << current_frame_.frame_id);
         return false;
     };
     if(last_grey_image_.empty() || last_grey_image_.size() != grey_image_.size())
         return fall_back("no previous frame of the same size", 0);
 
+    // 1. Flow: the last frame's tracked points, KLT forward-backward, snapped to this frame's keypoints
     const FeatureMatcher::FlowMatchCounts counts = matcher_->match_frame_to_frame_by_flow(
-        last_frame_, last_grey_image_, current_frame_, grey_image_,
+        last_frame_, last_grey_image_, current_frame_, grey_image_, params.flow_window, params.flow_pyramid_levels,
         params.flow_max_backward_error, params.flow_association_radius);
-    if(counts.tracked < params.flow_min_matches)
-        return fall_back("too few tracked points in the last frame", counts.tracked);
-    if(counts.survived < params.flow_min_matches)
-        return fall_back("too few flow tracks survived the forward-backward check", counts.survived);
-    const int num_matches = counts.matched;
-    if(num_matches < params.flow_min_matches)
-        return fall_back("too few flow tracks landed on a detected keypoint", num_matches);
+    if(counts.matched < params.flow_min_matches)   // matched <= survived <= tracked: the first short count is the reason
+    {
+        if(counts.tracked < params.flow_min_matches)
+            return fall_back("too few tracked points in the last frame", counts.tracked);
+        if(counts.survived < params.flow_min_matches)
+            return fall_back("too few flow tracks survived the forward-backward check", counts.survived);
+        return fall_back("too few flow tracks landed on a detected keypoint", counts.matched);
+    }
 
-    const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_with_optical_flow");
-    if(num_map_inliers < params.track_ref_min_inliers)
-        return fall_back("too few inliers after pose optimization", num_map_inliers);
+    // 2. Pose: as track_reference_keyframe; too few inliers -> fall back, never lost
+    const int num_inliers = optimize_pose_from_last_frame(counts.matched, "track_with_optical_flow");
+    if(num_inliers < params.track_ref_min_inliers)
+        return fall_back("too few inliers after pose optimization", num_inliers);
+
+    discard_pose_outliers();
+    AF_REPORT("flow.fallback", "", 0);
     return true;
 }
 
@@ -889,20 +906,16 @@ void Tracking::update_local_keyframes()
 
 void Tracking::update_local_points()
 {
-    // local_points_ = union of the map points of all local keyframes, deduplicated.
-    // Dedup before the is_bad check: points are shared across many keyframes, and
-    // is_bad locks the point's mutex — check it once per unique point.
     local_points_.clear();
     std::set<PtId> seen_point_ids;
     for(const Keyframe& keyframe : local_keyframes_){
         for(const FeatureType ft : feature_types_){
-            // By-value snapshot: get_map_point_matches copies under the keyframe's mutex
             const std::vector<Pt> pts = keyframe->get_map_point_matches(ft);
             for(const Pt& pt : pts){
                 if(!pt)
                     continue;
                 if(!seen_point_ids.insert(pt->ptId).second)
-                    continue; // already collected (or already seen and rejected as bad)
+                    continue;
                 if(!pt->is_bad())
                     local_points_.push_back(pt);
             }
@@ -912,8 +925,6 @@ void Tracking::update_local_points()
 
 void Tracking::search_local_points()
 {
-    // Mark the frame's already-matched points (visible, seen this frame, not a
-    // search candidate) so the frustum loop below skips them; drop bad ones.
     for (auto& [ft, pts] : current_frame_.pts) {
         for(auto& pt : pts){
             if(pt && !pt->is_bad()){
@@ -925,10 +936,6 @@ void Tracking::search_local_points()
         }
     }
 
-    // Project the local points into the frame and keep the visible ones with their projections:
-    // the matcher is handed exactly the candidates it should consider, each with a projection
-    // computed from THIS frame's pose, so it neither re-projects nor reads stale scratch.
-    // Points already matched this frame are skipped — they are not search candidates.
     std::vector<Pt> visible_points;
     std::vector<cv::Point2f> projections;
     visible_points.reserve(local_points_.size());

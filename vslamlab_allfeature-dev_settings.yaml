@@ -31,6 +31,8 @@ Optimizer.LocalBaNeighbors: 10                # best covisible keyframes optimiz
 
 Tracking.FlowAssociationRadius: 2.0           # px: a flowed point takes the nearest keypoint of its feature type within this
 Tracking.FlowMaxBackwardError: 1.0            # px: forward-backward KLT disagreement above this drops the track
+Tracking.FlowWindow: 21                        # px: KLT window side
+Tracking.FlowPyramidLevels: 3                  # KLT pyramid levels; with the window, the largest motion the flow follows
 
 # Constants
 Tracking.NominalImageArea: 307200                    # px (640x480): frames are resized to this area and cropped to a multiple of 32 (739x458 -> 672x416)
