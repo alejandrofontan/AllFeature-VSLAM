@@ -160,9 +160,7 @@ public:
     void set_local_mapper(std::shared_ptr<LocalMapping> local_mapper) { local_mapper_ = std::move(local_mapper); }
     void set_loop_closing(std::shared_ptr<LoopClosing> loop_closing) { loop_closing_ = std::move(loop_closing); }
     void set_viewer(std::shared_ptr<Viewer> viewer) { viewer_ = std::move(viewer); }
-    // Keyframe information kernel (KeyframeInformation.h); null = no information measure
-    // (LocalMapping.InformationKernel: megaloc in a build without MegaLoc): the tracking-health
-    // triggers alone decide keyframe insertion.
+    // Keyframe information kernel (KeyframeInformation.h): the sole keyframe-insertion authority
     void set_keyframe_information(std::shared_ptr<KeyframeInformation> keyframe_information) { keyframe_information_ = std::move(keyframe_information); }
 
 public:
@@ -291,8 +289,8 @@ protected:
     std::shared_ptr<PlaceRecognition> place_recognition_;
 
     // Keyframe information kernel: unexplained information of the current view given
-    // the local keyframes (need_new_keyframe), decision history for the plots. Null when
-    // the system has no information measure.
+    // the local keyframes (need_new_keyframe), decision history for the plots. System
+    // refuses to start without one.
     std::shared_ptr<KeyframeInformation> keyframe_information_{};
 
     // Initialization (only for monocular)
@@ -357,7 +355,11 @@ protected:
     // Last Frame and Relocalisation Info
     Frame last_frame_;
     mat4f last_frame_relative_pose_{mat4f::Identity()}; // Tlr of last_frame_ (see store_relative_pose)
-    FrameId last_reloc_frame_id_{0};
+    std::optional<FrameId> last_reloc_frame_id_{};   // unset until the first relocalization
+    // Within max_frames_ of the last relocalization (never before the first one)
+    bool shortly_after_relocalization() const {
+        return last_reloc_frame_id_ && current_frame_.frame_id < *last_reloc_frame_id_ + max_frames_;
+    }
 
     // Resize frames (Tracking.NominalImageArea or Tracking.ImageWidth/Height; see load_camera_parameters)
     bool fix_image_size_{false};

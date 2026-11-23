@@ -224,9 +224,12 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
                 << " cosine; tau " << LocalMapping::params.keyframe_culling_max_unexplained.load() << ")");
     }
 #endif
-    else
-        AF_INFO("[System] keyframe information kernel: none (InformationKernel: megaloc needs a build with MegaLoc) — "
-                "keyframe insertion by the tracking triggers only, keyframes are never culled");
+    else{
+        // No information measure: Tracking would never insert a keyframe after the initial map
+        AF_ERROR("[System] LocalMapping.InformationKernel: \"" << information_kernel << "\" needs the MegaLoc VPR backend "
+                 "(a build with MegaLoc and PlaceRecognition megaloc); use \"covisibility\" otherwise");
+        exit(-1);
+    }
 
     if(keyframe_information || place_cell){
         AF_INFO("[System] placecell diagnostics: verbosity "

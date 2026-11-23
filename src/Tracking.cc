@@ -801,14 +801,13 @@ bool Tracking::track_local_map()
     num_inlier_matches_ = current_frame_.count_inlier_map_points();
 
     // Decide if tracking succeeded — more restrictive shortly after a relocalization
-    if(current_frame_.frame_id < last_reloc_frame_id_ + max_frames_
-       && num_inlier_matches_ < params.track_local_map_min_inliers_after_reloc)
+    if(shortly_after_relocalization() && num_inlier_matches_ < params.track_local_map_min_inliers_after_reloc)
     {
         std::ostringstream reason;
         reason << "track_local_map: insufficient inliers shortly after relocalization (inliers="
                << num_inlier_matches_ << " < " << params.track_local_map_min_inliers_after_reloc << ")"
                << " | frame=" << current_frame_.frame_id
-               << " framesSinceReloc=" << (current_frame_.frame_id - last_reloc_frame_id_)
+               << " framesSinceReloc=" << (current_frame_.frame_id - *last_reloc_frame_id_)
                << " max_frames_=" << max_frames_;
         throw TrackingLostException(reason.str());
     }
@@ -884,10 +883,9 @@ void Tracking::update_local_keyframes()
     }
 
     // Expand with neighbors of the included keyframes: per keyframe, ONE best
-    // covisible neighbor, ONE child, and the parent. Indexed loop because the
-    // vector grows while being traversed (a range-for reference would dangle on
-    // reallocation). Semantics match stock ORB-SLAM2, including the outer-loop
-    // break after the first parent insertion.
+    // covisible neighbor, ONE child, and the parent, up to max_local_keyframes.
+    // Indexed loop because the vector grows while being traversed (a range-for
+    // reference would dangle on reallocation).
     for(size_t i = 0; i < local_keyframes_.size(); i++){
         if(local_keyframes_.size() > static_cast<size_t>(params.max_local_keyframes))
             break;
@@ -908,10 +906,8 @@ void Tracking::update_local_keyframes()
         }
 
         const Keyframe parent = keyframe->get_parent();
-        if(parent && !parent->is_bad() && seen_keyframe_ids.insert(parent->keyId).second){
+        if(parent && !parent->is_bad() && seen_keyframe_ids.insert(parent->keyId).second)
             local_keyframes_.push_back(parent);
-            break;
-        }
     }
 }
 
@@ -991,7 +987,7 @@ bool Tracking::need_new_keyframe()
     // threshold): at driving speed the full embargo freezes the reference keyframe for
     // ~a second of travel, decaying its matches until tracking is lost AGAIN right after
     // a successful relocalization (observed echo losses 20-22 frames after reloc; #9).
-    if(current_frame_.frame_id < last_reloc_frame_id_ + max_frames_
+    if(shortly_after_relocalization()
        && num_keyframes_in_map > max_frames_
        && num_inlier_matches_ < 2 * params.track_local_map_min_inliers_after_reloc)
         return false;
@@ -1039,10 +1035,7 @@ bool Tracking::need_new_keyframe()
     //             (minInfo 0.05 < tau 0.3) that is a label, not a decision: those frames are
     //             not novel either. It only becomes a veto if minInfo is configured ABOVE tau,
     //             where tau < v < minInfo is both novel and redundant and redundant wins.
-    // WITHOUT AN INFORMATION MEASURE (keyframe_information_ null: InformationKernel is not
-    // covisibility and there is no MegaLoc store: a build without MegaLoc) BOTH BANDS ARE FALSE AND
-    // THIS RETURNS false ON EVERY FRAME — no keyframe is ever inserted after the initial map.
-    // See System.cc, which still announces the (now removed) tracking triggers in that case.
+    // System refuses to start without an information measure (keyframe_information_ is never null here).
     const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load();
     const std::optional<KeyframeInformationValue> information = keyframe_information_
         ? keyframe_information_->information(current_frame_, local_keyframes_, LocalMapping::params.keyframe_culling_centred)
@@ -1416,7 +1409,7 @@ void Tracking::reset()
     // Per-run tracking state: frame ids restart at 0, so id-anchored state from
     // the previous run (reloc embargo, emergency cooldown) must not leak into the
     // next one and suppress keyframes there.
-    last_reloc_frame_id_ = 0;
+    last_reloc_frame_id_.reset();
     last_emergency_keyframe_id_ = 0;
     emergency_keyframe_ = false;
     num_inlier_matches_ = 0;
