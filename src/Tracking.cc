@@ -114,17 +114,12 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
 {
     load_camera_parameters(calibration_yaml, settings_yaml);
 
-    // Frame window for the post-relocalization embargo/strictness (~1 s at the camera rate)
     max_frames_ = static_cast<size_t>(fps_);
 
-    // One extractor per feature type, used for initialization and tracking alike, with the budget of
-    // Tracking.FeaturesFraction (features_budget); apply_features_fraction updates it later
     features_fraction_in_use_ = std::clamp(params.features_fraction.load(), 0.0f, 1.0f);
     for (const FeatureType ft : feature_types)
         feature_extractor_left_[ft] = get_feature_extractor(features_budget(ft, features_fraction_in_use_), ft);
 
-    // Every model session is created and warmed up now, at the size the frames will have (Image::fix_image_size
-    // crops the resized frame to multiples of 32), so the first frame does not pay for it
     const int frame_width = fix_image_size_ ? (image_width_ / 32) * 32 : image_width_;
     const int frame_height = fix_image_size_ ? (image_height_ / 32) * 32 : image_height_;
     for (const auto& [ft, extractor] : feature_extractor_left_)
@@ -153,6 +148,13 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
 {
     // Report: the thread's total for this frame (its frame is set below, before the extraction)
     AF_REPORT_SCOPE();
+
+    // A degenerate initialization asked for a reset: before this frame takes an id, so ids restart with it
+    if(reset_after_failed_initialization_)
+    {
+        reset_after_failed_initialization_ = false;
+        reset();
+    }
 
     // This thread's model runs go ahead of Local Mapping's and Loop Closing's on a shared session
     // (OrtSession, Threading). Set per frame rather than once: this is the thread's entry point,
@@ -207,12 +209,6 @@ mat4f Tracking::track()
     // A degenerate initialization asked for a reset (create_initial_map): run it here, before the map lock is
     // taken. reset() waits for Local Mapping and Loop Closing, and a global-BA correction holding Local Mapping
     // stopped while it waits for map_update_mutex_ deadlocked against a reset run under that lock.
-    if(reset_after_failed_initialization_)
-    {
-        reset_after_failed_initialization_ = false;
-        reset();
-    }
-
     if(state_ == TrackingState::NO_IMAGES_YET)
         state_ = TrackingState::NOT_INITIALIZED;
 
@@ -297,11 +293,11 @@ mat4f Tracking::track()
         wait_for_local_mapper(/*drain_queue=*/true);
     }
     // An emergency keyframe was just inserted: block until Local Mapping has taken it
-    else if (emergency_keyframe_)
+    else if (run_.emergency_keyframe)
     {
         lock.unlock();
         wait_for_local_mapper(/*drain_queue=*/false);
-        emergency_keyframe_ = false;
+        run_.emergency_keyframe = false;
     }
 
     return Tcw;
@@ -310,7 +306,7 @@ mat4f Tracking::track()
 void Tracking::store_relative_pose()
 {
     if(state_ == TrackingState::OK)
-        last_frame_relative_pose_ = current_frame_.get_Tcw() * current_frame_.ref_keyframe->get_Twc();
+        run_.last_frame_relative_pose = current_frame_.get_Tcw() * current_frame_.ref_keyframe->get_Twc();
 }
 
 void Tracking::monocular_initialization()
@@ -687,7 +683,7 @@ bool Tracking::track_reference_keyframe()
 int Tracking::optimize_pose_from_last_frame(const int num_matches, const char* stage)
 {
     // Seed: the last frame's Tlr on its reference keyframe's current pose (absorbs BA and loop corrections); no motion model
-    const mat4f seed_pose = last_frame_relative_pose_ * last_frame_.ref_keyframe->get_Tcw();
+    const mat4f seed_pose = run_.last_frame_relative_pose * last_frame_.ref_keyframe->get_Tcw();
     current_frame_.set_pose(seed_pose);
     int num_inliers = Optimizer::pose_optimization(&current_frame_);
 
@@ -793,28 +789,28 @@ bool Tracking::track_local_map()
     const std::vector<Pt> visible_points = search_local_points();
 
     // 3. Pose: re-optimized on every match; too few inliers -> lost (stricter shortly after a relocalization)
-    num_inliers_ = Optimizer::pose_optimization(&current_frame_);
+    run_.num_inliers = Optimizer::pose_optimization(&current_frame_);
     AF_REPORT("local.keyframes", "", local_keyframes_.size());
     AF_REPORT("local.points", "", local_points_.size());
     AF_REPORT("local.visible", "", visible_points.size());
     report_pose_inliers();
 
-    if(shortly_after_relocalization() && num_inliers_ < params.track_local_map_min_inliers_after_reloc)
+    if(shortly_after_relocalization() && run_.num_inliers < params.track_local_map_min_inliers_after_reloc)
     {
         std::ostringstream reason;
         reason << "track_local_map: insufficient inliers shortly after relocalization (inliers="
-               << num_inliers_ << " < " << params.track_local_map_min_inliers_after_reloc << ")"
+               << run_.num_inliers << " < " << params.track_local_map_min_inliers_after_reloc << ")"
                << " | frame=" << current_frame_.frame_id
-               << " frames_since_reloc=" << (current_frame_.frame_id - *last_reloc_frame_id_)
+               << " frames_since_reloc=" << (current_frame_.frame_id - *run_.last_reloc_frame_id)
                << " max_frames=" << max_frames_;
         throw TrackingLostException(reason.str());
     }
 
-    if(num_inliers_ < params.track_local_map_min_inliers)
+    if(run_.num_inliers < params.track_local_map_min_inliers)
     {
         std::ostringstream reason;
         reason << "track_local_map: insufficient inliers against local map (inliers="
-               << num_inliers_ << " < " << params.track_local_map_min_inliers << ")"
+               << run_.num_inliers << " < " << params.track_local_map_min_inliers << ")"
                << " | frame=" << current_frame_.frame_id << " local_points=" << local_points_.size();
         throw TrackingLostException(reason.str());
     }
@@ -975,15 +971,15 @@ bool Tracking::need_new_keyframe()
     // Recent inliers: the emergency trigger's reference (median of the last InliersHistorySize tracked frames,
     // once half of them exist)
     int median_recent_inliers = -1;
-    if (recent_inliers_history_.size() >= static_cast<size_t>(params.inliers_history_size) / 2) {
-        std::vector<int> history(recent_inliers_history_.begin(), recent_inliers_history_.end());
+    if (run_.recent_inliers_history.size() >= static_cast<size_t>(params.inliers_history_size) / 2) {
+        std::vector<int> history(run_.recent_inliers_history.begin(), run_.recent_inliers_history.end());
         const auto mid = history.begin() + history.size() / 2;
         std::nth_element(history.begin(), mid, history.end());
         median_recent_inliers = *mid;
     }
-    recent_inliers_history_.push_back(num_inliers_);
-    if (recent_inliers_history_.size() > static_cast<size_t>(params.inliers_history_size))
-        recent_inliers_history_.pop_front();
+    run_.recent_inliers_history.push_back(run_.num_inliers);
+    if (run_.recent_inliers_history.size() > static_cast<size_t>(params.inliers_history_size))
+        run_.recent_inliers_history.pop_front();
     AF_REPORT("inliers.median_recent", "", median_recent_inliers);
 
     const float tau = LocalMapping::params.keyframe_culling_max_unexplained.load();
@@ -1010,7 +1006,7 @@ bool Tracking::need_new_keyframe()
         return decide(false, "local mapping stopped");
     if(shortly_after_relocalization()
        && map_->keyframes_in_map() > static_cast<size_t>(params.reloc_embargo_min_keyframes)
-       && num_inliers_ < params.reloc_embargo_bypass_inliers)
+       && run_.num_inliers < params.reloc_embargo_bypass_inliers)
         return decide(false, "relocalization embargo");
 
     // Information: the view's unexplained information given the local keyframes (the culler's kernel and tau)
@@ -1031,11 +1027,11 @@ bool Tracking::need_new_keyframe()
 
     // Busy: only on an emergency inlier drop against the recent median, with a cooldown
     if(median_recent_inliers > 0
-       && num_inliers_ < params.emergency_inlier_drop_ratio * static_cast<float>(median_recent_inliers)
-       && current_frame_.frame_id >= last_emergency_keyframe_id_ + static_cast<FrameId>(params.emergency_keyframe_cooldown))
+       && run_.num_inliers < params.emergency_inlier_drop_ratio * static_cast<float>(median_recent_inliers)
+       && current_frame_.frame_id >= run_.last_emergency_keyframe_id + static_cast<FrameId>(params.emergency_keyframe_cooldown))
     {
-        last_emergency_keyframe_id_ = current_frame_.frame_id;
-        emergency_keyframe_ = true;
+        run_.last_emergency_keyframe_id = current_frame_.frame_id;
+        run_.emergency_keyframe = true;
         return decide(true, "novel+emergency", /*emergency=*/true, /*blocked=*/true);
     }
     return decide(false, "novel, local mapping busy", /*emergency=*/false, /*blocked=*/true);
@@ -1062,7 +1058,7 @@ void Tracking::log_keyframe_decision(const bool insert, const std::string& reaso
     else
         line << " info=n/a";
     if(params.log_keyframe_information || emergency)
-        line << " inliers=" << num_inliers_ << " median_recent_inliers=" << median_recent_inliers
+        line << " inliers=" << run_.num_inliers << " median_recent_inliers=" << median_recent_inliers
              << " keyframes=" << map_->keyframes_in_map();
     if(emergency)
         AF_WARN(line.str());
@@ -1075,7 +1071,7 @@ void Tracking::create_new_keyframe()
     // Lock Local Mapping against stopping while the keyframe is inserted; fails (no insertion) if a loop closure stopped it
     if(!local_mapper_->set_insertion_lock(true))
     {
-        emergency_keyframe_ = false;   // nothing inserted: nothing to wait for
+        run_.emergency_keyframe = false;   // nothing inserted: nothing to wait for
         return;
     }
 
@@ -1172,7 +1168,7 @@ bool Tracking::relocalize()
             if(accept_relocalization_hypothesis(candidates[i], matches_per_candidate[i].at(feature_type),
                                                 inliers, feature_type))
             {
-                last_reloc_frame_id_ = current_frame_.frame_id;
+                run_.last_reloc_frame_id = current_frame_.frame_id;
                 AF_REPORT("reloc.success", "", 1);
                 return true;
             }
@@ -1303,8 +1299,15 @@ void Tracking::request_relocalization()
 
 void Tracking::reset()
 {
-    AF_INFO("reset: stopping viewer...");
-    std::cout.flush();
+    // Each step is logged and flushed before it runs, so a hang shows the step that started last
+    const auto step = [](const char* what)
+    {
+        AF_INFO("reset: " << what);
+        std::cout.flush();
+    };
+    AF_REPORT("tracking.reset", "", 1);   // frame ids restart: the report's frames repeat after this
+
+    step("stopping viewer...");
     if(viewer_)
     {
         viewer_->request_stop();
@@ -1312,19 +1315,15 @@ void Tracking::reset()
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
     }
 
-    AF_INFO("reset: resetting local mapping...");
-    std::cout.flush();
+    step("resetting local mapping...");
     local_mapper_->request_reset();
 
-    AF_INFO("reset: resetting loop closing...");
-    std::cout.flush();
+    step("resetting loop closing...");
     loop_closing_->request_reset();
 
-    AF_INFO("reset: clearing keyframe database and map...");
-    std::cout.flush();
+    step("clearing keyframe database and map...");
     place_recognition_->clear();
-    if(keyframe_information_)
-        keyframe_information_->clear();
+    keyframe_information_->clear();
     map_->clear();
 
     KeyFrame::next_id = 0;
@@ -1333,31 +1332,20 @@ void Tracking::reset()
     state_ = TrackingState::NO_IMAGES_YET;
     initializer_ = nullptr;
 
-    ref_keyframe_.reset();
-    local_keyframes_.clear();
-    local_points_.clear();
-    last_frame_ = Frame();
-    initial_frame_ = Frame();
+    // Everything pointing into the wiped map (ids restart, so a stale keyframe would alias a new one), and the run
+    release_map_references();
     matches_per_feature_.clear();
     init_matches_.clear();
     last_grey_image_.release();
     grey_image_.release();
-    last_frame_relative_pose_ = mat4f::Identity();
-    num_tracked_frames_ = 2;
-
-    last_reloc_frame_id_.reset();
-    last_emergency_keyframe_id_ = 0;
-    emergency_keyframe_ = false;
-    num_inliers_ = 0;
-    recent_inliers_history_.clear();
-
+    num_tracked_frames_ = FOUNDING_FRAMES;
+    run_ = {};
     grab_image_times_.clear();
 
     if(viewer_)
         viewer_->release();
 
-    AF_INFO("reset: done");
-    std::cout.flush();
+    step("done");
 }
 
 }

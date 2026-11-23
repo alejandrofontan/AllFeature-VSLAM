@@ -177,7 +177,8 @@ public:
     // becomes LOST; an uninitialized or already lost one is left as it is. Tracking thread only.
     void request_relocalization();
 
-    size_t num_tracked_frames_{2};
+    static constexpr size_t FOUNDING_FRAMES{2};          // the initial map's two frames count as tracked
+    size_t num_tracked_frames_{FOUNDING_FRAMES};          // read by the viewer
 
     std::vector<FeatureType> feature_types_{};
 
@@ -297,28 +298,27 @@ protected:
     size_t max_frames_{0};
     float fps_{0.0f};
 
-    //Current matches in frame
-    int num_inliers_{0};
+    // Per-run state: reset() returns it to these defaults (run_ = {})
+    struct RunState
+    {
+        int num_inliers{0};                                  // track_local_map's inliers of the last tracked frame
+        std::deque<int> recent_inliers_history;              // last InliersHistorySize tracked frames: the emergency
+                                                             // reference (not the reference keyframe's points, which
+                                                             // grow with every insertion)
+        FrameId last_emergency_keyframe_id{0};
+        bool emergency_keyframe{false};                      // inserted this frame: track() waits for Local Mapping
+        std::optional<FrameId> last_reloc_frame_id{};        // unset until the first relocalization
+        mat4f last_frame_relative_pose{mat4f::Identity()};   // Tlr of last_frame_ (see store_relative_pose)
+    };
+    RunState run_{};
 
-    bool emergency_keyframe_{false};
-
-    // Rolling inlier history (last params.inliers_history_size tracked frames) — reference for the
-    // emergency-keyframe trigger in need_new_keyframe(). Comparing against recent frames
-    // instead of ref_keyframe_->count_tracked_map_points() avoids the self-inflating feedback loop
-    // where every inserted keyframe grows the reference stat via post-hoc triangulation.
-    std::deque<int> recent_inliers_history_;
-    FrameId last_emergency_keyframe_id_{0};
-
-    // Set by a degenerate initialization (create_initial_map): track() resets on the next frame, outside the map lock
+    // Set by a degenerate initialization (create_initial_map): grab_image resets before the next frame is built
     bool reset_after_failed_initialization_{false};
 
-    // Last Frame and Relocalisation Info
     Frame last_frame_;
-    mat4f last_frame_relative_pose_{mat4f::Identity()}; // Tlr of last_frame_ (see store_relative_pose)
-    std::optional<FrameId> last_reloc_frame_id_{};   // unset until the first relocalization
     // Within max_frames_ of the last relocalization (never before the first one)
     bool shortly_after_relocalization() const {
-        return last_reloc_frame_id_ && current_frame_.frame_id < *last_reloc_frame_id_ + max_frames_;
+        return run_.last_reloc_frame_id && current_frame_.frame_id < *run_.last_reloc_frame_id + max_frames_;
     }
 
     // Resize frames (Tracking.NominalImageArea or Tracking.ImageWidth/Height; see load_camera_parameters)

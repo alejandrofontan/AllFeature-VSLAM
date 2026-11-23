@@ -8,7 +8,8 @@ A stage is a function with a report scope (AF_REPORT_SCOPE). A thread's outermos
 (tracking: grab_image, local mapping: process_keyframe, loop closing: run); the stages are the scopes it calls, at
 the depth asked. A scope's own time (what is not inside a deeper scope) is drawn as "<function> (self)", and the
 outermost scope's own time as "other". Stacks add up to the thread's total. The x axis is the frame the work
-belongs to (for local mapping and loop closing, the keyframe's frame), not when it ran.
+belongs to (for local mapping and loop closing, the keyframe's frame), not when it ran. Frame ids restart after a
+reset (a tracking.reset row marks it), so a report spanning one holds two frames under each early id.
 """
 
 import argparse
