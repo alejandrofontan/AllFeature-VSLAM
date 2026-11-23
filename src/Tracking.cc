@@ -121,11 +121,16 @@ Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
     // Extractors: one per feature at the Features Fraction budget, warmed up at the frame size
     features_fraction_in_use_ = std::clamp(params.features_fraction.load(), 0.0f, 1.0f);
     for (const FeatureType ft : feature_types_)
-        feature_extractor_left_[ft] = get_feature_extractor(features_budget(ft, features_fraction_in_use_), ft);
+        feature_extractors_[ft] = get_feature_extractor(features_budget(ft, features_fraction_in_use_), ft);
     const int frame_width = fix_image_size_ ? (image_width_ / Image::SIZE_MULTIPLE) * Image::SIZE_MULTIPLE : image_width_;
     const int frame_height = fix_image_size_ ? (image_height_ / Image::SIZE_MULTIPLE) * Image::SIZE_MULTIPLE : image_height_;
-    for (const auto& [ft, extractor] : feature_extractor_left_)
+    for (const auto& [ft, extractor] : feature_extractors_)
         extractor->prepare(frame_width, frame_height);
+
+    // The camera at the frame size; grab_image checks every frame against it
+    calibration_ = std::make_shared<const Calibration>(K, distortion_coefficients, distortion_model_,
+                                                       frame_width, frame_height, FRAME_GRID_COLS, FRAME_GRID_ROWS,
+                                                       depth_noise_coeff_);
 
     // Frame-to-frame matcher
     matcher_ = std::make_shared<FeatureMatcher>(feature_types_, "Tracking");
@@ -157,6 +162,7 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
         reset();
     }
 
+    // This thread's model runs go first on shared sessions (thread-local flag, set at its entry point)
     onnx::set_run_priority(true);
 
     apply_features_fraction();
@@ -167,22 +173,29 @@ mat4f Tracking::grab_image(Image &im, const double timestamp)
     if(fix_image_size_)
         im.fix_image_size(image_width_, image_height_);
 
-    if(!calibration_)
-        calibration_ = std::make_shared<const Calibration>(K, distortion_coefficients, distortion_model_,
-                                                           im.grayImg.cols, im.grayImg.rows,
-                                                           FRAME_GRID_COLS, FRAME_GRID_ROWS,
-                                                           depth_noise_coeff_);
+    if(im.grayImg.cols != calibration_->width || im.grayImg.rows != calibration_->height)
+    {
+        AF_ERROR("[Tracking] frame " << im.grayImg.cols << "x" << im.grayImg.rows << " but the calibration is for "
+                 << calibration_->width << "x" << calibration_->height
+                 << " (image_dimension, after any resize): the intrinsics would not match the image");
+        exit(-1);
+    }
 
-    last_grey_image_ = grey_image_;
-    grey_image_ = im.grayImg.clone();
+    if(params.frame_tracking == FrameTracking::optical_flow)
+    {
+        last_grey_image_ = grey_image_;
+        grey_image_ = im.grayImg.clone();   // the caller may reuse its Image
+    }
     color_image_ = im.img;
     mask_image_ = im.mask;
 
     AF_REPORT_CONTEXT("tracking", Frame::next_id);
-    current_frame_ = Frame(im, timestamp, feature_extractor_left_, place_recognition_, calibration_);
+    current_frame_ = Frame(im, timestamp, feature_extractors_, place_recognition_, calibration_);
 
     const mat4f Tcw = track();
+    AF_REPORT("tracking.state", "", static_cast<int>(state_));
 
+    // The viewer's median excludes this frame
     if(viewer_)
         viewer_->set_grab_image_time_median(map_median(grab_image_times_));
 

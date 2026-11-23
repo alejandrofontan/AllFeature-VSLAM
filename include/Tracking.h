@@ -156,7 +156,7 @@ public:
     // Current Frame
     Frame current_frame_;
     cv::Mat color_image_; // current image as loaded (BGR/BGRA, or gray), after resize/crop; drawn by the viewer
-    cv::Mat grey_image_;      // current grey frame after resize/crop (optical-flow tracking)
+    cv::Mat grey_image_;      // current grey frame after resize/crop (optical_flow mode only)
     cv::Mat last_grey_image_; // the previous frame's, whatever its tracking state
     cv::Mat mask_image_; // segmentation mask of the current image (1 = static, 0 = dynamic); empty when segmentation is off
 
@@ -246,7 +246,7 @@ protected:
     std::shared_ptr<LoopClosing> loop_closing_;
 
     // Features
-    std::map<FeatureType, std::shared_ptr<FeatureExtractor>> feature_extractor_left_;
+    std::map<FeatureType, std::shared_ptr<FeatureExtractor>> feature_extractors_;
 
     // Visual place recognition backend (relocalization queries; keyframes register
     // themselves in its database)
@@ -283,9 +283,8 @@ protected:
     cv::Mat K;
     cv::Mat distortion_coefficients;
     DistortionModel distortion_model_{DistortionModel::radtan};
-    // The camera and everything derived from it (Calibration.h), built on the first frame from
-    // the image as the tracker actually sees it. One instance serves the run; per-frame
-    // intrinsics would build one per frame here.
+    // The camera and everything derived from it (Calibration.h), at the frame size (after any resize and crop).
+    // One instance serves the run.
     std::shared_ptr<const Calibration> calibration_;
     int image_width_{};
     int image_height_{};
