@@ -73,6 +73,8 @@ Optimizer.PoseOptWarnOutlierRatio: 0.5      # and more than this share of them r
 Optimizer.LocalBaMinKeyframes: 2            # the map needs more keyframes than this
 Optimizer.LocalBaIterations: 5              # first round, every observation
 Optimizer.LocalBaRefineIterations: 10       # second round, without the outliers of the first
+Optimizer.LocalBaMinFixedMono: 2            # fewer fixed keyframes: the oldest local ones are fixed too (pose + scale)
+Optimizer.LocalBaMinFixedRGBD: 1            # the same with sensor-depth edges (depth fixes the scale)
 
 # global_bundle_adjustment()
 Optimizer.FinalGbaIterations: 100           # the bundle adjustment at shutdown

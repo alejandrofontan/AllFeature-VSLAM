@@ -49,6 +49,8 @@ void Optimizer::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Optimizer.LocalBaNeighbors", params.local_ba_neighbors);
     read_if_present("Optimizer.LocalBaIterations", params.local_ba_iterations);
     read_if_present("Optimizer.LocalBaRefineIterations", params.local_ba_refine_iterations);
+    read_if_present("Optimizer.LocalBaMinFixedMono", params.local_ba_min_fixed_mono);
+    read_if_present("Optimizer.LocalBaMinFixedRGBD", params.local_ba_min_fixed_rgbd);
 
     read_if_present("Optimizer.FinalGbaIterations", params.final_gba_iterations);
     int loop_gba_robust = params.loop_gba_robust ? 1 : 0;   // a 0/1 flag in the file
@@ -767,6 +769,26 @@ Optimizer::LocalBaCounts Optimizer::local_bundle_adjustment(const Keyframe& curr
         }
     }
 
+    // Gauge: while the window holds the whole early map there are no fixed keyframes outside it, so the oldest
+    // local keyframes are fixed until the minimum is met (never the current one)
+    const int min_fixed = rgbd_observations.empty() ? params.local_ba_min_fixed_mono : params.local_ba_min_fixed_rgbd;
+    int num_fixed = static_cast<int>(fixed_keyframes.size());
+    for(const Keyframe& keyframe : local_keyframes)
+        num_fixed += keyframe->is_origin() ? 1 : 0;
+    std::vector<Keyframe> oldest_local(local_keyframes.begin() + 1, local_keyframes.end());
+    std::sort(oldest_local.begin(), oldest_local.end(), KeyFrame::less_by_id);
+    int num_oldest_fixed = 0;
+    for(const Keyframe& keyframe : oldest_local)
+    {
+        if(num_fixed >= min_fixed)
+            break;
+        if(keyframe->is_origin())
+            continue;
+        optimizer.vertex(keyframe->keyId)->setFixed(true);
+        num_fixed++;
+        num_oldest_fixed++;
+    }
+
     optimizer.initializeOptimization();
     optimizer.optimize(params.local_ba_iterations);
 
@@ -833,6 +855,7 @@ Optimizer::LocalBaCounts Optimizer::local_bundle_adjustment(const Keyframe& curr
     LocalBaCounts counts;
     counts.local_keyframes = static_cast<int>(local_keyframes.size());
     counts.fixed_keyframes = static_cast<int>(fixed_keyframes.size());
+    counts.oldest_fixed = num_oldest_fixed;
     counts.points = static_cast<int>(local_points.size());
     counts.edges = static_cast<int>(mono_observations.size() + rgbd_observations.size());
     counts.outliers_erased = static_cast<int>(to_erase.size());

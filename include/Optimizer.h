@@ -37,6 +37,8 @@ struct OptimizerParameters
     int local_ba_neighbors{10};        // best covisible keyframes optimized with the current one
     int local_ba_iterations{5};        // first round, every observation
     int local_ba_refine_iterations{10};   // second round, without the outliers of the first
+    int local_ba_min_fixed_mono{2};    // fewer fixed keyframes: the oldest local ones are fixed too (pose + scale)
+    int local_ba_min_fixed_rgbd{1};    // the same with sensor-depth edges (pose only: depth fixes the scale)
 
     // global_bundle_adjustment()
     int final_gba_iterations{100};     // the bundle adjustment at shutdown (System::GBA)
@@ -67,7 +69,8 @@ public:
                                          bool robust = true);
 
     // What one local bundle adjustment did; all zero when the map is too small to run it
-    struct LocalBaCounts { int local_keyframes{0}, fixed_keyframes{0}, points{0}, edges{0}, outliers_erased{0}; };
+    struct LocalBaCounts { int local_keyframes{0}, fixed_keyframes{0}, oldest_fixed{0}, points{0}, edges{0},
+                           outliers_erased{0}; };
     static LocalBaCounts local_bundle_adjustment(const Keyframe& current_keyframe, const std::shared_ptr<Map>& map);
 
     // Returns the number of inliers. use_depth_channel = false books RGB-D observations as plain 2D reprojection

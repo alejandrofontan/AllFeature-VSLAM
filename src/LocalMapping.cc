@@ -819,6 +819,7 @@ void LocalMapping::local_bundle_adjustment()
         Optimizer::local_bundle_adjustment(current_keyframe_, map_);
     AF_REPORT("keyframes.local", "", counts.local_keyframes);
     AF_REPORT("keyframes.fixed", "", counts.fixed_keyframes);
+    AF_REPORT("keyframes.oldest_fixed", "", counts.oldest_fixed);
     AF_REPORT("points", "", counts.points);
     AF_REPORT("edges", "", counts.edges);
     AF_REPORT("outliers.erased", "", counts.outliers_erased);
