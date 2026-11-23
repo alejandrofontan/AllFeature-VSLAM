@@ -317,8 +317,7 @@ struct KeyframeView
     // The keypoint's viewing ray in the camera frame, at depth 1
     [[nodiscard]] vec3f normalized(const cv::KeyPoint& keypoint) const
     {
-        return vec3f{(keypoint.pt.x - calibration.cx) * calibration.invfx,
-                     (keypoint.pt.y - calibration.cy) * calibration.invfy, 1.0f};
+        return calibration.normalized(keypoint.pt);
     }
 
     // The world point on that ray at the given inverse depth

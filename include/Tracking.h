@@ -208,6 +208,7 @@ protected:
     void monocular_initialization();
     void attempt_monocular_initialization();
     void create_initial_map();
+    void rescale_initial_map(const Keyframe& keyframe_ini, const Keyframe& keyframe_cur, float scale) const;
 
     void check_replaced_in_last_frame();
     bool track_reference_keyframe();

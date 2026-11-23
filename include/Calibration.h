@@ -4,6 +4,8 @@
 
 #include <opencv2/core.hpp>
 
+#include "Types.h"
+
 namespace AF_VSLAM
 {
 
@@ -25,6 +27,12 @@ struct Calibration
     [[nodiscard]] bool is_in_image(const float x, const float y) const
     {
         return x >= min_x && x < max_x && y >= min_y && y < max_y;
+    }
+
+    // An undistorted pixel's viewing ray in the camera frame, at depth 1
+    [[nodiscard]] vec3f normalized(const cv::Point2f& pt) const
+    {
+        return vec3f{(pt.x - cx) * invfx, (pt.y - cy) * invfy, 1.0f};
     }
 
     [[nodiscard]] bool has_distortion() const;

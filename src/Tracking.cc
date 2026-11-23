@@ -301,97 +301,116 @@ void Tracking::monocular_initialization()
 
 void Tracking::attempt_monocular_initialization()
 {
+    AF_REPORT_SCOPE();
+
     const auto total_keypoints = [this](const Frame& frame) {
         size_t n = 0;
         for (const auto& ft : feature_types_)
             n += frame.features.at(ft).keypoints.size();
         return n;
     };
+    // How far the attempt got: 0 reference set, 1 too few keypoints, 2 too few matches, 3 low disparity,
+    // 4 initializer failed, 5 map created (create_initial_map reports whether it was degenerate)
+    const auto stage = []([[maybe_unused]] const int reached) { AF_REPORT("init.stage", "", reached); };
 
     matches_per_feature_.clear();
+    const size_t num_keypoints = total_keypoints(current_frame_);
+    AF_REPORT("init.keypoints", "", num_keypoints);
 
+    // Reference: the first frame with enough keypoints
     if(!initializer_)
     {
-        if(total_keypoints(current_frame_) > static_cast<size_t>(params.init_min_keypoints))
-        {
-            initial_frame_ = current_frame_;
-            last_frame_ = current_frame_;
-            initializer_ = std::make_shared<Initializer>(current_frame_, params.init_sigma, params.init_ransac_iterations);
-            return;
-        }
+        if(num_keypoints <= static_cast<size_t>(params.init_min_keypoints))
+            return stage(1);
+        initial_frame_ = current_frame_;
+        initializer_ = std::make_shared<Initializer>(current_frame_, params.init_sigma, params.init_ransac_iterations);
+        return stage(0);
     }
-    else
+    if(num_keypoints <= static_cast<size_t>(params.init_min_keypoints))
     {
-        if(total_keypoints(current_frame_) <= static_cast<size_t>(params.init_min_keypoints))
-        {
-            initializer_ = nullptr;
-            return;
-        }
-
-        const auto matched_pairs = matcher_->match_frames_for_initialization(initial_frame_, current_frame_, feature_types_);
-
-        init_matches_.clear();
-        size_t offset2 = 0;
-        for (const auto& ft : feature_types_) {
-            const size_t offset1 = init_matches_.size();
-            init_matches_.resize(offset1 + initial_frame_.features.at(ft).keypoints.size(), -1);
-            auto& matches_ft = matches_per_feature_[ft];
-            matches_ft.assign(initial_frame_.features.at(ft).keypoints.size(), -1);
-            for (const auto& m : matched_pairs.at(ft)) {
-                matches_ft[m.first] = m.second;
-                init_matches_[offset1 + m.first] = m.second + offset2;
-            }
-            offset2 += current_frame_.features.at(ft).keypoints.size();
-        }
-
-        size_t num_matches = 0;
-        for (const auto& ft : feature_types_)
-            num_matches += matched_pairs.at(ft).size();
-        if(num_matches < static_cast<size_t>(params.init_min_matches))
-        {
-            initializer_ = nullptr;
-            return;
-        }
-
-        {
-            std::vector<float> disparities;
-            disparities.reserve(num_matches);
-            for (const auto& ft : feature_types_) {
-                const auto& keypoints1 = initial_frame_.features.at(ft).keypoints;
-                const auto& keypoints2 = current_frame_.features.at(ft).keypoints;
-                for (const auto& m : matched_pairs.at(ft))
-                    disparities.push_back(static_cast<float>(cv::norm(keypoints2[m.second].pt - keypoints1[m.first].pt)));
-            }
-            const auto mid = disparities.begin() + disparities.size() / 2;
-            std::nth_element(disparities.begin(), mid, disparities.end());
-            if (*mid < params.init_min_median_disparity)
-                return;
-        }
-
-        mat3f Rcw{};
-        vec3f tcw{};
-        std::vector<bool> triangulated;
-        if(initializer_->initialize(current_frame_, init_matches_, Rcw, tcw, init_points3d_, triangulated))
-        {
-            for (size_t j = 0; j < init_matches_.size(); j++)
-                if (init_matches_[j] >= 0 && !triangulated[j])
-                    init_matches_[j] = -1;
-
-            initial_frame_.set_pose(mat4f::Identity());
-            mat4f Tcw{mat4f::Identity()};
-            Tcw.block<3,3>(0,0) = Rcw;
-            Tcw.block<3,1>(0,3) = tcw;
-            current_frame_.set_pose(Tcw);
-            create_initial_map();
-        }
+        initializer_ = nullptr;
+        return stage(1);
     }
+
+    // Match against the reference: per feature (drawn while NOT_INITIALIZED) and flat (the initializer's indexing)
+    const auto matched_pairs = matcher_->match_frames_for_initialization(initial_frame_, current_frame_, feature_types_);
+    init_matches_.clear();
+    size_t offset_current = 0;
+    for (const auto& ft : feature_types_) {
+        const size_t offset_initial = init_matches_.size();
+        init_matches_.resize(offset_initial + initial_frame_.features.at(ft).keypoints.size(), -1);
+        auto& matches_ft = matches_per_feature_[ft];
+        matches_ft.assign(initial_frame_.features.at(ft).keypoints.size(), -1);
+        for (const auto& m : matched_pairs.at(ft)) {
+            matches_ft[m.first] = m.second;
+            init_matches_[offset_initial + m.first] = m.second + offset_current;
+        }
+        offset_current += current_frame_.features.at(ft).keypoints.size();
+    }
+
+    size_t num_matches = 0;
+    for (const auto& ft : feature_types_)
+        num_matches += matched_pairs.at(ft).size();
+    AF_REPORT("init.matches", "", num_matches);
+    if(num_matches < static_cast<size_t>(params.init_min_matches))
+    {
+        initializer_ = nullptr;
+        return stage(2);
+    }
+
+    // Disparity: a (near-)static camera gives ill-conditioned geometry; keep the reference until it moves
+    std::vector<float> disparities;
+    disparities.reserve(num_matches);
+    for (const auto& ft : feature_types_) {
+        const auto& keypoints1 = initial_frame_.features.at(ft).keypoints;
+        const auto& keypoints2 = current_frame_.features.at(ft).keypoints;
+        for (const auto& m : matched_pairs.at(ft))
+            disparities.push_back(static_cast<float>(cv::norm(keypoints2[m.second].pt - keypoints1[m.first].pt)));
+    }
+    const auto mid = disparities.begin() + disparities.size() / 2;
+    std::nth_element(disparities.begin(), mid, disparities.end());
+    AF_REPORT("init.median_disparity", "", *mid);
+    if (*mid < params.init_min_median_disparity)
+        return stage(3);
+
+    // Two-view initialization; untriangulated matches are dropped
+    mat3f Rcw{};
+    vec3f tcw{};
+    std::vector<bool> triangulated;
+    if(!initializer_->initialize(current_frame_, init_matches_, Rcw, tcw, init_points3d_, triangulated))
+        return stage(4);
+    for (size_t j = 0; j < init_matches_.size(); j++)
+        if (init_matches_[j] >= 0 && !triangulated[j])
+            init_matches_[j] = -1;
+
+    initial_frame_.set_pose(mat4f::Identity());
+    mat4f Tcw{mat4f::Identity()};
+    Tcw.block<3,3>(0,0) = Rcw;
+    Tcw.block<3,1>(0,3) = tcw;
+    current_frame_.set_pose(Tcw);
+    create_initial_map();
+    stage(5);
+}
+
+void Tracking::rescale_initial_map(const Keyframe& keyframe_ini, const Keyframe& keyframe_cur, const float scale) const
+{
+    // keyframe_ini is the origin: scaling the baseline and every point scales the map
+    mat4f Tcw_cur = keyframe_cur->get_Tcw();
+    Tcw_cur.block<3,1>(0,3) *= scale;
+    keyframe_cur->set_pose(Tcw_cur);
+    for (const auto& ft : feature_types_)
+        for (const Pt& map_point : keyframe_ini->get_map_point_matches(ft))
+            if (map_point)
+                map_point->set_world_pos(map_point->get_world_pos() * scale);
 }
 
 void Tracking::create_initial_map()
 {
+    AF_REPORT_SCOPE();
+
+    // 1. Founding keyframes and the initializer's triangulations
     Keyframe keyframe_ini = std::make_shared<KeyFrame>(initial_frame_, map_, place_recognition_);
     Keyframe keyframe_cur = std::make_shared<KeyFrame>(current_frame_, map_, place_recognition_);
-
     map_->add_keyframe(keyframe_ini);
     map_->add_keyframe(keyframe_cur);
 
@@ -414,6 +433,7 @@ void Tracking::create_initial_map()
         }
     }
 
+    // 2. Scale: median sensor/triangulated depth (keyframe_ini is the origin); decided before BA so depth anchors it
     std::vector<float> depth_ratios;
     for (const auto& ft : feature_types_) {
         const auto& inv_depth_kf = keyframe_ini->features.at(ft).inv_depth;
@@ -432,24 +452,31 @@ void Tracking::create_initial_map()
         }
     }
     const bool metric_scale = depth_ratios.size() >= static_cast<size_t>(params.init_min_depth_samples);
+    AF_REPORT("init.triangulated", "", num_triangulated);
+    AF_REPORT("init.scale_samples", "", depth_ratios.size());
+    AF_REPORT("init.metric", "", metric_scale);
 
+    // 3. Depth completion (metric only): matched but untriangulated pairs back-projected from sensor depth
     int num_depth_completed = 0;
     if (metric_scale)
     {
         const auto mid = depth_ratios.begin() + depth_ratios.size() / 2;
         std::nth_element(depth_ratios.begin(), mid, depth_ratios.end());
         const float scale = *mid;
+        AF_REPORT("init.scale", "", scale);
+#ifdef ALLFEATURE_REPORT
+        // Spread of the ratios (MAD / median): how far the depth samples agree on that scale
+        std::vector<float> deviations;
+        deviations.reserve(depth_ratios.size());
+        for (const float ratio : depth_ratios)
+            deviations.push_back(std::abs(ratio - scale));
+        const auto mid_deviation = deviations.begin() + deviations.size() / 2;
+        std::nth_element(deviations.begin(), mid_deviation, deviations.end());
+        const float scale_spread = *mid_deviation / scale;
+        AF_REPORT("init.scale_spread", "", scale_spread);
+#endif
+        rescale_initial_map(keyframe_ini, keyframe_cur, scale);
 
-        mat4f Tc2w = keyframe_cur->get_Tcw();
-        Tc2w.block<3,1>(0,3) *= scale;
-        keyframe_cur->set_pose(Tc2w);
-        for (const auto& ft : feature_types_)
-            for (const Pt& map_point : keyframe_ini->get_map_point_matches(ft))
-                if (map_point)
-                    map_point->set_world_pos(map_point->get_world_pos() * scale);
-
-        const float cx = calibration_->cx, cy = calibration_->cy;
-        const float invfx = calibration_->invfx, invfy = calibration_->invfy;
         const mat4f Twc_cur = keyframe_cur->get_Twc();
         const mat3f Rwc_cur = Twc_cur.block<3,3>(0,0);
         const vec3f twc_cur = Twc_cur.block<3,1>(0,3);
@@ -467,17 +494,10 @@ void Tracking::create_initial_map()
                 const int j = matches[i];
 
                 vec3f world_pos;
-                if (inv_depth_ini[i] > 0.0f)
-                {
-                    const cv::KeyPoint& kp = keypoints_ini[i]; // keyframe_ini is the origin
-                    world_pos = vec3f{(kp.pt.x - cx) * invfx, (kp.pt.y - cy) * invfy, 1.0f} / inv_depth_ini[i];
-                }
+                if (inv_depth_ini[i] > 0.0f)        // the reference keyframe first: it is the origin
+                    world_pos = calibration_->normalized(keypoints_ini[i].pt) / inv_depth_ini[i];
                 else if (inv_depth_cur[j] > 0.0f)
-                {
-                    const cv::KeyPoint& kp = keypoints_cur[j];
-                    const vec3f xn{(kp.pt.x - cx) * invfx, (kp.pt.y - cy) * invfy, 1.0f};
-                    world_pos = Rwc_cur * (xn / inv_depth_cur[j]) + twc_cur;
-                }
+                    world_pos = Rwc_cur * (calibration_->normalized(keypoints_cur[j].pt) / inv_depth_cur[j]) + twc_cur;
                 else
                     continue;
 
@@ -491,16 +511,18 @@ void Tracking::create_initial_map()
             }
         }
     }
+    AF_REPORT("init.depth_completed", "", num_depth_completed);
 
+    // 4. Global BA; a degenerate result resets before the next frame
     keyframe_ini->update_connections();
     keyframe_cur->update_connections();
-
     Optimizer::global_bundle_adjustment(map_, params.init_gba_iterations);
 
     const std::optional<float> median_depth = keyframe_ini->compute_scene_median_depth();
     const int tracked_map_points = keyframe_cur->count_tracked_map_points(1);
-
-    if (!median_depth || *median_depth < 0 || tracked_map_points < params.init_min_tracked_points)
+    const bool degenerate = !median_depth || *median_depth <= 0.0f || tracked_map_points < params.init_min_tracked_points;
+    AF_REPORT("init.degenerate", "", degenerate);
+    if (degenerate)
     {
         AF_WARN("create_initial_map: degenerate initialization (median_depth=" << median_depth.value_or(-1.0f)
                 << ", tracked map points=" << tracked_map_points << " < " << params.init_min_tracked_points
@@ -509,23 +531,13 @@ void Tracking::create_initial_map()
         return;
     }
 
+    // 5. Mono: median scene depth = 1; metric: unmatched depth keypoints of keyframe_cur become points (after BA)
     if (!metric_scale)
-    {
-        const float inv_median_depth = 1.0f / *median_depth;
-        mat4f Tc2w = keyframe_cur->get_Tcw();
-        Tc2w.block<3,1>(0,3) *= inv_median_depth;
-        keyframe_cur->set_pose(Tc2w);
-        for (const auto& ft : feature_types_)
-            for (const Pt& map_point : keyframe_ini->get_map_point_matches(ft))
-                if (map_point)
-                    map_point->set_world_pos(map_point->get_world_pos() * inv_median_depth);
-    }
+        rescale_initial_map(keyframe_ini, keyframe_cur, 1.0f / *median_depth);
 
     int num_depth_only = 0;
     if (metric_scale)
     {
-        const float cx = calibration_->cx, cy = calibration_->cy;
-        const float invfx = calibration_->invfx, invfy = calibration_->invfy;
         const mat4f Twc_cur = keyframe_cur->get_Twc();
         const mat3f Rwc_cur = Twc_cur.block<3,3>(0,0);
         const vec3f twc_cur = Twc_cur.block<3,1>(0,3);
@@ -536,18 +548,18 @@ void Tracking::create_initial_map()
             for (size_t j = 0; j < inv_depth_cur.size(); j++) {
                 if (inv_depth_cur[j] <= 0.0f || keyframe_cur->get_map_point(j, ft))
                     continue;
-                const cv::KeyPoint& kp = keypoints_cur[j];
-                const vec3f xn{(kp.pt.x - cx) * invfx, (kp.pt.y - cy) * invfy, 1.0f};
-                Pt map_point = map_->create_map_point(Rwc_cur * (xn / inv_depth_cur[j]) + twc_cur,
-                                                      keyframe_cur, KeypointIndex(j), ft);
+                Pt map_point = map_->create_map_point(
+                    Rwc_cur * (calibration_->normalized(keypoints_cur[j].pt) / inv_depth_cur[j]) + twc_cur,
+                    keyframe_cur, KeypointIndex(j), ft);
                 if (!map_point)
-                    continue; 
+                    continue;
                 current_frame_.pts.at(ft)[j] = map_point;
                 current_frame_.outliers.at(ft)[j] = false;
                 num_depth_only++;
             }
         }
     }
+    AF_REPORT("init.depth_only", "", num_depth_only);
 
     AF_INFO("create_initial_map: " << map_->map_points_in_map() << " points ("
             << num_triangulated << " triangulated, " << num_depth_completed
