@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -145,6 +146,8 @@ public:
 
     // Owned by the tracking thread (Tracking::search_local_points)
     FrameId last_frame_seen{0};
+    // Owned by the tracking thread (Tracking::update_local_points): the frame whose local map last collected it
+    FrameId local_map_frame{std::numeric_limits<FrameId>::max()};
 
 
     // Owned by the loop closing thread (LoopClosing; Optimizer's essential-graph optimization)

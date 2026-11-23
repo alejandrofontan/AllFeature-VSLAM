@@ -122,6 +122,7 @@ Tracking.TrackLocalMapMinInliersAfterReloc: 50  # the same, shortly after a relo
 # Local map
 Tracking.MaxLocalKeyframes: 80        # the local map stops growing at this many keyframes
 Tracking.BestCovisibleKeyframes: 10   # covisible neighbours considered per keyframe
+Tracking.ProjectionGateSigma2: 64     # squared sigmas: a projected map point matches keypoints within this gate (8 sigma)
 
 # Keyframe policy: information = how much of the view the local map does not explain (0..1)
 Tracking.KeyframeMinInformation: 0.05 # below this: redundant, no keyframe; above LocalMapping.KeyframeCullingMaxUnexplained: always one

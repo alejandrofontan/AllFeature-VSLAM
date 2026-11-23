@@ -57,7 +57,7 @@ public:
 
     static constexpr float projection_match_scale_sigma2 = 64.0f;
     void match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
-                                   const std::vector<cv::Point2f>& projections);
+                                   const std::vector<cv::Point2f>& projections, float gate_scale_sigma2);
 
     void match_map_points_to_keyframe(const Keyframe& keyframe, const std::vector<Pt>& map_pts,
                                       const std::vector<cv::Point2f>& projections,

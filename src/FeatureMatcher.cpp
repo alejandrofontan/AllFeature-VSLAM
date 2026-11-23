@@ -517,6 +517,7 @@ struct GateMatchCounts
     size_t free_keypoints{0};      // keypoints with no map point yet
     size_t with_keypoint{0};       // candidates with at least one free keypoint in their gate
     size_t accepted{0};            // pairs where each side is the other's best descriptor match
+    std::vector<float> accepted_distances;   // their descriptor distances (the report's median)
 };
 
 template <typename KeypointsInArea, typename IsFree, typename Assign>
@@ -626,6 +627,7 @@ std::map<FeatureType, GateMatchCounts> match_points_in_gate(
                 continue;
             assign(ft, static_cast<size_t>(k), map_pts[candidates.indices[c]]);
             counts.accepted++;
+            counts.accepted_distances.push_back(static_cast<float>(best_keypoint_distance[c]));
         }
     }
     return counts_by_type;
@@ -633,12 +635,12 @@ std::map<FeatureType, GateMatchCounts> match_points_in_gate(
 }
 
 void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<Pt>& map_pts,
-                                               const std::vector<cv::Point2f>& projections)
+                                               const std::vector<cv::Point2f>& projections, const float gate_scale_sigma2)
 {
     AF_REPORT_SCOPE();
 
     [[maybe_unused]] const std::map<FeatureType, GateMatchCounts> counts_by_type = match_points_in_gate(
-        frame.features, map_pts, projections, projection_match_scale_sigma2,
+        frame.features, map_pts, projections, gate_scale_sigma2,
         std::numeric_limits<Descriptor_Distance_Type>::max(),
         [&frame](const float x, const float y, const float radius, const FeatureType ft) {
             return frame.get_features_in_area(x, y, radius, ft);
@@ -656,6 +658,15 @@ void FeatureMatcher::match_map_points_to_frame(Frame& frame, const std::vector<P
         AF_REPORT("keypoints.unmatched", get_feature(ft).get_feature_name(), counts.free_keypoints);
         AF_REPORT("matches.raw", get_feature(ft).get_feature_name(), counts.with_keypoint);
         AF_REPORT("matches.accepted", get_feature(ft).get_feature_name(), counts.accepted);
+#ifdef ALLFEATURE_REPORT
+        // No distance limit here: the accepted distances, to choose one
+        if (!counts.accepted_distances.empty()) {
+            std::vector<float> distances = counts.accepted_distances;
+            const auto mid = distances.begin() + distances.size() / 2;
+            std::nth_element(distances.begin(), mid, distances.end());
+            AF_REPORT("matches.distance_median", get_feature(ft).get_feature_name(), *mid);
+        }
+#endif
     }
 }
 

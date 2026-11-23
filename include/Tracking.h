@@ -102,6 +102,7 @@ struct TrackingParameters
 
     // search_local_points()
     float viewing_cos_limit{0.5f}; // frustum viewing-angle limit for local-point candidates
+    float projection_gate_sigma2{64.0f}; // squared sigmas: a projected point matches keypoints within this gate (8 sigma)
 
     // need_new_keyframe()
     float keyframe_min_information{0.05f}; // unexplained information (placecell, [0,1]) below which the local map already explains the view: no keyframe
@@ -220,12 +221,12 @@ protected:
     bool accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,
                                           const std::vector<bool>& inliers, FeatureType feature_type);
 
-    void update_local_map();
     void update_local_points();
     void update_local_keyframes();
 
     bool track_local_map();
-    void search_local_points();
+    std::vector<Pt> search_local_points();   // returns every point visible in the frame
+    void report_pose_inliers() const;
 
     bool need_new_keyframe();
     void create_new_keyframe();
@@ -294,7 +295,7 @@ protected:
     float fps_{0.0f};
 
     //Current matches in frame
-    int num_inlier_matches_{0};
+    int num_inliers_{0};
 
     bool emergency_keyframe_{false};
 
