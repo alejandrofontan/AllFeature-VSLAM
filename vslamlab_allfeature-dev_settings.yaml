@@ -113,6 +113,7 @@ Tracking.ImageHeight: 0                 # use multiples of 32
 Tracking.FlowMinMatches: 30                     # fewer flow matches: fall back to the reference-keyframe match
 Tracking.TrackRefMinMatches: 15                 # fewer raw matches to the reference keyframe: lost
 Tracking.TrackRefMinInliers: 10                 # fewer pose-optimization inliers: lost
+Tracking.PoseRescueMinMatches: 45               # a pose collapse with this many matches retries without depth (RGB-D)
 Tracking.TrackLocalMapMinInliers: 30            # fewer inliers against the local map: lost
 Tracking.TrackLocalMapMinInliersAfterReloc: 50  # the same, shortly after a relocalization
 

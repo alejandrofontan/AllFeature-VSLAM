@@ -1,26 +1,4 @@
-/**
-* This file is part of ORB-SLAM2.
-*
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
-* For more information see <https://github.com/raulmur/ORB_SLAM2>
-*
-* ORB-SLAM2 is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* ORB-SLAM2 is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
-*/
-
-
-#ifndef AF_VSLAM_TRACKING_H
-#define AF_VSLAM_TRACKING_H
+#pragma once
 
 #include <atomic>
 #include <deque>
@@ -110,6 +88,7 @@ struct TrackingParameters
     // track_reference_keyframe()
     int track_ref_min_matches{15}; // raw matches to the reference keyframe below this -> lost
     int track_ref_min_inliers{10}; // pose-optimization inliers below this -> lost
+    int pose_rescue_min_matches{45}; // a pose collapse with at least this many matches retries without depth (RGB-D)
 
     // track_local_map()
     int track_local_map_min_inliers{30};             // inliers against the local map below this -> lost
@@ -231,21 +210,10 @@ protected:
 
     void check_replaced_in_last_frame();
     bool track_reference_keyframe();
-    // Frame-to-frame tracking by KLT optical flow of the last frame's tracked points into the current grey frame
-    // (forward-backward checked), each snapped to the nearest detected keypoint of its feature type within
-    // params.flow_association_radius, then the shared pose optimization. false = fall back to
-    // track_reference_keyframe (never "lost" by itself; the frame's matches are cleared first).
     bool track_with_optical_flow();
-    // The tail both stages share: seed the pose from the last frame's relative pose, optimize, the depth-free
-    // rescue, discard the outlier matches. Returns the inlier count; the caller decides what too few means.
     int optimize_pose_from_last_frame(int num_matches, const char* stage);
 
     bool relocalize();
-    // One RANSAC pose hypothesis for a relocalization candidate: seed the frame
-    // with the hypothesis' inlier matches, optimize, and while too few inliers support it look
-    // for more matches with the new pose (FeatureMatcher::match_map_points_to_frame, up to
-    // twice); true when params.reloc_inliers_high inliers support it.
-    // (candidate by value: the legacy matcher APIs take non-const Keyframe&)
     bool accept_relocalization_hypothesis(Keyframe candidate, const std::vector<Pt>& matches,
                                           const std::vector<bool>& inliers, FeatureType feature_type);
 
@@ -258,22 +226,11 @@ protected:
 
     bool need_new_keyframe();
     void create_new_keyframe();
-    // Sequential mode: spin until Local Mapping has drained its queue and is idle.
-    // Queue-empty closes the pickup race (a just-inserted keyframe may not have been
-    // dequeued yet); the busy flag covers processing in progress. Call with the map
-    // mutex RELEASED — Local Mapping needs it.
     void wait_for_idle_local_mapper() const;
 
-    // Load intrinsics/distortion/fps for the settings' cam_mono camera from the
-    // calibration yaml (hard error if the camera is missing); applies the
-    // nominal-area rescale when fix_image_size_ is set.
     void load_camera_parameters(const std::string& calibration_yaml, const std::string& settings_yaml);
-    // Build a feature extractor that keeps at most max_num_features keypoints per frame
     static std::shared_ptr<FeatureExtractor> get_feature_extractor(int max_num_features, FeatureType feature_type);
-    // Keypoints per frame of a feature at a features fraction (share of its get_max_features())
     static int features_budget(FeatureType feature_type, float features_fraction);
-    // Gives every extractor the budget of params.features_fraction if it changed since the last call
-    // (grab_image, before extraction)
     void apply_features_fraction();
     float features_fraction_in_use_{-1.0f};
 
@@ -380,6 +337,4 @@ protected:
     static constexpr float DEFAULT_FPS{30.0f};
 };
 
-} // namespace AF_VSLAM
-
-#endif // AF_VSLAM_TRACKING_H
+}

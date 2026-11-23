@@ -1,7 +1,3 @@
-/**
- * Auxiliary Tracking members kept out of Tracking.cc so the per-frame flow
- * there reads uninterrupted.
- */
 #include "Tracking.h"
 
 #include <string>

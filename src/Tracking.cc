@@ -1,11 +1,3 @@
-/**
- * Tracking thread: the per-frame front-end of AllFeature-VSLAM (monocular, with
- * an optional RGB-D depth channel). Receives images (grab_image), initializes
- * the map via two-view monocular initialization, tracks each frame against the
- * reference keyframe and the local map, decides keyframe insertion, and
- * recovers from losses via relocalization. Auxiliary members (calibration
- * loading, extractor budgets, stage error handling) live in Tracking_aux.cc.
- */
 #include "Tracking.h"
 
 #include <algorithm>
@@ -25,6 +17,7 @@
 #include <opencv2/core/core.hpp>
 
 #include "Converter.h"
+#include "FeatureFactory.h"
 #include "Initializer.h"
 #include "Map.h"
 #include "Optimizer.h"
@@ -82,6 +75,7 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     }
     read_if_present("Tracking.TrackRefMinMatches", params.track_ref_min_matches);
     read_if_present("Tracking.TrackRefMinInliers", params.track_ref_min_inliers);
+    read_if_present("Tracking.PoseRescueMinMatches", params.pose_rescue_min_matches);
     read_if_present("Tracking.TrackLocalMapMinInliers", params.track_local_map_min_inliers);
     read_if_present("Tracking.TrackLocalMapMinInliersAfterReloc", params.track_local_map_min_inliers_after_reloc);
     read_if_present("Tracking.MaxLocalKeyframes", params.max_local_keyframes);
@@ -653,11 +647,12 @@ void Tracking::check_replaced_in_last_frame()
 
 bool Tracking::track_reference_keyframe()
 {
+    AF_REPORT_SCOPE();
 
-    // Feature matching against the reference keyframe (global descriptor matching)
+    // 1. Match: reference-keyframe descriptors, joint geometric filter; each match takes the keyframe's map point
     std::map<FeatureType, std::vector<Pt>> map_point_matches;
     const std::map<FeatureType, int> num_matches_per_feature =
-        matcher_->match_keyframe_to_frame(ref_keyframe_, current_frame_, map_point_matches, current_frame_.feature_types);
+        matcher_->match_keyframe_to_frame(ref_keyframe_, current_frame_, map_point_matches, feature_types_);
 
     int num_matches = 0;
     for (auto& [ft, matches] : map_point_matches)
@@ -672,16 +667,17 @@ bool Tracking::track_reference_keyframe()
         std::ostringstream reason;
         reason << "track_reference_keyframe: insufficient matches to reference keyframe (num_matches="
                << num_matches << " < " << params.track_ref_min_matches << ")"
-               << " | frame=" << current_frame_.frame_id << " ref_keyframe_=" << ref_keyframe_->keyId;
+               << " | frame=" << current_frame_.frame_id << " ref_keyframe=KF" << ref_keyframe_->keyId;
         throw TrackingLostException(reason.str());
     }
 
-    const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_reference_keyframe");
-    if(num_map_inliers < params.track_ref_min_inliers)
+    // 2. Pose: optimized from the last frame's pose; too few inliers -> lost
+    const int num_inliers = optimize_pose_from_last_frame(num_matches, "track_reference_keyframe");
+    if(num_inliers < params.track_ref_min_inliers)
     {
         std::ostringstream reason;
-        reason << "track_reference_keyframe: insufficient inlier matches after pose optimization (num_map_inliers="
-               << num_map_inliers << " < " << params.track_ref_min_inliers << ")"
+        reason << "track_reference_keyframe: insufficient inlier matches after pose optimization (num_inliers="
+               << num_inliers << " < " << params.track_ref_min_inliers << ")"
                << " | frame=" << current_frame_.frame_id << " raw_matches=" << num_matches;
         throw TrackingLostException(reason.str());
     }
@@ -691,61 +687,58 @@ bool Tracking::track_reference_keyframe()
 
 int Tracking::optimize_pose_from_last_frame(const int num_matches, const char* stage)
 {
-    // Optimize pose — seeded from the last frame's pose, recomputed on the fly from its
-    // stored RELATIVE pose and the reference keyframe's CURRENT pose, so BA/loop-closure
-    // corrections since last frame are absorbed into the seed by construction (no stale
-    // stored pose to refresh). Constant-position beyond that: deliberately no motion
-    // prior — a prediction is only as good as its assumption, and a violated one (abrupt
-    // motion change) turns anything built on it into a failure cascade. Divergence
-    // protection comes from the optimizer itself (g2o LM monotone-acceptance fix) plus
-    // the depth-free rescue below.
-    // Invariant: last_frame_relative_pose_ belongs to last_frame_ — every path here
-    // had state_ == OK last frame, which stored it.
+    // Seed: the last frame's Tlr on its reference keyframe's current pose (absorbs BA and loop corrections); no motion model
     const mat4f seed_pose = last_frame_relative_pose_ * last_frame_.ref_keyframe->get_Tcw();
     current_frame_.set_pose(seed_pose);
-    Optimizer::pose_optimization(&current_frame_);
-    int num_map_inliers = current_frame_.count_inlier_map_points();
+    int num_inliers = Optimizer::pose_optimization(&current_frame_);
 
-    // Divergence rescue: a collapse to (almost) zero inliers despite plentiful raw matches
-    // means the optimizer left the basin, not that the matches are bad. Re-seed and
-    // re-optimize once with the RGB-D depth channel disabled — pure 2D reprojection, the
-    // configuration the 4-pass scheme was originally tuned for.
-    if(num_map_inliers < params.track_ref_min_inliers
-       && num_matches >= 3 * params.track_ref_min_matches)
+    // Rescue: a collapse despite many matches retries without the depth channel (RGB-D only: mono would repeat itself)
+    const auto has_matched_depth = [this]
     {
-        AF_WARN(stage << ": pose optimization collapsed (" << num_map_inliers
+        for (const auto& [ft, pts] : current_frame_.pts)
+        {
+            const std::vector<float>& inv_depth = current_frame_.features.at(ft).inv_depth;
+            for (size_t i = 0; i < pts.size() && i < inv_depth.size(); i++)
+                if (pts[i] && inv_depth[i] > 0.0f)
+                    return true;
+        }
+        return false;
+    };
+    const bool rescue = num_inliers < params.track_ref_min_inliers
+                        && num_matches >= params.pose_rescue_min_matches && has_matched_depth();
+    if(rescue)
+    {
+        AF_WARN(stage << ": pose optimization collapsed (" << num_inliers
                 << " inliers of " << num_matches << " raw matches) — retrying without depth channel"
                 << " | frame=" << current_frame_.frame_id);
-
-        for (auto& [ft, outlier_flags] : current_frame_.outliers)
-            std::fill(outlier_flags.begin(), outlier_flags.end(), false);
         current_frame_.set_pose(seed_pose);
-        Optimizer::pose_optimization(&current_frame_, /*useDepthChannel=*/false);
-        num_map_inliers = current_frame_.count_inlier_map_points();
+        num_inliers = Optimizer::pose_optimization(&current_frame_, /*use_depth_channel=*/false);
     }
+    AF_REPORT("pose.rescue", "", rescue);
 
-    // Discard outliers: remove the match, and mark the map point so search_local_points
-    // neither revisits nor double-counts it this frame.
-    //
-    // The flag MUST be cleared here, not just the match: track_local_map still runs on this
-    // frame, and search_local_points/match_map_points_to_frame can bind a different map point
-    // to the same keypoint slot. A flag left set would mark that fresh match an outlier before
-    // it was ever evaluated — excluding it from the second pose optimization's edges, from
-    // increase_found, and from count_inlier_map_points.
-    for (const auto& [ft, data] : current_frame_.features.per_type)
+#ifdef ALLFEATURE_REPORT
+    // Seed -> optimized pose: the motion the constant-position seed missed (map units; metric in RGB-D)
+    const mat4f seed_to_optimized = current_frame_.get_Tcw() * seed_pose.inverse();
+    const float seed_error = seed_to_optimized.block<3,1>(0,3).norm();
+    const float seed_error_deg = Eigen::AngleAxisf(mat3f(seed_to_optimized.block<3,3>(0,0))).angle() * 180.0f / float(M_PI);
+    AF_REPORT("pose.seed_error", "", seed_error);
+    AF_REPORT("pose.seed_error_deg", "", seed_error_deg);
+    for (const auto& [ft, pts] : current_frame_.pts)
     {
-        for(std::size_t i = 0; i < data.count(); i++)
-        {
-            const Pt& map_point = current_frame_.pts.at(ft)[i];
-            if(map_point && current_frame_.outliers.at(ft)[i])
-            {
-                map_point->last_frame_seen = current_frame_.frame_id;
-                current_frame_.outliers.at(ft)[i] = false;
-                current_frame_.pts.at(ft)[i] = nullptr;
-            }
-        }
+        int num_inliers_ft = 0;
+        for (size_t i = 0; i < pts.size(); i++)
+            num_inliers_ft += (pts[i] && !current_frame_.outliers.at(ft)[i]) ? 1 : 0;
+        AF_REPORT("pose.inliers", get_feature(ft).get_feature_name(), num_inliers_ft);
     }
-    return num_map_inliers;
+#endif
+
+    // Outliers lose their match and are marked seen, so search_local_points neither re-matches nor re-counts them
+    for (const auto& [ft, pts] : current_frame_.pts)
+        for (size_t i = 0; i < pts.size(); i++)
+            if (pts[i] && current_frame_.outliers.at(ft)[i])
+                pts[i]->last_frame_seen = current_frame_.frame_id;
+    current_frame_.drop_outlier_points();   // the flags too: a slot re-matched later must not start as an outlier
+    return num_inliers;
 }
 
 bool Tracking::track_with_optical_flow()
@@ -764,7 +757,6 @@ bool Tracking::track_with_optical_flow()
     if(last_grey_image_.empty() || last_grey_image_.size() != grey_image_.size())
         return fall_back("no previous frame of the same size", 0);
 
-    // 1-4. The last frame's tracked points flowed into this frame and snapped to its keypoints
     const FeatureMatcher::FlowMatchCounts counts = matcher_->match_frame_to_frame_by_flow(
         last_frame_, last_grey_image_, current_frame_, grey_image_,
         params.flow_max_backward_error, params.flow_association_radius);
@@ -776,7 +768,6 @@ bool Tracking::track_with_optical_flow()
     if(num_matches < params.flow_min_matches)
         return fall_back("too few flow tracks landed on a detected keypoint", num_matches);
 
-    // 5. The shared pose optimization; too few inliers is a fallback here, not a loss
     const int num_map_inliers = optimize_pose_from_last_frame(num_matches, "track_with_optical_flow");
     if(num_map_inliers < params.track_ref_min_inliers)
         return fall_back("too few inliers after pose optimization", num_map_inliers);
@@ -785,14 +776,10 @@ bool Tracking::track_with_optical_flow()
 
 bool Tracking::track_local_map()
 {
-    // We have a pose estimate and some map points tracked in the frame: retrieve
-    // the local map, match its points into the frame, and refine the pose.
     update_local_map();
     search_local_points();
     Optimizer::pose_optimization(&current_frame_);
 
-    // Found-ratio statistics: every non-outlier match counts as "found"
-    // (feeds MapPointCulling's found/visible ratio).
     for (auto& [ft, pts] : current_frame_.pts)
         for(size_t i = 0; i < pts.size(); i++)
             if(pts[i] && !current_frame_.outliers.at(ft)[i])
@@ -800,7 +787,6 @@ bool Tracking::track_local_map()
 
     num_inlier_matches_ = current_frame_.count_inlier_map_points();
 
-    // Decide if tracking succeeded — more restrictive shortly after a relocalization
     if(shortly_after_relocalization() && num_inlier_matches_ < params.track_local_map_min_inliers_after_reloc)
     {
         std::ostringstream reason;
@@ -824,7 +810,6 @@ bool Tracking::track_local_map()
     return true;
 }
 
-
 void Tracking::update_local_map()
 {
     update_local_keyframes();
@@ -833,8 +818,6 @@ void Tracking::update_local_map()
 
 void Tracking::update_local_keyframes()
 {
-    // Each map point of the current frame votes for the keyframes observing it
-    // (bad points are dropped from the frame along the way)
     std::map<KeyframeId, int> shared_points_per_keyframe;
     std::map<KeyframeId, Keyframe> keyframe_by_id;
     for (auto& [ft, pts] : current_frame_.pts) {
@@ -845,8 +828,7 @@ void Tracking::update_local_keyframes()
                 pt = nullptr;
                 continue;
             }
-            // By-value snapshot: get_observers copies the observing keyframes under the point's
-            // mutex. The Observation itself is not needed -- only who observes.
+
             for (const auto& [key_id, observer] : pt->get_observers()) {
                 shared_points_per_keyframe[key_id]++;
                 keyframe_by_id[key_id] = observer;
@@ -856,8 +838,6 @@ void Tracking::update_local_keyframes()
     if(shared_points_per_keyframe.empty())
         return;
 
-    // Every keyframe observing a current map point joins the local map; the one
-    // sharing the most points becomes the reference keyframe.
     int max_shared_points = 0;
     Keyframe keyframe_most_shared{};
     std::set<KeyframeId> seen_keyframe_ids;
@@ -882,14 +862,10 @@ void Tracking::update_local_keyframes()
         current_frame_.ref_keyframe = ref_keyframe_;
     }
 
-    // Expand with neighbors of the included keyframes: per keyframe, ONE best
-    // covisible neighbor, ONE child, and the parent, up to max_local_keyframes.
-    // Indexed loop because the vector grows while being traversed (a range-for
-    // reference would dangle on reallocation).
     for(size_t i = 0; i < local_keyframes_.size(); i++){
         if(local_keyframes_.size() > static_cast<size_t>(params.max_local_keyframes))
             break;
-        const Keyframe keyframe = local_keyframes_[i]; // copy: push_back may reallocate
+        const Keyframe keyframe = local_keyframes_[i];
 
         for(const Keyframe& neighbor : keyframe->get_best_covisibility_keyframes(params.best_covisible_keyframes)){
             if(!neighbor->is_bad() && seen_keyframe_ids.insert(neighbor->keyId).second){
