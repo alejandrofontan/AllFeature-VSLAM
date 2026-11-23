@@ -201,9 +201,9 @@ export-features = { cmd = "python tools/export_features.py", env = { PYTHONNOUSE
 # are kept; add --force to re-export them (after a change to the export tool). No pixi cache on purpose: the outputs
 # depend on the settings, and a deleted model file must come back on the next run.
 export-feature-models = { cmd = "python tools/export_features.py --settings vslamlab_allfeature-dev_settings.yaml", env = { PYTHONNOUSERSITE = "1" } }
-# publish the redistributable exports + sidecars (never the SuperPoint detector, the Core ML _L<L> matchers, the
-# references or the cache); needs `hf auth login`. Tag the commit with the package version (`hf repo tag create`).
-upload-feature-models = { cmd = "hf upload vslamlab/allfeature-vslamlab feature_models feature_models --include='aliked_*.onnx*' --include='raco_*.onnx*' --include='lightglue_*.onnx*' --exclude='*_L[0-9]*'" }
+# publish the exports + sidecars (never the references or the cache); needs `hf auth login`. SuperPoint is under
+# Magic Leap's non-commercial licence (README on the HF repo). Tag the commit with the package version.
+upload-feature-models = { cmd = "hf upload vslamlab/allfeature-vslamlab feature_models feature_models --include='aliked_*.onnx*' --include='raco_*.onnx*' --include='superpoint_*.onnx*' --include='lightglue_*.onnx*'" }
 
 [feature.export-features.dependencies]
 python = "3.11.*"
