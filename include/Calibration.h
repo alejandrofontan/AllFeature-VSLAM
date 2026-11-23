@@ -7,10 +7,13 @@
 namespace AF_VSLAM
 {
 
+// radtan: OpenCV's k1 k2 p1 p2 [k3] (calibration radtan4/radtan5); equidistant: Kannala-Brandt k1..k4 (equid4)
+enum class DistortionModel { radtan, equidistant };
+
 struct Calibration
 {
 
-    Calibration(const cv::Mat& K_, const cv::Mat& distortion_coefficients_,
+    Calibration(const cv::Mat& K_, const cv::Mat& distortion_coefficients_, DistortionModel distortion_model_,
                 int width_, int height_, int grid_cols, int grid_rows,
                 float depth_noise_coeff_);
 
@@ -29,6 +32,7 @@ struct Calibration
 
     cv::Mat K;
     cv::Mat distortion_coefficients;
+    DistortionModel distortion_model{DistortionModel::radtan};
     int width{};
     int height{};
 

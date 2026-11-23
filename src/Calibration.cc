@@ -22,15 +22,14 @@ constexpr int border_samples_per_edge = 32;
 
 constexpr float round_trip_tolerance_px = 1.0f;
 
-// cv::undistortPoints inverts the distortion with a fixed-point iteration that does not always
-// converge; OpenCV's divergence guard then returns the INPUT unchanged, which no inspection of
-// the output can distinguish from a correct answer. Re-distorting each sample can. Across the
-// benchmark's 13 distortion models only ENDOMAPPER (f≈319 across 640px, i.e. >90 deg FOV through
-// a 4-coefficient radtan model) fails — and it fails on 90 of 128 samples, not marginally. So a
-// single failure is read as "this model cannot be inverted here", not as one bad sample.
+// Undistortion inverts the model with a fixed-point iteration that does not always converge; OpenCV's
+// divergence guard then returns the INPUT unchanged, which no inspection of the output can tell from a
+// correct answer. Re-distorting each sample can; a single failure is read as "this model cannot be
+// inverted here", not as one bad sample.
 bool border_round_trips(const std::vector<cv::Point2f>& original,
                         const std::vector<cv::Point2f>& undistorted,
-                        const cv::Mat& K, const cv::Mat& distortion_coefficients)
+                        const cv::Mat& K, const cv::Mat& distortion_coefficients,
+                        const DistortionModel distortion_model)
 {
     const float cx = K.at<float>(0,2), cy = K.at<float>(1,2);
     const float inv_fx = 1.0f / K.at<float>(0,0), inv_fy = 1.0f / K.at<float>(1,1);
@@ -41,7 +40,16 @@ bool border_round_trips(const std::vector<cv::Point2f>& original,
         normalized.emplace_back((p.x - cx) * inv_fx, (p.y - cy) * inv_fy, 1.0f);
 
     std::vector<cv::Point2f> back;
-    cv::projectPoints(normalized, cv::Vec3d(0,0,0), cv::Vec3d(0,0,0), K, distortion_coefficients, back);
+    if(distortion_model == DistortionModel::equidistant)
+    {
+        std::vector<cv::Point2f> normalized_2d;
+        normalized_2d.reserve(normalized.size());
+        for(const cv::Point3f& p : normalized)
+            normalized_2d.emplace_back(p.x, p.y);
+        cv::fisheye::distortPoints(normalized_2d, back, K, distortion_coefficients);
+    }
+    else
+        cv::projectPoints(normalized, cv::Vec3d(0,0,0), cv::Vec3d(0,0,0), K, distortion_coefficients, back);
 
     for(std::size_t i = 0; i < original.size(); ++i)
         if(cv::norm(back[i] - original[i]) > round_trip_tolerance_px)
@@ -63,14 +71,18 @@ std::vector<cv::Point2f> Calibration::undistort(const std::vector<cv::Point2f>& 
         return points;
 
     std::vector<cv::Point2f> out(points.size());
-    cv::undistortPoints(points, out, K, distortion_coefficients, cv::noArray(), K);
+    if(distortion_model == DistortionModel::equidistant)
+        cv::fisheye::undistortPoints(points, out, K, distortion_coefficients, cv::noArray(), K);
+    else
+        cv::undistortPoints(points, out, K, distortion_coefficients, cv::noArray(), K);
     return out;
 }
 
 Calibration::Calibration(const cv::Mat& K_, const cv::Mat& distortion_coefficients_,
+                         const DistortionModel distortion_model_,
                          int width_, int height_, int grid_cols, int grid_rows,
                          float depth_noise_coeff_):
-    K(K_.clone()), distortion_coefficients(distortion_coefficients_.clone()),
+    K(K_.clone()), distortion_coefficients(distortion_coefficients_.clone()), distortion_model(distortion_model_),
     width(width_), height(height_),
     fx(K.at<float>(0,0)), fy(K.at<float>(1,1)),
     cx(K.at<float>(0,2)), cy(K.at<float>(1,2)),
@@ -93,10 +105,10 @@ Calibration::Calibration(const cv::Mat& K_, const cv::Mat& distortion_coefficien
 
     const std::vector<cv::Point2f> undistorted = undistort(border);
 
-    if(has_distortion() && !border_round_trips(border, undistorted, K, distortion_coefficients))
+    if(has_distortion() && !border_round_trips(border, undistorted, K, distortion_coefficients, distortion_model))
     {
         AF_WARN("[Calibration] the distortion model could not be inverted on the image border"
-                << " (cv::undistortPoints did not converge) — falling back to the raw "
+                << " (the undistortion did not converge) — falling back to the raw "
                 << width << "x" << height << " rectangle for the undistorted bounds."
                 << " Keypoint undistortion is unreliable for this camera.");
         min_x = 0.0f; max_x = w;

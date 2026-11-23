@@ -115,11 +115,9 @@ void AF_VSLAM::Image::fix_image_size(const int& new_width, const int& new_height
     cv::resize(grayImg, grayImg, new_size, 0, 0, interpolation);
     cv::resize(img, img, new_size, 0, 0, interpolation);
 
-    // Floor to a multiple of 32: the learned feature extractors (SuperPoint/ALIKED)
-    // downsample internally by a power-of-2 stride and expect input dimensions
-    // divisible by it.
-    int cropWidth = (img.cols / 32) * 32;
-    int cropHeight = (img.rows / 32) * 32;
+    // Floor to a multiple of SIZE_MULTIPLE (top-left anchored: the principal point is unchanged)
+    const int cropWidth = (img.cols / SIZE_MULTIPLE) * SIZE_MULTIPLE;
+    const int cropHeight = (img.rows / SIZE_MULTIPLE) * SIZE_MULTIPLE;
 
     cv::Rect cropRect(0, 0, cropWidth, cropHeight);
     img = img(cropRect).clone();

@@ -12,6 +12,9 @@ namespace AF_VSLAM {
 
     class Image {
     public:
+        // fix_image_size crops to multiples of this: the learned extractors downsample by a power-of-2 stride
+        static constexpr int SIZE_MULTIPLE{32};
+
         // Both leave `img` 8-bit: a 16-bit or floating-point image is converted (Image.cpp, to_8bit)
         explicit Image(const std::string& imagePath);
         explicit Image(const cv::Mat& image);

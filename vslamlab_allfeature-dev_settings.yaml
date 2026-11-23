@@ -134,6 +134,7 @@ Tracking.RelocEmbargoBypassInliers: 100 # no keyframes for ~1 s after a relocali
 Tracking.RelocEmbargoMinKeyframes: 30   # ... and only once the map has more keyframes than this
 
 # Relocalization
+Tracking.RelocWindowSeconds: 1.0      # after a relocalization: stricter local-map bar and keyframe embargo
 Tracking.RelocMinMatches: 15          # min matches to try a candidate
 Tracking.RelocInliersHigh: 70         # inliers that accept a pose
 Tracking.RelocInliersMedium: 30       # above this after the first search: search once more

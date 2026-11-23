@@ -255,7 +255,7 @@ System::System(const string &strCalibrationFile, const string &strSettingsFile,
     //(it will live in the main thread of execution, the one that called this constructor)
     tracker = make_shared<Tracking>(place_recognition, frameDrawer, mapDrawer,
                              mpMap,
-                             strCalibrationFile, strSettingsFile,
+                             strCalibrationFile, static_cast<std::string>(fsSettings["cam_mono"]),
                              feature_types, fixImageSize);
 
     // Local Mapping: its thread starts at the end, once it is wired

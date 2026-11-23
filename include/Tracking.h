@@ -110,10 +110,11 @@ struct TrackingParameters
     float emergency_inlier_drop_ratio{0.5f}; // emergency keyframe: inliers < ratio x recent median
     int inliers_history_size{30};       // recent-inlier reference window (frames)
     int emergency_keyframe_cooldown{10}; // min frames between emergency keyframes
-    int reloc_embargo_bypass_inliers{100}; // no keyframe within max_frames_ of a relocalization unless this many inliers
+    int reloc_embargo_bypass_inliers{100}; // no keyframe within the relocalization window unless this many inliers
     int reloc_embargo_min_keyframes{30};   //   and the embargo applies only above this many keyframes in the map
 
     // relocalize()
+    float reloc_window_seconds{1.0f};   // after a relocalization: stricter local-map bar and the keyframe embargo
     int reloc_min_matches{15};    // per-candidate matching gate
     int reloc_inliers_high{50};   // inliers to accept a pose hypothesis
     int reloc_inliers_medium{30}; // above this (and below high) after the first search: search once more
@@ -130,7 +131,7 @@ class Tracking
 public:
     Tracking(std::shared_ptr<PlaceRecognition> place_recognition, std::shared_ptr<FrameDrawer> frame_drawer,
              std::shared_ptr<MapDrawer> map_drawer, std::shared_ptr<Map> map,
-             const std::string& calibration_yaml, const std::string& settings_yaml,
+             const std::string& calibration_yaml, const std::string& cam_name,
              const std::vector<FeatureType>& feature_types,
              const bool fix_image_size = false);
 
@@ -144,8 +145,6 @@ public:
     void set_keyframe_information(std::shared_ptr<KeyframeInformation> keyframe_information) { keyframe_information_ = std::move(keyframe_information); }
 
 public:
-    VerbosityLevel verbosity{LOW};
-
     // Tunable parameters, loaded from the settings YAML at System startup
     static TrackingParameters params;
     static void LoadParameters(const cv::FileStorage &fSettings);
@@ -236,7 +235,7 @@ protected:
                                const std::optional<KeyframeInformationValue>& information, float tau,
                                int median_recent_inliers) const;
 
-    void load_camera_parameters(const std::string& calibration_yaml, const std::string& settings_yaml);
+    float load_camera_parameters(const std::string& calibration_yaml, const std::string& cam_name);   // returns fps
     static std::shared_ptr<FeatureExtractor> get_feature_extractor(int max_num_features, FeatureType feature_type);
     static int features_budget(FeatureType feature_type, float features_fraction);
     void apply_features_fraction();
@@ -283,6 +282,7 @@ protected:
     // load_camera_parameters and that construction should read them.
     cv::Mat K;
     cv::Mat distortion_coefficients;
+    DistortionModel distortion_model_{DistortionModel::radtan};
     // The camera and everything derived from it (Calibration.h), built on the first frame from
     // the image as the tracker actually sees it. One instance serves the run; per-frame
     // intrinsics would build one per frame here.
@@ -294,9 +294,8 @@ protected:
     // the uncalibrated Kinect-era estimate this used to hardcode in Frame (issue #3).
     float depth_noise_coeff_{0.0028f};
 
-    // New KeyFrame rules (according to fps)
-    size_t max_frames_{0};
-    float fps_{0.0f};
+    // Frames in params.reloc_window_seconds at the camera rate
+    size_t reloc_window_frames_{0};
 
     // Per-run state: reset() returns it to these defaults (run_ = {})
     struct RunState
@@ -316,9 +315,9 @@ protected:
     bool reset_after_failed_initialization_{false};
 
     Frame last_frame_;
-    // Within max_frames_ of the last relocalization (never before the first one)
+    // Within reloc_window_frames_ of the last relocalization (never before the first one)
     bool shortly_after_relocalization() const {
-        return run_.last_reloc_frame_id && current_frame_.frame_id < *run_.last_reloc_frame_id + max_frames_;
+        return run_.last_reloc_frame_id && current_frame_.frame_id < *run_.last_reloc_frame_id + reloc_window_frames_;
     }
 
     // Resize frames (Tracking.NominalImageArea or Tracking.ImageWidth/Height; see load_camera_parameters)

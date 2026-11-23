@@ -94,6 +94,7 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
     read_if_present("Tracking.RelocEmbargoBypassInliers", params.reloc_embargo_bypass_inliers);
     read_if_present("Tracking.RelocEmbargoMinKeyframes", params.reloc_embargo_min_keyframes);
     read_if_present("Tracking.RelocMinMatches", params.reloc_min_matches);
+    read_if_present("Tracking.RelocWindowSeconds", params.reloc_window_seconds);
     read_if_present("Tracking.RelocInliersHigh", params.reloc_inliers_high);
     read_if_present("Tracking.RelocInliersMedium", params.reloc_inliers_medium);
     read_if_present("Tracking.RelocInliersLow", params.reloc_inliers_low);
@@ -106,26 +107,28 @@ void Tracking::LoadParameters(const cv::FileStorage &fSettings)
 Tracking::Tracking(std::shared_ptr<PlaceRecognition> place_recognition,
                    std::shared_ptr<FrameDrawer> frame_drawer, std::shared_ptr<MapDrawer> map_drawer,
                    std::shared_ptr<Map> map,
-                   const std::string& calibration_yaml, const std::string& settings_yaml,
+                   const std::string& calibration_yaml, const std::string& cam_name,
                    const std::vector<FeatureType>& feature_types,
                    const bool fix_image_size):
     feature_types_(feature_types), place_recognition_(std::move(place_recognition)),
-    frame_drawer_(frame_drawer), map_drawer_(map_drawer), map_(map), fix_image_size_(fix_image_size)
+    frame_drawer_(std::move(frame_drawer)), map_drawer_(std::move(map_drawer)), map_(std::move(map)),
+    fix_image_size_(fix_image_size)
 {
-    load_camera_parameters(calibration_yaml, settings_yaml);
+    // Camera: intrinsics, distortion and fps of cam_name (rescaled when frames are resized)
+    const float fps = load_camera_parameters(calibration_yaml, cam_name);
+    reloc_window_frames_ = static_cast<size_t>(std::lround(params.reloc_window_seconds * fps));
 
-    max_frames_ = static_cast<size_t>(fps_);
-
+    // Extractors: one per feature at the Features Fraction budget, warmed up at the frame size
     features_fraction_in_use_ = std::clamp(params.features_fraction.load(), 0.0f, 1.0f);
-    for (const FeatureType ft : feature_types)
+    for (const FeatureType ft : feature_types_)
         feature_extractor_left_[ft] = get_feature_extractor(features_budget(ft, features_fraction_in_use_), ft);
-
-    const int frame_width = fix_image_size_ ? (image_width_ / 32) * 32 : image_width_;
-    const int frame_height = fix_image_size_ ? (image_height_ / 32) * 32 : image_height_;
+    const int frame_width = fix_image_size_ ? (image_width_ / Image::SIZE_MULTIPLE) * Image::SIZE_MULTIPLE : image_width_;
+    const int frame_height = fix_image_size_ ? (image_height_ / Image::SIZE_MULTIPLE) * Image::SIZE_MULTIPLE : image_height_;
     for (const auto& [ft, extractor] : feature_extractor_left_)
         extractor->prepare(frame_width, frame_height);
 
-    matcher_ = std::make_shared<FeatureMatcher>(feature_types, "Tracking");
+    // Frame-to-frame matcher
+    matcher_ = std::make_shared<FeatureMatcher>(feature_types_, "Tracking");
     if(params.frame_tracking == FrameTracking::optical_flow)
         AF_INFO("[Tracking] frame-to-frame stage: optical_flow (KLT on the last frame's tracked points, association radius "
                 << params.flow_association_radius << " px, min " << params.flow_min_matches
@@ -146,53 +149,40 @@ void Tracking::release_map_references()
 
 mat4f Tracking::grab_image(Image &im, const double timestamp)
 {
-    // Report: the thread's total for this frame (its frame is set below, before the extraction)
     AF_REPORT_SCOPE();
 
-    // A degenerate initialization asked for a reset: before this frame takes an id, so ids restart with it
     if(reset_after_failed_initialization_)
     {
         reset_after_failed_initialization_ = false;
         reset();
     }
 
-    // This thread's model runs go ahead of Local Mapping's and Loop Closing's on a shared session
-    // (OrtSession, Threading). Set per frame rather than once: this is the thread's entry point,
-    // and the flag is a thread-local bool.
     onnx::set_run_priority(true);
 
-    // A Features Fraction moved in the viewer takes effect from this frame
     apply_features_fraction();
 
     const auto t_start = std::chrono::steady_clock::now();
 
-    // Convert image to grayscale and resize
     im.get_gray_image();
     if(fix_image_size_)
         im.fix_image_size(image_width_, image_height_);
 
-    // The calibration is derived from the image AS RESIZED/CROPPED above: image_width_ and
-    // image_height_ are the requested size and can be larger (Image::fix_image_size crops to
-    // multiples of 32), so the dimensions have to come from the image itself.
     if(!calibration_)
-        calibration_ = std::make_shared<const Calibration>(K, distortion_coefficients,
+        calibration_ = std::make_shared<const Calibration>(K, distortion_coefficients, distortion_model_,
                                                            im.grayImg.cols, im.grayImg.rows,
                                                            FRAME_GRID_COLS, FRAME_GRID_ROWS,
                                                            depth_noise_coeff_);
 
-    last_grey_image_ = grey_image_;                   // the previous frame's grey, for optical-flow tracking
-    grey_image_ = im.grayImg.clone();                 // the caller may reuse its Image
+    last_grey_image_ = grey_image_;
+    grey_image_ = im.grayImg.clone();
     color_image_ = im.img;
     mask_image_ = im.mask;
 
-    // Create the frame (feature extraction). The report context is set first, with the id the frame is about
-    // to take, so that what the extraction reports is stamped with its own frame
     AF_REPORT_CONTEXT("tracking", Frame::next_id);
     current_frame_ = Frame(im, timestamp, feature_extractor_left_, place_recognition_, calibration_);
 
     const mat4f Tcw = track();
 
-    // Median excludes the current frame (updated below)
     if(viewer_)
         viewer_->set_grab_image_time_median(map_median(grab_image_times_));
 
@@ -206,38 +196,29 @@ mat4f Tracking::track()
 {
     AF_REPORT_CONTEXT("tracking", current_frame_.frame_id);
 
-    // A degenerate initialization asked for a reset (create_initial_map): run it here, before the map lock is
-    // taken. reset() waits for Local Mapping and Loop Closing, and a global-BA correction holding Local Mapping
-    // stopped while it waits for map_update_mutex_ deadlocked against a reset run under that lock.
     if(state_ == TrackingState::NO_IMAGES_YET)
         state_ = TrackingState::NOT_INITIALIZED;
 
     last_processed_state_ = state_;
 
-    // Get Map Mutex -> Map cannot be changed
     std::unique_lock<std::mutex> lock(map_->map_update_mutex_);
 
-    // No map yet: the frame goes to two-view initialization, which finishes the
-    // frame itself (drawer update, first stored relative pose once a map exists).
     if(state_ == TrackingState::NOT_INITIALIZED)
     {
         monocular_initialization();
         if(params.sequential)
         {
-            // The two founding keyframes must be fully mapped before the next frame
             lock.unlock();
             wait_for_local_mapper(/*drain_queue=*/true);
         }
         return current_frame_.get_Tcw();
     }
 
-    // System is initialized: track the frame.
     bool ok{false};
     if(state_ == TrackingState::OK)
     {
-        // Local Mapping might have changed some MapPoints tracked in last frame
         check_replaced_in_last_frame();
-        if(params.frame_tracking == FrameTracking::optical_flow)   // false: not lost, fall back to the descriptor match
+        if(params.frame_tracking == FrameTracking::optical_flow)
             ok = run_tracking_stage([this] { return track_with_optical_flow(); });
         if(!ok)
             ok = run_tracking_stage([this] { return track_reference_keyframe(); });
@@ -247,7 +228,6 @@ mat4f Tracking::track()
 
     current_frame_.ref_keyframe = ref_keyframe_;
 
-    // If we have an initial estimation of the camera pose and matching, track the local map.
     if(ok)
         ok = run_tracking_stage([this] { return track_local_map(); });
 
@@ -255,44 +235,31 @@ mat4f Tracking::track()
 
     frame_drawer_->update(this);
 
-    // If tracking was good, check if we insert a keyframe
     if(ok)
     {
         ++num_tracked_frames_;
 
         map_drawer_->set_current_camera_pose(current_frame_.get_Tcw());
 
-        // Check if we need to insert a new keyframe
         if(need_new_keyframe())
             create_new_keyframe();
 
-        // We allow points with high innovation (considered outliers by the Huber function)
-        // to pass to the new keyframe, so that bundle adjustment will finally decide
-        // if they are outliers or not. We don't want the next frame to estimate its pose
-        // with those points, so we discard them in the frame.
         current_frame_.drop_outlier_points();
     }
 
     if(!current_frame_.ref_keyframe)
         current_frame_.ref_keyframe = ref_keyframe_;
 
-    // Both read current_frame_, so they run before it is moved from
     store_relative_pose();
     const mat4f Tcw = current_frame_.get_Tcw();
 
-    // Moved, not copied: grab_image rebuilds current_frame_ from scratch next frame, and nothing
-    // reads it in between. The copy this replaced was ~250 KB plus one atomic refcount increment
-    // per matched map point, every frame.
     last_frame_ = std::move(current_frame_);
 
-    // Sequential (deterministic) mode: every frame ends with Local Mapping idle and the
-    // map fully updated, so the next frame always sees the same map state (issue #16).
     if (params.sequential)
     {
         lock.unlock();
         wait_for_local_mapper(/*drain_queue=*/true);
     }
-    // An emergency keyframe was just inserted: block until Local Mapping has taken it
     else if (run_.emergency_keyframe)
     {
         lock.unlock();
@@ -802,7 +769,7 @@ bool Tracking::track_local_map()
                << run_.num_inliers << " < " << params.track_local_map_min_inliers_after_reloc << ")"
                << " | frame=" << current_frame_.frame_id
                << " frames_since_reloc=" << (current_frame_.frame_id - *run_.last_reloc_frame_id)
-               << " max_frames=" << max_frames_;
+               << " reloc_window_frames=" << reloc_window_frames_;
         throw TrackingLostException(reason.str());
     }
 
