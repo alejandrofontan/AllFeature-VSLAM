@@ -3,6 +3,9 @@
 #include <fstream>
 #include <chrono>
 #include <thread>
+#include <cmath>
+#include <iomanip>
+#include <locale>
 #include <memory>
 #include <opencv2/core/core.hpp>
 
@@ -24,6 +27,19 @@ void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,
                 std::vector<AF_VSLAM::Seconds> &timestamps,
                 const std::string cam_name = "rgb_0");
 std::string paddingZeros(const std::string& number, const size_t numberOfZeros = 5);
+
+// One trajectory row (the format of System::SaveKeyFrameTrajectoryVSLAMLAB): timestamp, camera centre, Rwc quaternion
+void writePose(std::ofstream& f, const AF_VSLAM::Seconds timestamp, const mat4f& Tcw)
+{
+    const mat4f Twc = Tcw.inverse();
+    const Eigen::Quaternionf q(mat3f(Twc.block<3,3>(0,0)));
+    const long long ts_ns = static_cast<long long>(std::round(timestamp * 1e9));
+    f << std::fixed << std::setprecision(9) << ts_ns << ','
+      << std::scientific << std::setprecision(7)
+      << static_cast<double>(Twc(0,3)) << ',' << static_cast<double>(Twc(1,3)) << ',' << static_cast<double>(Twc(2,3)) << ','
+      << static_cast<double>(q.x()) << ',' << static_cast<double>(q.y()) << ','
+      << static_cast<double>(q.z()) << ',' << static_cast<double>(q.w()) << '\n';
+}
 
 void removeSubstring(std::string& str, const std::string& substring) {
     size_t pos;
@@ -114,6 +130,9 @@ int main(int argc, char **argv)
     const std::vector<std::string> features = settings["features"].as<std::vector<std::string>>();
     bool debug = settings["debug"].as<bool>();
     AF_CONFIG_FIELD("Debug mode: ", debug);
+    // Two passes: map + GBA, then the sequence again against the frozen map, saving every frame's pose
+    const bool localization_pass = settings["localization_pass"] && settings["localization_pass"].as<bool>();
+    AF_CONFIG_FIELD("Localization pass: ", localization_pass);
 
     // Replay pacing: cap on the pause before the next frame (max_frame_wait, seconds; <= 0 = none)
     AF_VSLAM::FramePacer pacer{};
@@ -170,21 +189,21 @@ int main(int argc, char **argv)
                                   feature_types,
                                   fixImageSize);
 
-    SLAM.SetSequenceInfo(nImages, segmenter != nullptr);
+    SLAM.SetSequenceInfo(localization_pass ? 2 * nImages : nImages, segmenter != nullptr);
 
     // The whole sequence run (tracking loop, GBA, Shutdown, saves) as one unit: on macOS with the viewer
     // on, System::Run executes it in a worker thread while the Pangolin viewer owns the main thread;
     // elsewhere it runs inline (System.h).
+    int exit_code = 0;
     auto processSequence = [&]() {
-        // Vector for tracking time statistics
-        std::vector<AF_VSLAM::Seconds> vTimesTrack;
-        vTimesTrack.resize(nImages);
+        // The localization pass enters the map by relocalizing: it needs place recognition
+        if (localization_pass && !SLAM.HasActivePlaceRecognition()) {
+            AF_ERROR("localization_pass needs an active place recognition backend (bow | megaloc)");
+            SLAM.Shutdown();
+            exit_code = 1;
+            return;
+        }
 
-        std::cout << std::endl << "-------------------------------" << std::endl;
-        AF_INFO("Start processing sequence ...");
-        AF_INFO("Images in the sequence: " << nImages);
-
-        // Main loop
         std::atomic<int> allowance{0};
         std::atomic<bool> quit{false};
         std::thread keyThread{};
@@ -192,48 +211,78 @@ int main(int argc, char **argv)
             keyThread = startKeyAllowanceThread(allowance, quit);
         }
 
-        for (size_t ni = 0; ni < nImages; /* ni++ happens when a frame passes */) {
-            // Wait until we have at least 1 "allowed" frame, or quit
-            if (debug){
-                while (!quit.load(std::memory_order_relaxed) && allowance.load(std::memory_order_relaxed) == 0){
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // One pass over the sequence. With a trajectory stream, every frame that tracks (OK) writes its pose to
+        // it, final at once: the map is frozen. Returns false when the debug stepper quits.
+        std::vector<AF_VSLAM::Seconds> vTimesTrack(nImages, 0.0);
+        size_t num_localized = 0;
+        const auto run_pass = [&](const char* pass, std::ofstream* trajectory) -> bool {
+            std::cout << std::endl << "-------------------------------" << std::endl;
+            AF_INFO("Start processing sequence (" << pass << ") ...");
+            AF_INFO("Images in the sequence: " << nImages);
+            std::fill(vTimesTrack.begin(), vTimesTrack.end(), 0.0);
+
+            for (size_t ni = 0; ni < nImages; /* ni++ happens when a frame passes */) {
+                // Wait until we have at least 1 "allowed" frame, or quit
+                if (debug){
+                    while (!quit.load(std::memory_order_relaxed) && allowance.load(std::memory_order_relaxed) == 0){
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
+                    if (quit.load(std::memory_order_relaxed)) return false;
+                    allowance.store(0, std::memory_order_relaxed);
                 }
-                if (quit.load(std::memory_order_relaxed)) break;
-                allowance.store(0, std::memory_order_relaxed);
-            }
 
-            // Read image from file
-            AF_VSLAM::Image im(imageFilenames[ni]);
-            if (im.img.empty()) {
-                std::cerr << "Failed to load image: '" << imageFilenames[ni] << "'" << std::endl;
+                // Read image from file
+                AF_VSLAM::Image im(imageFilenames[ni]);
+                if (im.img.empty()) {
+                    std::cerr << "Failed to load image: '" << imageFilenames[ni] << "'" << std::endl;
+                    ++ni;
+                    continue;
+                }
+
+                if (segmenter)
+                    im.mask = segmenter->inferMask(im.img);
+
+                AF_VSLAM::Seconds tframe = timestamps[ni];
+
+                // Pass the image to the SLAM system
+                std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+                const mat4f Tcw = SLAM.Track(im,tframe);
+                std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
+
+                AF_VSLAM::Seconds ttrack = std::chrono::duration_cast<std::chrono::duration<AF_VSLAM::Seconds> >(t2 - t1).count();
+                vTimesTrack[ni] = ttrack;
+
+                if (trajectory && SLAM.GetTrackingState() == static_cast<int>(TrackingState::OK)) {
+                    writePose(*trajectory, tframe, Tcw);
+                    ++num_localized;
+                }
+
+                // Wait to load the next frame (remainder of the timestamp gap, capped by max_frame_wait)
+                AF_VSLAM::Seconds T = 0.0;
+                if(ni < nImages-1)
+                    T = timestamps[ni+1] - tframe;
+                else if(ni > 0)
+                    T = tframe - timestamps[ni-1];
+
+                pacer.wait(T, ttrack);
+
+                // Advance to next image only after processing this one
                 ++ni;
-                continue;
             }
+            return true;
+        };
 
-            if (segmenter)
-                im.mask = segmenter->inferMask(im.img);
+        std::string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
+        const bool mapped = run_pass("mapping", nullptr);
 
-            AF_VSLAM::Seconds tframe = timestamps[ni];
-
-            // Pass the image to the SLAM system
-            std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
-            SLAM.Track(im,tframe);
-            std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
-
-            AF_VSLAM::Seconds ttrack = std::chrono::duration_cast<std::chrono::duration<AF_VSLAM::Seconds> >(t2 - t1).count();
-            vTimesTrack[ni] = ttrack;
-
-            // Wait to load the next frame (remainder of the timestamp gap, capped by max_frame_wait)
-            AF_VSLAM::Seconds T = 0.0;
-            if(ni < nImages-1)
-                T = timestamps[ni+1] - tframe;
-            else if(ni > 0)
-                T = tframe - timestamps[ni-1];
-
-            pacer.wait(T, ttrack);
-
-            // Advance to next image only after processing this one
-            ++ni;
+        // Localization pass: GBA over the mapping pass, freeze the map, run the sequence again saving every frame
+        if (localization_pass && mapped) {
+            SLAM.ActivateLocalizationMode();
+            std::ofstream trajectory(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
+            trajectory.imbue(std::locale::classic());
+            trajectory << "ts (ns),tx (m),ty (m),tz (m),qx,qy,qz,qw\n";
+            if (run_pass("localization", &trajectory))
+                AF_INFO("Localization pass: " << num_localized << " / " << nImages << " frames localized");
         }
 
         if (debug){
@@ -245,13 +294,14 @@ int main(int argc, char **argv)
         // bundle adjustment below must have the map to itself
         SLAM.Shutdown();
 
-        std::string resultsPath_expId = exp_folder + "/" + paddingZeros(exp_id);
-        SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory_beforeGBA.csv");
+        if (!localization_pass) {
+            SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory_beforeGBA.csv");
 
-        // Perform Global Bundle Adjustment
-        SLAM.GBA();
+            // Perform Global Bundle Adjustment
+            SLAM.GBA();
+        }
 
-        // Tracking time statistics
+        // Tracking time statistics (of the last pass)
         std::sort(vTimesTrack.begin(),vTimesTrack.end());
         AF_VSLAM::Seconds totaltime = 0.0;
         for(size_t ni = 0; ni < nImages; ni++)
@@ -263,9 +313,10 @@ int main(int argc, char **argv)
         std::cout << "mean tracking time: " << totaltime/nImages << std::endl;
         pacer.printSummary();
 
-        // Save camera trajectory
+        // Save camera trajectory (the localization pass wrote its own: every frame)
         AF_REPORT_WRITE(resultsPath_expId + "_" + "Report.csv");
-        SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
+        if (!localization_pass)
+            SLAM.SaveKeyFrameTrajectoryVSLAMLAB(resultsPath_expId + "_" + "KeyFrameTrajectory.csv");
         SLAM.SavePointCloudVSLAMLAB(resultsPath_expId + "_" + "PointCloud.ply");
 
         // placecell kernel / history / profile / plots (PlaceCell.Dump; no-op otherwise)
@@ -274,7 +325,7 @@ int main(int argc, char **argv)
 
     SLAM.Run(processSequence);
 
-    return 0;
+    return exit_code;
 }
 
 void LoadImages(const std::string &pathToSequence, const std::string &rgb_csv,

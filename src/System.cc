@@ -457,13 +457,12 @@ void System::reset()
     mbReset = true;
 }
 
-void System::Shutdown()
+void System::wait_for_idle_workers()
 {
-    // Let the workers finish what is queued first: a finish request makes each stop after the
-    // keyframe it is on and drop the rest. Loop Closing is busy while it has keyframes or a global
-    // BA is running. Local Mapping is busy while it has keyframes or is in the middle of one; when it
-    // is stopped, that is Loop Closing correcting a loop or applying a BA (the only one that stops
-    // it, and it always releases it), so it is waited for as long as that thread is alive.
+    // Loop Closing is busy while it has keyframes or a global BA is running. Local Mapping is busy while
+    // it has keyframes or is in the middle of one; when it is stopped, that is Loop Closing correcting a
+    // loop or applying a BA (the only one that stops it, and it always releases it), so it is waited for
+    // as long as that thread is alive.
     const auto workers_busy = [this]
     {
         const bool loop_closing_alive = !loopCloser->is_finished();
@@ -477,6 +476,13 @@ void System::Shutdown()
     };
     while(workers_busy())
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+}
+
+void System::Shutdown()
+{
+    // Let the workers finish what is queued first: a finish request makes each stop after the
+    // keyframe it is on and drop the rest
+    wait_for_idle_workers();
 
     localMapper->request_finish();
     loopCloser->request_finish();
@@ -813,6 +819,38 @@ void System::SaveStatistics(const std::string &filename){
 void System::setImageSize(const int width, const int height){
     image_width = width;
     image_height = height;
+}
+
+bool System::HasActivePlaceRecognition() const
+{
+    return place_recognition && place_recognition->is_active();
+}
+
+void System::ActivateLocalizationMode()
+{
+    // 1. Everything queued is mapped, and any loop-closure global BA applied
+    wait_for_idle_workers();
+
+    // 2. Global BA over the mapping pass; it writes without locks, so Local Mapping and the Viewer are stopped
+    localMapper->request_stop();
+    while(!localMapper->is_stopped())
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if(viewer)
+    {
+        viewer->request_stop();
+        while(!viewer->is_stopped() && !viewer->isFinished())
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    }
+    GBA();
+    if(viewer)
+        viewer->release();
+    localMapper->release();
+
+    // 3. Frozen: no keyframe from now on; the next frame relocalizes in the map
+    tracker->set_map_frozen(true);
+    tracker->request_relocalization();
+    AF_INFO("[System] localization mode: map frozen at " << mpMap->keyframes_in_map() << " keyframes, "
+            << mpMap->map_points_in_map() << " points");
 }
 
 // The final bundle adjustment over the whole map. Call it after Shutdown(): it writes every pose

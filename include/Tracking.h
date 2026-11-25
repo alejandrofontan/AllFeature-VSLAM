@@ -153,6 +153,8 @@ public:
     void release_map_references();
     // An OK tracker becomes LOST and relocalizes on the next frame (System::Track after a pause); tracking thread only
     void request_relocalization();
+    // Localization against the existing map: no keyframes, no re-initialization, no reset when lost; tracking thread only
+    void set_map_frozen(bool frozen);
 
     static TrackingParameters params;
     static void LoadParameters(const cv::FileStorage &fSettings);
@@ -295,6 +297,8 @@ protected:
 
     // A degenerate initialization, or a loss with no way back: grab_image resets before the next frame is built
     bool reset_requested_{false};
+    // Localization mode (set_map_frozen): the map is only read
+    std::atomic<bool> map_frozen_{false};
 
     // ========================================================================
     // Compile-time constants (tunables live in TrackingParameters)

@@ -7,6 +7,7 @@ features_superpoint_subpixel: true            # sub-pixel SuperPoint keypoints, 
 features_raco_covariance: true                # weight RaCo keypoints by their own 2x2 covariance; false = 1 px
 loop_closure: true                            # false = loops are not detected or closed (relocalization still works)
 segmentation: "none"                          # online semantic segmentation: "efficientvit" | "none"
+localization_pass: false                      # true = map + GBA, then the sequence again against the frozen map: every frame saved
 
 # Tunable
 Tracking.FeaturesFraction: 0.5        # keypoints per frame, as a share of each feature's maximum (orb32 4000, learned 2048, others 2000)

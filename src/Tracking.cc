@@ -247,7 +247,8 @@ mat4f Tracking::track()
 
     if(state_ == TrackingState::NOT_INITIALIZED)
     {
-        monocular_initialization();
+        if(!map_frozen_)   // a frozen map is never re-founded
+            monocular_initialization();
         release_map();
         if(params.sequential)
             wait_for_local_mapper(/*drain_queue=*/true);
@@ -273,7 +274,7 @@ mat4f Tracking::track()
     state_ = ok ? TrackingState::OK : TrackingState::LOST;
 
     // Lost with no way back (no place recognition, or a map too young to relocalize against): reset before the next frame
-    if(!ok && !reset_requested_)
+    if(!ok && !reset_requested_ && !map_frozen_)
     {
         const size_t num_keyframes = map_->keyframes_in_map();
         if(!place_recognition_->is_active() || num_keyframes <= static_cast<size_t>(params.reset_lost_max_keyframes))
@@ -991,7 +992,9 @@ bool Tracking::need_new_keyframe()
         return insert;
     };
 
-    // Gates: no keyframe while Local Mapping is stopped (loop correction) or under the relocalization embargo
+    // Gates: no keyframe on a frozen map, while Local Mapping is stopped (loop correction) or under the embargo
+    if(map_frozen_)
+        return decide(false, "map frozen");
     if(local_mapper_->is_stopped() || local_mapper_->is_stop_requested())
         return decide(false, "local mapping stopped");
     if(shortly_after_relocalization()
@@ -1282,6 +1285,13 @@ void Tracking::request_relocalization()
 {
     if(state_ == TrackingState::OK)
         state_ = TrackingState::LOST;
+}
+
+void Tracking::set_map_frozen(const bool frozen)
+{
+    map_frozen_ = frozen;
+    if(frozen)
+        reset_requested_ = false;   // a pending reset would wipe the map to localize against
 }
 
 void Tracking::reset()

@@ -103,6 +103,13 @@ public:
     // This function must be called before saving the trajectory.
     void Shutdown();
 
+    // Two-pass localization (vslamlab_allfeature_mono_localization), between the passes: once Local Mapping and
+    // Loop Closing are idle, a global BA over the map, then the map is frozen (no keyframes; Tracking.h
+    // set_map_frozen) and tracking relocalizes on the next frame. Call from the tracking thread.
+    void ActivateLocalizationMode();
+    // Relocalization needs it: localization mode cannot enter the map without one
+    bool HasActivePlaceRecognition() const;
+
     // Runs `work` (the entry point's sequence loop, GBA, Shutdown and saves) to completion. On macOS with the
     // viewer on, Pangolin/Cocoa must own the process main thread, so the Viewer loop runs here and `work`
     // runs in a thread with an 8 MB stack (secondary threads get 512 KB on macOS, which monocular map
@@ -163,6 +170,9 @@ public:
     std::string GetModalityDescription() const;
 
 private:
+
+    // Until Local Mapping and Loop Closing have nothing queued and no global BA runs
+    void wait_for_idle_workers();
 
     // Input sensor
     eSensor mSensor;
