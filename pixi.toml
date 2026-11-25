@@ -252,7 +252,7 @@ report = { features = ["report"], no-default-feature = true }
 # allfeature environment downloads them next to the settings.
 [package]
 name = "allfeature"
-version = "1.1.0"
+version = "1.2.0"
 description = "AllFeature-VSLAM: multi-feature visual SLAM (ORB-SLAM2 lineage) with learned features, MegaLoc place recognition and online segmentation"
 authors = ["Alejandro Fontan", "Javier Civera", "Michael Milford"]
 license = "GPL-3.0-only"
